@@ -4,6 +4,19 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script>
+      // Apply persisted theme before first paint to avoid flash.
+      // Must stay in sync with ThemeProvider storageKey in src/core/config/theme.ts.
+      (function () {
+        try {
+          let theme = localStorage.getItem('work-duo-theme');
+          if (theme === 'system' || !theme) {
+            theme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+          }
+          document.documentElement.classList.add(theme)
+        } catch (e) {}
+      })()
+    </script>
     <title>Tauri + React + Typescript</title>
   </head>
 

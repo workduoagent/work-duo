@@ -1,0 +1,38 @@
+/* ============================================================
+ * variables.css — 项目级样式变量（设计令牌 / Design Tokens）
+ * ------------------------------------------------------------
+ * 采用 Tailwind v4 的 @theme 机制：这里声明的变量会
+ *   1) 自动成为 CSS 变量（如 --color-brand-500），可被 :root / .dark 覆盖；
+ *   2) 自动生成对应的 Tailwind 工具类（如 bg-brand-500 / text-brand-500）。
+ *
+ * 注意：语义令牌（--background / --foreground / --card …）已由
+ * @appica/ui-react/styles.css 提供，这里只补充「品牌色」与「项目尺寸」，
+ * 不覆盖 Appica 的底层令牌，避免组件缺色。
+ * ============================================================ */
+
+@theme {
+  /* —— 品牌色（与 Appica 的 primary 体系解耦，可独立演进）—— */
+  --color-brand-50: #eef4ff;
+  --color-brand-100: #d9e6ff;
+  --color-brand-200: #bcd2ff;
+  --color-brand-300: #8fb4ff;
+  --color-brand-400: #5e92ff;
+  --color-brand-500: #3b6fff;
+  --color-brand-600: #2f5be0;
+  --color-brand-700: #2548b8;
+  --color-brand-800: #1d3a92;
+  --color-brand-900: #162d6e;
+
+  /* —— 字体 —— */
+  --font-sans: "Inter", system-ui, -apple-system, "Segoe UI", Roboto,
+    "PingFang SC", "Microsoft YaHei", sans-serif;
+
+  /* —— 布局尺寸 —— */
+  --sidebar-width: 248px;
+  --topbar-height: 56px;
+
+  /* —— 圆角 / 阴影 —— */
+  --radius-card: 14px;
+  --shadow-card: 0 4px 24px rgb(0 0 0 / 0.06);
+  --shadow-pop: 0 8px 32px rgb(0 0 0 / 0.12);
+}
