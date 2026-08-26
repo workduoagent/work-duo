@@ -39,14 +39,28 @@ body {
 /* ---------- 白天 / 黑夜主题 ----------
  * 基础语义令牌（背景、前景、卡片、边框…）由 Appica 提供，
  * 这里仅做「项目级」覆盖：把品牌色接到布局表面，并定义侧栏 / 顶栏底色。
+ *
+ * 兜底说明：Appica 在 styles.css 里把裸变量（--foreground / --background
+ * / --border …）放在 ":root, .light" 与 ".dark" 块中声明；但 lightningcss
+ * 在编译期会校验 `color-mix(... var(--xxx) ...)`，当用户 CSS 先于
+ * Appica 的变量块被处理时就会报"无法解析 '--xxx' 自定义属性"。
+ * 这里在 :root / .dark 各自显式声明一份兜底值，Appica 同名块在级联中
+ * 位置靠后会自然覆盖它们（保持主题色不变），但能确保编译期与运行期
+ * 任何时点 `--foreground` 都是已定义状态。
  */
 :root {
+  /* —— 语义色兜底（运行时会被 Appica 的 :root, .light 覆盖）—— */
+  --foreground: oklch(0.446 0.03 256.802);
+
   --app-sidebar-bg: var(--color-brand-50);
   --app-topbar-bg: #ffffff;
   --app-border-subtle: color-mix(in srgb, var(--foreground) 8%, transparent);
 }
 
 .dark {
+  /* —— 暗色下语义色兜底（运行时由 Appica 的 .dark 覆盖）—— */
+  --foreground: oklch(0.872 0.01 258.338);
+
   --app-sidebar-bg: #0f1115;
   --app-topbar-bg: #0f1115;
   --app-border-subtle: color-mix(in srgb, var(--foreground) 14%, transparent);
@@ -104,11 +118,11 @@ body {
 }
 
 .md-body code {
-  @apply rounded bg-muted px-1.5 py-0.5 text-[0.85em];
+  @apply rounded bg-background-muted px-1.5 py-0.5 text-[0.85em];
 }
 
 .md-body pre {
-  @apply mb-3 overflow-x-auto rounded-lg bg-muted p-4 text-sm;
+  @apply mb-3 overflow-x-auto rounded-lg bg-background-muted p-4 text-sm;
 }
 
 .md-body pre code {
@@ -116,7 +130,7 @@ body {
 }
 
 .md-body blockquote {
-  @apply mb-3 border-l-4 border-border pl-4 text-muted-foreground;
+  @apply mb-3 border-l-4 border-border pl-4 text-foreground-muted;
 }
 
 .md-body table {
