@@ -1,107 +1,122 @@
-import { useState } from 'react'
-import { Card, CardHeader, CardTitle, CardDescription, Button, Input, Field, FieldLabel, Modal } from '@/components/ui'
-import { PlusIcon, TrashIcon } from '@/components/ui/icons'
+/**
+ * 路由页面「LLM」：线上模型接入中心。
+ * - 6 大分类（文本 / 多模态 / 语音转文字 / 文字转语音 / 向量 / 重排序）切换；
+ * - 各分类下模型配置的增删改、启用停用；
+ * - 数据持久化走 src/core/file/model-file.ts（$APPDATA/models.json）。
+ */
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Button } from '@/components/ui'
+import { PlusIcon } from '@/components/ui/icons'
+import {
+  deleteModel,
+  listModels,
+  setModelEnabled,
+  upsertModel,
+  type ModelConfig,
+} from '@/core/file/model-file'
+import type { ModelCategory } from '@/types/core'
+import { isTauri } from '@/core/config'
+import { CategoryTabs } from './components/CategoryTabs'
+import { ModelList } from './components/ModelList'
+import { ModelFormModal } from './components/ModelFormModal'
 import './index.scss'
 
-interface ModelItem {
-  id: string
-  name: string
-  provider: string
-}
-
 export default function ModelSettingsPage() {
-  const [models, setModels] = useState<ModelItem[]>([
-    { id: crypto.randomUUID(), name: 'GPT-4o', provider: 'openai' },
-  ])
-  const [open, setOpen] = useState(false)
-  const [name, setName] = useState('')
-  const [provider, setProvider] = useState('')
+  const [category, setCategory] = useState<ModelCategory>('text')
+  const [models, setModels] = useState<ModelConfig[]>([])
+  const [loading, setLoading] = useState(true)
+  const [modalOpen, setModalOpen] = useState(false)
+  // null = 新增；非 null = 编辑该模型
+  const [editing, setEditing] = useState<ModelConfig | null>(null)
 
-  function add() {
-    if (!name.trim()) return
-    setModels((list) => [
-      ...list,
-      { id: crypto.randomUUID(), name: name.trim(), provider: provider.trim() || 'custom' },
-    ])
-    setName('')
-    setProvider('')
-    setOpen(false)
+  const reload = useCallback(async () => {
+    setLoading(true)
+    try {
+      setModels(await listModels())
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    void reload()
+  }, [reload])
+
+  // 各分类数量徽章
+  const counts = useMemo(() => {
+    const acc = {} as Partial<Record<ModelCategory, number>>
+    for (const m of models) {
+      acc[m.category] = (acc[m.category] ?? 0) + 1
+    }
+    return acc
+  }, [models])
+
+  const visibleModels = useMemo(
+    () => models.filter((m) => m.category === category),
+    [models, category],
+  )
+
+  function openCreate() {
+    setEditing(null)
+    setModalOpen(true)
   }
 
-  function remove(id: string) {
-    setModels((list) => list.filter((m) => m.id !== id))
+  function openEdit(model: ModelConfig) {
+    setEditing(model)
+    setModalOpen(true)
+  }
+
+  async function handleSave(model: ModelConfig) {
+    setModels(await upsertModel(model))
+  }
+
+  async function handleDelete(id: string) {
+    setModels(await deleteModel(id))
+  }
+
+  async function handleToggle(id: string, enabled: boolean) {
+    setModels(await setModelEnabled(id, enabled))
   }
 
   return (
     <div className="ms">
-      <div className="ms__head">
-        <p className="ms__lead">管理可用的模型配置。</p>
-        <Button onClick={() => setOpen(true)}>
-          <PlusIcon data-icon="start" />
-          新增模型
-        </Button>
-      </div>
-
-      <div className="ms__grid">
-        {models.map((m) => (
-          <Card key={m.id} frame="solid">
-            <CardHeader>
-              <div className="ms__card-row">
-                <div>
-                  <CardTitle className="ms__card-title">{m.name}</CardTitle>
-                  <CardDescription>Provider: {m.provider}</CardDescription>
-                </div>
-                <Button
-                  variant="ghost"
-                  size="icon-md"
-                  className="ms__card-del"
-                  aria-label="删除"
-                  onClick={() => remove(m.id)}
-                >
-                  <TrashIcon />
-                </Button>
-              </div>
-            </CardHeader>
-          </Card>
-        ))}
-        {models.length === 0 && (
-          <p className="ms__empty">暂无模型配置，点击右上角新增。</p>
-        )}
-      </div>
-
-      <Modal
-        open={open}
-        onOpenChange={setOpen}
-        title="新增模型"
-        description="填写模型的名称与提供方。"
-        footer={
-          <>
-            <Button variant="soft" onClick={() => setOpen(false)}>
-              取消
-            </Button>
-            <Button onClick={add}>保存</Button>
-          </>
-        }
-      >
-        <div className="ms__form">
-          <Field>
-            <FieldLabel>模型名称</FieldLabel>
-            <Input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="例如 GPT-4o"
-            />
-          </Field>
-          <Field>
-            <FieldLabel>提供方</FieldLabel>
-            <Input
-              value={provider}
-              onChange={(e) => setProvider(e.target.value)}
-              placeholder="例如 openai"
-            />
-          </Field>
+      <header className="ms__head">
+        <div>
+          <h2 className="ms__title">LLM 模型接入</h2>
+          <p className="ms__lead">
+            接入线上模型服务，配置保存在{' '}
+            {isTauri ? (
+              <code className="ms__code">$APPDATA/models.json</code>
+            ) : (
+              <code className="ms__code">localStorage（开发模式回退）</code>
+            )}
+            。
+          </p>
         </div>
-      </Modal>
+        <Button onClick={openCreate}>
+          <PlusIcon data-icon="start" />
+          接入模型
+        </Button>
+      </header>
+
+      <CategoryTabs value={category} onChange={setCategory} counts={counts} />
+
+      <ModelList
+        category={category}
+        models={visibleModels}
+        loading={loading}
+        onEdit={openEdit}
+        onDelete={handleDelete}
+        onToggleEnabled={handleToggle}
+      />
+
+      <ModelFormModal
+        open={modalOpen}
+        onOpenChange={setModalOpen}
+        model={editing}
+        category={category}
+        onSave={handleSave}
+      />
     </div>
   )
 }

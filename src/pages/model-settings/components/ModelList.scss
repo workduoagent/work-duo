@@ -1,0 +1,144 @@
+/* 模型列表：卡片网格 + 空态 + 删除确认文案 */
+.model-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: 12px;
+}
+
+.model-list--loading,
+.model-list--empty {
+  grid-column: 1 / -1;
+  color: var(--color-foreground-muted);
+  font-size: 0.875rem;
+  text-align: center;
+}
+
+.model-list--empty {
+  padding: 48px 16px;
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-card);
+  background-color: var(--color-background-subtle);
+}
+
+.model-list__empty-title {
+  margin: 0 0 4px;
+  font-size: 0.9375rem;
+  font-weight: 500;
+  color: var(--color-foreground);
+}
+
+.model-list__empty-desc {
+  margin: 0;
+}
+
+.model-list__confirm-text {
+  margin: 0;
+  color: var(--color-foreground);
+  font-size: 0.875rem;
+  line-height: 1.6;
+}
+
+/* ---------- 单张模型卡片 ---------- */
+.model-card {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.model-card__main {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.model-card__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.model-card__name {
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--color-foreground-intense);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-card__status {
+  flex: 0 0 auto;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  line-height: 18px;
+  background-color: var(--color-background-muted);
+  color: var(--color-foreground-muted);
+
+  &.is-on {
+    background-color: var(--color-brand-50);
+    color: var(--color-brand-600);
+  }
+}
+
+.model-card__meta {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.model-card__meta-row {
+  display: flex;
+  gap: 8px;
+  font-size: 12px;
+  line-height: 20px;
+
+  dt {
+    flex: 0 0 56px;
+    color: var(--color-foreground-muted);
+  }
+
+  dd {
+    margin: 0;
+    min-width: 0;
+    color: var(--color-foreground);
+  }
+}
+
+.model-card__mono {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 11.5px;
+}
+
+.model-card__ellipsis {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-card__desc {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--color-foreground-muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.model-card__actions {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.model-card__del:hover {
+  color: var(--color-danger) !important;
+}

@@ -1,5 +1,6 @@
+/* LLM 模型接入页（model-settings）整体布局 */
 .ms {
-  max-width: 896px;
+  max-width: 1024px;
   margin: 0 auto;
   display: flex;
   flex-direction: column;
@@ -8,49 +9,29 @@
 
 .ms__head {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
 }
 
-.ms__lead {
-  color: var(--color-foreground-muted);
-  font-size: 0.875rem;
-  margin: 0;
-}
-
-.ms__grid {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 12px;
-}
-
-.ms__card-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.ms__card-title {
-  font-size: 1rem;
+.ms__title {
+  margin: 0 0 4px;
+  font-size: 1.125rem;
   font-weight: 600;
   color: var(--color-foreground-intense);
 }
 
-.ms__card-del {
-  flex: 0 0 auto;
-}
-
-.ms__empty {
-  padding: 32px 0;
-  text-align: center;
+.ms__lead {
+  margin: 0;
   color: var(--color-foreground-muted);
   font-size: 0.875rem;
+  line-height: 1.6;
 }
 
-.ms__form {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
+.ms__code {
+  padding: 1px 6px;
+  border-radius: 6px;
+  background-color: var(--color-background-muted);
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 12px;
 }

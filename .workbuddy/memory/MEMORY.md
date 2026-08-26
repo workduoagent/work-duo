@@ -20,7 +20,19 @@
 - `Button` / `Card` / `Input` / `Modal` / `Field`(+`FieldLabel`) / `icons`（本地内联 SVG，lucide 风格）。
 - `Button`：`variant`(solid/soft/ghost/outline/link/text/dashed/filled) + `size`(sm/md/lg/icon-sm/icon-md) 映射到 antd。
 - `Card`：`frame="solid"|"ghost"`（**antd 5.29 的 Card.variant 只支持 outlined/borderless，无 filled**；solid 用 `.app-card--solid` 浅底类实现）。
-- `Modal`：受控 `open` / `onOpenChange` / `title` / `description` / `footer`。
+- `Modal`：受控 `open` / `onOpenChange` / `title` / `description` / `footer` / `width`（antd 5.25+ 用 `destroyOnHidden`，`destroyOnClose` 已弃用）。
+- `controls.tsx`：透传 antd `Select` / `Slider` / `Switch` / `InputNumber`。
+
+## 数据持久化约定（前端 fs）
+- 用户约定：**所有 fs 操作统一写在 `src/core/file/` 目录**，每类数据一个文件（如 `model-file.ts`）：定义数据结构 + 读写接口，供各页面复用。
+- 存储位置：`$APPDATA/` 下的 JSON 文件（当前有 `models.json`）；用 `@tauri-apps/plugin-fs` + `@tauri-apps/api/path`（capability 已授权 `$APPDATA/**` 全套 fs 权限）。
+- **非 Tauri 环境（浏览器 dev）回退 localStorage**，保证 `npm run dev` 可调试。
+- 公共枚举/类型：编译期类型放 `src/types/core.d.ts`（写中文注释）；**运行期选项列表（label/value）放对应 core/file 模块**。
+- 注意：`@/core/config` 的 `isTauri` 是**布尔常量**，不是函数。
+
+## LLM 页面（model-settings）结构范式
+- 页面入口 `index.tsx` + 子组件 `./components/`（各自配 `.scss`）。
+- 分类专属参数用**字段描述驱动动态表单**：`components/paramFields.ts` 定义 `ParamFieldDef[]`，`ModelFormModal` 据此渲染（slider/number/switch/select/checkbox/text/textarea）。新增分类只需改 paramFields + model-file 默认值。
 
 ## 状态/主题
 - Redux（@reduxjs/toolkit + react-redux）Provider；`themeSlice` 存 `mode:'light'|'dark'|'system'`。
@@ -35,3 +47,4 @@
 - 纯 HTML 实现（弃用 Appica Navigation 以避免内部样式层叠冲突）。
 - 6 个一级菜单（LLM/MCP/Skill/智能体/小分队/设置），图标用 `@ant-design/icons`（MCP=`NodeIndexOutlined`）。
 - 滑动滑块：`useLayoutEffect`+`ResizeObserver`+`document.fonts.ready` 测量选中项几何 → 写 CSS 变量 `--pill-x`/`--pill-w` → transform+width 过渡。
+- **已接路由**：`NAV_PATHS` 映射菜单→`ROUTES`（llm→model-settings / agent→agent-studio / squads→squads-workspace），`useLocation` 同步高亮；mcp/skill/settings 建页后补映射即可。

@@ -6,6 +6,7 @@ import {
   useState,
   type CSSProperties,
 } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import {
   ApiOutlined,
   NodeIndexOutlined,
@@ -17,6 +18,7 @@ import {
 import { WindowControls } from './WindowControls'
 import { ThemeToggle } from './ThemeToggle'
 import { isTauri } from '@/core/config'
+import { ROUTES } from '@/core/router/paths'
 
 interface NavEntry {
   value: string
@@ -25,7 +27,7 @@ interface NavEntry {
 }
 
 // 顶栏中部横向菜单：全部一级菜单，一个菜单一个页面，图标 + 文字，胶囊风格。
-// 点击切换驱动底槽内的品牌蓝滑块位移，暂不接路由跳转。
+// 点击切换驱动底槽内的品牌蓝滑块位移；已建成页面的菜单项同步跳转路由。
 const NAV: NavEntry[] = [
   { value: 'llm', label: 'LLM', Icon: ApiOutlined },
   { value: 'mcp', label: 'MCP', Icon: NodeIndexOutlined },
@@ -34,6 +36,20 @@ const NAV: NavEntry[] = [
   { value: 'squads', label: '小分队', Icon: TeamOutlined },
   { value: 'settings', label: '设置', Icon: SettingOutlined },
 ]
+
+// 菜单项 → 路由路径（仅已建成页面；mcp/skill/settings 暂未建页，仅高亮不跳转）。
+const NAV_PATHS: Record<string, string> = {
+  llm: ROUTES.modelSettings,
+  agent: ROUTES.agentStudio,
+  squads: ROUTES.squadsWorkspace,
+}
+
+function pathToNav(pathname: string): string | null {
+  if (pathname.startsWith(ROUTES.modelSettings)) return 'llm'
+  if (pathname.startsWith(ROUTES.agentStudio)) return 'agent'
+  if (pathname.startsWith(ROUTES.squadsWorkspace)) return 'squads'
+  return null
+}
 
 /** 滑块几何：x = 相对底槽 padding box 的左偏移，w = 选中项宽度。 */
 interface ThumbRect {
@@ -51,8 +67,22 @@ interface ThumbRect {
  * 与自定义胶囊样式的层叠冲突。
  */
 export function TopBar() {
+  const navigate = useNavigate()
+  const location = useLocation()
   const [version, setVersion] = useState('0.0.1')
-  const [active, setActive] = useState('llm')
+  const [active, setActive] = useState(() => pathToNav(location.pathname) ?? 'llm')
+
+  // 路由变化时同步高亮（例如从其他入口进入 model-settings）。
+  useEffect(() => {
+    const nav = pathToNav(location.pathname)
+    if (nav) setActive(nav)
+  }, [location.pathname])
+
+  const handleNav = (value: string) => {
+    setActive(value)
+    const path = NAV_PATHS[value]
+    if (path) navigate(path)
+  }
 
   const trackRef = useRef<HTMLDivElement>(null)
   const [thumb, setThumb] = useState<ThumbRect>({ x: 0, w: 0 })
@@ -159,7 +189,7 @@ export function TopBar() {
                 className={`app-nav-pills__item${
                   active === value ? ' app-nav-pills__item--active' : ''
                 }`}
-                onClick={() => setActive(value)}
+                onClick={() => handleNav(value)}
               >
                 <Icon className="app-nav-pills__icon" />
                 <span className="app-nav-pills__label">{label}</span>

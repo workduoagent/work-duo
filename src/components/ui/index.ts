@@ -11,4 +11,5 @@ export {
 } from './Card'
 export { Modal, type ModalProps } from './Modal'
 export { Field, FieldLabel } from './Field'
+export { Select, Slider, Switch, InputNumber } from './controls'
 export * from './icons'

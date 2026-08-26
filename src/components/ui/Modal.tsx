@@ -10,6 +10,8 @@ export interface ModalProps {
   children?: ReactNode
   footer?: ReactNode
   closeLabel?: string
+  /** 弹窗宽度（px 或 CSS 长度），长表单建议 640~720 */
+  width?: number | string
 }
 
 // 受控封装 antd Modal：open/onOpenChange 与旧 Modal 一致。
@@ -20,6 +22,7 @@ export function Modal({
   description,
   children,
   footer,
+  width = 640,
 }: ModalProps) {
   const titleNode = description ? (
     <div className="app-modal__title-wrap">
@@ -36,8 +39,10 @@ export function Modal({
       title={titleNode}
       onCancel={() => onOpenChange(false)}
       footer={footer ?? null}
-      destroyOnClose
+      width={width}
+      destroyOnHidden
       maskClosable={false}
+      styles={{ body: { maxHeight: '72vh', overflowY: 'auto' } }}
     >
       {children}
     </AntdModal>

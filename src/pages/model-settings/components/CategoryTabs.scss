@@ -1,0 +1,66 @@
+/* 分类切换标签页：6 大模型分类的横向 tab 组 */
+.cat-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 4px;
+  background-color: var(--color-border-muted);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+}
+
+.cat-tabs__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border: none;
+  border-radius: 9px;
+  background-color: transparent;
+  color: var(--color-foreground-muted);
+  font-size: 0.875rem;
+  line-height: 20px;
+  cursor: pointer;
+  transition: background-color 0.18s ease, color 0.18s ease,
+    box-shadow 0.18s ease;
+
+  &:hover {
+    color: var(--color-foreground);
+    background-color: var(--color-background);
+  }
+
+  &.is-active {
+    background-color: var(--color-background);
+    color: var(--color-brand-600);
+    box-shadow: var(--shadow-sm);
+    font-weight: 500;
+  }
+}
+
+.cat-tabs__icon {
+  display: inline-flex;
+  align-items: center;
+  font-size: 14px;
+}
+
+.cat-tabs__label {
+  white-space: nowrap;
+}
+
+.cat-tabs__badge {
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background-color: var(--color-brand-600);
+  color: var(--color-foreground-inverse);
+  font-size: 11px;
+  line-height: 18px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 非激活项的徽章降饱和，避免视觉噪音 */
+.cat-tabs__item:not(.is-active) .cat-tabs__badge {
+  background-color: var(--color-background-muted);
+  color: var(--color-foreground-muted);
+}
