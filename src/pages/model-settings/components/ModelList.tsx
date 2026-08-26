@@ -4,7 +4,7 @@
  * 删除走二次确认弹窗（复用 ui/Modal）。
  */
 import { useState } from 'react'
-import { EditOutlined, DeleteOutlined } from '@ant-design/icons'
+import { Pencil, Trash2 } from 'lucide-react'
 import { Card, Button, Switch, Modal } from '@/components/ui'
 import {
   MODEL_CATEGORY_OPTIONS,
@@ -115,7 +115,7 @@ export function ModelList({
                 aria-label="编辑"
                 onClick={() => onEdit(m)}
               >
-                <EditOutlined />
+                <Pencil size={16} />
               </Button>
               <Button
                 variant="ghost"
@@ -124,7 +124,7 @@ export function ModelList({
                 aria-label="删除"
                 onClick={() => setPendingDelete(m)}
               >
-                <DeleteOutlined />
+                <Trash2 size={16} />
               </Button>
             </div>
           </Card>

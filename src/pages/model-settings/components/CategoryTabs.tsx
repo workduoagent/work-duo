@@ -1,23 +1,23 @@
 import type { ReactNode } from 'react'
 import type { ModelCategory } from '@/types/core'
 import {
-  AudioOutlined,
-  FilterOutlined,
-  FunctionOutlined,
-  MessageOutlined,
-  PictureOutlined,
-  SoundOutlined,
-} from '@ant-design/icons'
+  MessageSquare,
+  Image,
+  AudioLines,
+  Volume2,
+  FunctionSquare,
+  Filter,
+} from 'lucide-react'
 import { MODEL_CATEGORY_OPTIONS } from '@/core/file/model-file'
 import './CategoryTabs.scss'
 
 const ICONS: Record<ModelCategory, ReactNode> = {
-  text: <MessageOutlined />,
-  multimodal: <PictureOutlined />,
-  stt: <AudioOutlined />,
-  tts: <SoundOutlined />,
-  embedding: <FunctionOutlined />,
-  rerank: <FilterOutlined />,
+  text: <MessageSquare size={14} />,
+  multimodal: <Image size={14} />,
+  stt: <AudioLines size={14} />,
+  tts: <Volume2 size={14} />,
+  embedding: <FunctionSquare size={14} />,
+  rerank: <Filter size={14} />,
 }
 
 export interface CategoryTabsProps {

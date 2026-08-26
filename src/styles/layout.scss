@@ -123,8 +123,11 @@
 /* 4. 顶栏胶囊菜单（app-nav-pills） */
 .app-nav-pills {
   position: relative;
-  display: inline-flex;
+  display: flex;
   align-items: center;
+  /* 固定轨道宽度：钻取展开二级菜单时不因子项多少改变胶囊宽度（窄窗口自适应收缩） */
+  width: min(480px, 100%);
+  max-width: 100%;
   padding: 4px;
   border-radius: 999px;
   background-color: var(--color-border-muted);
@@ -143,6 +146,16 @@
   gap: 2px;
   position: relative;
   z-index: 1;
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  scroll-behavior: smooth;
+}
+
+.app-nav-pills__list::-webkit-scrollbar {
+  display: none;
 }
 
 .app-nav-pills__thumb {
@@ -163,10 +176,15 @@
 .app-nav-pills[data-ready='true'] .app-nav-pills__thumb {
   opacity: 1;
   transition:
-    transform 0.42s cubic-bezier(0.32, 0.72, 0, 1),
-    width 0.42s cubic-bezier(0.32, 0.72, 0, 1),
+    transform 0.5s cubic-bezier(0.32, 0.72, 0, 1),
+    width 0.5s cubic-bezier(0.32, 0.72, 0, 1),
     opacity 0.2s ease,
     background-color 0.2s ease;
+}
+
+/* 钻取切换期间逐帧测量滑块：关闭过渡避免拖影，由 JS 实时驱动 */
+.app-nav-pills[data-tracking='true'] .app-nav-pills__thumb {
+  transition: opacity 0.2s ease, background-color 0.2s ease;
 }
 
 @supports (color: color-mix(in srgb, red, transparent)) {
@@ -182,13 +200,13 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 7px 14px;
+  padding: 8px 14px;
   border: none;
   border-radius: 999px;
   background: none;
   white-space: nowrap;
   cursor: pointer;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 500;
   font-family: inherit;
   line-height: 1;
@@ -221,9 +239,164 @@
   outline-offset: 2px;
 }
 
+/* 一级菜单占位槽：钻取态下非活动项收起（宽度 + 透明 + 缩放过渡） */
+.app-nav-pills__slot {
+  display: inline-flex;
+  max-width: 240px;
+  transition:
+    max-width 0.55s cubic-bezier(0.32, 0.72, 0, 1),
+    opacity 0.3s ease,
+    transform 0.55s cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+.app-nav-pills__slot[data-collapsed='true'] {
+  max-width: 0;
+  opacity: 0;
+  transform: scale(0.85);
+  overflow: hidden;
+  pointer-events: none;
+}
+
+/* 父容器项：提示可下钻 */
+.app-nav-pills__item--parent {
+  font-weight: 600;
+}
+
+/* 钻取态下已锚定在最左侧的父容器：点击无响应（返回上级只走左侧返回按钮） */
+.app-nav-pills[data-mode='drilled'] .app-nav-pills__item--parent.app-nav-pills__item--active {
+  cursor: default;
+}
+
+/* 返回按钮 / 右移箭头（固定在轨道两端，不随滚动移动） */
+.app-nav-pills__back,
+.app-nav-pills__scroll {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  margin: 0 2px;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--color-foreground-muted);
+  cursor: pointer;
+  transition: background-color 0.2s ease, color 0.2s ease, transform 0.2s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.app-nav-pills__back:hover,
+.app-nav-pills__scroll:hover {
+  background-color: color-mix(in srgb, var(--color-foreground) 10%, transparent);
+  color: var(--color-foreground);
+}
+
+.app-nav-pills__back:active,
+.app-nav-pills__scroll:active {
+  transform: scale(0.92);
+}
+
+.app-nav-pills__back:focus-visible,
+.app-nav-pills__scroll:focus-visible {
+  outline: 2px solid var(--color-brand-500);
+  outline-offset: 2px;
+}
+
+/* 进入钻取态时，返回按钮轻微淡入 */
+.app-nav-pills__back[data-phase='in'] {
+  animation: pillBackIn 0.36s cubic-bezier(0.32, 0.72, 0, 1) both;
+}
+
+/* 退出钻取态（收起动画播放中）：返回按钮淡出且不可点 */
+.app-nav-pills__back[data-phase='out'] {
+  pointer-events: none;
+  animation: pillBackOut 0.3s ease forwards;
+}
+
+@keyframes pillBackIn {
+  from {
+    opacity: 0;
+    transform: translateX(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes pillBackOut {
+  from {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(-6px);
+  }
+}
+
+/* 二级菜单：进场「从左往右依次铺开」（宽度展开 + 淡入 + 左侧滑入） */
+.app-nav-pills__item--child {
+  flex-shrink: 0;
+  overflow: hidden;
+}
+
+.app-nav-pills__item--child[data-phase='enter'] {
+  animation: pillChildIn 0.5s cubic-bezier(0.32, 0.72, 0, 1) backwards;
+}
+
+/* 退场「从右往左依次收起」：由 JS 反序写入 animation-delay */
+.app-nav-pills__item--child[data-phase='exit'] {
+  pointer-events: none;
+  animation: pillChildOut 0.5s cubic-bezier(0.32, 0.72, 0, 1) forwards;
+}
+
+@keyframes pillChildIn {
+  from {
+    max-width: 0;
+    padding-inline: 0;
+    opacity: 0;
+    transform: translateX(-12px);
+  }
+  to {
+    max-width: 200px;
+    padding-inline: 14px;
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes pillChildOut {
+  from {
+    max-width: 200px;
+    padding-inline: 14px;
+    opacity: 1;
+    transform: translateX(0);
+  }
+  to {
+    max-width: 0;
+    padding-inline: 0;
+    opacity: 0;
+    transform: translateX(-12px);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .app-nav-pills[data-ready='true'] .app-nav-pills__thumb {
     transition: none;
+  }
+
+  .app-nav-pills__item--child[data-phase='enter'],
+  .app-nav-pills__item--child[data-phase='exit'],
+  .app-nav-pills__back[data-phase='in'],
+  .app-nav-pills__back[data-phase='out'] {
+    animation: none;
+  }
+
+  .app-nav-pills__item--child[data-phase='exit'] {
+    visibility: hidden;
   }
 }
 
