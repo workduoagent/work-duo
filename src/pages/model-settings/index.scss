@@ -1,0 +1,56 @@
+.ms {
+  max-width: 896px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.ms__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ms__lead {
+  color: var(--color-foreground-muted);
+  font-size: 0.875rem;
+  margin: 0;
+}
+
+.ms__grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+}
+
+.ms__card-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ms__card-title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--color-foreground-intense);
+}
+
+.ms__card-del {
+  flex: 0 0 auto;
+}
+
+.ms__empty {
+  padding: 32px 0;
+  text-align: center;
+  color: var(--color-foreground-muted);
+  font-size: 0.875rem;
+}
+
+.ms__form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}

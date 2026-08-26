@@ -1,0 +1,45 @@
+/* ============================================================
+ * mixins.scss — 复用工具类（纯 CSS，不依赖 Tailwind）
+ * 组件里直接 className="flex-center" 即可。
+ * ============================================================ */
+
+.flex-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.flex-between {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.text-ellipsis {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.text-clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.clearfix::after {
+  content: "";
+  display: block;
+  clear: both;
+}
+
+/* 卡片悬浮反馈：统一一套，避免各页面重复写 */
+.card-hover {
+  transition: box-shadow 0.2s ease;
+  box-shadow: var(--shadow-card);
+}
+
+.card-hover:hover {
+  box-shadow: var(--shadow-pop);
+}

@@ -1,0 +1,31 @@
+.agent-studio {
+  max-width: 896px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.agent-studio__lead {
+  color: var(--color-foreground-muted);
+  font-size: 0.875rem;
+}
+
+.agent-studio__nodes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.agent-studio__card-title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--color-foreground-intense);
+}
+
+.agent-studio__card-desc {
+  margin-top: 4px;
+  font-size: 0.875rem;
+  color: var(--color-foreground-muted);
+  line-height: 1.5;
+}

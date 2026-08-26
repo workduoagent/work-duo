@@ -1,1 +1,1 @@
-export { ThemeSync } from './ThemeSync'
+export { ThemeProvider } from './ThemeProvider'

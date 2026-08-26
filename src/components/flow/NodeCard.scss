@@ -1,0 +1,29 @@
+.flow-node {
+  width: 240px;
+}
+
+.flow-node__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.flow-node__title-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.flow-node__title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--color-foreground-intense);
+}
+
+.flow-node__desc {
+  margin-top: 6px;
+  font-size: 0.875rem;
+  color: var(--color-foreground-muted);
+  line-height: 1.5;
+}

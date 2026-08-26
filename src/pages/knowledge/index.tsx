@@ -1,7 +1,8 @@
 import { Link } from 'react-router-dom'
-import { Card, CardHeader, CardTitle, CardDescription } from '@appica/ui-react/card'
+import { Card } from '@/components/ui'
 import { knowledgeDetailPath } from '@/core/router/paths'
 import { formatRelativeTime } from '@/utils/format'
+import './index.scss'
 
 const MOCK = [
   {
@@ -20,23 +21,21 @@ const MOCK = [
 
 export default function KnowledgeListPage() {
   return (
-    <div className="mx-auto flex max-w-4xl flex-col gap-4">
-      <p className="text-foreground-muted">管理知识库，点击卡片查看详情。</p>
-      <div className="grid gap-3 sm:grid-cols-2">
+    <div className="kb">
+      <p className="kb__lead">管理知识库，点击卡片查看详情。</p>
+      <div className="kb__grid">
         {MOCK.map((kb) => (
           <Link
             key={kb.id}
             to={knowledgeDetailPath(kb.id)}
-            className="block rounded-xl outline-ring focus-visible:ring-2"
+            className="kb__card-link"
           >
-            <Card frame="solid" className="h-full">
-              <CardHeader>
-                <CardTitle className="text-base">{kb.name}</CardTitle>
-                <CardDescription>{kb.description}</CardDescription>
-                <CardDescription className="mt-2 text-xs">
-                  更新于 {formatRelativeTime(kb.updated_at)}
-                </CardDescription>
-              </CardHeader>
+            <Card frame="solid" className="kb__card">
+              <div className="kb__card-title">{kb.name}</div>
+              <div className="kb__card-desc">{kb.description}</div>
+              <div className="kb__card-time">
+                更新于 {formatRelativeTime(kb.updated_at)}
+              </div>
             </Card>
           </Link>
         ))}

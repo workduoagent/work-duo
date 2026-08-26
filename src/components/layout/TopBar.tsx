@@ -1,20 +1,19 @@
-import { useEffect, useState } from 'react'
-import { Link, useLocation } from 'react-router-dom'
 import {
-  Navigation,
-  NavigationList,
-  NavigationItem,
-  NavigationLink,
-} from '@appica/ui-react/navigation'
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+} from 'react'
 import {
-  DashboardIcon,
-  ModelIcon,
-  KnowledgeIcon,
-  AgentIcon,
-  SquadsIcon,
-  type IconProps,
-} from '@/components/ui/icons'
-import { ROUTES } from '@/core/router/paths'
+  ApiOutlined,
+  NodeIndexOutlined,
+  ToolOutlined,
+  RobotOutlined,
+  TeamOutlined,
+  SettingOutlined,
+} from '@ant-design/icons'
 import { WindowControls } from './WindowControls'
 import { ThemeToggle } from './ThemeToggle'
 import { isTauri } from '@/core/config'
@@ -22,36 +21,95 @@ import { isTauri } from '@/core/config'
 interface NavEntry {
   value: string
   label: string
-  to: string
-  Icon: React.ComponentType<IconProps>
+  Icon: typeof ApiOutlined
 }
 
-// 原侧栏菜单迁移到顶栏中部，作为横向「灵动岛」导航
+// 顶栏中部横向菜单：全部一级菜单，一个菜单一个页面，图标 + 文字，胶囊风格。
+// 点击切换驱动底槽内的品牌蓝滑块位移，暂不接路由跳转。
 const NAV: NavEntry[] = [
-  { value: 'dashboard', label: '首页大盘', to: ROUTES.dashboard, Icon: DashboardIcon },
-  { value: 'model-settings', label: '模型配置', to: ROUTES.modelSettings, Icon: ModelIcon },
-  { value: 'knowledge', label: '知识库', to: ROUTES.knowledge, Icon: KnowledgeIcon },
-  { value: 'agent-studio', label: '智能体工作坊', to: ROUTES.agentStudio, Icon: AgentIcon },
-  { value: 'squads-workspace', label: '协作车间', to: ROUTES.squadsWorkspace, Icon: SquadsIcon },
+  { value: 'llm', label: 'LLM', Icon: ApiOutlined },
+  { value: 'mcp', label: 'MCP', Icon: NodeIndexOutlined },
+  { value: 'skill', label: 'Skill', Icon: ToolOutlined },
+  { value: 'agent', label: '智能体', Icon: RobotOutlined },
+  { value: 'squads', label: '小分队', Icon: TeamOutlined },
+  { value: 'settings', label: '设置', Icon: SettingOutlined },
 ]
+
+/** 滑块几何：x = 相对底槽 padding box 的左偏移，w = 选中项宽度。 */
+interface ThumbRect {
+  x: number
+  w: number
+}
 
 /**
  * 自定义窗口头（decorations:false）。
- * 视觉对齐 we-create-calculation-board 的 .custom-header / .brand-section：
  *  - 左侧：图片 Logo + 固定品牌名 + 版本号胶囊徽章
- *  - 中部：横向导航菜单（原侧栏菜单已迁移至此）
- *  - 右侧：日/月切换开关 + 分隔线 + 窗口控制三键
- * 整条 Header 可拖拽（data-tauri-drag-region），内部交互区单独禁拖。
+ *  - 中部：胶囊菜单（底槽 + 品牌蓝滑块，切换有滑动动画）
+ *  - 右侧：主题切换 + 分隔线 + 窗口控制三键
+ *
+ * 菜单使用纯 HTML 实现（不依赖 Appica Navigation 组件），避免组件内部样式
+ * 与自定义胶囊样式的层叠冲突。
  */
 export function TopBar() {
-  const { pathname } = useLocation()
   const [version, setVersion] = useState('0.0.1')
+  const [active, setActive] = useState('llm')
 
-  // 当前路由 → 高亮项；根路径映射到 dashboard
-  const active = pathname === '/' ? 'dashboard' : pathname.split('/')[1] ?? 'dashboard'
+  const trackRef = useRef<HTMLDivElement>(null)
+  const [thumb, setThumb] = useState<ThumbRect>({ x: 0, w: 0 })
+  const [ready, setReady] = useState(false)
 
-  // 版本号来自 @tauri-apps/api/app 的 getVersion（已装，无需新增依赖）。
-  // Web 开发环境无 Tauri 运行时，动态 import + catch 兜底，避免控制台报错。
+  const measure = useCallback(() => {
+    const track = trackRef.current
+    if (!track) return
+    const item = track.querySelector<HTMLElement>(
+      `[data-nav-value="${active}"]`,
+    )
+    if (!item) return
+
+    const trackBox = track.getBoundingClientRect()
+    const itemBox = item.getBoundingClientRect()
+    const x =
+      itemBox.left -
+      trackBox.left -
+      track.clientLeft +
+      track.scrollLeft
+
+    setThumb((prev) =>
+      Math.abs(prev.x - x) < 0.5 && Math.abs(prev.w - itemBox.width) < 0.5
+        ? prev
+        : { x, w: itemBox.width },
+    )
+  }, [active])
+
+  useLayoutEffect(() => {
+    measure()
+  }, [measure])
+
+  useEffect(() => {
+    const track = trackRef.current
+    if (!track) return
+    const ro = new ResizeObserver(() => measure())
+    ro.observe(track)
+    return () => ro.disconnect()
+  }, [measure])
+
+  useEffect(() => {
+    let alive = true
+    document.fonts?.ready
+      .then(() => {
+        if (alive) measure()
+      })
+      .catch(() => {})
+    return () => {
+      alive = false
+    }
+  }, [measure])
+
+  useEffect(() => {
+    const raf = requestAnimationFrame(() => setReady(true))
+    return () => cancelAnimationFrame(raf)
+  }, [])
+
   useEffect(() => {
     if (!isTauri) return
     let alive = true
@@ -68,7 +126,7 @@ export function TopBar() {
 
   return (
     <header className="app-topbar" data-tauri-drag-region>
-      {/* 左侧：品牌区（Logo + 固定品牌名 + 版本徽章） */}
+      {/* 左侧：品牌区 */}
       <div className="app-topbar__brand no-drag-region">
         <img src="/tauri.svg" alt="Work Duo" className="app-brand-logo" />
         <span className="app-topbar__brand-name">Work Duo</span>
@@ -77,23 +135,41 @@ export function TopBar() {
         </div>
       </div>
 
-      {/* 中部：横向导航菜单（原侧栏菜单，禁止拖拽） */}
-      <nav className="app-topbar__nav no-drag-region" aria-label="主导航">
-        <Navigation orientation="horizontal" variant="pill" activeLink={active} size="md">
-          <NavigationList>
-            {NAV.map(({ value, label, to, Icon }) => (
-              <NavigationItem key={value}>
-                <NavigationLink value={value} render={<Link to={to} />} className="w-full">
-                  <Icon data-icon="start" />
-                  {label}
-                </NavigationLink>
-              </NavigationItem>
+      {/* 中部：胶囊菜单（纯 HTML，无第三方组件依赖） */}
+      <div className="app-topbar__nav no-drag-region">
+        <nav className="app-nav-pills" ref={trackRef} data-ready={ready}>
+          {/* 滑块 */}
+          <span
+            className="app-nav-pills__thumb"
+            style={
+              {
+                '--pill-x': `${thumb.x}px`,
+                '--pill-w': `${thumb.w}px`,
+              } as CSSProperties
+            }
+            aria-hidden="true"
+          />
+          {/* 菜单项 */}
+          <div className="app-nav-pills__list">
+            {NAV.map(({ value, label, Icon }) => (
+              <button
+                key={value}
+                type="button"
+                data-nav-value={value}
+                className={`app-nav-pills__item${
+                  active === value ? ' app-nav-pills__item--active' : ''
+                }`}
+                onClick={() => setActive(value)}
+              >
+                <Icon className="app-nav-pills__icon" />
+                <span className="app-nav-pills__label">{label}</span>
+              </button>
             ))}
-          </NavigationList>
-        </Navigation>
-      </nav>
+          </div>
+        </nav>
+      </div>
 
-      {/* 右侧：主题切换 + 窗口控制（禁止拖拽） */}
+      {/* 右侧 */}
       <div className="app-topbar__actions no-drag-region">
         <ThemeToggle />
         <span className="app-topbar__divider" />

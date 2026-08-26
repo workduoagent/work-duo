@@ -1,6 +1,6 @@
 import React, {useEffect, useState} from 'react'
 import {useTheme} from '@/hooks/useTheme'
-import './ThemeToggle.css';
+import './ThemeToggle.scss';
 
 /**
  * 主题切换：Appica <Switch> + 太阳/月亮图标。

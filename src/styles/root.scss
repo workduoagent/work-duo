@@ -1,0 +1,128 @@
+/* ============================================================
+ * root.scss — 全局样式入口（单一入口）
+ * 引入顺序：variables(令牌) → mixins(复用类) → layout(布局)
+ * 基础重置 + 亮/暗基础 + 滚动条 + Markdown 排版。
+ * 使用现代 @use 模块系统（@import 在 Dart Sass 3.0 将被移除）。
+ * ============================================================ */
+
+@use "./variables.scss";
+@use "./mixins.scss";
+@use "./layout.scss";
+
+/* 全局基础 */
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background-color: var(--color-background);
+  color: var(--color-foreground);
+  font-family: var(--font-sans);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  -webkit-text-size-adjust: 100%;
+}
+
+/* 滚动条 */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-foreground) 18%, transparent);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--color-foreground) 28%, transparent);
+}
+
+/* 暗色下 antd 等第三方可能会注入 body 默认色，这里兜底确保整页底色跟随主题 */
+#root {
+  background-color: var(--color-background);
+  color: var(--color-foreground);
+}
+
+/* Markdown 渲染（.md-body），由 MarkdownRenderer 使用 */
+.md-body {
+  font-size: 0.875rem;
+  line-height: 1.75;
+  color: var(--color-foreground);
+}
+
+.md-body h1 {
+  margin: 1.25rem 0 0.75rem;
+  font-size: 1.5rem;
+  font-weight: 600;
+}
+
+.md-body h2 {
+  margin: 1.25rem 0 0.5rem;
+  font-size: 1.25rem;
+  font-weight: 600;
+}
+
+.md-body h3 {
+  margin: 1rem 0 0.5rem;
+  font-size: 1.125rem;
+  font-weight: 600;
+}
+
+.md-body p {
+  margin-bottom: 0.75rem;
+}
+
+.md-body ul {
+  margin-bottom: 0.75rem;
+  padding-left: 1.5rem;
+  list-style: disc;
+}
+
+.md-body ol {
+  margin-bottom: 0.75rem;
+  padding-left: 1.5rem;
+  list-style: decimal;
+}
+
+.md-body a {
+  color: var(--color-brand-600);
+  text-underline-offset: 2px;
+}
+
+.md-body a:hover {
+  text-decoration: underline;
+}
+
+.md-body code {
+  padding: 0.125rem 0.375rem;
+  border-radius: 6px;
+  font-size: 0.85em;
+  background: var(--color-background-muted);
+}
+
+.md-body pre {
+  margin-bottom: 0.75rem;
+  padding: 1rem;
+  border-radius: var(--radius-card);
+  font-size: 0.875rem;
+  overflow-x: auto;
+  background: var(--color-background-muted);
+}
+
+.md-body pre code {
+  padding: 0;
+  background: transparent;
+}
+
+.md-body blockquote {
+  margin-bottom: 0.75rem;
+  padding-left: 1rem;
+  border-left: 4px solid var(--color-border);
+  color: var(--color-foreground-muted);
+}

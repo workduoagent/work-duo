@@ -1,0 +1,31 @@
+.squads {
+  max-width: 896px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.squads__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.squads__lead {
+  color: var(--color-foreground-muted);
+  font-size: 0.875rem;
+}
+
+.squads__card-title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--color-foreground-intense);
+}
+
+.squads__card-desc {
+  margin-top: 4px;
+  font-size: 0.875rem;
+  color: var(--color-foreground-muted);
+  line-height: 1.5;
+}

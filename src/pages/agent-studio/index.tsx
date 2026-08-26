@@ -1,12 +1,13 @@
 import { NodeCard } from '@/components/flow'
 import { AgentIcon, KnowledgeIcon, ModelIcon } from '@/components/ui/icons'
-import { Card, CardHeader, CardTitle, CardDescription } from '@appica/ui-react/card'
+import { Card } from '@/components/ui'
+import './index.scss'
 
 export default function AgentStudioPage() {
   return (
-    <div className="mx-auto flex max-w-4xl flex-col gap-6">
-      <p className="text-foreground-muted">通过编排节点构建智能体工作流。</p>
-      <div className="flex flex-wrap gap-4">
+    <div className="agent-studio">
+      <p className="agent-studio__lead">通过编排节点构建智能体工作流。</p>
+      <div className="agent-studio__nodes">
         <NodeCard
           node={{ id: 'n1', title: '知识检索', description: '从知识库取上下文', status: 'done', icon: <KnowledgeIcon /> }}
         />
@@ -18,10 +19,10 @@ export default function AgentStudioPage() {
         />
       </div>
       <Card frame="solid">
-        <CardHeader>
-          <CardTitle className="text-base">提示</CardTitle>
-          <CardDescription>后续可接入 React Flow 实现可拖拽的连线编排画布。</CardDescription>
-        </CardHeader>
+        <div className="agent-studio__card-title">提示</div>
+        <div className="agent-studio__card-desc">
+          后续可接入 React Flow 实现可拖拽的连线编排画布。
+        </div>
       </Card>
     </div>
   )

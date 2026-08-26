@@ -1,6 +1,7 @@
-import { Card, CardHeader, CardTitle, CardDescription, CardFooter } from '@appica/ui-react/card'
-import { Button } from '@appica/ui-react/button'
+import { Card } from '@/components/ui'
+import { Button } from '@/components/ui'
 import { APP_NAME } from '@/core/config'
+import './index.scss'
 
 const STATS = [
   { label: '知识库', value: '0' },
@@ -11,34 +12,32 @@ const STATS = [
 
 export default function DashboardPage() {
   return (
-    <div className="mx-auto flex max-w-5xl flex-col gap-6">
+    <div className="dash">
       <section>
-        <h2 className="text-2xl font-semibold text-foreground-intense">欢迎使用 {APP_NAME}</h2>
-        <p className="mt-1 text-foreground-muted">
-          这是一个基于 Tauri 2 + React 19 + Appica UI 的桌面端基础框架。
+        <h2 className="dash__title">欢迎使用 {APP_NAME}</h2>
+        <p className="dash__subtitle">
+          这是一个基于 Tauri 2 + React 19 + Ant Design 的桌面端基础框架。
         </p>
       </section>
 
-      <section className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+      <section className="dash__stats">
         {STATS.map((s) => (
           <Card key={s.label} frame="solid">
-            <CardHeader>
-              <CardTitle className="text-3xl">{s.value}</CardTitle>
-              <CardDescription>{s.label}</CardDescription>
-            </CardHeader>
+            <div className="dash__stat-value">{s.value}</div>
+            <div className="dash__stat-label">{s.label}</div>
           </Card>
         ))}
       </section>
 
       <section>
         <Card>
-          <CardHeader>
-            <CardTitle>快速开始</CardTitle>
-            <CardDescription>从左侧导航进入各模块，逐步接入真实数据与 Rust 命令。</CardDescription>
-          </CardHeader>
-          <CardFooter>
+          <div className="dash__card-title">快速开始</div>
+          <div className="dash__card-desc">
+            从顶部胶囊菜单进入各模块，逐步接入真实数据与 Rust 命令。
+          </div>
+          <div className="dash__card-footer">
             <Button variant="soft">查看文档</Button>
-          </CardFooter>
+          </div>
         </Card>
       </section>
     </div>

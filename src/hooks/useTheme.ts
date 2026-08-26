@@ -1,25 +1,24 @@
-import {useCallback} from 'react'
-import {useTheme as useAppicaTheme} from '@appica/ui-react/hooks/use-theme'
-import {useAppDispatch, useAppSelector} from '@/core/store'
-import {setTheme as setThemeAction, type ThemeMode} from '@/core/store/slices/themeSlice'
+import { useCallback } from 'react'
+import { useAppDispatch, useAppSelector } from '@/core/store'
+import {
+  setTheme as setThemeAction,
+  type ThemeMode,
+} from '@/core/store/slices/themeSlice'
 
 /**
- * App-wide theme hook. Redux is the source of truth for app logic; Appica's
- * ThemeProvider owns the actual <html> class + persistence. This hook keeps
- * both in sync on every change.
+ * 全局主题 hook。Redux themeSlice 为唯一真源；
+ * <html> 的 .light/.dark 类与 antd 算法由 ThemeProvider 负责同步。
  */
 export function useTheme() {
-    const dispatch = useAppDispatch()
-    const mode = useAppSelector((state) => state.theme.mode)
-    const {setTheme: setAppicaTheme} = useAppicaTheme()
+  const dispatch = useAppDispatch()
+  const mode = useAppSelector((state) => state.theme.mode)
 
-    const setTheme = useCallback(
-        (next: ThemeMode) => {
-            dispatch(setThemeAction(next))
-            setAppicaTheme(next)
-        },
-        [dispatch, setAppicaTheme],
-    )
+  const setTheme = useCallback(
+    (next: ThemeMode) => {
+      dispatch(setThemeAction(next))
+    },
+    [dispatch],
+  )
 
-    return {theme: mode, setTheme}
+  return { theme: mode, setTheme }
 }

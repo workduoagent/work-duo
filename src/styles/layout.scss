@@ -1,0 +1,293 @@
+/* ============================================================
+ * layout.scss — 全局布局专用样式
+ * 承载：Tauri 窗口壳 + 顶栏 + 胶囊菜单 + 窗口控制 + 路由过渡。
+ * 颜色 / 圆角 / 阴影一律引用 variables.scss 暴露的 CSS 变量，不写死 hex/px。
+ * ============================================================ */
+
+/* 1. Tauri 窗口壳（app-shell） */
+.app-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden;
+  border-radius: 12px;
+  box-shadow: var(--shadow-md);
+  background-color: var(--color-background);
+  color: var(--color-foreground);
+}
+
+/* 2. Tauri 拖拽区 */
+[data-tauri-drag-region] {
+  -webkit-app-region: drag;
+  user-select: none;
+  cursor: default;
+}
+
+.no-drag-region,
+.no-drag-region * {
+  -webkit-app-region: no-drag;
+  cursor: auto;
+}
+
+/* 3. 顶栏（app-topbar） */
+.app-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  height: 64px;
+  padding: 0 24px;
+  background-color: var(--color-background);
+  color: var(--color-foreground);
+  transition: background-color 0.2s ease, border-color 0.2s ease;
+}
+
+.app-topbar__brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.app-brand-logo {
+  width: 28px;
+  height: 28px;
+  object-fit: contain;
+  border-radius: 6px;
+  filter: drop-shadow(0 2px 4px rgb(0 0 0 / 0.08));
+  flex-shrink: 0;
+}
+
+.app-topbar__brand-name {
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.5px;
+  color: var(--color-foreground);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.app-version-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 500;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--color-foreground-muted);
+  background-color: var(--color-background-subtle);
+  border: 1px solid var(--color-border-muted);
+  box-shadow: 0 2px 6px rgb(0 0 0 / 0.06);
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.3s ease;
+  cursor: default;
+}
+
+.app-version-tag:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgb(0 0 0 / 0.1);
+}
+
+.app-version-tag__text {
+  letter-spacing: 0.2px;
+}
+
+.app-topbar__nav {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  align-items: center;
+  justify-content: center;
+}
+
+.app-topbar__actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.app-topbar__divider {
+  width: 1px;
+  height: 24px;
+  margin: 0 6px;
+  background-color: var(--color-border-muted);
+}
+
+.dark .app-topbar {
+  border-bottom: 1px solid var(--color-border-muted);
+}
+
+/* 4. 顶栏胶囊菜单（app-nav-pills） */
+.app-nav-pills {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  padding: 4px;
+  border-radius: 999px;
+  background-color: var(--color-border-muted);
+  border: 1px solid var(--color-border);
+  box-shadow: inset 0 1px 2px rgb(0 0 0 / 0.06);
+  overflow: hidden;
+}
+
+.dark .app-nav-pills {
+  box-shadow: inset 0 1px 2px rgb(0 0 0 / 0.24);
+}
+
+.app-nav-pills__list {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  position: relative;
+  z-index: 1;
+}
+
+.app-nav-pills__thumb {
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  left: 4px;
+  z-index: 0;
+  width: var(--pill-w, 0px);
+  transform: translateX(var(--pill-x, 0px));
+  border-radius: 999px;
+  background-color: var(--color-brand-600);
+  pointer-events: none;
+  opacity: 0;
+  transition: none;
+}
+
+.app-nav-pills[data-ready='true'] .app-nav-pills__thumb {
+  opacity: 1;
+  transition:
+    transform 0.42s cubic-bezier(0.32, 0.72, 0, 1),
+    width 0.42s cubic-bezier(0.32, 0.72, 0, 1),
+    opacity 0.2s ease,
+    background-color 0.2s ease;
+}
+
+@supports (color: color-mix(in srgb, red, transparent)) {
+  .app-nav-pills__thumb {
+    box-shadow:
+      0 2px 8px color-mix(in srgb, var(--color-brand-600) 38%, transparent),
+      0 1px 2px rgb(0 0 0 / 0.08);
+  }
+}
+
+.app-nav-pills__item {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border: none;
+  border-radius: 999px;
+  background: none;
+  white-space: nowrap;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  font-family: inherit;
+  line-height: 1;
+  color: var(--color-foreground-muted);
+  transition: color 0.25s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.app-nav-pills__item:hover:not(.app-nav-pills__item--active) {
+  color: var(--color-foreground);
+}
+
+.app-nav-pills__item--active {
+  color: #ffffff;
+  cursor: default;
+}
+
+.app-nav-pills__icon {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+}
+
+.app-nav-pills__label {
+  line-height: 1;
+}
+
+.app-nav-pills__item:focus-visible {
+  outline: 2px solid var(--color-brand-500);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-nav-pills[data-ready='true'] .app-nav-pills__thumb {
+    transition: none;
+  }
+}
+
+/* 5. 窗口控制三键 */
+.window-controls-icons {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 12px;
+}
+
+.win-ctrl-btn {
+  border-radius: 50% !important;
+  width: 32px !important;
+  height: 32px !important;
+}
+
+.win-ctrl-btn:hover {
+  background-color: rgb(0 0 0 / 0.06) !important;
+}
+
+.win-ctrl-btn--close:hover {
+  background-color: var(--color-danger-bg) !important;
+  color: var(--color-danger) !important;
+}
+
+.dark .win-ctrl-btn:hover {
+  background-color: rgb(255 255 255 / 0.1) !important;
+}
+
+.dark .win-ctrl-btn--close:hover {
+  background-color: var(--color-danger-bg) !important;
+  color: var(--color-danger) !important;
+}
+
+/* 6. 内容区 + 路由切换淡入动画 */
+.app-content {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 24px;
+  background-color: var(--color-background);
+}
+
+.page-transition {
+  height: 100%;
+  width: 100%;
+  animation: routeFadeIn 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes routeFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.99);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .page-transition {
+    animation: none;
+  }
+}

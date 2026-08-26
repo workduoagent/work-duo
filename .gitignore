@@ -11,6 +11,9 @@ node_modules
 dist
 dist-ssr
 *.local
+dist-build
+dist-verify
+dist-verify2
 
 # Editor directories and files
 .vscode/*
@@ -22,3 +25,4 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+

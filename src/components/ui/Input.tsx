@@ -1,1 +1,1 @@
-export { Input } from '@appica/ui-react/input'
+export { Input, type InputProps } from 'antd'

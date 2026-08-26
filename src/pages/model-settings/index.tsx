@@ -1,10 +1,7 @@
 import { useState } from 'react'
-import { Card, CardHeader, CardTitle, CardDescription } from '@appica/ui-react/card'
-import { Button } from '@appica/ui-react/button'
-import { Input } from '@appica/ui-react/input'
-import { Field, FieldLabel } from '@appica/ui-react/field'
+import { Card, CardHeader, CardTitle, CardDescription, Button, Input, Field, FieldLabel, Modal } from '@/components/ui'
 import { PlusIcon, TrashIcon } from '@/components/ui/icons'
-import { Modal } from '@/components/ui'
+import './index.scss'
 
 interface ModelItem {
   id: string
@@ -36,25 +33,31 @@ export default function ModelSettingsPage() {
   }
 
   return (
-    <div className="mx-auto flex max-w-4xl flex-col gap-4">
-      <div className="flex items-center justify-between">
-        <p className="text-foreground-muted">管理可用的模型配置。</p>
+    <div className="ms">
+      <div className="ms__head">
+        <p className="ms__lead">管理可用的模型配置。</p>
         <Button onClick={() => setOpen(true)}>
           <PlusIcon data-icon="start" />
           新增模型
         </Button>
       </div>
 
-      <div className="grid gap-3">
+      <div className="ms__grid">
         {models.map((m) => (
           <Card key={m.id} frame="solid">
             <CardHeader>
-              <div className="flex items-center justify-between gap-3">
+              <div className="ms__card-row">
                 <div>
-                  <CardTitle className="text-base">{m.name}</CardTitle>
+                  <CardTitle className="ms__card-title">{m.name}</CardTitle>
                   <CardDescription>Provider: {m.provider}</CardDescription>
                 </div>
-                <Button variant="ghost" size="icon-md" aria-label="删除" onClick={() => remove(m.id)}>
+                <Button
+                  variant="ghost"
+                  size="icon-md"
+                  className="ms__card-del"
+                  aria-label="删除"
+                  onClick={() => remove(m.id)}
+                >
                   <TrashIcon />
                 </Button>
               </div>
@@ -62,7 +65,7 @@ export default function ModelSettingsPage() {
           </Card>
         ))}
         {models.length === 0 && (
-          <p className="py-8 text-center text-foreground-muted">暂无模型配置，点击右上角新增。</p>
+          <p className="ms__empty">暂无模型配置，点击右上角新增。</p>
         )}
       </div>
 
@@ -80,7 +83,7 @@ export default function ModelSettingsPage() {
           </>
         }
       >
-        <div className="flex flex-col gap-4">
+        <div className="ms__form">
           <Field>
             <FieldLabel>模型名称</FieldLabel>
             <Input

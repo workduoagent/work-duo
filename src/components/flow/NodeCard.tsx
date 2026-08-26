@@ -1,6 +1,7 @@
-import type { ComponentProps, ReactNode } from 'react'
-import { Card, CardHeader, CardTitle, CardDescription } from '@appica/ui-react/card'
-import { Badge } from '@appica/ui-react/badge'
+import type { ReactNode } from 'react'
+import { Tag } from 'antd'
+import { Card } from '@/components/ui'
+import './NodeCard.scss'
 
 export type FlowNodeStatus = 'idle' | 'running' | 'done' | 'error'
 
@@ -12,8 +13,6 @@ export interface FlowNode {
   icon?: ReactNode
 }
 
-type BadgeVariant = ComponentProps<typeof Badge>['variant']
-
 const STATUS_LABEL: Record<FlowNodeStatus, string> = {
   idle: '等待中',
   running: '运行中',
@@ -21,31 +20,28 @@ const STATUS_LABEL: Record<FlowNodeStatus, string> = {
   error: '出错',
 }
 
-const STATUS_VARIANT: Record<FlowNodeStatus, BadgeVariant> = {
-  idle: 'outline',
-  running: 'secondary',
+const STATUS_COLOR: Record<FlowNodeStatus, string> = {
+  idle: 'default',
+  running: 'processing',
   done: 'success',
   error: 'error',
 }
 
-// Reusable pipeline / orchestrator node. Drop it onto a canvas (e.g. React Flow)
-// or render it standalone as a status card.
+// 流水线 / 编排节点。可挂到画布（如 React Flow），也可独立作为状态卡片。
 export function NodeCard({ node }: { node: FlowNode }) {
   const status = node.status ?? 'idle'
   return (
-    <Card className="w-60">
-      <CardHeader>
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
-            {node.icon}
-            <CardTitle className="text-base">{node.title}</CardTitle>
-          </div>
-          <Badge variant={STATUS_VARIANT[status]} size="sm">
-            {STATUS_LABEL[status]}
-          </Badge>
+    <Card className="flow-node" frame="solid">
+      <div className="flow-node__header">
+        <div className="flow-node__title-group">
+          {node.icon}
+          <span className="flow-node__title">{node.title}</span>
         </div>
-        {node.description && <CardDescription>{node.description}</CardDescription>}
-      </CardHeader>
+        <Tag color={STATUS_COLOR[status]}>{STATUS_LABEL[status]}</Tag>
+      </div>
+      {node.description && (
+        <div className="flow-node__desc">{node.description}</div>
+      )}
     </Card>
   )
 }

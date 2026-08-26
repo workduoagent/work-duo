@@ -1,8 +1,8 @@
 import { useParams, Link } from 'react-router-dom'
-import { Card, CardHeader, CardTitle, CardDescription } from '@appica/ui-react/card'
-import { Button } from '@appica/ui-react/button'
+import { Card, Button } from '@/components/ui'
 import { MarkdownRenderer } from '@/components/markdown/MarkdownRenderer'
 import { ROUTES } from '@/core/router/paths'
+import './index.scss'
 
 const SAMPLE_MD = `# 知识库详情
 
@@ -19,22 +19,18 @@ export default function KnowledgeDetailPage() {
   const { id } = useParams<{ id: string }>()
 
   return (
-    <div className="mx-auto flex max-w-3xl flex-col gap-4">
+    <div className="kb-detail">
       <Link to={ROUTES.knowledge}>
         <Button variant="ghost" size="sm">
           ← 返回列表
         </Button>
       </Link>
       <Card>
-        <CardHeader>
-          <CardTitle className="text-xl">知识库 {id}</CardTitle>
-          <CardDescription>以下为示例内容（Markdown 渲染）。</CardDescription>
-        </CardHeader>
+        <div className="kb-detail__title">知识库 {id}</div>
+        <div className="kb-detail__desc">以下为示例内容（Markdown 渲染）。</div>
       </Card>
       <Card frame="solid">
-        <CardHeader>
-          <MarkdownRenderer content={SAMPLE_MD} />
-        </CardHeader>
+        <MarkdownRenderer content={SAMPLE_MD} />
       </Card>
     </div>
   )
