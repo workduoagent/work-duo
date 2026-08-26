@@ -1,17 +1,18 @@
-import { Outlet } from 'react-router-dom'
-import { Sidebar } from './Sidebar'
+import { Outlet, useLocation } from 'react-router-dom'
 import { TopBar } from './TopBar'
 
 export function AppLayout() {
+  const { pathname } = useLocation()
+
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-background text-foreground">
-      <Sidebar />
-      <div className="flex min-w-0 flex-1 flex-col">
-        <TopBar />
-        <main className="flex-1 overflow-y-auto p-6">
+    <div className="app-shell flex flex-col">
+      <TopBar />
+      <main className="app-content">
+        {/* key=pathname 触发 remount，配合 .page-transition 做路由淡入动画 */}
+        <div key={pathname} className="page-transition">
           <Outlet />
-        </main>
-      </div>
+        </div>
+      </main>
     </div>
   )
 }

@@ -38,7 +38,7 @@ body {
 
 /* ---------- 白天 / 黑夜主题 ----------
  * 基础语义令牌（背景、前景、卡片、边框…）由 Appica 提供，
- * 这里仅做「项目级」覆盖：把品牌色接到布局表面，并定义侧栏 / 顶栏底色。
+ * 这里仅做「项目级」覆盖：把品牌色接到布局表面，并定义顶栏底色。
  *
  * 兜底说明：Appica 在 styles.css 里把裸变量（--foreground / --background
  * / --border …）放在 ":root, .light" 与 ".dark" 块中声明；但 lightningcss
@@ -52,7 +52,6 @@ body {
   /* —— 语义色兜底（运行时会被 Appica 的 :root, .light 覆盖）—— */
   --foreground: oklch(0.446 0.03 256.802);
 
-  --app-sidebar-bg: var(--color-brand-50);
   --app-topbar-bg: #ffffff;
   --app-border-subtle: color-mix(in srgb, var(--foreground) 8%, transparent);
 }
@@ -61,7 +60,6 @@ body {
   /* —— 暗色下语义色兜底（运行时由 Appica 的 .dark 覆盖）—— */
   --foreground: oklch(0.872 0.01 258.338);
 
-  --app-sidebar-bg: #0f1115;
   --app-topbar-bg: #0f1115;
   --app-border-subtle: color-mix(in srgb, var(--foreground) 14%, transparent);
 
@@ -141,3 +139,9 @@ body {
 .md-body td {
   @apply border border-border px-3 py-2 text-left;
 }
+
+/* ---------- 布局专用样式 ----------
+ * 仅承载 Tauri 窗口壳 / 顶栏 / 侧栏 / 路由过渡相关规则，
+ * 详见 ./layout.css 顶部注释。
+ */
+@import "./layout.css";

@@ -6,8 +6,6 @@ export enum Env {
   Production = 'production',
 }
 
-export const isDev = import.meta.env.DEV
-
 // True when running inside the Tauri webview (custom protocol / native shell).
 export const isTauri =
   typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
