@@ -1,0 +1,540 @@
+/* ============================================================
+ * pages/mcp — MCP 服务接入
+ * 仅使用设计令牌 var(--color-*)，不写 hex / px 字面量。
+ * ============================================================ */
+
+.mcphub {
+  display: flex;
+  gap: 20px;
+  height: 100%;
+  padding: 20px;
+  box-sizing: border-box;
+  background: var(--color-background-subtle);
+}
+
+/* ---------------- 左侧场景侧栏 ---------------- */
+.mcphub__sidebar {
+  width: 220px;
+  flex: 0 0 220px;
+  background: var(--color-background);
+  border: 1px solid var(--color-border);
+  border-radius: 14px;
+  padding: 16px 12px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.mcphub__sidebar-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-foreground-intense);
+}
+
+.mcphub__cat-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow-y: auto;
+}
+
+.mcphub__cat-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 9px 12px;
+  border-radius: 9px;
+  cursor: pointer;
+  color: var(--color-foreground-muted);
+  transition: background 0.15s ease, color 0.15s ease;
+
+  &:hover {
+    background: var(--color-background-muted);
+    color: var(--color-foreground);
+  }
+
+  &.active {
+    background: var(--color-brand-50);
+    color: var(--color-brand-700);
+    font-weight: 600;
+  }
+}
+
+.mcphub__cat-label {
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mcphub__cat-count {
+  font-size: 12px;
+  color: var(--color-foreground-muted);
+  background: var(--color-background-muted);
+  border-radius: 999px;
+  padding: 1px 8px;
+  min-width: 22px;
+  text-align: center;
+}
+
+.mcphub__cat-item.active .mcphub__cat-count {
+  background: var(--color-brand-100);
+  color: var(--color-brand-700);
+}
+
+/* ---------------- 右侧内容 ---------------- */
+.mcphub__content {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.mcphub__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.mcphub__title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--color-foreground-intense);
+}
+
+.mcphub__lead {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--color-foreground-muted);
+}
+
+.mcphub__actions {
+  display: flex;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.mcphub__toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.mcphub__spin {
+  flex: 1 1 auto;
+  min-height: 200px;
+}
+
+/* ---------------- 卡片网格 ---------------- */
+.mcphub-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 16px;
+  align-content: start;
+}
+
+.mcphub-grid-item {
+  background: var(--color-background);
+  border: 1px solid var(--color-border);
+  border-radius: 14px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+
+  &:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-md);
+    border-color: var(--color-brand-200);
+  }
+
+  &--error {
+    border-color: var(--color-danger-200, var(--color-border));
+  }
+}
+
+.mcphub-grid-item__header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.mcphub-grid-item__logo {
+  width: 40px;
+  height: 40px;
+  flex: 0 0 40px;
+  border-radius: 10px;
+  background: var(--color-brand-50);
+  color: var(--color-brand-600);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.mcphub-grid-item__title-box {
+  min-width: 0;
+}
+
+.mcphub-grid-item__title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--color-foreground-intense);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mcphub-grid-item__identifier {
+  font-size: 12px;
+  font-family: monospace;
+  color: var(--color-foreground-muted);
+}
+
+.mcphub-grid-item__desc {
+  margin: 0;
+  font-size: 13px;
+  color: var(--color-foreground-muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  min-height: 38px;
+}
+
+.mcphub-grid-item__meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--color-foreground-muted);
+}
+
+.mcphub-grid-item__meta-tags {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.mcphub-grid-item__category {
+  background: var(--color-background-muted);
+  border-radius: 999px;
+  padding: 2px 10px;
+  color: var(--color-foreground);
+}
+
+.mcphub-grid-item__meta-info {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.mcphub-grid-item__status-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.mcphub-grid-item__badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin: 0;
+}
+
+.mcphub-grid-item__actions {
+  display: flex;
+  gap: 6px;
+  border-top: 1px solid var(--color-border-muted);
+  padding-top: 10px;
+  margin-top: auto;
+  flex-wrap: wrap;
+}
+
+.action-btn {
+  flex: 1;
+  min-width: 56px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  border: none;
+  background: transparent;
+  border-radius: 8px;
+  padding: 6px 4px;
+  font-size: 12px;
+  cursor: pointer;
+  color: var(--color-foreground-muted);
+  transition: background 0.15s ease, color 0.15s ease;
+
+  &:hover:not(:disabled) {
+    background: var(--color-background-muted);
+    color: var(--color-foreground);
+  }
+
+  &:disabled {
+    opacity: 0.6;
+    cursor: default;
+  }
+
+  &.delete:hover {
+    background: var(--color-danger-bg);
+    color: var(--color-danger);
+  }
+}
+
+.spin {
+  animation: mcphub-spin 0.8s linear infinite;
+}
+
+@keyframes mcphub-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.mcphub-grid-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 320px;
+}
+
+.mcphub__pagination {
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* ---------------- 接入弹窗 ---------------- */
+.mcphub__form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.mcphub__section {
+  margin-bottom: 4px;
+}
+
+.mcphub__section-title {
+  margin: 0 0 12px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-foreground-intense);
+}
+
+.mcphub__grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+.mcphub__span-2 {
+  grid-column: span 2;
+}
+
+.mcphub__required {
+  color: var(--color-danger);
+  font-weight: 600;
+  margin-left: 2px;
+}
+
+.mcphub__field-error {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--color-danger);
+}
+
+.mcphub__inline-icon {
+  vertical-align: -2px;
+  margin-right: 4px;
+}
+
+.mcphub__form-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.mcphub__json-block {
+  margin-bottom: 12px;
+}
+
+.mcphub__json-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-foreground-intense);
+  font-family: monospace;
+}
+
+/* ---------------- 详情抽屉 ---------------- */
+.mcphub-detail__logo {
+  width: 56px;
+  height: 56px;
+  flex: 0 0 56px;
+  border-radius: 14px;
+  background: var(--color-brand-50);
+  color: var(--color-brand-600);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.mcphub-detail__config {
+  margin-bottom: 12px;
+}
+
+.mcphub-detail__config-label {
+  font-size: 12px;
+  font-weight: 600;
+  font-family: monospace;
+  color: var(--color-foreground-intense);
+  margin-bottom: 4px;
+}
+
+.mcphub-detail__code {
+  margin: 0;
+  padding: 12px;
+  background: var(--color-background-subtle);
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 240px;
+  overflow: auto;
+  font-family: var(--font-mono, monospace);
+}
+
+.mcphub-detail__tools-bar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 12px;
+}
+
+.mcphub-tools {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+.mcphub-tool-card {
+  background: var(--color-background);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+
+  &--disabled {
+    opacity: 0.6;
+  }
+}
+
+.mcphub-tool-card__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mcphub-tool-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: 0 0 8px;
+
+  &.active {
+    background: var(--color-success, #22c55e);
+  }
+
+  &.inactive {
+    background: var(--color-foreground-muted);
+  }
+}
+
+.mcphub-tool-card__title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-foreground-intense);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mcphub-tool-card__code {
+  margin-left: auto;
+  font-size: 11px;
+  font-family: monospace;
+  color: var(--color-foreground-muted);
+  background: var(--color-background-muted);
+  border-radius: 6px;
+  padding: 1px 6px;
+  white-space: nowrap;
+}
+
+.mcphub-tool-card__desc {
+  margin: 0;
+  font-size: 12px;
+  color: var(--color-foreground-muted);
+  line-height: 1.5;
+  min-height: 36px;
+}
+
+.mcphub-tool-card__footer {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.mcphub-tools-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 200px;
+}
+
+/* ---------------- 响应式 ---------------- */
+@media (max-width: 880px) {
+  .mcphub {
+    flex-direction: column;
+    height: auto;
+  }
+  .mcphub__sidebar {
+    width: 100%;
+    flex: none;
+    flex-direction: row;
+    overflow-x: auto;
+  }
+  .mcphub__cat-list {
+    flex-direction: row;
+  }
+  .mcphub__cat-item {
+    white-space: nowrap;
+  }
+  .mcphub__grid {
+    grid-template-columns: 1fr;
+  }
+  .mcphub__span-2 {
+    grid-column: span 1;
+  }
+}

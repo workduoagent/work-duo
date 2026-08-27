@@ -50,3 +50,68 @@ export type ModelProvider =
     | 'iflytek'       // 讯飞星火
     | 'ollama'
     | 'custom';
+
+/**
+ * 技能分类（对应 skill_info.scenario 字段）。
+ * 用户在「新建/编辑」表单中从下拉选择，写入 scenario（存 key）。
+ * 文案与用户给出的枚举保持一致。
+ */
+export type SkillCategory =
+  | 'pay-skill'
+  | 'office-efficiency'
+  | 'content-creation'
+  | 'dev-programming'
+  | 'data-analysis'
+  | 'design-media'
+  | 'ai-agent'
+  | 'knowledge-management'
+  | 'business-ops'
+  | 'education'
+  | 'professional'
+  | 'it-ops-security'
+  | 'life-service'
+
+/**
+ * MCP 服务协议类型（对应 mcp_info.protocol_type 字段）。
+ *  - STDIO：本地子进程（命令行启动，需本地运行时，网页端无法做连通性测试）；
+ *  - SSE：Server-Sent Events 传输（POST 消息到 endpoint）；
+ *  - HTTP：Streamable HTTP（JSON-RPC over HTTP）。
+ */
+export type McpProtocolType = 'STDIO' | 'SSE' | 'HTTP'
+
+/**
+ * MCP 服务认证类型（对应 mcp_info.auth_type 字段）。
+ *  - NONE：无认证；
+ *  - API_KEY：API Key（通常在 headers 中携带）；
+ *  - OAUTH2：OAuth2 授权。
+ */
+export type McpAuthType = 'NONE' | 'API_KEY' | 'OAUTH2'
+
+/**
+ * MCP 服务连通状态（对应 mcp_info.status 字段，INTEGER）。
+ *  - 0：未测试（初始 / 编辑后待测试）；
+ *  - 1：正常（最近一次连通性测试通过）；
+ *  - 2：异常（最近一次连通性测试失败）。
+ */
+export type McpStatus = 0 | 1 | 2
+
+/**
+ * MCP 使用场景（对应 mcp_info.scenario 字段）。
+ * 用户在「接入服务」表单中从下拉选择，写入 scenario（存 key）。
+ * 先写入常用场景，后续可继续扩充。
+ */
+export type McpScenario =
+  | 'file-system'
+  | 'web-search'
+  | 'database'
+  | 'dev-tools'
+  | 'communication'
+  | 'productivity'
+
+/**
+ * 网络代理模式（对应 app_config.network_proxy.mode）。
+ *  - direct：直连（不使用代理）；
+ *  - system：跟随系统代理；
+ *  - manual：手动配置（提供 http(s) / socks5 地址输入框）。
+ */
+export type ProxyMode = 'direct' | 'system' | 'manual'

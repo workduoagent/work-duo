@@ -26,3 +26,4 @@ dist-verify2
 *.sln
 *.sw?
 
+pnpm-lock.yaml

@@ -60,3 +60,78 @@ export interface SquadRow {
   member_ids: string // JSON 数组存储为文本
   created_at: number
 }
+
+/** 技能能力单元表（skill_info）行映射。
+ * - identifier：唯一标识 slug；
+ * - tags：标签数组序列化后的 JSON 字符串；
+ * - instruction：技能正文（SKILL.md 内容）；
+ * - scenario：技能分类 key（对应 SkillCategory）；
+ * - path：本地存储目录（默认 app_config.skill_path + '/' + identifier）；
+ * - created_at / updated_at：epoch 毫秒（整型）。
+ */
+export interface SkillInfoRow {
+  id: string
+  identifier: string
+  name: string | null
+  description: string | null
+  instruction: string | null
+  tags: string | null // JSON 数组文本
+  scenario: string | null // 对应 SkillCategory
+  path: string | null
+  created_at: number
+  updated_at: number
+}
+
+/** MCP 服务接入表（mcp_info）行映射。
+ * - id：本地 UUID（文本主键）；
+ * - protocol_type：STDIO / SSE / HTTP；
+ * - auth_type：NONE / API_KEY / OAUTH2；
+ * - status：0 未测试 / 1 正常 / 2 异常（INTEGER）；
+ * - is_active：启用开关（INTEGER 0/1）；
+ * - headers / auth_config / capabilities / properties：JSON 对象序列化文本；
+ * - scenario：使用场景 key（对应 McpScenario）；
+ * - created_at / updated_at：epoch 毫秒（整型）。
+ */
+export interface McpInfoRow {
+  id: string
+  alias_name: string | null
+  mcp_name: string | null
+  protocol_type: string // 对应 McpProtocolType
+  endpoint_url: string | null
+  headers: string | null // JSON 对象文本
+  auth_type: string // 对应 McpAuthType
+  auth_config: string | null // JSON 对象文本
+  is_active: number // SQLite 布尔：0 / 1
+  status: number // 0 / 1 / 2
+  capabilities: string | null // JSON 数组文本
+  properties: string | null // JSON 对象文本
+  description: string | null
+  scenario: string | null // 对应 McpScenario
+  created_at: number
+  updated_at: number
+}
+
+/** MCP 工具定义表（mcp_tool_definition）行映射。
+ * - id：本地 UUID（文本主键）；
+ * - mcp_id：外键，引用 mcp_info.id；
+ * - input_schema / output_schema / test_params：JSON 对象序列化文本；
+ * - is_active：启用开关（INTEGER 0/1）；
+ * - timeout：延时毫秒（INTEGER 默认 0）；
+ * - created_at / updated_at：epoch 毫秒（整型）。
+ */
+export interface McpToolDefinitionRow {
+  id: string
+  mcp_id: string
+  tool_code: string | null
+  display_name: string | null
+  description: string | null
+  input_schema: string | null // JSON 对象文本
+  output_schema: string | null // JSON 对象文本
+  endpoint: string | null
+  method_type: string | null
+  is_active: number // SQLite 布尔：0 / 1
+  timeout: number
+  test_params: string | null // JSON 对象文本
+  created_at: number
+  updated_at: number
+}

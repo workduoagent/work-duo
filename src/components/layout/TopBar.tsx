@@ -16,7 +16,6 @@ import {
   Sparkles,
   Plug,
   Wand2,
-  SlidersHorizontal,
   ChevronLeft,
   ChevronRight,
   type LucideIcon,
@@ -53,8 +52,8 @@ const MENUS: MenuNode[] = [
     icon: Boxes,
     children: [
       { key: 'llm', label: 'LLM', icon: Sparkles, path: ROUTES.modelSettings },
-      { key: 'mcp', label: 'MCP', icon: Plug },
-      { key: 'skill', label: 'Skill', icon: Wand2 },
+      { key: 'mcp', label: 'MCP', icon: Plug, path: ROUTES.mcpHub },
+      { key: 'skill', label: 'Skill', icon: Wand2, path: ROUTES.skillHub },
       // 后续接入的服务继续在此追加子项即可
     ],
   },
@@ -65,7 +64,7 @@ const MENUS: MenuNode[] = [
     key: 'settings',
     label: '设置',
     icon: Settings,
-    children: [{ key: 'general', label: '通用设置', icon: SlidersHorizontal }],
+    path: ROUTES.settings,
   },
 ]
 

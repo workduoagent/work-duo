@@ -6,6 +6,9 @@ import KnowledgeListPage from '@/pages/knowledge'
 import KnowledgeDetailPage from '@/pages/knowledge/detail'
 import AgentStudioPage from '@/pages/agent-studio'
 import SquadsWorkspacePage from '@/pages/squads-workspace'
+import SkillHubPage from '@/pages/skill-hub'
+import McpHubPage from '@/pages/mcp'
+import SettingsPage from '@/pages/settings'
 
 // HashRouter is used so deep links survive reloads inside the Tauri custom
 // protocol (no SPA fallback on tauri://). Swap to createBrowserRouter if the
@@ -21,6 +24,9 @@ export const router = createHashRouter([
       { path: 'knowledge/:id', element: <KnowledgeDetailPage /> },
       { path: 'agent-studio', element: <AgentStudioPage /> },
       { path: 'squads-workspace', element: <SquadsWorkspacePage /> },
+      { path: 'skill-hub', element: <SkillHubPage /> },
+      { path: 'mcp-hub', element: <McpHubPage /> },
+      { path: 'settings', element: <SettingsPage /> },
     ],
   },
 ])
