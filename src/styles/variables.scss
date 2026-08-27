@@ -1,85 +1,86 @@
 /* ============================================================
  * variables.scss — 项目级设计令牌（Design Tokens）
  * ------------------------------------------------------------
- * 弃用 Appica 后，这里自己维护一套「语义色 + 品牌色 + 尺寸」令牌，
- * 供 layout / 组件配套 .scss 使用。亮色挂在 :root / .light，
- * 暗色挂在 .dark（由 src/core/contexts/ThemeProvider 注入到 <html>）。
- * 不依赖任何第三方 UI 库的变量。
+ * 极简、清新、脱俗的现代 SaaS 主题。
+ * 亮色挂在 :root / .light，暗色挂在 .dark。
  * ============================================================ */
 
 :root,
 .light {
-  /* 表面 / 文本 */
+  /* 表面 / 文本 (雅致锌 Zinc 体系) */
   --color-background: #ffffff;
-  --color-background-subtle: #f7f8fb;
-  --color-background-muted: #eef1f6;
-  --color-foreground: #2b2f36;
-  --color-foreground-muted: #6b7280;
-  --color-foreground-intense: #111827;
+  --color-background-subtle: #fafafa; /* Zinc 50 - 极浅的珍珠白 */
+  --color-background-muted: #f4f4f5; /* Zinc 100 */
+  --color-foreground: #27272a; /* Zinc 800 - 柔和的正文黑 */
+  --color-foreground-muted: #71717a; /* Zinc 500 */
+  --color-foreground-intense: #18181b; /* Zinc 900 - 纯粹的标题黑 */
   --color-foreground-inverse: #ffffff;
 
-  /* 边框 */
-  --color-border: #e3e6ec;
-  --color-border-muted: #eceef2;
+  /* 边框 - 极度弱化物理分割线 */
+  --color-border: #e4e4e7; /* Zinc 200 */
+  --color-border-muted: #f4f4f5; /* Zinc 100 */
 
-  /* 品牌色（与旧 variables.css 保持一致，UI 切换不跳色） */
-  --color-brand-50: #eef4ff;
-  --color-brand-100: #d9e6ff;
-  --color-brand-200: #bcd2ff;
-  --color-brand-300: #8fb4ff;
-  --color-brand-400: #5e92ff;
-  --color-brand-500: #3b6fff;
-  --color-brand-600: #2f5be0;
-  --color-brand-700: #2548b8;
-  --color-brand-800: #1d3a92;
-  --color-brand-900: #162d6e;
+  /* 品牌色 - 晴空蓝 (Fresh Sky) 体系，清透焕新 */
+  --color-brand-50: #f0f9ff;
+  --color-brand-100: #e0f2fe;
+  --color-brand-200: #bae6fd;
+  --color-brand-300: #7dd3fc;
+  --color-brand-400: #38bdf8;
+  --color-brand-500: #0ea5e9;
+  --color-brand-600: #0284c7; /* 核心交互色 */
+  --color-brand-700: #0369a1;
+  --color-brand-800: #075985;
+  --color-brand-900: #0c4a6e;
 
-  /* 危险色（窗口关闭键等） */
-  --color-danger: #ff4d4f;
-  --color-danger-bg: rgba(255, 77, 79, 0.12);
+  /* 危险色 - 保持警示性但降低刺眼度 */
+  --color-danger: #ef4444;
+  --color-danger-bg: rgba(239, 68, 68, 0.08);
 
-  /* 阴影 */
-  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.06);
-  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.08);
-  --shadow-pop: 0 8px 32px rgba(0, 0, 0, 0.12);
+  /* 阴影 - 极简大气的灵魂（低透明度，大扩散） */
+  --shadow-sm: 0 2px 12px rgba(0, 0, 0, 0.03);
+  --shadow-md: 0 8px 32px rgba(0, 0, 0, 0.04);
+  --shadow-pop: 0 16px 48px rgba(0, 0, 0, 0.06);
 }
 
 .dark {
-  --color-background: #0f1115;
-  --color-background-subtle: rgba(255, 255, 255, 0.06);
-  --color-background-muted: #1a1d24;
-  --color-foreground: #e6e8ec;
-  --color-foreground-muted: #9aa1ad;
-  --color-foreground-intense: #ffffff;
-  --color-foreground-inverse: #0f1115;
+  /* 暗黑模式保持同等的高级感，避免纯黑死白 */
+  --color-background: #09090b; /* Zinc 950 - 深邃背景 */
+  --color-background-subtle: #18181b; /* Zinc 900 */
+  --color-background-muted: #27272a; /* Zinc 800 */
+  --color-foreground: #e4e4e7; /* Zinc 200 */
+  --color-foreground-muted: #a1a1aa; /* Zinc 400 */
+  --color-foreground-intense: #fafafa; /* Zinc 50 */
+  --color-foreground-inverse: #09090b;
 
-  --color-border: #2a2e38;
-  --color-border-muted: #1f232c;
+  --color-border: #27272a; /* Zinc 800 */
+  --color-border-muted: #18181b; /* Zinc 900 */
 
-  /* 暗色下品牌主色略提亮，保证对比度 */
-  --color-brand-50: #eef4ff;
-  --color-brand-100: #d9e6ff;
-  --color-brand-200: #bcd2ff;
-  --color-brand-300: #8fb4ff;
-  --color-brand-400: #5e92ff;
-  --color-brand-500: #3b6fff;
-  --color-brand-600: #4f7fff;
-  --color-brand-700: #2548b8;
-  --color-brand-800: #1d3a92;
-  --color-brand-900: #162d6e;
+  /* 暗色下品牌色略微调整，确保发光感与对比度 */
+  --color-brand-50: #082f49;
+  --color-brand-100: #0c4a6e;
+  --color-brand-200: #075985;
+  --color-brand-300: #0369a1;
+  --color-brand-400: #0284c7;
+  --color-brand-500: #0ea5e9;
+  --color-brand-600: #38bdf8; /* 暗色下的核心按钮提亮，保证辨识度 */
+  --color-brand-700: #7dd3fc;
+  --color-brand-800: #bae6fd;
+  --color-brand-900: #e0f2fe;
 
-  --color-danger: #ff7875;
-  --color-danger-bg: rgba(255, 77, 79, 0.18);
+  --color-danger: #f87171;
+  --color-danger-bg: rgba(248, 113, 113, 0.12);
 
-  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.3);
-  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.4);
-  --shadow-pop: 0 8px 32px rgba(0, 0, 0, 0.5);
+  /* 暗黑模式需要更深、更集中的阴影来体现 Z 轴层级 */
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.5);
+  --shadow-pop: 0 16px 40px rgba(0, 0, 0, 0.6);
 }
 
 /* 尺寸 / 圆角（项目级，非语义） */
 :root {
   --topbar-height: 56px;
-  --radius-card: 14px;
+  /* 稍微增大圆角，配合柔和阴影，现代感更强 */
+  --radius-card: 16px;
   --font-sans: "Inter", system-ui, -apple-system, "Segoe UI", Roboto,
-    "PingFang SC", "Microsoft YaHei", sans-serif;
+  "PingFang SC", "Microsoft YaHei", sans-serif;
 }

@@ -8,8 +8,14 @@
   /* 新增：开启垂直方向独立滚动 */
   overflow-y: auto;
 
-  /* 可选优化：给滚动条留一点边距，防止滚动条紧贴着卡片 */
-  padding-right: 4px;
+  /*
+   * 修改 padding：
+   * top: 4px (给 translateY(-3px) 留出向上浮动的空间，防止被削顶)
+   * right: 4px (给滚动条留空间)
+   * bottom: 16px (防止滚到最底下时卡片贴着底边)
+   * left: 4px (平衡视觉，防止左侧悬浮阴影被切)
+   */
+  padding: 4px 4px 16px 4px;
 }
 
 .model-list--loading,
@@ -58,10 +64,22 @@
 /* ---------- 单张模型卡片（紧凑型） ---------- */
 .model-card {
   position: relative;
+  height: 100%; /* 撑满网格行高，便于同行卡片的底部操作栏对齐 */
+  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+}
+
+/*
+ * 关键：Card 封装把 className 挂在 antd Card 根节点，各区块实际渲染在内部 .ant-card-body 中，
+ * 因此 flex 列布局必须下沉到 body 层，gap 才会真正作用在 head/tags/desc/actions 之间
+ *（写在 .model-card 根上时，根节点只有 body 一个子节点，gap 无效 → 上半部分全部贴死）。
+ * 特异性 (0,3,0) 高于 antd cssinjs 的 .ant-card .ant-card-body (0,2,0)，确保 padding 覆盖生效。
+ */
+.app-card.model-card .ant-card-body {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+  gap: 12px; /* 上半部分各区块拉开呼吸感 */
+  height: 100%;
+  padding: 16px; /* antd 默认 24px 偏大，紧凑卡片收敛 */
 }
 
 .model-card:hover {
@@ -258,10 +276,18 @@
 .model-card__actions {
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding-top: 4px;
+  gap: 6px; /* 图标按钮靠左成组，紧凑排列（不用 space-between，避免按钮被强行打散） */
+
+  padding-top: 12px; /* 顶部内边距加大，与上方内容拉开呼吸感 */
   border-top: 1px solid var(--color-border);
-  margin-top: 0;
+
+  /* 利用 auto margin 将操作栏强制推到卡片最底部 */
+  margin-top: auto;
+}
+
+/* 启用开关推到整行最右：按钮组靠左、开关靠右，两端平衡 */
+.model-card__actions .ant-switch {
+  margin-left: auto;
 }
 
 .model-card__del:hover {
