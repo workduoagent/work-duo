@@ -35,6 +35,13 @@
   /* 危险色 - 保持警示性但降低刺眼度 */
   --color-danger: #ef4444;
   --color-danger-bg: rgba(239, 68, 68, 0.08);
+  --color-danger-50: #fee2e2;
+
+  /* 成功 / 警告语义色（连通性三态等使用） */
+  --color-success: #16a34a;
+  --color-success-50: #dcfce7;
+  --color-warning: #d97706;
+  --color-warning-50: #fef3c7;
 
   /* 阴影 - 极简大气的灵魂（低透明度，大扩散） */
   --shadow-sm: 0 2px 12px rgba(0, 0, 0, 0.03);
@@ -69,6 +76,13 @@
 
   --color-danger: #f87171;
   --color-danger-bg: rgba(248, 113, 113, 0.12);
+  --color-danger-50: rgba(248, 113, 113, 0.12);
+
+  /* 成功 / 警告语义色（暗色下提亮以保证辨识度） */
+  --color-success: #4ade80;
+  --color-success-50: rgba(74, 222, 128, 0.12);
+  --color-warning: #fbbf24;
+  --color-warning-50: rgba(251, 191, 36, 0.12);
 
   /* 暗黑模式需要更深、更集中的阴影来体现 Z 轴层级 */
   --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.4);

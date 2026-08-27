@@ -126,3 +126,18 @@ body {
   border-left: 4px solid var(--color-border);
   color: var(--color-foreground-muted);
 }
+
+/* ============================================================
+ * 全局加载动画工具类
+ * 注：项目已弃用 Tailwind，SpinnerIcon 依赖的 `animate-spin` 工具类需在此定义，
+ *     否则加载图标不会旋转（按钮「测试连通性」等场景）。
+ * ============================================================ */
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.animate-spin {
+  animation: spin 1s linear infinite;
+}

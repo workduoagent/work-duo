@@ -138,6 +138,9 @@
 }
 
 .mfm__test-result {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   font-size: 0.75rem;
   white-space: nowrap;
   overflow: hidden;
@@ -146,14 +149,29 @@
   border-radius: 4px;
 }
 
-.mfm__test-result--ok {
-  color: var(--color-brand-600, #059669);
-  background-color: var(--color-brand-50, #ecfdf5);
+/* 测试结果前的状态小球：继承父级文字色，三态始终可见 */
+.mfm__test-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+  background-color: currentColor;
 }
 
-.mfm__test-result--fail {
+.mfm__test-result--success {
+  color: var(--color-success, #16a34a);
+  background-color: var(--color-success-50, #dcfce7);
+}
+
+.mfm__test-result--error {
   color: var(--color-danger, #dc2626);
-  background-color: var(--color-danger-50, #fef2f2);
+  background-color: var(--color-danger-50, #fee2e2);
+}
+
+.mfm__test-result--warn {
+  color: var(--color-warning, #d97706);
+  background-color: var(--color-warning-50, #fef3c7);
 }
 
 .mfm__footer-actions {

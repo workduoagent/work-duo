@@ -244,28 +244,41 @@
 }
 
 .model-card__test-dot {
+  display: inline-block;
   width: 6px;
   height: 6px;
   border-radius: 50%;
   flex: 0 0 auto;
+  /* 直接继承父级文字色，确保三态（成功/可达/失败）下小球永远有颜色、不会变透明 */
+  background-color: currentColor;
 }
 
-.model-card__test--ok {
+.model-card__test--success {
   color: var(--color-success, #16a34a);
-  background-color: color-mix(in srgb, var(--color-success, #16a34a) 12%, transparent);
+  background-color: var(--color-success-50, #dcfce7);
 }
 
-.model-card__test--ok .model-card__test-dot {
+.model-card__test--success .model-card__test-dot {
   background-color: var(--color-success, #16a34a);
 }
 
-.model-card__test--fail {
+.model-card__test--error {
   color: var(--color-danger, #dc2626);
-  background-color: color-mix(in srgb, var(--color-danger, #dc2626) 12%, transparent);
+  background-color: var(--color-danger-50, #fee2e2);
 }
 
-.model-card__test--fail .model-card__test-dot {
+.model-card__test--error .model-card__test-dot {
   background-color: var(--color-danger, #dc2626);
+}
+
+/* warn：网络可达，但有鉴权/路径/方法/请求体等提示（黄色，区别于成功与失败） */
+.model-card__test--warn {
+  color: var(--color-warning, #d97706);
+  background-color: var(--color-warning-50, #fef3c7);
+}
+
+.model-card__test--warn .model-card__test-dot {
+  background-color: var(--color-warning, #d97706);
 }
 
 .model-card__test-ms {

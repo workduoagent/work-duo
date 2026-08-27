@@ -179,9 +179,7 @@ export function ModelList({
 
                             {result && (
                                 <div
-                                    className={`model-card__test model-card__test--${
-                                        result.ok ? 'ok' : 'fail'
-                                    }`}
+                                    className={`model-card__test model-card__test--${result.level}`}
                                     title={result.message}
                                 >
                                     <span className="model-card__test-dot"/>

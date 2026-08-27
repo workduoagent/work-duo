@@ -140,10 +140,9 @@ export function ModelFormModal({
                         </Button>
                         {testResult && (
                             <span
-                                className={`mfm__test-result mfm__test-result--${
-                                    testResult.ok ? 'ok' : 'fail'
-                                }`}
+                                className={`mfm__test-result mfm__test-result--${testResult.level}`}
                             >
+                <span className="mfm__test-dot" />
                 {testResult.message}
               </span>
                         )}
