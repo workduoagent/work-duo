@@ -1,73 +1,164 @@
-/* 模型接入 / 编辑弹窗内的表单布局 */
+/* 模型接入 / 编辑弹窗内的表单布局 - 简约重构版 */
 .mfm {
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 32px; /* 增加整体段落间距，提供呼吸感 */
+
+  /* 新增：给右侧滚动条和底部留出安全距离 */
+  padding-right: 16px;
+  padding-bottom: 8px;
 }
 
 .mfm__section {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 20px;
 }
 
 .mfm__section-title {
   margin: 0;
-  padding-bottom: 8px;
-  border-bottom: 1px solid var(--color-border);
-  font-size: 0.8125rem;
-  font-weight: 600;
-  color: var(--color-foreground-muted);
-  letter-spacing: 0.02em;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--color-border, #eaeaea); /* 确保线条颜色足够浅 */
+  font-size: 0.875rem; /* 稍微放大标题以区分层级 */
+  font-weight: 500; /* 降低字重，避免过于突兀 */
+  color: var(--color-foreground, #333);
+  letter-spacing: 0.01em;
 }
 
 .mfm__grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 12px 16px;
+  gap: 20px 24px; /* 增加网格间距，减少拥挤感 */
 }
 
 .mfm__span-2 {
   grid-column: span 2;
 }
 
-.mfm__hint {
-  font-weight: 400;
-  color: var(--color-foreground-muted);
-  font-size: 12px;
+/* 必填星号柔化处理 */
+.mfm__required {
+  color: var(--color-danger, #ef4444);
+  margin-left: 4px;
+  font-weight: normal;
+  opacity: 0.7; /* 降低饱和度，不那么刺眼 */
 }
 
-/* Slider 行：滑轨 + 数值读数 */
-.mfm__slider {
+.mfm__hint {
+  font-weight: 400;
+  color: var(--color-foreground-muted, #888);
+  font-size: 0.75rem;
+  margin-left: 6px;
+}
+
+/* Tool / Function Calling 开关行 */
+.mfm__inline-icon {
+  vertical-align: text-bottom;
+  margin-right: 6px;
+  color: var(--color-foreground-muted, #888);
+}
+
+.mfm__toolcalls {
   display: flex;
   align-items: center;
   gap: 12px;
+  margin-top: 4px;
+  padding: 12px 16px;
+  background-color: var(--color-background-soft, #f9f9f9); /* 提供一个极浅的背景包裹 */
+  border-radius: 8px;
+}
+
+.mfm__toolcalls-text {
+  font-size: 0.75rem;
+  color: var(--color-foreground-muted, #888);
+  line-height: 1.5;
+}
+
+/* Slider 行 */
+.mfm__slider {
+  display: flex;
+  align-items: center;
+  gap: 16px;
 
   .ant-slider {
-    flex: 1 1 auto;
-    margin: 6px 0; /* antd Slider 默认 margin 归一 */
+    flex: 1 1 0;
+    min-width: 0;
+    margin: 8px 0;
   }
 }
 
 .mfm__slider-value {
-  flex: 0 0 44px;
+  flex: 0 0 48px;
   text-align: right;
-  font-size: 12px;
+  font-size: 0.75rem;
   font-variant-numeric: tabular-nums;
-  color: var(--color-foreground-muted);
+  color: var(--color-foreground, #333);
+  background: var(--color-background-soft, #f9f9f9);
+  padding: 4px 8px;
+  border-radius: 4px; /* 给数值增加一点底色衬托 */
 }
 
 .mfm__input-number {
-  width: 160px;
+  width: 100%;
+  max-width: 200px;
 }
 
-/* 窄屏兜底：单列 */
+/* 控件统一对齐包装器 */
+.mfm__control-wrapper {
+  display: flex;
+  align-items: center;
+  min-height: 36px; /* 统一表单控件的最小高度 */
+}
+
+/* 窄屏兜底 */
 @media (max-width: 640px) {
   .mfm__grid {
     grid-template-columns: 1fr;
+    gap: 16px;
   }
-
   .mfm__span-2 {
     grid-column: span 1;
   }
+}
+
+/* 弹窗页脚 */
+.mfm__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
+  padding-top: 8px;
+}
+
+.mfm__test {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.mfm__test-result {
+  font-size: 0.75rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 4px 10px;
+  border-radius: 4px;
+}
+
+.mfm__test-result--ok {
+  color: var(--color-brand-600, #059669);
+  background-color: var(--color-brand-50, #ecfdf5);
+}
+
+.mfm__test-result--fail {
+  color: var(--color-danger, #dc2626);
+  background-color: var(--color-danger-50, #fef2f2);
+}
+
+.mfm__footer-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 0 0 auto;
 }

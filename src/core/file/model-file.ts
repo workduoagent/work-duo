@@ -1,20 +1,14 @@
 /**
- * 模型接入配置的数据层。
+ * 模型接入配置 —— 领域类型 / 运行期选项 / 草稿工厂。
  *
- * 职责：
- *  - 定义 6 大类模型的参数结构与统一的 ModelConfig 数据结构；
- *  - 提供对 $APPDATA/models.json 的读写接口（基于 @tauri-apps/plugin-fs）；
- *  - 在非 Tauri 环境（vite dev / preview）自动回退到 localStorage，便于开发期调试。
- *
- * 该文件被 model-settings 页面及各"接入模型"相关页面复用。
+ * 说明：本文件**不再承担持久化**。数据已迁移到 SQLite，由
+ * `src/core/mapper/model-mapper.ts` 负责增删改查（@tauri-apps/plugin-sql）。
+ * 这里只保留与 UI / 表单无关的纯领域定义，供页面、组件与 mapper 复用。
  */
-import { appDataDir, join } from '@tauri-apps/api/path'
-import { exists, mkdir, readTextFile, writeTextFile } from '@tauri-apps/plugin-fs'
-import { isTauri } from '@/core/config'
 import type { ModelCategory, ModelProvider } from '@/types/core'
 
 /* ------------------------------------------------------------------ *
- * 1. 分类参数结构
+ * 1. 分类参数结构（异构，按 category 选其一挂载到 ModelConfig）
  * ------------------------------------------------------------------ */
 
 /** 文本 / 对话模型参数 */
@@ -83,7 +77,7 @@ export interface RerankModelParams {
 }
 
 /* ------------------------------------------------------------------ *
- * 2. 统一模型配置结构
+ * 2. 统一模型配置结构（领域模型，运行时使用）
  * ------------------------------------------------------------------ */
 
 export interface ModelConfig {
@@ -95,6 +89,8 @@ export interface ModelConfig {
   apiKey: string
   modelName: string // 服务商侧的模型标识
   enabled: boolean
+  /** Tool/Function Calling 能力标记：默认 false（不支持），由用户接入时显式开启；对 Agent 集成至关重要 */
+  toolCalls: boolean
   description?: string
   tags?: string[]
   // 按分类挂载的参数对象（仅挂载与 category 对应的一项）
@@ -104,22 +100,13 @@ export interface ModelConfig {
   tts?: TtsModelParams
   embedding?: EmbeddingModelParams
   rerank?: RerankModelParams
-  createdAt: string
+  createdAt: string // ISO 时间字符串（与 SQLite 的 epoch 毫秒在 mapper 层互转）
   updatedAt: string
-}
-
-/** models.json 文件结构 */
-export interface ModelFile {
-  version: number
-  models: ModelConfig[]
 }
 
 /* ------------------------------------------------------------------ *
  * 3. 运行期常量 / 选项（枚举值在此，而非 core.d.ts）
  * ------------------------------------------------------------------ */
-
-export const MODELS_FILE_NAME = 'models.json'
-export const MODELS_FILE_VERSION = 1
 
 export const MODEL_CATEGORY_OPTIONS: ReadonlyArray<{
   value: ModelCategory
@@ -137,18 +124,34 @@ export const PROVIDER_OPTIONS: ReadonlyArray<{
   value: ModelProvider
   label: string
 }> = [
+  // ----- 国际主流 -----
   { value: 'openai', label: 'OpenAI' },
   { value: 'azure', label: 'Azure OpenAI' },
-  { value: 'anthropic', label: 'Anthropic' },
-  { value: 'google', label: 'Google' },
-  { value: 'qwen', label: '通义千问' },
+  { value: 'anthropic', label: 'Anthropic (Claude)' },
+  { value: 'google', label: 'Google (Gemini)' },
+  { value: 'meta', label: 'Meta (Llama)' },
+  { value: 'microsoft', label: 'Microsoft (Copilot)' },
+  { value: 'amazon', label: 'Amazon (Bedrock)' },
+  { value: 'grok', label: 'xAI (Grok)' },
+
+  // ----- 中国科技巨头 -----
+  { value: 'qwen', label: '通义千问 (阿里)' },
+  { value: 'baidu', label: '文心一言 (百度)' },
+  { value: 'tencent', label: '混元 (腾讯)' },
+  { value: 'bytedance', label: '豆包 (字节)' },
+  { value: 'iflytek', label: '讯飞星火' },
+
+  // ----- 中国AI新锐（“六小虎”等） -----
   { value: 'deepseek', label: 'DeepSeek' },
   { value: 'zhipu', label: '智谱 GLM' },
-  { value: 'moonshot', label: 'Kimi' },
-  { value: 'baichuan', label: '百川' },
-  { value: 'ollama', label: 'Ollama' },
+  { value: 'moonshot', label: 'Kimi (月之暗面)' },
+  { value: 'minimax', label: 'MiniMax' },
+  { value: 'baichuan', label: '百川智能' },
+
+  // ----- 本地工具 / 自定义 -----
+  { value: 'ollama', label: 'Ollama (本地运行)' },
   { value: 'custom', label: '自定义 / 兼容 OpenAI' },
-]
+];
 
 /** 创建一个带默认参数的新模型草稿（用于"新增"） */
 export function createEmptyModel(category: ModelCategory): ModelConfig {
@@ -162,6 +165,7 @@ export function createEmptyModel(category: ModelCategory): ModelConfig {
     apiKey: '',
     modelName: '',
     enabled: true,
+    toolCalls: false,
     createdAt: now,
     updatedAt: now,
   }
@@ -248,93 +252,73 @@ export function createEmptyModel(category: ModelCategory): ModelConfig {
 }
 
 /* ------------------------------------------------------------------ *
- * 4. 持久化（Tauri fs，回退 localStorage）
+ * 4. 导入配置（JSON -> ModelConfig[]）
  * ------------------------------------------------------------------ */
 
-const STORAGE_KEY = 'work-duo:models'
-
-async function readRaw(): Promise<string | null> {
-  if (isTauri) {
-    const filePath = await join(await appDataDir(), MODELS_FILE_NAME)
-    if (!(await exists(filePath))) return null
-    return readTextFile(filePath)
-  }
-  return localStorage.getItem(STORAGE_KEY)
+export interface ModelImportResult {
+  /** 校验通过、可入库的模型列表 */
+  models: ModelConfig[]
+  /** 校验失败的原因（逐项） */
+  errors: string[]
+  /** 总条目数（含非法项），用于「N 条中 M 条有效」提示 */
+  total: number
 }
 
-async function writeRaw(content: string): Promise<void> {
-  if (isTauri) {
-    const dir = await appDataDir()
-    if (!(await exists(dir))) await mkdir(dir, { recursive: true })
-    await writeTextFile(await join(dir, MODELS_FILE_NAME), content)
-    return
-  }
-  localStorage.setItem(STORAGE_KEY, content)
-}
-
-function normalize(raw: string | null): ModelFile {
-  if (!raw) return { version: MODELS_FILE_VERSION, models: [] }
+/**
+ * 解析导入的 JSON 文本，归一化为 ModelConfig[] 并做基础校验。
+ * 兼容「单个对象」或「对象数组」两种格式；缺失字段用 createEmptyModel 默认值补齐；
+ * 传入的分类专属参数（与 category 同键的对象）会覆盖默认值。
+ */
+export function parseModelImport(text: string): ModelImportResult {
+  const errors: string[] = []
+  let data: unknown
   try {
-    const parsed = JSON.parse(raw)
-    if (parsed && Array.isArray(parsed.models)) return parsed as ModelFile
-    if (Array.isArray(parsed)) {
-      return { version: MODELS_FILE_VERSION, models: parsed }
+    data = JSON.parse(text)
+  } catch (e) {
+    return { models: [], errors: [`JSON 解析失败：${(e as Error).message}`], total: 0 }
+  }
+
+  const arr = Array.isArray(data) ? data : [data]
+  const models: ModelConfig[] = []
+
+  arr.forEach((item, i) => {
+    const idx = i + 1
+    if (typeof item !== 'object' || item === null) {
+      errors.push(`第 ${idx} 项不是对象，已跳过`)
+      return
     }
-  } catch {
-    /* 损坏的 JSON：回退到空列表，避免整页崩溃 */
-  }
-  return { version: MODELS_FILE_VERSION, models: [] }
-}
+    const obj = item as Record<string, unknown>
+    const category = obj.category as ModelCategory
+    if (!MODEL_CATEGORY_OPTIONS.some((o) => o.value === category)) {
+      errors.push(`第 ${idx} 项 category 非法：${String(obj.category ?? '')}`)
+      return
+    }
 
-async function persist(models: ModelConfig[]): Promise<ModelConfig[]> {
-  const file: ModelFile = { version: MODELS_FILE_VERSION, models }
-  await writeRaw(JSON.stringify(file, null, 2))
-  return models
-}
+    const base = createEmptyModel(category)
+    const merged: ModelConfig = {
+      ...base,
+      id: typeof obj.id === 'string' && obj.id ? obj.id : base.id,
+      name: typeof obj.name === 'string' ? obj.name : base.name,
+      provider: typeof obj.provider === 'string' ? (obj.provider as ModelProvider) : base.provider,
+      baseUrl: typeof obj.baseUrl === 'string' ? obj.baseUrl : base.baseUrl,
+      apiKey: typeof obj.apiKey === 'string' ? obj.apiKey : base.apiKey,
+      modelName: typeof obj.modelName === 'string' ? obj.modelName : base.modelName,
+      enabled: typeof obj.enabled === 'boolean' ? obj.enabled : base.enabled,
+      toolCalls: typeof obj.toolCalls === 'boolean' ? obj.toolCalls : base.toolCalls,
+      description: typeof obj.description === 'string' ? obj.description : base.description,
+      tags: Array.isArray(obj.tags) ? (obj.tags as string[]) : base.tags,
+    }
 
-/* ------------------------------------------------------------------ *
- * 5. 对外操作接口
- * ------------------------------------------------------------------ */
+    // 分类专属参数：传入了与 category 同键的对象则覆盖默认
+    const param = obj[category]
+    if (param && typeof param === 'object') {
+      ;(merged as unknown as Record<string, unknown>)[category] = {
+        ...(base[category] as object),
+        ...(param as object),
+      }
+    }
+    models.push(merged)
+  })
 
-export async function readModelsFile(): Promise<ModelFile> {
-  return normalize(await readRaw())
-}
-
-export async function listModels(): Promise<ModelConfig[]> {
-  return (await readModelsFile()).models
-}
-
-export async function getModel(id: string): Promise<ModelConfig | undefined> {
-  return (await readModelsFile()).models.find((m) => m.id === id)
-}
-
-/** 新增或更新（按 id 幂等）。返回最新列表。 */
-export async function upsertModel(model: ModelConfig): Promise<ModelConfig[]> {
-  const models = (await readModelsFile()).models
-  const idx = models.findIndex((m) => m.id === model.id)
-  const next: ModelConfig = { ...model, updatedAt: new Date().toISOString() }
-  if (idx >= 0) models[idx] = next
-  else models.push(next)
-  return persist(models)
-}
-
-export async function deleteModel(id: string): Promise<ModelConfig[]> {
-  const models = (await readModelsFile()).models.filter((m) => m.id !== id)
-  return persist(models)
-}
-
-/** 仅切换启用状态。返回最新列表。 */
-export async function setModelEnabled(
-  id: string,
-  enabled: boolean,
-): Promise<ModelConfig[]> {
-  const models = await readModelsFile()
-  const idx = models.models.findIndex((m) => m.id === id)
-  if (idx < 0) return models.models
-  models.models[idx] = {
-    ...models.models[idx],
-    enabled,
-    updatedAt: new Date().toISOString(),
-  }
-  return persist(models.models)
+  return { models, errors, total: arr.length }
 }

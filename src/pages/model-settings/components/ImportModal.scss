@@ -1,0 +1,96 @@
+/* 导入配置弹窗 */
+.import-modal {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.import-modal__toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.import-modal__hint {
+  color: var(--color-foreground-muted);
+  font-size: 12px;
+}
+
+/* 复制模板按钮：已复制时短暂变绿 */
+.import-modal__toolbar .ant-btn:last-of-type:not(:hover) {
+  border-color: var(--color-border);
+}
+
+.import-modal__textarea {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 12.5px;
+}
+
+.import-modal__result {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-card);
+  background-color: var(--color-background-subtle);
+}
+
+.import-modal__summary {
+  font-size: 13px;
+  color: var(--color-foreground);
+}
+
+.import-modal__summary .is-ok {
+  color: var(--color-brand-600);
+}
+
+.import-modal__summary .is-fail {
+  color: var(--color-danger);
+}
+
+.import-modal__errors {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+  color: var(--color-danger);
+}
+
+.import-modal__preview {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.import-modal__preview li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12.5px;
+}
+
+.import-modal__name {
+  font-weight: 500;
+  color: var(--color-foreground-intense);
+}
+
+.import-modal__meta {
+  color: var(--color-foreground-muted);
+}
+
+.import-modal__tool {
+  margin-left: 4px;
+  color: var(--color-brand-600);
+  font-weight: 600;
+}
+
+.import-modal__more {
+  color: var(--color-foreground-muted);
+}

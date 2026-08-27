@@ -1,66 +1,143 @@
-/* 分类切换标签页：6 大模型分类的横向 tab 组 */
-.cat-tabs {
+/* 左侧悬浮分类导航（纵向）——高度约占视口 58%，为后续新增模型类型预留空间 */
+.cat-nav {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   gap: 4px;
-  padding: 4px;
-  background-color: var(--color-border-muted);
+  padding: 10px;
+  border-radius: var(--radius-card);
+  background-color: var(--color-background-subtle);
   border: 1px solid var(--color-border);
-  border-radius: 12px;
+  box-shadow: var(--shadow-sm);
+  position: sticky;
+  top: 24px;
+  align-self: start;
+  /* 高度：拉满视口（减去顶部标题与间距），消除下方大片空白；项多时内部滚动 */
+  min-height: calc(100vh - 40%);
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border) transparent;
 }
 
-.cat-tabs__item {
-  display: inline-flex;
+.cat-nav__title {
+  padding: 6px 10px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-foreground-muted);
+}
+
+.cat-nav__item {
+  position: relative;
+  display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 14px;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
   border: none;
-  border-radius: 9px;
+  border-radius: 10px;
   background-color: transparent;
   color: var(--color-foreground-muted);
   font-size: 0.875rem;
   line-height: 20px;
   cursor: pointer;
-  transition: background-color 0.18s ease, color 0.18s ease,
-    box-shadow 0.18s ease;
-
-  &:hover {
-    color: var(--color-foreground);
-    background-color: var(--color-background);
-  }
-
-  &.is-active {
-    background-color: var(--color-background);
-    color: var(--color-brand-600);
-    box-shadow: var(--shadow-sm);
-    font-weight: 500;
-  }
+  text-align: left;
+  transition: background-color 0.2s ease, color 0.2s ease, transform 0.12s ease;
 }
 
-.cat-tabs__icon {
+/* 左侧选中指示条：默认收缩，选中时展开（切换动画） */
+.cat-nav__item::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 3px;
+  height: 0;
+  border-radius: 999px;
+  background-color: var(--color-brand-600);
+  transform: translateY(-50%);
+  transition: height 0.22s ease;
+}
+
+.cat-nav__item:hover {
+  color: var(--color-foreground);
+  background-color: var(--color-background-muted);
+  transform: translateX(2px);
+}
+
+.cat-nav__item.is-active {
+  color: var(--color-brand-600);
+  background-color: var(--color-background);
+  font-weight: 600;
+  box-shadow: var(--shadow-sm);
+}
+
+.cat-nav__item.is-active::before {
+  height: 60%;
+}
+
+.cat-nav__icon {
   display: inline-flex;
   align-items: center;
-  font-size: 14px;
+  justify-content: center;
+  flex: 0 0 auto;
+  color: inherit;
 }
 
-.cat-tabs__label {
+.cat-nav__label {
+  flex: 1 1 auto;
   white-space: nowrap;
 }
 
-.cat-tabs__badge {
-  min-width: 18px;
-  padding: 0 5px;
+.cat-nav__badge {
+  flex: 0 0 auto;
+  min-width: 20px;
+  padding: 0 6px;
   border-radius: 999px;
   background-color: var(--color-brand-600);
   color: var(--color-foreground-inverse);
   font-size: 11px;
-  line-height: 18px;
+  line-height: 20px;
   text-align: center;
   font-variant-numeric: tabular-nums;
 }
 
-/* 非激活项的徽章降饱和，避免视觉噪音 */
-.cat-tabs__item:not(.is-active) .cat-tabs__badge {
+.cat-nav__item:not(.is-active) .cat-nav__badge {
   background-color: var(--color-background-muted);
   color: var(--color-foreground-muted);
+}
+
+/* 窄屏：导航转为顶部横向滚动，避免挤占纵向空间 */
+@media (max-width: 880px) {
+  .cat-nav {
+    position: static;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    gap: 6px;
+    scrollbar-width: none;
+  }
+
+  .cat-nav::-webkit-scrollbar {
+    display: none;
+  }
+
+  .cat-nav__title {
+    display: none;
+  }
+
+  .cat-nav__item {
+    width: auto;
+    white-space: nowrap;
+    transform: none;
+  }
+
+  .cat-nav__item:hover {
+    transform: none;
+  }
+
+  .cat-nav__item.is-active::before {
+    height: 0;
+    width: 0;
+  }
 }

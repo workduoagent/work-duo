@@ -30,14 +30,23 @@ export type ModelCategory =
  * 'custom' 表示自建服务或兼容 OpenAI 协议的中转网关。
  */
 export type ModelProvider =
-  | 'openai'
-  | 'azure'
-  | 'anthropic'
-  | 'google'
-  | 'qwen'
-  | 'deepseek'
-  | 'zhipu'
-  | 'moonshot'
-  | 'baichuan'
-  | 'ollama'
-  | 'custom'
+    | 'openai'
+    | 'azure'
+    | 'anthropic'
+    | 'google'
+    | 'meta'
+    | 'microsoft'
+    | 'amazon'
+    | 'grok'
+    | 'deepseek'
+    | 'zhipu'
+    | 'moonshot'
+    | 'minimax'
+    | 'baichuan'
+    | 'qwen'          // 通义千问（阿里）
+    | 'baidu'
+    | 'tencent'
+    | 'bytedance'     // 豆包
+    | 'iflytek'       // 讯飞星火
+    | 'ollama'
+    | 'custom';

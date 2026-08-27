@@ -1,24 +1,26 @@
 /**
- * 路由页面「LLM」：线上模型接入中心。
- * - 6 大分类（文本 / 多模态 / 语音转文字 / 文字转语音 / 向量 / 重排序）切换；
- * - 各分类下模型配置的增删改、启用停用；
- * - 数据持久化走 src/core/file/model-file.ts（$APPDATA/models.json）。
+ * 路由页面「LLM」：模型接入中心。
+ * - 左侧悬浮纵向分类导航（文本 / 多模态 / 语音转文字 / 文字转语音 / 向量 / 重排序）；
+ * - 各分类下模型卡片的增删改、启用停用、连通性测试；
+ * - 支持「导入配置」批量入库（JSON）；
+ * - 数据持久化走 src/core/mapper/model-mapper.ts（SQLite：workduo.db）。
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { SquarePlus, Import } from 'lucide-react'
 import { Button } from '@/components/ui'
-import { PlusIcon } from '@/components/ui/icons'
 import {
+  bulkUpsertModels,
   deleteModel,
   listModels,
   setModelEnabled,
   upsertModel,
-  type ModelConfig,
-} from '@/core/file/model-file'
+} from '@/core/mapper/model-mapper'
+import type { ModelConfig } from '@/core/file/model-file'
 import type { ModelCategory } from '@/types/core'
-import { isTauri } from '@/core/config'
 import { CategoryTabs } from './components/CategoryTabs'
 import { ModelList } from './components/ModelList'
 import { ModelFormModal } from './components/ModelFormModal'
+import { ImportModal } from './components/ImportModal'
 import './index.scss'
 
 export default function ModelSettingsPage() {
@@ -26,6 +28,7 @@ export default function ModelSettingsPage() {
   const [models, setModels] = useState<ModelConfig[]>([])
   const [loading, setLoading] = useState(true)
   const [modalOpen, setModalOpen] = useState(false)
+  const [importOpen, setImportOpen] = useState(false)
   // null = 新增；非 null = 编辑该模型
   const [editing, setEditing] = useState<ModelConfig | null>(null)
 
@@ -78,37 +81,43 @@ export default function ModelSettingsPage() {
     setModels(await setModelEnabled(id, enabled))
   }
 
+  async function handleImport(models: ModelConfig[]) {
+    setModels(await bulkUpsertModels(models))
+  }
+
   return (
     <div className="ms">
       <header className="ms__head">
         <div>
           <h2 className="ms__title">LLM 模型接入</h2>
           <p className="ms__lead">
-            接入线上模型服务，配置保存在{' '}
-            {isTauri ? (
-              <code className="ms__code">$APPDATA/models.json</code>
-            ) : (
-              <code className="ms__code">localStorage（开发模式回退）</code>
-            )}
-            。
+            管理本地与云端模型，为智能体和向量检索提供基础算力。
           </p>
         </div>
-        <Button onClick={openCreate}>
-          <PlusIcon data-icon="start" />
-          接入模型
-        </Button>
+        <div className="ms__actions">
+          <Button variant="soft" size="sm" onClick={() => setImportOpen(true)}>
+            <Import size={14} />
+            导入配置
+          </Button>
+          <Button size="sm" onClick={openCreate}>
+            <SquarePlus size={14} />
+            接入模型
+          </Button>
+        </div>
       </header>
 
-      <CategoryTabs value={category} onChange={setCategory} counts={counts} />
+      <div className="ms__layout">
+        <CategoryTabs value={category} onChange={setCategory} counts={counts} />
 
-      <ModelList
-        category={category}
-        models={visibleModels}
-        loading={loading}
-        onEdit={openEdit}
-        onDelete={handleDelete}
-        onToggleEnabled={handleToggle}
-      />
+        <ModelList
+          category={category}
+          models={visibleModels}
+          loading={loading}
+          onEdit={openEdit}
+          onDelete={handleDelete}
+          onToggleEnabled={handleToggle}
+        />
+      </div>
 
       <ModelFormModal
         open={modalOpen}
@@ -116,6 +125,12 @@ export default function ModelSettingsPage() {
         model={editing}
         category={category}
         onSave={handleSave}
+      />
+
+      <ImportModal
+        open={importOpen}
+        onOpenChange={setImportOpen}
+        onImported={handleImport}
       />
     </div>
   )

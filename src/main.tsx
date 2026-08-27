@@ -5,7 +5,7 @@ import '@/styles/root.scss'
 
 import { store } from '@/core/store'
 import { Provider } from 'react-redux'
-import { ThemeProvider } from '@/core/contexts'
+import { ThemeProvider, InitProvider } from '@/core/contexts'
 import { THEME_STORAGE_KEY } from '@/core/config/theme'
 import { setTheme } from '@/core/store/slices/themeSlice'
 import type { ThemeMode } from '@/core/store/slices/themeSlice'
@@ -24,7 +24,9 @@ ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
   <React.StrictMode>
     <Provider store={store}>
       <ThemeProvider>
-        <App />
+        <InitProvider>
+          <App />
+        </InitProvider>
       </ThemeProvider>
     </Provider>
   </React.StrictMode>,

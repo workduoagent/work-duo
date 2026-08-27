@@ -1,8 +1,15 @@
-/* 模型列表：卡片网格 + 空态 + 删除确认文案 */
+/* 模型列表：响应式卡片网格 + 空态 + 删除确认 */
 .model-list {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 14px;
+  align-content: start;
+
+  /* 新增：开启垂直方向独立滚动 */
+  overflow-y: auto;
+
+  /* 可选优化：给滚动条留一点边距，防止滚动条紧贴着卡片 */
+  padding-right: 4px;
 }
 
 .model-list--loading,
@@ -13,22 +20,32 @@
   text-align: center;
 }
 
+/* 空态：紧凑、水平居中、略微下移的小卡片，置于正文区（左侧导航右侧），不撑满整栏 */
 .model-list--empty {
-  padding: 48px 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  max-width: 460px;
+  margin: 6vh auto 0;
+  padding: 28px 32px;
   border: 1px dashed var(--color-border);
   border-radius: var(--radius-card);
   background-color: var(--color-background-subtle);
 }
 
 .model-list__empty-title {
-  margin: 0 0 4px;
+  margin: 0 0 8px;
   font-size: 0.9375rem;
   font-weight: 500;
   color: var(--color-foreground);
+  text-align: center;
 }
 
 .model-list__empty-desc {
   margin: 0;
+  text-align: center;
+  max-width: 360px;
 }
 
 .model-list__confirm-text {
@@ -38,31 +55,106 @@
   line-height: 1.6;
 }
 
-/* ---------- 单张模型卡片 ---------- */
+/* ---------- 单张模型卡片（紧凑型） ---------- */
 .model-card {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.model-card__main {
-  flex: 1 1 auto;
-  min-width: 0;
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 8px;
+  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
 }
 
+.model-card:hover {
+  transform: translateY(-3px);
+  border-color: var(--color-brand-300, var(--color-brand-600));
+  box-shadow: var(--shadow-md);
+}
+
+/* 状态徽标（右上角绝对定位） */
+.model-card__status {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  line-height: 18px;
+  background-color: var(--color-background-muted);
+  color: var(--color-foreground-muted);
+}
+
+.model-card__status--on {
+  background-color: var(--color-brand-50, var(--color-brand-600));
+  color: var(--color-brand-600);
+}
+
+.model-card__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: currentColor;
+}
+
+.model-card__status--on .model-card__dot {
+  box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 25%, transparent);
+}
+
+/* 头部：Logo + 标题组 */
 .model-card__head {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   min-width: 0;
+  padding-right: 58px; /* 给状态徽标让位 */
+}
+
+.model-card__avatar {
+  position: relative;
+  flex: 0 0 auto;
+  width: 36px;
+  height: 36px;
+  border-radius: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--color-brand-600);
+  background-color: var(--color-brand-50, var(--color-background-muted));
+  border: 1px solid var(--color-border);
+  overflow: hidden;
+}
+
+/* 厂商 Logo 图片：填满容器、保持比例 */
+.model-card__logo {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  padding: 3px;
+}
+
+/* Logo 加载失败时的首字母回退：绝对定位居中于头像框内 */
+.model-card__avatar-fallback {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.model-card__titles {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .model-card__name {
-  font-size: 0.9375rem;
+  margin: 0;
+  font-size: 0.875rem;
   font-weight: 600;
   color: var(--color-foreground-intense);
   overflow: hidden;
@@ -70,55 +162,45 @@
   white-space: nowrap;
 }
 
-.model-card__status {
-  flex: 0 0 auto;
-  padding: 1px 8px;
+.model-card__model {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 11.5px;
+  color: var(--color-foreground-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 标签行（服务商 / 分类） */
+.model-card__tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.model-card__chip {
+  padding: 1px 9px;
   border-radius: 999px;
   font-size: 11px;
   line-height: 18px;
   background-color: var(--color-background-muted);
+  color: var(--color-foreground);
+}
+
+.model-card__chip--muted {
+  background-color: transparent;
+  border: 1px solid var(--color-border);
   color: var(--color-foreground-muted);
-
-  &.is-on {
-    background-color: var(--color-brand-50);
-    color: var(--color-brand-600);
-  }
 }
 
-.model-card__meta {
-  margin: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.model-card__meta-row {
-  display: flex;
-  gap: 8px;
-  font-size: 12px;
-  line-height: 20px;
-
-  dt {
-    flex: 0 0 56px;
-    color: var(--color-foreground-muted);
-  }
-
-  dd {
-    margin: 0;
-    min-width: 0;
-    color: var(--color-foreground);
-  }
-}
-
-.model-card__mono {
-  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
-  font-size: 11.5px;
-}
-
-.model-card__ellipsis {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+/* 支持工具调用标识（品牌色强调） */
+.model-card__chip--tool {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  background-color: var(--color-brand-50, color-mix(in srgb, var(--color-brand-600) 12%, transparent));
+  color: var(--color-brand-700, var(--color-brand-600));
+  border: 1px solid color-mix(in srgb, var(--color-brand-600) 28%, transparent);
 }
 
 .model-card__desc {
@@ -132,11 +214,54 @@
   overflow: hidden;
 }
 
-.model-card__actions {
+/* 连通性测试结果 */
+.model-card__test {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  line-height: 18px;
+  padding: 4px 10px;
+  border-radius: 8px;
+}
+
+.model-card__test-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
   flex: 0 0 auto;
+}
+
+.model-card__test--ok {
+  color: var(--color-success, #16a34a);
+  background-color: color-mix(in srgb, var(--color-success, #16a34a) 12%, transparent);
+}
+
+.model-card__test--ok .model-card__test-dot {
+  background-color: var(--color-success, #16a34a);
+}
+
+.model-card__test--fail {
+  color: var(--color-danger, #dc2626);
+  background-color: color-mix(in srgb, var(--color-danger, #dc2626) 12%, transparent);
+}
+
+.model-card__test--fail .model-card__test-dot {
+  background-color: var(--color-danger, #dc2626);
+}
+
+.model-card__test-ms {
+  color: var(--color-foreground-muted);
+}
+
+/* 操作栏 */
+.model-card__actions {
   display: flex;
   align-items: center;
   gap: 4px;
+  padding-top: 4px;
+  border-top: 1px solid var(--color-border);
+  margin-top: 0;
 }
 
 .model-card__del:hover {

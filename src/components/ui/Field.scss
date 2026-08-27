@@ -9,3 +9,10 @@
   font-weight: 500;
   color: var(--color-foreground);
 }
+
+/* 必填星号（调用方包裹 <span class="mfm__required">） */
+.mfm__required {
+  color: var(--color-danger, #ef4444);
+  margin-left: 2px;
+  font-weight: 600;
+}

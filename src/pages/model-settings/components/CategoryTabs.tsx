@@ -12,12 +12,12 @@ import { MODEL_CATEGORY_OPTIONS } from '@/core/file/model-file'
 import './CategoryTabs.scss'
 
 const ICONS: Record<ModelCategory, ReactNode> = {
-  text: <MessageSquare size={14} />,
-  multimodal: <Image size={14} />,
-  stt: <AudioLines size={14} />,
-  tts: <Volume2 size={14} />,
-  embedding: <FunctionSquare size={14} />,
-  rerank: <Filter size={14} />,
+  text: <MessageSquare size={18} />,
+  multimodal: <Image size={18} />,
+  stt: <AudioLines size={18} />,
+  tts: <Volume2 size={18} />,
+  embedding: <FunctionSquare size={18} />,
+  rerank: <Filter size={18} />,
 }
 
 export interface CategoryTabsProps {
@@ -26,9 +26,11 @@ export interface CategoryTabsProps {
   counts?: Partial<Record<ModelCategory, number>>
 }
 
+/** 左侧悬浮纵向分类导航（图标 + 文字 + 数量徽章；悬停 / 选中均有过渡动画）。 */
 export function CategoryTabs({ value, onChange, counts }: CategoryTabsProps) {
   return (
-    <div className="cat-tabs" role="tablist" aria-label="模型分类">
+    <nav className="cat-nav" aria-label="模型分类">
+      <div className="cat-nav__title">模型分类</div>
       {MODEL_CATEGORY_OPTIONS.map((opt) => {
         const isActive = opt.value === value
         const count = counts?.[opt.value] ?? 0
@@ -36,17 +38,16 @@ export function CategoryTabs({ value, onChange, counts }: CategoryTabsProps) {
           <button
             key={opt.value}
             type="button"
-            role="tab"
-            aria-selected={isActive}
-            className={`cat-tabs__item${isActive ? ' is-active' : ''}`}
+            className={`cat-nav__item${isActive ? ' is-active' : ''}`}
             onClick={() => onChange(opt.value)}
+            aria-current={isActive ? 'page' : undefined}
           >
-            <span className="cat-tabs__icon">{ICONS[opt.value]}</span>
-            <span className="cat-tabs__label">{opt.label}</span>
-            {count > 0 && <span className="cat-tabs__badge">{count}</span>}
+            <span className="cat-nav__icon">{ICONS[opt.value]}</span>
+            <span className="cat-nav__label">{opt.label}</span>
+            {count > 0 && <span className="cat-nav__badge">{count}</span>}
           </button>
         )
       })}
-    </div>
+    </nav>
   )
 }
