@@ -1,5 +1,5 @@
 import { Modal as AntdModal } from 'antd'
-import type { ReactNode } from 'react'
+import type { CSSProperties, ReactNode } from 'react'
 import './Modal.scss'
 
 export interface ModalProps {
@@ -12,6 +12,8 @@ export interface ModalProps {
   closeLabel?: string
   /** 弹窗宽度（px 或 CSS 长度），长表单建议 640~720 */
   width?: number | string
+  /** 透传 antd Modal 的 style，用于大表单定位（如 { top, maxWidth }） */
+  style?: CSSProperties
 }
 
 // 受控封装 antd Modal：open/onOpenChange 与旧 Modal 一致。
@@ -23,6 +25,7 @@ export function Modal({
   children,
   footer,
   width = 640,
+  style,
 }: ModalProps) {
   const titleNode = description ? (
     <div className="app-modal__title-wrap">
@@ -40,6 +43,7 @@ export function Modal({
       onCancel={() => onOpenChange(false)}
       footer={footer ?? null}
       width={width}
+      style={style}
       destroyOnHidden
       maskClosable={false}
       styles={{ body: { maxHeight: '72vh', overflowY: 'auto' } }}

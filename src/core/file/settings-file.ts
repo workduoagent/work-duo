@@ -39,7 +39,7 @@ export interface AppSettings {
   networkProxy: ProxyConfig
   /** 默认工作空间存储路径，默认 $APPDATA/.workspace */
   workspacePath: string
-  /** Skill 存储目录，默认 $RESOURCE/.skills（与 app_config.skill_path 同键） */
+  /** Skill 存储目录，默认 $APPDATA/.skills（与 app_config.skill_path 同键） */
   skillPath: string
   /** 客户端通知，默认开启 */
   clientNotify: boolean
@@ -71,7 +71,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   autoLaunch: false,
   networkProxy: { mode: 'direct' },
   workspacePath: '$APPDATA/.workspace',
-  skillPath: '$RESOURCE/.skills',
+  skillPath: '$APPDATA/.skills',
   clientNotify: true,
   memoryEnabled: false,
   sessionAutoNew: false,

@@ -1,13 +1,14 @@
 /**
  * 路由页面「MCP」：MCP 服务接入管理（仅「接入」，不提供「构建」）。
- * - 左侧场景侧栏（对应 scenario / McpScenario）；
- * - 顶部关键词搜索 + 工具栏（接入服务）；
- * - 卡片网格（含连通状态徽标、协议标签）+ 分页；
- * - 接入弹窗、详情抽屉（含工具 Tab 与连通性测试 / 同步）。
+ * 布局与配色对齐 LLM 模块（model-settings）：
+ * - 顶部 Header（标题 / 描述 + 搜索框 + 接入服务按钮，整行横跨，位于侧栏上方）；
+ * - 下方 SideBar（场景过滤）| MainOut（卡片网格 + 分页）两栏；
+ * - 卡片为浅灰实底（frame="solid"），状态 tag 右上角绝对定位，操作区为 ghost 图标按钮。
  *
  * 数据持久化走 src/core/mapper/mcp-mapper.ts（SQLite：workduo.db）。
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   Search,
   Plus,
@@ -15,65 +16,104 @@ import {
   Pencil,
   Eye,
   Trash2,
-  RefreshCw,
-  Power,
-  Calendar,
-  CircleDashed,
-  CheckCircle2,
-  XCircle,
   Server,
+  LayoutGrid,
+  FolderOpen,
+  Globe,
+  Database,
+  Wrench,
+  MessagesSquare,
+  Briefcase,
+  type LucideIcon,
 } from 'lucide-react'
-import { Button, Input } from '@/components/ui'
-import { Tag, Popconfirm, message, Empty, Spin, Pagination, Tooltip } from 'antd'
+import { Button, Input, Card, Switch } from '@/components/ui'
+import {
+  Popconfirm,
+  message,
+  Empty,
+  Spin,
+  Pagination,
+  Tooltip,
+} from 'antd'
 import {
   listMcps,
   upsertMcp,
   deleteMcp,
-  updateMcpStatus,
   setMcpActive,
-  syncMcpTools,
+  getMcpToolCountMap,
+  type McpToolCount,
 } from '@/core/mapper/mcp-mapper'
-import { testMcpConnection } from '@/core/mapper/mcp-connection'
 import {
   MCP_SCENARIO_OPTIONS,
   getMcpScenarioLabel,
-  getMcpStatusLabel,
   getMcpProtocolLabel,
   type McpInfo,
-  type McpToolDefinition,
 } from '@/core/file/mcp-file'
-import type { McpStatus } from '@/types/core'
 import { McpFormModal } from './components/McpFormModal'
-import { McpDetailDrawer } from './components/McpDetailDrawer'
 import './index.scss'
 
 const PAGE_SIZE = 12
 
-function formatDate(iso?: string): string {
-  if (!iso) return '-'
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return '-'
-  const p = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
+/** 场景分类 -> 图标（侧栏展示，与卡片风格统一）。 */
+const SCENARIO_ICON: Record<string, LucideIcon> = {
+  all: LayoutGrid,
+  'file-system': FolderOpen,
+  'web-search': Globe,
+  database: Database,
+  'dev-tools': Wrench,
+  communication: MessagesSquare,
+  productivity: Briefcase,
 }
 
-function StatusBadge({ status }: { status: McpStatus | number }) {
-  if (status === 1)
+/** 右上角状态徽标（仿 LLM model-card__status：绝对定位 + 圆点）。 */
+function StatusPill({ mcp }: { mcp: McpInfo }) {
+  if (!mcp.isActive)
     return (
-      <Tag color="success" className="mcphub-grid-item__badge">
-        <CheckCircle2 size={12} /> {getMcpStatusLabel(1)}
-      </Tag>
+      <span className="mcphub-grid-item__status mcphub-grid-item__status--off">
+        <i className="mcphub-grid-item__dot" />
+        已禁用
+      </span>
     )
-  if (status === 2)
+  if (mcp.status === 1)
     return (
-      <Tag color="error" className="mcphub-grid-item__badge">
-        <XCircle size={12} /> {getMcpStatusLabel(2)}
-      </Tag>
+      <span className="mcphub-grid-item__status mcphub-grid-item__status--on">
+        <i className="mcphub-grid-item__dot" />
+        已连接
+      </span>
+    )
+  if (mcp.status === 2)
+    return (
+      <span className="mcphub-grid-item__status mcphub-grid-item__status--err">
+        <i className="mcphub-grid-item__dot" />
+        连接失败
+      </span>
     )
   return (
-    <Tag className="mcphub-grid-item__badge">
-      <CircleDashed size={12} /> {getMcpStatusLabel(0)}
-    </Tag>
+    <span className="mcphub-grid-item__status mcphub-grid-item__status--idle">
+      <i className="mcphub-grid-item__dot" />
+      未测试
+    </span>
+  )
+}
+
+/** 右上角状态区：状态徽标 + 工具计数徽标（{已激活}/{总数}），绝对定位在卡片右上角。 */
+function StatusArea({
+  mcp,
+  count,
+}: {
+  mcp: McpInfo
+  count: McpToolCount
+}) {
+  return (
+    <div className="mcphub-grid-item__status-wrap">
+      <StatusPill mcp={mcp} />
+      <span
+        className="mcphub-grid-item__tools"
+        title={`已激活 ${count.active} / 工具总数 ${count.total}`}
+      >
+        <b>{count.active}</b>/{count.total}
+      </span>
+    </div>
   )
 }
 
@@ -84,15 +124,16 @@ export default function McpHubPage() {
   const [loading, setLoading] = useState(true)
   const [modalOpen, setModalOpen] = useState(false)
   const [editing, setEditing] = useState<McpInfo | null>(null)
-  const [drawerOpen, setDrawerOpen] = useState(false)
-  const [viewing, setViewing] = useState<McpInfo | null>(null)
   const [currentPage, setCurrentPage] = useState(1)
-  const [testingId, setTestingId] = useState<string | null>(null)
+  const [toolCounts, setToolCounts] = useState<Record<string, McpToolCount>>({})
+  const navigate = useNavigate()
 
   const reload = useCallback(async () => {
     setLoading(true)
     try {
-      setRecords(await listMcps())
+      const [recs, map] = await Promise.all([listMcps(), getMcpToolCountMap()])
+      setRecords(recs)
+      setToolCounts(map)
     } finally {
       setLoading(false)
     }
@@ -108,7 +149,9 @@ export default function McpHubPage() {
       if (scenarioFilter !== 'all' && m.scenario !== scenarioFilter) return false
       if (
         kw &&
-        !`${m.aliasName ?? ''} ${m.mcpName} ${m.description ?? ''}`.toLowerCase().includes(kw)
+        !`${m.aliasName ?? ''} ${m.mcpName} ${m.description ?? ''}`
+          .toLowerCase()
+          .includes(kw)
       )
         return false
       return true
@@ -152,10 +195,6 @@ export default function McpHubPage() {
     setEditing(m)
     setModalOpen(true)
   }
-  function openView(m: McpInfo) {
-    setViewing(m)
-    setDrawerOpen(true)
-  }
 
   async function handleSave(m: McpInfo) {
     setRecords(await upsertMcp(m))
@@ -172,78 +211,17 @@ export default function McpHubPage() {
     message.success(!m.isActive ? '服务已启用' : '服务已禁用')
   }
 
-  // 列表卡片上的「测试连接」
-  async function handleTest(m: McpInfo) {
-    setTestingId(m.id)
-    try {
-      const res = await testMcpConnection(m)
-      if (res.ok) {
-        const tools: McpToolDefinition[] = res.tools.map((t) => ({
-          ...t,
-          mcpId: m.id,
-        }))
-        await syncMcpTools(m.id, tools)
-      }
-      setRecords(await updateMcpStatus(m.id, res.status))
-      if (res.ok) {
-        message.success(
-          `连接成功，耗时 ${res.latencyMs}ms，发现 ${res.tools.length} 个工具`,
-        )
-      } else {
-        message.error(`连接失败：${res.error}`)
-      }
-    } finally {
-      setTestingId(null)
-    }
-  }
-
   return (
     <div className="mcphub">
-      {/* 左侧场景侧栏 */}
-      <aside className="mcphub__sidebar">
-        <div className="mcphub__sidebar-title">
-          <Server size={15} />
-          <span>MCP 场景</span>
+      {/* 顶部 Header：标题 / 描述 + 搜索框 + 接入服务按钮（整行横跨，位于侧栏上方） */}
+      <header className="mcphub__head">
+        <div>
+          <h2 className="mcphub__title">MCP 服务接入</h2>
+          <p className="mcphub__lead">
+            接入本地或第三方的 Model Context Protocol 服务，自动发现并管理其工具能力。
+          </p>
         </div>
-        <div className="mcphub__cat-list">
-          {categories.map((cat) => {
-            const isActive = scenarioFilter === cat.value
-            const count =
-              cat.value === 'all'
-                ? records.length
-                : counts[cat.value as string] ?? 0
-            return (
-              <div
-                key={cat.value}
-                className={`mcphub__cat-item ${isActive ? 'active' : ''}`}
-                onClick={() => setScenarioFilter(cat.value)}
-              >
-                <span className="mcphub__cat-label">{cat.label}</span>
-                <span className="mcphub__cat-count">{count}</span>
-              </div>
-            )
-          })}
-        </div>
-      </aside>
-
-      {/* 右侧内容 */}
-      <div className="mcphub__content">
-        <header className="mcphub__head">
-          <div>
-            <h2 className="mcphub__title">MCP 服务接入</h2>
-            <p className="mcphub__lead">
-              接入本地或第三方的 Model Context Protocol 服务，自动发现并管理其工具能力。
-            </p>
-          </div>
-          <div className="mcphub__actions">
-            <Button size="sm" onClick={openCreate}>
-              <Plus size={14} />
-              接入服务
-            </Button>
-          </div>
-        </header>
-
-        <div className="mcphub__toolbar">
+        <div className="mcphub__actions">
           <Input
             allowClear
             placeholder="搜索服务名称 / 标识 / 描述"
@@ -253,133 +231,169 @@ export default function McpHubPage() {
             onPressEnter={() => setCurrentPage(1)}
             style={{ width: 280 }}
           />
+          <Button size="sm" onClick={openCreate}>
+            <Plus size={14} />
+            接入服务
+          </Button>
         </div>
+      </header>
 
-        <Spin spinning={loading} wrapperClassName="mcphub__spin">
-          {pageRecords.length > 0 ? (
-            <div className="mcphub-grid">
-              {pageRecords.map((mcp) => (
-                <div
-                  key={mcp.id}
-                  className={`mcphub-grid-item ${
-                    mcp.status === 2 ? 'mcphub-grid-item--error' : ''
-                  }`}
-                  onClick={() => openView(mcp)}
+      {/* 侧栏 + 主内容 两栏 */}
+      <div className="mcphub__layout">
+        <aside className="mcphub__sidebar">
+          <div className="mcphub__sidebar-title">
+            <Server size={15} />
+            <span>场景分类</span>
+          </div>
+          <div className="mcphub__cat-list">
+            {categories.map((cat) => {
+              const isActive = scenarioFilter === cat.value
+              const count =
+                cat.value === 'all'
+                  ? records.length
+                  : counts[cat.value as string] ?? 0
+              return (
+                <button
+                  key={cat.value}
+                  type="button"
+                  className={`mcphub__cat-item${isActive ? ' is-active' : ''}`}
+                  onClick={() => setScenarioFilter(cat.value)}
                 >
-                  <div className="mcphub-grid-item__header">
-                    <div className="mcphub-grid-item__logo">
-                      <Plug size={20} />
+                  {(() => {
+                    const Icon = SCENARIO_ICON[cat.value] ?? LayoutGrid
+                    return <Icon size={15} className="mcphub__cat-icon" />
+                  })()}
+                  <span className="mcphub__cat-label">{cat.label}</span>
+                  {count > 0 && (
+                    <span className="mcphub__cat-count">{count}</span>
+                  )}
+                </button>
+              )
+            })}
+          </div>
+        </aside>
+
+        <div className="mcphub__main">
+          <Spin spinning={loading} wrapperClassName="mcphub__spin">
+            {pageRecords.length > 0 ? (
+              <div className="mcphub-grid">
+                {pageRecords.map((mcp) => (
+                  <Card
+                    key={mcp.id}
+                    frame="solid"
+                    className="mcphub-grid-item"
+                    onClick={() => navigate(`/mcp-hub/${mcp.id}`)}
+                  >
+                    <StatusArea
+                      mcp={mcp}
+                      count={toolCounts[mcp.id] ?? { total: 0, active: 0 }}
+                    />
+
+                    <div className="mcphub-grid-item__head">
+                      <div className="mcphub-grid-item__avatar">
+                        <Plug size={18} />
+                      </div>
+                      <div className="mcphub-grid-item__titles">
+                        <Tooltip title={mcp.aliasName || mcp.mcpName}>
+                          <h3 className="mcphub-grid-item__name">
+                            {mcp.aliasName || mcp.mcpName}
+                          </h3>
+                        </Tooltip>
+                        <code className="mcphub-grid-item__identifier">
+                          {mcp.mcpName}
+                        </code>
+                      </div>
                     </div>
-                    <div className="mcphub-grid-item__title-box">
-                      <Tooltip title={mcp.aliasName || mcp.mcpName}>
-                        <h3 className="mcphub-grid-item__title">
-                          {mcp.aliasName || mcp.mcpName}
-                        </h3>
-                      </Tooltip>
-                      <span className="mcphub-grid-item__identifier">
-                        {mcp.mcpName}
+
+                    <div className="mcphub-grid-item__tags">
+                      <span className="mcphub-grid-item__chip">
+                        {getMcpProtocolLabel(mcp.protocolType)}
                       </span>
-                    </div>
-                  </div>
-
-                  <p className="mcphub-grid-item__desc" title={mcp.description}>
-                    {mcp.description || '暂无描述'}
-                  </p>
-
-                  <div className="mcphub-grid-item__meta">
-                    <div className="mcphub-grid-item__meta-tags">
-                      <Tag color="blue">{getMcpProtocolLabel(mcp.protocolType)}</Tag>
-                      <span className="mcphub-grid-item__category">
+                      <span className="mcphub-grid-item__chip mcphub-grid-item__chip--muted">
                         {getMcpScenarioLabel(mcp.scenario)}
                       </span>
                     </div>
-                    <span className="mcphub-grid-item__meta-info">
-                      <Calendar size={12} />
-                      {formatDate(mcp.createdAt)}
-                    </span>
-                  </div>
 
-                  <div className="mcphub-grid-item__status-row">
-                    <StatusBadge status={mcp.status} />
-                    {!mcp.isActive && (
-                      <Tag color="default" className="mcphub-grid-item__badge">
-                        已禁用
-                      </Tag>
-                    )}
-                  </div>
-
-                  <div
-                    className="mcphub-grid-item__actions"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <button
-                      className="action-btn test"
-                      disabled={testingId === mcp.id}
-                      onClick={() => handleTest(mcp)}
+                    <p
+                      className="mcphub-grid-item__desc"
+                      title={mcp.description}
                     >
-                      <RefreshCw
-                        size={13}
-                        className={testingId === mcp.id ? 'spin' : ''}
+                      {mcp.description || '暂无描述'}
+                    </p>
+
+                    <div
+                      className="mcphub-grid-item__actions"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <Tooltip title="编辑">
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          aria-label="编辑"
+                          onClick={() => openEdit(mcp)}
+                        >
+                          <Pencil size={16} />
+                        </Button>
+                      </Tooltip>
+                      <Tooltip title="详情">
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          aria-label="详情"
+                          onClick={() => navigate(`/mcp-hub/${mcp.id}`)}
+                        >
+                          <Eye size={16} />
+                        </Button>
+                      </Tooltip>
+                      <Popconfirm
+                        title="确定移除该服务吗？"
+                        okText="确定"
+                        cancelText="取消"
+                        okButtonProps={{ danger: true }}
+                        onConfirm={() => handleDelete(mcp)}
+                      >
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          className="mcphub-grid-item__del"
+                          aria-label="删除"
+                          title="删除"
+                        >
+                          <Trash2 size={16} />
+                        </Button>
+                      </Popconfirm>
+                      <Switch
+                        size="small"
+                        checked={mcp.isActive}
+                        onChange={() => handleToggle(mcp)}
+                        aria-label="启用开关"
+                        title={mcp.isActive ? '点击禁用' : '点击启用'}
                       />
-                      {testingId === mcp.id ? '测试中' : '测试'}
-                    </button>
-                    <button
-                      className="action-btn edit"
-                      onClick={() => openEdit(mcp)}
-                    >
-                      <Pencil size={13} /> 编辑
-                    </button>
-                    <button
-                      className="action-btn view"
-                      onClick={() => openView(mcp)}
-                    >
-                      <Eye size={13} /> 详情
-                    </button>
-                    <Popconfirm
-                      title={mcp.isActive ? '确定禁用该服务吗？' : '确定启用该服务吗？'}
-                      okText="确定"
-                      cancelText="取消"
-                      onConfirm={() => handleToggle(mcp)}
-                    >
-                      <button className="action-btn toggle">
-                        <Power size={13} /> {mcp.isActive ? '禁用' : '启用'}
-                      </button>
-                    </Popconfirm>
-                    <Popconfirm
-                      title="确定移除该服务吗？"
-                      okText="确定"
-                      cancelText="取消"
-                      okButtonProps={{ danger: true }}
-                      onConfirm={() => handleDelete(mcp)}
-                    >
-                      <button className="action-btn delete">
-                        <Trash2 size={13} /> 删除
-                      </button>
-                    </Popconfirm>
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            !loading && (
-              <div className="mcphub-grid-empty">
-                <Empty description="暂无 MCP 服务，点击右上角「接入服务」" />
+                    </div>
+                  </Card>
+                ))}
               </div>
-            )
-          )}
-        </Spin>
+            ) : (
+              !loading && (
+                <div className="mcphub-grid-empty">
+                  <Empty description="暂无 MCP 服务，点击右上角「接入服务」" />
+                </div>
+              )
+            )}
+          </Spin>
 
-        {total > 0 && (
-          <div className="mcphub__pagination">
-            <Pagination
-              total={total}
-              current={currentPage}
-              pageSize={PAGE_SIZE}
-              showSizeChanger={false}
-              onChange={(page) => setCurrentPage(page)}
-            />
-          </div>
-        )}
+          {total > 0 && (
+            <div className="mcphub__pagination">
+              <Pagination
+                total={total}
+                current={currentPage}
+                pageSize={PAGE_SIZE}
+                showSizeChanger={false}
+                onChange={(page) => setCurrentPage(page)}
+              />
+            </div>
+          )}
+        </div>
       </div>
 
       <McpFormModal
@@ -387,17 +401,6 @@ export default function McpHubPage() {
         onOpenChange={setModalOpen}
         mcp={editing}
         onSave={handleSave}
-      />
-
-      <McpDetailDrawer
-        open={drawerOpen}
-        mcp={viewing}
-        onClose={() => setDrawerOpen(false)}
-        onEdit={(m) => {
-          setDrawerOpen(false)
-          openEdit(m)
-        }}
-        onChanged={reload}
       />
     </div>
   )

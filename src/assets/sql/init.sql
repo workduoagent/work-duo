@@ -46,29 +46,37 @@ CREATE TABLE IF NOT EXISTS models
 -- 由 PostgreSQL 设计转 SQLite（详见用户给出的 DDL）：
 --   id：本地生成的 UUID（文本主键），与 work-duo「模型/知识库」约定一致
 --       （原 PG BIGINT 在此转为 TEXT 主键，避免自增 id 与导入/外部 id 冲突）；
---   identifier：唯一标识 slug，大小写敏感的唯一约束由 UNIQUE 保证；
+--   identifier：唯一标识 slug（同时是磁盘目录名），大小写敏感的唯一约束由 UNIQUE 保证；
 --   tags：标签数组序列化后的 JSON 字符串；
---   instruction：技能正文（SKILL.md 内容）；
+--   instruction：指令内容（与 SKILL.md 是不同字段）；
+--   skill_markdown：SKILL.md 正文（落盘到 <identifier>/SKILL.md）；
 --   scenario：技能分类 key（对应 SkillCategory 枚举）；
+--   scope：可见域 PUBLIC / PRIVATE；
+--   version：版本号，如 v1.0.0；
+--   status：启用状态 1 / 0（卡片右上角 Switch 控制）；
 --   path：本地存储目录，默认取 app_config.skill_path + '/' + identifier；
 --   created_at / updated_at：epoch 毫秒（整型）。
 CREATE TABLE IF NOT EXISTS skill_info
 (
-    id          TEXT    PRIMARY KEY,
-    identifier  TEXT    NOT NULL,
-    name        TEXT,
-    description TEXT,
-    instruction TEXT,
-    tags        TEXT,
-    scenario    TEXT,
-    path        TEXT,
-    created_at  INTEGER NOT NULL,
-    updated_at  INTEGER NOT NULL,
+    id            TEXT    PRIMARY KEY,
+    identifier    TEXT    NOT NULL,
+    name          TEXT,
+    description   TEXT,
+    instruction   TEXT,
+    skill_markdown TEXT,
+    tags          TEXT,
+    scenario      TEXT,
+    scope         TEXT,
+    version       TEXT,
+    status        INTEGER NOT NULL DEFAULT 1,
+    path          TEXT,
+    created_at    INTEGER NOT NULL,
+    updated_at    INTEGER NOT NULL,
     CONSTRAINT uk_skill_identifier UNIQUE (identifier)
 );
 
--- 技能存储根路径：默认 $RESOURCE/.skills，后续可在「设置」页修改（覆盖此值）。
-INSERT OR IGNORE INTO app_config (key, value) VALUES ('skill_path', '$RESOURCE/.skills');
+-- 技能存储根路径：默认 $APPDATA/.skills，后续可在「设置」页修改（覆盖此值）。
+INSERT OR IGNORE INTO app_config (key, value) VALUES ('skill_path', '$APPDATA/.skills');
 
 -- ============ 设置页配置项（全部注册进 app_config） ============
 -- 开机自启（布尔，JSON 字符串 'true'/'false'），默认关闭。

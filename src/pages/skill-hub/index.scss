@@ -1,39 +1,90 @@
 /* ============================================================
  * pages/skill-hub — 技能中心
- * 仅使用设计令牌 var(--color-*)，不写 hex / px 字面量。
+ * 卡片风格 / 分页布局整体对齐 MCP 模块（mcphub）：
+ *   - 顶部 Header（title + lead + 搜索 + 操作，整行横跨，位于侧栏上方）；
+ *   - 侧栏(sidebar) | 主区(main) 两栏；
+ *   - Card 卡片网格（frame="solid"）+ 右上角状态区 + ghost 图标操作栏 + 启用 Switch；
+ *   - 仅使用设计令牌 var(--color-*)，不写 hex / px 字面量。
  * ============================================================ */
 
 .skillhub {
+  width: 100%;
+  max-width: 1680px;
+  margin: 0 auto;
   display: flex;
-  gap: 20px;
+  flex-direction: column;
+  gap: 18px;
   height: 100%;
-  padding: 20px;
-  box-sizing: border-box;
-  background: var(--color-background-subtle);
+  overflow: hidden;
+  background: var(--color-background);
+}
+
+/* ---------------- 顶部 Header ---------------- */
+.skillhub__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.skillhub__title {
+  margin: 0 0 6px;
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--color-foreground-intense);
+}
+
+.skillhub__lead {
+  margin: 0;
+  max-width: 640px;
+  color: var(--color-foreground-muted);
+  font-size: 0.875rem;
+  line-height: 1.6;
+}
+
+.skillhub__actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 0 auto;
+}
+
+/* ---------------- 左导航 + 右内容 两栏 ---------------- */
+.skillhub__layout {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 20px;
+  flex: 1;
+  min-height: 0;
+  align-items: stretch;
 }
 
 /* ---------------- 左侧分类侧栏 ---------------- */
 .skillhub__sidebar {
-  width: 220px;
-  flex: 0 0 220px;
-  background: var(--color-background);
-  border: 1px solid var(--color-border);
-  border-radius: 14px;
-  padding: 16px 12px;
-  box-sizing: border-box;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 4px;
+  padding: 10px;
+  border-radius: var(--radius-card);
+  background-color: var(--color-background-subtle);
+  border: 1px solid var(--color-border);
+  box-shadow: var(--shadow-sm);
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border) transparent;
 }
 
 .skillhub__sidebar-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 0 8px;
-  font-size: 13px;
+  padding: 6px 10px 10px;
+  font-size: 11px;
   font-weight: 600;
-  color: var(--color-foreground-intense);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-foreground-muted);
+  display: flex;
+  flex-direction: row;
+  justify-content: flex-start;
 }
 
 .skillhub__cat-list {
@@ -43,236 +94,267 @@
   overflow-y: auto;
 }
 
+.skillhub__cat-icon {
+  flex: 0 0 auto;
+  width: 15px;
+  height: 15px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-foreground-muted);
+}
+
+.skillhub__cat-item.is-active .skillhub__cat-icon {
+  color: var(--color-brand-600);
+}
+
 .skillhub__cat-item {
+  position: relative;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 9px 12px;
-  border-radius: 9px;
-  cursor: pointer;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  border: none;
+  border-radius: 10px;
+  background-color: transparent;
   color: var(--color-foreground-muted);
-  transition: background 0.15s ease, color 0.15s ease;
+  font-size: 0.875rem;
+  line-height: 20px;
+  cursor: pointer;
+  text-align: left;
+  transition: background-color 0.2s ease, color 0.2s ease, transform 0.12s ease;
 
   &:hover {
-    background: var(--color-background-muted);
     color: var(--color-foreground);
+    background-color: var(--color-background-muted);
+    transform: translateX(2px);
   }
 
-  &.active {
-    background: var(--color-brand-50);
-    color: var(--color-brand-700);
+  &.is-active {
+    color: var(--color-brand-600);
+    background-color: var(--color-background);
     font-weight: 600;
+    box-shadow: var(--shadow-sm);
   }
 }
 
+.skillhub__cat-item::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 3px;
+  height: 0;
+  border-radius: 999px;
+  background-color: var(--color-brand-600);
+  transform: translateY(-50%);
+  transition: height 0.22s ease;
+}
+
+.skillhub__cat-item.is-active::before {
+  height: 60%;
+}
+
 .skillhub__cat-label {
-  font-size: 13px;
+  flex: 1 1 auto;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
 .skillhub__cat-count {
-  font-size: 12px;
-  color: var(--color-foreground-muted);
-  background: var(--color-background-muted);
+  flex: 0 0 auto;
+  min-width: 20px;
+  padding: 0 6px;
   border-radius: 999px;
-  padding: 1px 8px;
-  min-width: 22px;
+  background-color: var(--color-brand-600);
+  color: var(--color-foreground-inverse);
+  font-size: 11px;
+  line-height: 20px;
   text-align: center;
+  font-variant-numeric: tabular-nums;
 }
 
-.skillhub__cat-item.active .skillhub__cat-count {
-  background: var(--color-brand-100);
-  color: var(--color-brand-700);
+.skillhub__cat-item:not(.is-active) .skillhub__cat-count {
+  background-color: var(--color-background-muted);
+  color: var(--color-foreground-muted);
 }
 
-/* ---------------- 右侧内容 ---------------- */
-.skillhub__content {
-  flex: 1 1 auto;
-  min-width: 0;
+/* ---------------- 右侧主内容 ---------------- */
+.skillhub__main {
   display: flex;
   flex-direction: column;
-  gap: 16px;
-}
-
-.skillhub__head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-}
-
-.skillhub__title {
-  margin: 0;
-  font-size: 20px;
-  font-weight: 700;
-  color: var(--color-foreground-intense);
-}
-
-.skillhub__lead {
-  margin: 4px 0 0;
-  font-size: 13px;
-  color: var(--color-foreground-muted);
-}
-
-.skillhub__actions {
-  display: flex;
-  gap: 8px;
-  flex: 0 0 auto;
-}
-
-.skillhub__toolbar {
-  display: flex;
-  align-items: center;
-  gap: 12px;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .skillhub__spin {
   flex: 1 1 auto;
-  min-height: 200px;
 }
 
 /* ---------------- 卡片网格 ---------------- */
 .skillhub-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-  gap: 16px;
+  gap: 14px;
   align-content: start;
+  padding: 4px 4px 16px 4px;
 }
 
 .skillhub-grid-item {
-  background: var(--color-background);
-  border: 1px solid var(--color-border);
-  border-radius: 14px;
-  padding: 16px;
+  position: relative;
+  height: 100%;
+  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+  cursor: pointer;
+}
+
+.app-card.skillhub-grid-item .ant-card-body {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  cursor: pointer;
-  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+  gap: 12px;
+  height: 100%;
+  padding: 16px;
+}
 
-  &:hover {
-    transform: translateY(-2px);
-    box-shadow: var(--shadow-md);
-    border-color: var(--color-brand-200);
+.skillhub-grid-item:hover {
+  transform: translateY(-3px);
+  border-color: var(--color-brand-300, var(--color-brand-600));
+  box-shadow: var(--shadow-md);
+}
+
+/* 状态区（右上角绝对定位：版本 + 可见域） */
+.skillhub-grid-item__status-wrap {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  z-index: 2;
+}
+
+.skillhub-grid-item__status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  line-height: 18px;
+  background-color: var(--color-background-muted);
+  color: var(--color-foreground-muted);
+
+  b {
+    color: var(--color-brand-600);
+    font-weight: 700;
   }
 }
 
-.skillhub-grid-item__header {
-  display: flex;
-  align-items: center;
-  gap: 12px;
+.skillhub-grid-item__status--scope {
+  color: var(--color-brand-600);
+  background-color: var(--color-brand-50, var(--color-background-muted));
 }
 
-.skillhub-grid-item__logo {
-  width: 40px;
-  height: 40px;
-  flex: 0 0 40px;
-  border-radius: 10px;
-  background: var(--color-brand-50);
-  color: var(--color-brand-600);
+/* 头部：Logo + 标题组 */
+.skillhub-grid-item__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding-right: 104px;
+}
+
+.skillhub-grid-item__avatar {
+  flex: 0 0 auto;
+  width: 36px;
+  height: 36px;
+  border-radius: 9px;
   display: flex;
   align-items: center;
   justify-content: center;
+  color: var(--color-brand-600);
+  background-color: var(--color-brand-50, var(--color-background-muted));
+  border: 1px solid var(--color-border);
 }
 
-.skillhub-grid-item__title-box {
+.skillhub-grid-item__titles {
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
-.skillhub-grid-item__title {
+.skillhub-grid-item__name {
   margin: 0;
-  font-size: 15px;
+  font-size: 0.875rem;
   font-weight: 600;
   color: var(--color-foreground-intense);
-  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .skillhub-grid-item__identifier {
-  font-size: 12px;
-  font-family: monospace;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 11.5px;
   color: var(--color-foreground-muted);
-}
-
-.skillhub-grid-item__desc {
-  margin: 0;
-  font-size: 13px;
-  color: var(--color-foreground-muted);
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
   overflow: hidden;
-  min-height: 38px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
+/* 标签行 */
 .skillhub-grid-item__tags {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
 }
 
-.skillhub-grid-item__tag {
-  font-size: 12px;
-  margin: 0;
-}
-
-.skillhub-grid-item__meta {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  font-size: 12px;
-  color: var(--color-foreground-muted);
-}
-
-.skillhub-grid-item__category {
-  background: var(--color-background-muted);
+.skillhub-grid-item__chip {
+  padding: 1px 9px;
   border-radius: 999px;
-  padding: 2px 10px;
+  font-size: 11px;
+  line-height: 18px;
+  background-color: var(--color-background-muted);
   color: var(--color-foreground);
 }
 
-.skillhub-grid-item__meta-info {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
+.skillhub-grid-item__chip--muted {
+  background-color: transparent;
+  border: 1px solid var(--color-border);
+  color: var(--color-foreground-muted);
 }
 
+/* 描述 */
+.skillhub-grid-item__desc {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--color-foreground-muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* 操作栏（ghost 图标按钮 + 启用 Switch 推到最右） */
 .skillhub-grid-item__actions {
   display: flex;
+  align-items: center;
   gap: 6px;
-  border-top: 1px solid var(--color-border-muted);
-  padding-top: 10px;
+  padding-top: 12px;
+  border-top: 1px solid var(--color-border);
   margin-top: auto;
 }
 
-.action-btn {
-  flex: 1;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  border: none;
-  background: transparent;
-  border-radius: 8px;
-  padding: 6px 4px;
-  font-size: 12px;
-  cursor: pointer;
-  color: var(--color-foreground-muted);
-  transition: background 0.15s ease, color 0.15s ease;
+.skillhub-grid-item__del:hover {
+  color: var(--color-danger) !important;
+}
 
-  &:hover {
-    background: var(--color-background-muted);
-    color: var(--color-foreground);
-  }
-
-  &.delete:hover {
-    background: var(--color-danger-bg);
-    color: var(--color-danger);
-  }
+.skillhub-grid-item__actions .ant-switch {
+  margin-left: auto;
 }
 
 .skillhub-grid-empty {
@@ -285,39 +367,22 @@
 .skillhub__pagination {
   display: flex;
   justify-content: flex-end;
+  padding: 4px 4px 4px;
 }
 
-/* ---------------- 表单弹窗（与 model-settings 风格一致） ---------------- */
-.sk__form {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.sk__section {
-  margin-bottom: 4px;
-}
-
-.sk__section-title {
-  margin: 0 0 12px;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--color-foreground-intense);
-}
-
+/* ---------------- 表单弹窗（基础信息网格） ---------------- */
 .sk__grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 14px;
+  gap: 14px 16px;
 }
 
 .sk__span-2 {
-  grid-column: span 2;
+  grid-column: 1 / -1;
 }
 
 .sk__required {
   color: var(--color-danger);
-  font-weight: 600;
   margin-left: 2px;
 }
 
@@ -328,6 +393,7 @@
 }
 
 .sk__inline-icon {
+  color: var(--color-brand-600);
   vertical-align: -2px;
   margin-right: 4px;
 }
@@ -336,6 +402,91 @@
   display: flex;
   justify-content: flex-end;
   gap: 10px;
+}
+
+/* ---------------- 脚本文件编辑 ---------------- */
+.sk__script-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.sk__script-item {
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: var(--color-background-subtle);
+}
+
+.sk__script-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.sk__script-editor {
+  margin-top: 10px;
+}
+
+.sk__script-empty {
+  font-size: 13px;
+  color: var(--color-foreground-muted);
+  padding: 8px 0;
+}
+
+/* ---------------- 资源文件上传 ---------------- */
+.sk__uploader {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px dashed var(--color-border);
+  border-radius: 10px;
+}
+
+.sk__uploader-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.sk__uploader-label {
+  font-size: 13px;
+  color: var(--color-foreground-muted);
+  min-width: 64px;
+}
+
+.sk__res-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.sk__res-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-background-subtle);
+
+  code {
+    font-size: 12px;
+    color: var(--color-foreground);
+    word-break: break-all;
+  }
+}
+
+/* ---------------- 导入弹窗 ---------------- */
+.sk-import__file {
+  margin-top: 12px;
+  font-size: 13px;
+  color: var(--color-foreground-muted);
 }
 
 /* ---------------- 详情抽屉 ---------------- */
@@ -367,35 +518,36 @@
   font-family: var(--font-mono, monospace);
 }
 
-/* ---------------- 导入弹窗 ---------------- */
-.sk-import__file {
-  margin-top: 12px;
-  font-size: 13px;
-  color: var(--color-foreground-muted);
-}
-
 /* ---------------- 响应式 ---------------- */
 @media (max-width: 880px) {
-  .skillhub {
-    flex-direction: column;
-    height: auto;
+  .skillhub__layout {
+    grid-template-columns: 1fr;
+    gap: 14px;
   }
   .skillhub__sidebar {
-    width: 100%;
-    flex: none;
     flex-direction: row;
+    flex-wrap: nowrap;
     overflow-x: auto;
+    gap: 6px;
+    scrollbar-width: none;
+  }
+  .skillhub__sidebar::-webkit-scrollbar {
+    display: none;
+  }
+  .skillhub__sidebar-title {
+    display: none;
   }
   .skillhub__cat-list {
     flex-direction: row;
   }
   .skillhub__cat-item {
+    width: auto;
     white-space: nowrap;
-  }
-  .sk__grid {
-    grid-template-columns: 1fr;
-  }
-  .sk__span-2 {
-    grid-column: span 1;
+    transform: none;
+
+    &::before {
+      width: 0;
+      height: 0;
+    }
   }
 }

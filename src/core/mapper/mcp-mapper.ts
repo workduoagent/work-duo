@@ -388,20 +388,45 @@ export async function deleteMcpTool(id: string): Promise<void> {
 /**
  * 同步工具：先删除该 mcp 下全部旧工具，再批量写入发现到的新工具。
  * 连通性测试 / 「同步工具」按钮调用，保证工具列表与真实服务一致。
+ * 关键：按 tool_code 保留用户此前对工具「启用 / 禁用」的设定，避免重新同步后被重置。
  */
 export async function syncMcpTools(
   mcpId: string,
   tools: McpToolDefinition[],
 ): Promise<McpToolDefinition[]> {
   if (!isTauri) {
-    const rest = lsListTools().filter((t) => t.mcpId !== mcpId)
-    lsSaveTools([...rest, ...tools])
-    return tools
+    const all = lsListTools()
+    // 记录该 mcp 下原有工具的启用状态（按 tool_code 匹配）
+    const prevActive = new Map<string, boolean>()
+    for (const t of all) {
+      if (t.mcpId === mcpId && t.toolCode) prevActive.set(t.toolCode, t.isActive)
+    }
+    const rest = all.filter((t) => t.mcpId !== mcpId)
+    const next = tools.map((t) =>
+      t.toolCode && prevActive.has(t.toolCode)
+        ? { ...t, isActive: prevActive.get(t.toolCode) as boolean }
+        : t,
+    )
+    lsSaveTools([...rest, ...next])
+    return next
   }
   const db = await getDb()
+  // 记录原有启用状态
+  const existing = await db.select<{ tool_code: string | null; is_active: number }[]>(
+    'SELECT tool_code, is_active FROM mcp_tool_definition WHERE mcp_id = ?',
+    [mcpId],
+  )
+  const prevActive = new Map<string, boolean>()
+  for (const r of existing) {
+    if (r.tool_code) prevActive.set(r.tool_code, r.is_active === 1)
+  }
   await db.execute('DELETE FROM mcp_tool_definition WHERE mcp_id = ?', [mcpId])
   for (const t of tools) {
-    const row = toolToRow(t)
+    const preserved =
+      t.toolCode && prevActive.has(t.toolCode)
+        ? (prevActive.get(t.toolCode) as boolean)
+        : t.isActive
+    const row = toolToRow({ ...t, isActive: preserved })
     await db.execute(
       `INSERT INTO mcp_tool_definition
          (id, mcp_id, tool_code, display_name, description, input_schema,
@@ -427,4 +452,73 @@ export async function syncMcpTools(
     )
   }
   return tools
+}
+
+/* ------------------------------------------------------------------ *
+ * 工具计数 + 单个工具启用开关
+ * ------------------------------------------------------------------ */
+
+/** 单个 MCP 的工具计数（总数 + 已激活数）。 */
+export interface McpToolCount {
+  total: number
+  active: number
+}
+
+/** 单个 MCP 的工具总数 / 已激活数。 */
+export async function getMcpToolCount(mcpId: string): Promise<McpToolCount> {
+  if (!isTauri) {
+    const list = lsListTools().filter((t) => t.mcpId === mcpId)
+    const active = list.filter((t) => t.isActive).length
+    return { total: list.length, active }
+  }
+  const db = await getDb()
+  const rows = await db.select<{ total: number; active: number }[]>(
+    `SELECT COUNT(*) AS total, COALESCE(SUM(is_active), 0) AS active
+       FROM mcp_tool_definition WHERE mcp_id = ?`,
+    [mcpId],
+  )
+  const r = rows[0]
+  return { total: r?.total ?? 0, active: r?.active ?? 0 }
+}
+
+/** 批量计数：返回 mcpId -> {total, active} 映射（列表页一次性拉取）。 */
+export async function getMcpToolCountMap(): Promise<Record<string, McpToolCount>> {
+  if (!isTauri) {
+    const map: Record<string, McpToolCount> = {}
+    for (const t of lsListTools()) {
+      const e = (map[t.mcpId] ??= { total: 0, active: 0 })
+      e.total += 1
+      if (t.isActive) e.active += 1
+    }
+    return map
+  }
+  const db = await getDb()
+  const rows = await db.select<{ mcp_id: string; total: number; active: number }[]>(
+    `SELECT mcp_id, COUNT(*) AS total, COALESCE(SUM(is_active), 0) AS active
+       FROM mcp_tool_definition GROUP BY mcp_id`,
+    [],
+  )
+  const map: Record<string, McpToolCount> = {}
+  for (const r of rows) {
+    map[r.mcp_id] = { total: r.total, active: r.active }
+  }
+  return map
+}
+
+/** 切换单个工具的启用 / 禁用。 */
+export async function setMcpToolActive(
+  id: string,
+  active: boolean,
+): Promise<void> {
+  if (!isTauri) {
+    lsSaveTools(
+      lsListTools().map((t) => (t.id === id ? { ...t, isActive: active } : t)),
+    )
+    return
+  }
+  const db = await getDb()
+  await db.execute(
+    'UPDATE mcp_tool_definition SET is_active = ?, updated_at = ? WHERE id = ?',
+    [active ? 1 : 0, Date.now(), id],
+  )
 }

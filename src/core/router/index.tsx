@@ -8,6 +8,7 @@ import AgentStudioPage from '@/pages/agent-studio'
 import SquadsWorkspacePage from '@/pages/squads-workspace'
 import SkillHubPage from '@/pages/skill-hub'
 import McpHubPage from '@/pages/mcp'
+import McpDetailPage from '@/pages/mcp/detail'
 import SettingsPage from '@/pages/settings'
 
 // HashRouter is used so deep links survive reloads inside the Tauri custom
@@ -26,6 +27,7 @@ export const router = createHashRouter([
       { path: 'squads-workspace', element: <SquadsWorkspacePage /> },
       { path: 'skill-hub', element: <SkillHubPage /> },
       { path: 'mcp-hub', element: <McpHubPage /> },
+      { path: 'mcp-hub/:id', element: <McpDetailPage /> },
       { path: 'settings', element: <SettingsPage /> },
     ],
   },

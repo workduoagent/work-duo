@@ -5,6 +5,7 @@
 import { Drawer, Descriptions, Tag, Typography, Divider, Empty, Space } from 'antd'
 import { Calendar, Pencil } from 'lucide-react'
 import { Button } from '@/components/ui'
+import { MarkdownRenderer } from '@/components/markdown/MarkdownRenderer'
 import { getSkillCategoryLabel, type SkillInfo } from '@/core/file/skill-file'
 
 const { Title, Text } = Typography
@@ -81,6 +82,22 @@ export function SkillDetailDrawer({
             <Descriptions.Item label="描述">
               {skill.description || <Text type="secondary">暂无描述</Text>}
             </Descriptions.Item>
+            <Descriptions.Item label="分类">
+              {getSkillCategoryLabel(skill.scenario)}
+            </Descriptions.Item>
+            <Descriptions.Item label="可见域">
+              {skill.scope || <Text type="secondary">未设置</Text>}
+            </Descriptions.Item>
+            <Descriptions.Item label="版本">
+              {skill.version || <Text type="secondary">未设置</Text>}
+            </Descriptions.Item>
+            <Descriptions.Item label="状态">
+              {skill.status === 1 ? (
+                <Tag color="success">已启用</Tag>
+              ) : (
+                <Tag>已禁用</Tag>
+              )}
+            </Descriptions.Item>
             <Descriptions.Item label="存储路径">
               <Text copyable style={{ fontFamily: 'monospace', fontSize: 12 }}>
                 {skill.path || '-'}
@@ -100,8 +117,19 @@ export function SkillDetailDrawer({
             </Descriptions.Item>
           </Descriptions>
 
+          <Divider>指令内容 (instruction)</Divider>
+          {skill.instruction?.trim() ? (
+            <MarkdownRenderer content={skill.instruction} />
+          ) : (
+            <Text type="secondary">暂无指令内容</Text>
+          )}
+
           <Divider>技能正文 (SKILL.md)</Divider>
-          <pre className="sk-detail__md">{skill.instruction || '暂无正文'}</pre>
+          {skill.skillMarkdown?.trim() ? (
+            <MarkdownRenderer content={skill.skillMarkdown} />
+          ) : (
+            <Text type="secondary">暂无 SKILL.md 正文</Text>
+          )}
         </div>
       )}
     </Drawer>

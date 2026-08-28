@@ -1,0 +1,93 @@
+/* ============================================================
+ * Markdown 编辑器（编辑 / 预览 双模式）
+ * 仅使用设计令牌 var(--color-*)。
+ * ============================================================ */
+
+.md-editor {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--color-background);
+}
+
+.md-editor[data-readonly='true'] .md-editor__toolbar {
+  opacity: 0.6;
+}
+
+.md-editor__toolbar {
+  display: flex;
+  align-items: center;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-background-subtle);
+}
+
+.md-editor__tabs {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 8px;
+  background: var(--color-background-muted);
+}
+
+.md-editor__tabs button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: none;
+  background: transparent;
+  border-radius: 6px;
+  padding: 4px 12px;
+  font-size: 12px;
+  color: var(--color-foreground-muted);
+  cursor: pointer;
+
+  &:hover {
+    color: var(--color-foreground);
+  }
+
+  &.is-active {
+    background: var(--color-background);
+    color: var(--color-brand-700);
+    font-weight: 600;
+    box-shadow: var(--shadow-sm);
+  }
+
+  &:disabled {
+    cursor: not-allowed;
+  }
+}
+
+.md-editor__body {
+  min-height: 160px;
+  overflow: hidden;
+}
+
+.md-editor__textarea {
+  height: 100% !important;
+  border: none !important;
+  border-radius: 0 !important;
+  resize: none;
+  font-family: ui-monospace, SFMono-Regular, 'JetBrains Mono', Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.6;
+  box-shadow: none !important;
+
+  &:focus {
+    box-shadow: none !important;
+  }
+}
+
+.md-editor__preview {
+  height: 100%;
+  overflow: auto;
+  padding: 12px 14px;
+  background: var(--color-background);
+}
+
+.md-editor__empty {
+  font-size: 13px;
+  color: var(--color-foreground-muted);
+}

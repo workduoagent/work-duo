@@ -1,0 +1,78 @@
+/* ============================================================
+ * MonacoJsonEditor.scss — Monaco 编辑器容器与工具条
+ * 仅使用设计令牌 var(--color-*)，不写 hex / px 字面量。
+ * ============================================================ */
+
+.mcphub-monaco {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--color-background);
+
+  .mcphub-monaco__toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--color-border);
+    background: var(--color-background-subtle);
+
+    .mcphub-monaco__lang {
+      font-size: 11px;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--color-foreground-muted);
+    }
+
+    .mcphub-monaco__actions {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .mcphub-monaco__btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      height: 26px;
+      padding: 0 8px;
+      font-size: 12px;
+      color: var(--color-foreground-muted);
+      background: transparent;
+      border: 1px solid var(--color-border);
+      border-radius: 6px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+
+      &:hover {
+        color: var(--color-foreground);
+        border-color: var(--color-brand-600);
+        background: var(--color-background-muted);
+      }
+
+      svg {
+        display: block;
+      }
+    }
+  }
+
+  .mcphub-monaco__body {
+    position: relative;
+    min-height: 0;
+
+    // 让 Monaco 内嵌区域与容器圆角对齐
+    .monaco-editor,
+    .monaco-editor .overflow-guard {
+      border-radius: 0;
+    }
+  }
+}
+
+/* 只读态弱化边框，与只读区块的安静感一致 */
+.mcphub-monaco[data-readonly='true'] {
+  border-style: dashed;
+  background: var(--color-background-subtle);
+}

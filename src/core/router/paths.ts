@@ -9,4 +9,6 @@ export const ROUTES = {
   settings: '/settings',
 } as const
 
+export const mcpDetailPath = (id: string): string => `/mcp-hub/${id}`
+
 export const knowledgeDetailPath = (id: string): string => `/knowledge/${id}`

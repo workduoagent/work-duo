@@ -13,6 +13,8 @@
  * 注意：真实的 STDIO 进程拉起应在后端 / Tauri Rust 命令内完成，这里仅做
  * 网页端可执行的 HTTP / SSE 探测，足以验证「接入」是否可达并拉取工具清单。
  */
+import { invoke } from '@tauri-apps/api/core'
+import { isTauri } from '@/core/config'
 import type { McpInfo, McpToolDefinition } from '@/core/file/mcp-file'
 import type { McpStatus } from '@/types/core'
 
@@ -23,6 +25,14 @@ export interface McpConnectionResult {
   error?: string
   latencyMs: number
   tools: McpToolDefinition[]
+}
+
+/** 工具调用结果（编辑测试参数弹窗「测试」按钮使用）。 */
+export interface McpToolCallResult {
+  ok: boolean
+  error?: string
+  /** tools/call 响应的解析结果（原始 JSON 文本解析失败时为字符串） */
+  value?: unknown
 }
 
 const JSON_RPC_HEADERS: Record<string, string> = {
@@ -163,6 +173,187 @@ export async function testMcpConnection(
       err.name === 'AbortError'
         ? '连接超时（>15s），请检查地址与网络'
         : `连接异常：${err.message}`,
+    )
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+/**
+ * 连通 MCP 并发现工具（对外统一入口）。
+ *  - Tauri 运行时：走 Rust 后端 `sync_mcp_tools` 命令（reqwest，不受浏览器 CORS 限制）；
+ *  - 非 Tauri（浏览器 dev）：回退前端 `testMcpConnection` 的 fetch 探测。
+ * 返回结构与 testMcpConnection 一致，调用方无需关心实现差异。
+ */
+export async function connectMcp(
+  mcp: Pick<
+    McpInfo,
+    'protocolType' | 'endpointUrl' | 'headers' | 'authType' | 'authConfig'
+  >,
+): Promise<McpConnectionResult> {
+  if (!isTauri) return testMcpConnection(mcp)
+
+  try {
+    const res = await invoke<{
+      status: number
+      ok: boolean
+      error?: string
+      latencyMs: number
+      tools: Record<string, unknown>[]
+    }>('sync_mcp_tools', {
+      request: {
+        endpointUrl: mcp.endpointUrl ?? '',
+        protocolType: mcp.protocolType,
+        headers: mcp.headers ?? {},
+        authType: mcp.authType,
+        authConfig: mcp.authConfig ?? {},
+      },
+    })
+    const tools: McpToolDefinition[] = (res.tools ?? []).map((t) => mapTool(t))
+    return {
+      status: (res.status === 1 ? 1 : 2) as McpStatus,
+      ok: res.ok,
+      error: res.error,
+      latencyMs: res.latencyMs,
+      tools,
+    }
+  } catch (e) {
+    return {
+      status: 2,
+      ok: false,
+      error: e instanceof Error ? e.message : String(e),
+      latencyMs: 0,
+      tools: [],
+    }
+  }
+}
+
+/**
+ * 调用 MCP 工具的 tools/call（编辑测试参数弹窗「测试」按钮使用）。
+ *  - Tauri 运行时：走 Rust 后端 `call_mcp_tool` 命令（reqwest，不受浏览器 CORS 限制）；
+ *  - 非 Tauri（浏览器 dev）：回退前端 fetch 探测（内网服务可能受 CORS 拦截，属预期）。
+ * 返回结构含 ok / error 与解析后的 value（供结果回显）。
+ */
+export async function callMcpTool(
+  mcp: Pick<
+    McpInfo,
+    'protocolType' | 'endpointUrl' | 'headers' | 'authType' | 'authConfig'
+  >,
+  toolName: string,
+  args: Record<string, unknown> | undefined,
+): Promise<McpToolCallResult> {
+  if (!isTauri) return callMcpToolFetch(mcp, toolName, args)
+  try {
+    const res = await invoke<{ ok: boolean; error?: string; raw: string }>(
+      'call_mcp_tool',
+      {
+        request: {
+          endpointUrl: mcp.endpointUrl ?? '',
+          protocolType: mcp.protocolType,
+          headers: mcp.headers ?? {},
+          authType: mcp.authType,
+          authConfig: mcp.authConfig ?? {},
+          toolName,
+          arguments: args ?? {},
+        },
+      },
+    )
+    let value: unknown = res.raw
+    try {
+      value = JSON.parse(res.raw)
+    } catch {
+      /* 保留原始文本 */
+    }
+    return { ok: res.ok, error: res.error, value }
+  } catch (e) {
+    return {
+      ok: false,
+      error: e instanceof Error ? e.message : String(e),
+    }
+  }
+}
+
+/** 非 Tauri 的 tools/call 回退实现（与 testMcpConnection 同范式的 fetch 探测）。 */
+async function callMcpToolFetch(
+  mcp: Pick<
+    McpInfo,
+    'protocolType' | 'endpointUrl' | 'headers' | 'authType' | 'authConfig'
+  >,
+  toolName: string,
+  args: Record<string, unknown> | undefined,
+): Promise<McpToolCallResult> {
+  const fail = (error: string): McpToolCallResult => ({
+    ok: false,
+    error,
+  })
+
+  if (mcp.protocolType === 'STDIO') {
+    return fail('STDIO 类型需本地进程支持，无法在网页端调用工具（请改用 HTTP / SSE）')
+  }
+  if (!mcp.endpointUrl) {
+    return fail('缺少 endpointUrl（SSE / HTTP 类型必须填写访问地址）')
+  }
+
+  const url = mcp.endpointUrl
+  const headers = buildHeaders(mcp)
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 15000)
+
+  try {
+    // 1) initialize 握手
+    const initRes = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'initialize',
+        params: {
+          protocolVersion: '2024-11-05',
+          capabilities: {},
+          clientInfo: { name: 'work-duo', version: '1.0.0' },
+        },
+      }),
+      signal: controller.signal,
+    })
+    const sessionId =
+      initRes.headers.get('mcp-session-id') ||
+      initRes.headers.get('Mcp-Session-Id')
+    if (sessionId) headers['Mcp-Session-Id'] = sessionId
+    if (!initRes.ok) {
+      const text = await initRes.text().catch(() => '')
+      return fail(`initialize 失败：HTTP ${initRes.status} ${text.slice(0, 200)}`)
+    }
+
+    // 2) tools/call
+    const callRes = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 3,
+        method: 'tools/call',
+        params: { name: toolName, arguments: args ?? {} },
+      }),
+      signal: controller.signal,
+    })
+    const raw = await callRes.text().catch(() => '')
+    let value: unknown = raw
+    try {
+      value = JSON.parse(raw)
+    } catch {
+      /* 保留原始文本 */
+    }
+    if (!callRes.ok) {
+      return fail(`tools/call 失败：HTTP ${callRes.status} ${raw.slice(0, 200)}`)
+    }
+    return { ok: true, value }
+  } catch (e) {
+    const err = e as Error
+    return fail(
+      err.name === 'AbortError'
+        ? '连接超时（>15s），请检查地址与网络'
+        : `调用异常：${err.message}`,
     )
   } finally {
     clearTimeout(timer)

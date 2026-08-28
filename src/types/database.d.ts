@@ -62,11 +62,15 @@ export interface SquadRow {
 }
 
 /** 技能能力单元表（skill_info）行映射。
- * - identifier：唯一标识 slug；
+ * - identifier：唯一标识 slug（同时是磁盘目录名）；
  * - tags：标签数组序列化后的 JSON 字符串；
- * - instruction：技能正文（SKILL.md 内容）；
+ * - instruction：指令内容（与 SKILL.md 是不同字段）；
+ * - skill_markdown：SKILL.md 正文（落盘到 <identifier>/SKILL.md）；
  * - scenario：技能分类 key（对应 SkillCategory）；
- * - path：本地存储目录（默认 app_config.skill_path + '/' + identifier）；
+ * - scope：可见域 PUBLIC / PRIVATE；
+ * - version：版本号，如 v1.0.0；
+ * - status：启用状态 1 / 0；
+ * - path：本地存储目录（默认 app_config.skill_path + '/' + identifier，可能含 $APPDATA/$RESOURCE 占位）；
  * - created_at / updated_at：epoch 毫秒（整型）。
  */
 export interface SkillInfoRow {
@@ -75,8 +79,12 @@ export interface SkillInfoRow {
   name: string | null
   description: string | null
   instruction: string | null
+  skill_markdown: string | null
   tags: string | null // JSON 数组文本
   scenario: string | null // 对应 SkillCategory
+  scope: string | null // PUBLIC / PRIVATE
+  version: string | null
+  status: number // 1 启用 / 0 禁用
   path: string | null
   created_at: number
   updated_at: number

@@ -30,7 +30,7 @@ function safeParse<T>(s: string | null, fallback: T): T {
   }
 }
 
-const DEFAULT_SKILL_PATH = '$RESOURCE/.skills'
+const DEFAULT_SKILL_PATH = '$APPDATA/.skills'
 
 /** 计算技能本地存储目录（basePath + '/' + identifier）。 */
 function buildPath(basePath: string, identifier: string): string {
@@ -45,8 +45,12 @@ function skillToRow(s: SkillInfo, basePath: string): SkillInfoRow {
     name: s.name || null,
     description: s.description || null,
     instruction: s.instruction || null,
+    skill_markdown: s.skillMarkdown || null,
     tags: s.tags && s.tags.length ? JSON.stringify(s.tags) : null,
     scenario: s.scenario ?? null,
+    scope: s.scope ?? null,
+    version: s.version || null,
+    status: s.status ?? 1,
     path: s.path || buildPath(basePath, s.identifier),
     created_at: now,
     updated_at: now,
@@ -60,8 +64,12 @@ function rowToSkill(r: SkillInfoRow): SkillInfo {
     name: r.name ?? '',
     description: r.description ?? undefined,
     instruction: r.instruction ?? undefined,
+    skillMarkdown: r.skill_markdown ?? undefined,
     tags: safeParse<string[] | null>(r.tags, null) ?? undefined,
     scenario: (r.scenario as SkillCategory) ?? undefined,
+    scope: (r.scope as SkillInfo['scope']) ?? undefined,
+    version: r.version ?? undefined,
+    status: r.status,
     path: r.path ?? undefined,
     createdAt: new Date(r.created_at).toISOString(),
     updatedAt: new Date(r.updated_at).toISOString(),
@@ -72,7 +80,8 @@ function rowToSkill(r: SkillInfoRow): SkillInfo {
  * skill_path 解析（读 app_config，非 Tauri 回退常量）
  * ------------------------------------------------------------------ */
 
-async function resolveSkillBasePath(): Promise<string> {
+/** 读取 skill_path 原始值（可能含 $APPDATA / $RESOURCE 占位，由 skillFs 在落盘时解析）。 */
+export async function resolveSkillBasePath(): Promise<string> {
   if (!isTauri) return 'skills' // 非 Tauri 仅记录相对路径，不真实落盘
   try {
     const db = await getDb()
@@ -155,30 +164,56 @@ export async function upsertSkill(skill: SkillInfo): Promise<SkillInfo[]> {
   const row = skillToRow(skill, basePath)
   await db.execute(
     `INSERT INTO skill_info
-       (id, identifier, name, description, instruction, tags, scenario, path, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       (id, identifier, name, description, instruction, skill_markdown, tags, scenario, scope, version, status, path, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET
-       identifier  = excluded.identifier,
-       name        = excluded.name,
-       description = excluded.description,
-       instruction = excluded.instruction,
-       tags        = excluded.tags,
-       scenario    = excluded.scenario,
-       path        = excluded.path,
-       updated_at  = excluded.updated_at`,
+       identifier    = excluded.identifier,
+       name          = excluded.name,
+       description   = excluded.description,
+       instruction   = excluded.instruction,
+       skill_markdown = excluded.skill_markdown,
+       tags          = excluded.tags,
+       scenario      = excluded.scenario,
+       scope         = excluded.scope,
+       version       = excluded.version,
+       status        = excluded.status,
+       path          = excluded.path,
+       updated_at    = excluded.updated_at`,
     [
       row.id,
       row.identifier,
       row.name,
       row.description,
       row.instruction,
+      row.skill_markdown,
       row.tags,
       row.scenario,
+      row.scope,
+      row.version,
+      row.status,
       row.path,
       row.created_at,
       row.updated_at,
     ],
   )
+  return listSkills()
+}
+
+/** 切换启用状态（卡片右上角 Switch）。返回最新列表。 */
+export async function setSkillStatus(
+  id: string,
+  status: number,
+): Promise<SkillInfo[]> {
+  if (!isTauri) {
+    const list = lsList().map((s) => (s.id === id ? { ...s, status } : s))
+    lsSave(list)
+    return list
+  }
+  const db = await getDb()
+  await db.execute('UPDATE skill_info SET status = ? WHERE id = ?', [
+    status,
+    id,
+  ])
   return listSkills()
 }
 
