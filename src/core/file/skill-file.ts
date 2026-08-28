@@ -16,9 +16,6 @@ import type { SkillCategory } from '@/types/core'
  * 1. 领域模型（运行时使用）
  * ------------------------------------------------------------------ */
 
-/** 技能可见域（对应 nexus-web 的 scope）。 */
-export type SkillScope = 'PUBLIC' | 'PRIVATE'
-
 export interface SkillInfo {
   id: string // 本地 UUID（文本主键）
   identifier: string // 唯一标识 slug，如 doc-polish（同时是磁盘目录名）
@@ -30,10 +27,6 @@ export interface SkillInfo {
   skillMarkdown?: string
   tags?: string[]
   scenario?: SkillCategory // 技能分类 key
-  /** 可见域：PUBLIC / PRIVATE。 */
-  scope?: SkillScope
-  /** 版本号，如 v1.0.0。 */
-  version?: string
   /** 启用状态：1 启用 / 0 禁用（卡片右上角 Switch 控制）。 */
   status?: number
   /** 本地存储目录（app_config.skill_path + '/' + identifier，可能含 $APPDATA/$RESOURCE 占位）。 */
@@ -74,12 +67,6 @@ export function getSkillCategoryLabel(
   if (!scenario) return '未分类'
   return CATEGORY_LABEL_MAP[scenario] ?? scenario
 }
-
-/** 可见域下拉选项。 */
-export const SKILL_SCOPE_OPTIONS = [
-  { value: 'PUBLIC', label: '公开 (PUBLIC)' },
-  { value: 'PRIVATE', label: '私有 (PRIVATE)' },
-] as const
 
 /* ------------------------------------------------------------------ *
  * 3. 脚本 / 资源文件（表单内编辑，落盘到技能目录）
@@ -159,8 +146,6 @@ export function createEmptySkill(): SkillInfo {
     skillMarkdown: '',
     tags: [],
     scenario: undefined,
-    scope: 'PUBLIC',
-    version: 'v1.0.0',
     status: 1,
     path: undefined,
     createdAt: now,
@@ -213,9 +198,6 @@ export function parseSkillImport(text: string): SkillImportResult {
     const scenario = SKILL_CATEGORY_OPTIONS.some((o) => o.value === scenarioRaw)
       ? (scenarioRaw as SkillCategory)
       : undefined
-    const scopeRaw = obj.scope as string | undefined
-    const scope: SkillScope | undefined =
-      scopeRaw === 'PUBLIC' || scopeRaw === 'PRIVATE' ? scopeRaw : undefined
     const now = new Date().toISOString()
     skills.push({
       id: typeof obj.id === 'string' && obj.id ? obj.id : crypto.randomUUID(),
@@ -226,8 +208,6 @@ export function parseSkillImport(text: string): SkillImportResult {
       skillMarkdown: typeof obj.skillMarkdown === 'string' ? obj.skillMarkdown : undefined,
       tags: Array.isArray(obj.tags) ? (obj.tags as string[]) : undefined,
       scenario,
-      scope,
-      version: typeof obj.version === 'string' ? obj.version : 'v1.0.0',
       status: typeof obj.status === 'number' ? obj.status : 1,
       path: typeof obj.path === 'string' ? obj.path : undefined,
       createdAt: typeof obj.createdAt === 'string' ? obj.createdAt : now,

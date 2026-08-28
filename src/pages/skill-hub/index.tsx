@@ -263,13 +263,14 @@ export default function SkillHubPage() {
                     onClick={() => openView(skill)}
                   >
                     <div className="skillhub-grid-item__status-wrap">
-                      {skill.version && (
-                        <span className="skillhub-grid-item__status">
-                          <b>{skill.version}</b>
-                        </span>
-                      )}
-                      <span className="skillhub-grid-item__status skillhub-grid-item__status--scope">
-                        {skill.scope === 'PRIVATE' ? '私有' : '公开'}
+                      <span
+                        className={`skillhub-grid-item__status${
+                          skill.status === 1
+                            ? ' skillhub-grid-item__status--on'
+                            : ' skillhub-grid-item__status--off'
+                        }`}
+                      >
+                        {skill.status === 1 ? '已启用' : '已禁用'}
                       </span>
                     </div>
 

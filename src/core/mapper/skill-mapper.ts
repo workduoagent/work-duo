@@ -48,8 +48,6 @@ function skillToRow(s: SkillInfo, basePath: string): SkillInfoRow {
     skill_markdown: s.skillMarkdown || null,
     tags: s.tags && s.tags.length ? JSON.stringify(s.tags) : null,
     scenario: s.scenario ?? null,
-    scope: s.scope ?? null,
-    version: s.version || null,
     status: s.status ?? 1,
     path: s.path || buildPath(basePath, s.identifier),
     created_at: now,
@@ -67,8 +65,6 @@ function rowToSkill(r: SkillInfoRow): SkillInfo {
     skillMarkdown: r.skill_markdown ?? undefined,
     tags: safeParse<string[] | null>(r.tags, null) ?? undefined,
     scenario: (r.scenario as SkillCategory) ?? undefined,
-    scope: (r.scope as SkillInfo['scope']) ?? undefined,
-    version: r.version ?? undefined,
     status: r.status,
     path: r.path ?? undefined,
     createdAt: new Date(r.created_at).toISOString(),
@@ -164,8 +160,8 @@ export async function upsertSkill(skill: SkillInfo): Promise<SkillInfo[]> {
   const row = skillToRow(skill, basePath)
   await db.execute(
     `INSERT INTO skill_info
-       (id, identifier, name, description, instruction, skill_markdown, tags, scenario, scope, version, status, path, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       (id, identifier, name, description, instruction, skill_markdown, tags, scenario, status, path, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET
        identifier    = excluded.identifier,
        name          = excluded.name,
@@ -174,8 +170,6 @@ export async function upsertSkill(skill: SkillInfo): Promise<SkillInfo[]> {
        skill_markdown = excluded.skill_markdown,
        tags          = excluded.tags,
        scenario      = excluded.scenario,
-       scope         = excluded.scope,
-       version       = excluded.version,
        status        = excluded.status,
        path          = excluded.path,
        updated_at    = excluded.updated_at`,
@@ -188,8 +182,6 @@ export async function upsertSkill(skill: SkillInfo): Promise<SkillInfo[]> {
       row.skill_markdown,
       row.tags,
       row.scenario,
-      row.scope,
-      row.version,
       row.status,
       row.path,
       row.created_at,

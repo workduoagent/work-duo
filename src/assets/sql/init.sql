@@ -51,8 +51,6 @@ CREATE TABLE IF NOT EXISTS models
 --   instruction：指令内容（与 SKILL.md 是不同字段）；
 --   skill_markdown：SKILL.md 正文（落盘到 <identifier>/SKILL.md）；
 --   scenario：技能分类 key（对应 SkillCategory 枚举）；
---   scope：可见域 PUBLIC / PRIVATE；
---   version：版本号，如 v1.0.0；
 --   status：启用状态 1 / 0（卡片右上角 Switch 控制）；
 --   path：本地存储目录，默认取 app_config.skill_path + '/' + identifier；
 --   created_at / updated_at：epoch 毫秒（整型）。
@@ -66,8 +64,6 @@ CREATE TABLE IF NOT EXISTS skill_info
     skill_markdown TEXT,
     tags          TEXT,
     scenario      TEXT,
-    scope         TEXT,
-    version       TEXT,
     status        INTEGER NOT NULL DEFAULT 1,
     path          TEXT,
     created_at    INTEGER NOT NULL,

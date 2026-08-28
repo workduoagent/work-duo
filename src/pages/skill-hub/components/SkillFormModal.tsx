@@ -2,7 +2,7 @@
  * 新建 / 编辑技能弹窗（仿 nexus-web skill-hub 的设计，但落盘到本地 $APPDATA/.skills）。
  *
  * 三个 Tab：
- *  1) 基础信息：标识符 / 名称 / 描述 / 分类 / 可见域 / 标签 / 版本；
+ *  1) 基础信息：标识符 / 名称 / 描述 / 分类 / 标签；
  *  2) 指令内容：instruction（技能级指令，与 SKILL.md 是**不同字段**）；
  *  3) 文件资源：SKILL.md 正文（独立字段，落盘为 <identifier>/SKILL.md）+ 脚本编辑（可选语言）
  *     + 资源文件上传（scripts / references / assets / templates / 自定义目录）。
@@ -24,11 +24,9 @@ import { MarkdownEditor } from '@/components/markdown/MarkdownEditor'
 import { MonacoJsonEditor } from '@/components/code-editor'
 import {
   SKILL_CATEGORY_OPTIONS,
-  SKILL_SCOPE_OPTIONS,
   SCRIPT_LANGUAGE_OPTIONS,
   createEmptySkill,
   type SkillInfo,
-  type SkillScope,
   type ScriptFile,
   type ResourceFile,
   type SkillFormData,
@@ -50,7 +48,6 @@ function validate(draft: SkillInfo): Set<string> {
   else if (!/^[a-z0-9][a-z0-9-]*$/.test(draft.identifier))
     errors.add('identifier-format')
   if (!draft.name.trim()) errors.add('name')
-  if (!draft.version?.trim()) errors.add('version')
   return errors
 }
 
@@ -130,7 +127,7 @@ export function SkillFormModal({
     const errs = validate(draft)
     setErrors(errs)
     if (errs.size > 0) {
-      message.warning('请完善必填项（标识符、技能名称、版本号）')
+      message.warning('请完善必填项（标识符、技能名称）')
       return
     }
     setSaving(true)
@@ -152,7 +149,6 @@ export function SkillFormModal({
       onOpenChange={onOpenChange}
       width={860}
       title={skill ? '编辑技能' : '新建技能'}
-      description="指令内容与 SKILL.md 是两个独立字段；保存后会生成 <identifier>/ 目录骨架并落盘。"
       style={{ top: 24, maxWidth: '94vw' }}
       footer={
         <div className="sk__form-footer">
@@ -165,17 +161,6 @@ export function SkillFormModal({
         </div>
       }
     >
-      <Alert
-        type="info"
-        showIcon
-        style={{ marginBottom: 16 }}
-        message={
-          skill
-            ? '编辑将更新技能元数据与目录文件；标识符（磁盘目录名）不可修改。'
-            : '技能将落盘到 skill_path 下的 <identifier>/ 目录，含 scripts / references / assets / templates 与 SKILL.md。'
-        }
-      />
-
       <Tabs
         defaultActiveKey="base"
         items={[
@@ -241,28 +226,6 @@ export function SkillFormModal({
                 </Field>
 
                 <Field>
-                  <FieldLabel>可见域 (scope)</FieldLabel>
-                  <Select
-                    value={draft.scope}
-                    options={SKILL_SCOPE_OPTIONS as never}
-                    placeholder="选择可见域"
-                    onChange={(v) => patch({ scope: (v as SkillScope) ?? undefined })}
-                  />
-                </Field>
-
-                <Field>
-                  <FieldLabel>
-                    版本号<span className="sk__required">*</span>
-                  </FieldLabel>
-                  <Input
-                    value={draft.version ?? ''}
-                    status={hasError('version')}
-                    placeholder="v1.0.0"
-                    onChange={(e) => patch({ version: e.target.value })}
-                  />
-                </Field>
-
-                <Field>
                   <FieldLabel>标签</FieldLabel>
                   <Select
                     mode="tags"
@@ -286,12 +249,6 @@ export function SkillFormModal({
                   <Code2 size={14} className="sk__inline-icon" />
                   指令内容 (instruction)
                 </FieldLabel>
-                <Alert
-                  type="warning"
-                  showIcon
-                  style={{ marginBottom: 12 }}
-                  message="指令内容是技能级的工作流 / 指令描述，与下方「文件资源」里的 SKILL.md 是两回事，请勿混写。"
-                />
                 <MarkdownEditor
                   value={draft.instruction ?? ''}
                   height={300}

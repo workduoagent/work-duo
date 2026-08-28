@@ -10,11 +10,9 @@
 -- 故重复执行不会报错。新装库在 init.sql 建表时即包含该列。
 ALTER TABLE models ADD COLUMN tool_calls INTEGER NOT NULL DEFAULT 0;
 
--- ---------- v2：技能表新增 SKILL.md / 版本 / 可见域 / 启用状态 字段 ----------
+-- ---------- v2：技能表新增 SKILL.md / 启用状态 字段 ----------
 -- instruction 与 SKILL.md 是两个独立字段：前者是技能级指令，后者是落盘的 SKILL.md 文件内容。
 -- 存量库（已建表但无这些列）通过本语句补齐；重复执行会被安全跳过。
 ALTER TABLE skill_info ADD COLUMN skill_markdown TEXT;
-ALTER TABLE skill_info ADD COLUMN scope TEXT;
-ALTER TABLE skill_info ADD COLUMN version TEXT;
 ALTER TABLE skill_info ADD COLUMN status INTEGER NOT NULL DEFAULT 1;
 -- ============================================================

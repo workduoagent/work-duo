@@ -252,9 +252,14 @@
   }
 }
 
-.skillhub-grid-item__status--scope {
-  color: var(--color-brand-600);
-  background-color: var(--color-brand-50, var(--color-background-muted));
+.skillhub-grid-item__status--on {
+  color: var(--color-success-600, #15803d);
+  background-color: var(--color-success-50, rgba(22, 163, 74, 0.12));
+}
+
+.skillhub-grid-item__status--off {
+  color: var(--color-foreground-muted);
+  background-color: var(--color-background-muted);
 }
 
 /* 头部：Logo + 标题组 */
@@ -483,10 +488,59 @@
 }
 
 /* ---------------- 导入弹窗 ---------------- */
-.sk-import__file {
-  margin-top: 12px;
-  font-size: 13px;
-  color: var(--color-foreground-muted);
+/* ---------------- 导入技能弹窗：拖拽 / 选择区 ---------------- */
+.sk-import__dropzone {
+  background: var(--color-background-subtle);
+  border: 1px dashed var(--color-border);
+  border-radius: 10px;
+  padding: 8px;
+
+  &__icon {
+    margin: 0;
+  }
+
+  &__title {
+    margin: 8px 0 4px;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--color-foreground);
+  }
+
+  &__hint {
+    margin: 0;
+    font-size: 12px;
+    color: var(--color-foreground-muted);
+  }
+
+  &__actions {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    justify-content: center;
+    margin-top: 12px;
+  }
+
+  &__label {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--color-foreground-muted);
+  }
+}
+
+/* ---------------- 导入技能弹窗：导入包摘要 ---------------- */
+.sk-import__summary {
+  &__row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    font-size: 13px;
+    color: var(--color-foreground-muted);
+
+    b {
+      color: var(--color-foreground);
+    }
+  }
 }
 
 /* ---------------- 详情抽屉 ---------------- */

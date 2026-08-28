@@ -85,12 +85,6 @@ export function SkillDetailDrawer({
             <Descriptions.Item label="分类">
               {getSkillCategoryLabel(skill.scenario)}
             </Descriptions.Item>
-            <Descriptions.Item label="可见域">
-              {skill.scope || <Text type="secondary">未设置</Text>}
-            </Descriptions.Item>
-            <Descriptions.Item label="版本">
-              {skill.version || <Text type="secondary">未设置</Text>}
-            </Descriptions.Item>
             <Descriptions.Item label="状态">
               {skill.status === 1 ? (
                 <Tag color="success">已启用</Tag>
