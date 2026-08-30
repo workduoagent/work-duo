@@ -5,6 +5,7 @@
  * 文件落盘走 src/core/file/skillFs.ts（<skill_path>/<identifier>/ 目录骨架）。
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   Search,
   Plus,
@@ -12,7 +13,6 @@ import {
   Pencil,
   Eye,
   Trash2,
-  Zap,
   LayoutGrid,
   type LucideIcon,
   CreditCard,
@@ -29,7 +29,8 @@ import {
   Coffee,
 } from 'lucide-react'
 import { Button, Card, Input, Switch } from '@/components/ui'
-import { Popconfirm, message, Empty, Spin, Pagination, Tooltip } from 'antd'
+import { Popconfirm, Empty, Spin, Pagination, Tooltip } from 'antd'
+import { useNotify } from '@/components/ui/notify'
 import {
   listSkills,
   upsertSkill,
@@ -39,14 +40,16 @@ import {
 } from '@/core/mapper/skill-mapper'
 import {
   getSkillCategoryLabel,
-  SKILL_CATEGORY_OPTIONS,
   type SkillInfo,
   type SkillFormData,
 } from '@/core/file/skill-file'
+import { listByScope } from '@/core/mapper/scenario-mapper'
+import type { ScenarioCategory } from '@/types/core'
 import { persistSkillFiles, removeSkillDir } from '@/core/file/skillFs'
+import { skillDetailPath } from '@/core/router/paths'
 import { SkillFormModal } from './components/SkillFormModal'
-import { SkillDetailDrawer } from './components/SkillDetailDrawer'
 import { SkillImportModal } from './components/SkillImportModal'
+import { SkillAvatar } from './components/SkillAvatar'
 import './index.scss'
 
 const PAGE_SIZE = 12
@@ -70,6 +73,8 @@ const CATEGORY_ICON: Record<string, LucideIcon> = {
 }
 
 export default function SkillHubPage() {
+  const { message } = useNotify()
+  const navigate = useNavigate()
   const [scenarioFilter, setScenarioFilter] = useState<string>('all')
   const [keyword, setKeyword] = useState('')
   const [records, setRecords] = useState<SkillInfo[]>([])
@@ -77,9 +82,9 @@ export default function SkillHubPage() {
   const [modalOpen, setModalOpen] = useState(false)
   const [editing, setEditing] = useState<SkillInfo | null>(null)
   const [importOpen, setImportOpen] = useState(false)
-  const [drawerOpen, setDrawerOpen] = useState(false)
-  const [viewing, setViewing] = useState<SkillInfo | null>(null)
   const [currentPage, setCurrentPage] = useState(1)
+  const [scenarios, setScenarios] = useState<ScenarioCategory[]>([])
+  const [scenarioLabels, setScenarioLabels] = useState<Record<string, string>>({})
 
   const reload = useCallback(async () => {
     setLoading(true)
@@ -90,9 +95,16 @@ export default function SkillHubPage() {
     }
   }, [])
 
+  const loadScenarios = useCallback(async () => {
+    const list = await listByScope('SKILL')
+    setScenarios(list)
+    setScenarioLabels(Object.fromEntries(list.map((s) => [s.value, s.label])))
+  }, [])
+
   useEffect(() => {
     void reload()
-  }, [reload])
+    void loadScenarios()
+  }, [reload, loadScenarios])
 
   const filtered = useMemo(() => {
     const kw = keyword.trim().toLowerCase()
@@ -132,8 +144,11 @@ export default function SkillHubPage() {
   }, [records])
 
   const categories = useMemo(
-    () => [{ value: 'all', label: '全部技能' }, ...SKILL_CATEGORY_OPTIONS],
-    [],
+    () => [
+      { value: 'all', label: '全部技能' },
+      ...scenarios.map((s) => ({ value: s.value, label: s.label })),
+    ],
+    [scenarios],
   )
 
   function openCreate() {
@@ -146,25 +161,33 @@ export default function SkillHubPage() {
     setModalOpen(true)
   }
 
-  function openView(s: SkillInfo) {
-    setViewing(s)
-    setDrawerOpen(true)
-  }
-
   async function handleSave(data: SkillFormData) {
     const rawBase = await resolveSkillBasePath()
-    const list = await upsertSkill(data.skill)
-    setRecords(list)
-    const res = await persistSkillFiles(rawBase, data.skill, data.scripts, data.resources)
-    if (res) {
-      const parts = [
-        res.written.skillMd ? 'SKILL.md' : '',
-        `${res.written.scripts} 个脚本`,
-        `${res.written.resources} 个资源`,
-      ].filter(Boolean)
-      message.success(`技能已${editing ? '更新' : '创建'}，已落盘 ${parts.join('、')}`)
-    } else {
-      message.success(editing ? '技能已更新' : '技能已创建')
+    try {
+      // 落盘先行：磁盘写入成功后再入库，避免「IO 失败但 DB 已写入」的脏数据
+      const res = await persistSkillFiles(
+        rawBase,
+        data.skill,
+        data.scripts,
+        data.resources,
+      )
+      const list = await upsertSkill(data.skill)
+      setRecords(list)
+      if (res) {
+        const parts = [
+          res.written.skillMd ? 'SKILL.md' : '',
+          `${res.written.scripts} 个脚本`,
+          `${res.written.resources} 个资源`,
+        ].filter(Boolean)
+        message.success(`技能已${editing ? '更新' : '创建'}，已落盘 ${parts.join('、')}`)
+      } else {
+        message.success(editing ? '技能已更新' : '技能已创建')
+      }
+    } catch (e) {
+      // 回滚：清掉可能已写入的磁盘目录与 DB 行
+      await removeSkillDir(rawBase, data.skill.identifier).catch(() => {})
+      await deleteSkill(data.skill.id).catch(() => {})
+      throw e
     }
   }
 
@@ -177,10 +200,17 @@ export default function SkillHubPage() {
 
   async function handleImport(data: SkillFormData) {
     const rawBase = await resolveSkillBasePath()
-    const list = await upsertSkill(data.skill)
-    setRecords(list)
-    await persistSkillFiles(rawBase, data.skill, data.scripts, data.resources)
-    message.success('导入完成')
+    try {
+      // 落盘先行：磁盘写入成功后再入库，导入 IO 失败则不会留下脏 DB 行
+      await persistSkillFiles(rawBase, data.skill, data.scripts, data.resources)
+      const list = await upsertSkill(data.skill)
+      setRecords(list)
+      message.success('导入完成')
+    } catch (e) {
+      await removeSkillDir(rawBase, data.skill.identifier).catch(() => {})
+      await deleteSkill(data.skill.id).catch(() => {})
+      throw e
+    }
   }
 
   async function handleToggle(s: SkillInfo) {
@@ -260,7 +290,7 @@ export default function SkillHubPage() {
                     key={skill.id}
                     frame="solid"
                     className="skillhub-grid-item"
-                    onClick={() => openView(skill)}
+                    onClick={() => navigate(skillDetailPath(skill.id))}
                   >
                     <div className="skillhub-grid-item__status-wrap">
                       <span
@@ -275,9 +305,7 @@ export default function SkillHubPage() {
                     </div>
 
                     <div className="skillhub-grid-item__head">
-                      <div className="skillhub-grid-item__avatar">
-                        <Zap size={18} />
-                      </div>
+                      <SkillAvatar skill={skill} />
                       <div className="skillhub-grid-item__titles">
                         <Tooltip title={skill.name}>
                           <h3 className="skillhub-grid-item__name">{skill.name}</h3>
@@ -290,7 +318,7 @@ export default function SkillHubPage() {
 
                     <div className="skillhub-grid-item__tags">
                       <span className="skillhub-grid-item__chip">
-                        {getSkillCategoryLabel(skill.scenario)}
+                        {scenarioLabels[skill.scenario ?? ''] ?? getSkillCategoryLabel(skill.scenario)}
                       </span>
                       {(skill.tags ?? []).slice(0, 2).map((t, i) => (
                         <span key={`${t}-${i}`} className="skillhub-grid-item__chip skillhub-grid-item__chip--muted">
@@ -322,7 +350,7 @@ export default function SkillHubPage() {
                           variant="ghost"
                           size="icon-sm"
                           aria-label="详情"
-                          onClick={() => openView(skill)}
+                          onClick={() => navigate(skillDetailPath(skill.id))}
                         >
                           <Eye size={16} />
                         </Button>
@@ -389,16 +417,6 @@ export default function SkillHubPage() {
         open={importOpen}
         onOpenChange={setImportOpen}
         onImported={handleImport}
-      />
-
-      <SkillDetailDrawer
-        open={drawerOpen}
-        skill={viewing}
-        onClose={() => setDrawerOpen(false)}
-        onEdit={(s) => {
-          setDrawerOpen(false)
-          openEdit(s)
-        }}
       />
     </div>
   )

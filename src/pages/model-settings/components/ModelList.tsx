@@ -9,11 +9,10 @@ import {useState} from 'react'
 import {Pencil, Trash2, Zap, Wrench} from 'lucide-react'
 import {Card, Button, Switch, Modal, SpinnerIcon} from '@/components/ui'
 import {
-    MODEL_CATEGORY_OPTIONS,
     PROVIDER_OPTIONS,
+    getModelCategoryLabel,
     type ModelConfig,
 } from '@/core/file/model-file'
-import type {ModelCategory} from '@/types/core'
 import {testModelConnection, type ModelTestResult} from '@/utils/modelTest'
 import './ModelList.scss'
 
@@ -48,7 +47,7 @@ function providerLogoUrl(provider: string): string | undefined {
 }
 
 export interface ModelListProps {
-    category: ModelCategory
+    category: string
     models: ModelConfig[]
     loading?: boolean
     onEdit: (model: ModelConfig) => void
@@ -60,8 +59,8 @@ function providerLabel(value: string): string {
     return PROVIDER_OPTIONS.find((p) => p.value === value)?.label ?? value
 }
 
-function categoryLabel(value: ModelCategory): string {
-    return MODEL_CATEGORY_OPTIONS.find((c) => c.value === value)?.label ?? value
+function categoryLabel(value: string): string {
+    return getModelCategoryLabel(value)
 }
 
 export function ModelList({

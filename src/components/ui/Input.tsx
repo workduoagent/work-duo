@@ -1,1 +1,1 @@
-export { Input, type InputProps } from 'antd'
+export { Input, type InputProps, type InputRef } from 'antd'

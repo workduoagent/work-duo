@@ -7,6 +7,7 @@ import { Calendar, Pencil } from 'lucide-react'
 import { Button } from '@/components/ui'
 import { MarkdownRenderer } from '@/components/markdown/MarkdownRenderer'
 import { getSkillCategoryLabel, type SkillInfo } from '@/core/file/skill-file'
+import { SkillAvatar } from './SkillAvatar'
 
 const { Title, Text } = Typography
 
@@ -62,7 +63,7 @@ export function SkillDetailDrawer({
       ) : (
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 16 }}>
-            <div className="sk-detail__logo">⚡</div>
+            <SkillAvatar skill={skill} size={56} />
             <div>
               <Title level={4} style={{ margin: 0 }}>
                 {skill.name}
@@ -111,7 +112,7 @@ export function SkillDetailDrawer({
             </Descriptions.Item>
           </Descriptions>
 
-          <Divider>指令内容 (instruction)</Divider>
+          <Divider>指令内容</Divider>
           {skill.instruction?.trim() ? (
             <MarkdownRenderer content={skill.instruction} />
           ) : (

@@ -1,0 +1,361 @@
+/* 技能详情页（对齐 mcphub-detail-page 的视觉语言） */
+.skillhub-detail-page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  /* 钉死为窗口可用高度（app-content 内容高度）：头部 / 详情表格为固定块，
+     技能文件块 flex:1 严格等于「窗口 − 头部 − 详情表格」，页面自身不滚动，
+     目录与内容各自内部细滚动。窄屏（堆叠布局）才允许整体滚动。 */
+  height: 100%;
+  overflow: hidden;
+
+  @media (max-width: 900px) {
+    overflow-y: auto;
+  }
+
+  &__nav {
+    display: flex;
+    align-items: center;
+    flex: none;
+  }
+
+  &__header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 18px 20px;
+    background: var(--color-background);
+    border: 1px solid var(--color-border);
+    border-radius: 14px;
+    flex: none;
+  }
+
+  &__header-info {
+    min-width: 0;
+  }
+
+  &__title-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  &__title {
+    margin: 0;
+    font-size: 20px;
+    font-weight: 600;
+    color: var(--color-foreground);
+  }
+
+  &__desc {
+    margin: 6px 0 0;
+    color: var(--color-foreground-muted);
+    font-size: 13px;
+    line-height: 1.5;
+  }
+
+  /* 头部右上角操作区（编辑 / 导出） */
+  &__header-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-left: auto;
+  }
+
+  &__section {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+
+  &__block {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    flex: none;
+  }
+
+  /* 技能文件块：占满页面剩余高度（详情介绍 / 技能详情为固定块，不伸缩） */
+  &__block--fill {
+    flex: 1;
+    min-height: 0;
+  }
+
+  &__block-title {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--color-foreground);
+  }
+
+  &__muted {
+    color: var(--color-foreground-muted);
+    font-size: 13px;
+  }
+
+  &__url {
+    font-family: monospace;
+    font-size: 12px;
+    word-break: break-all;
+    color: var(--color-foreground-muted);
+  }
+
+  &__loading {
+    display: flex;
+    justify-content: center;
+    padding: 60px 0;
+  }
+
+  &__empty {
+    display: flex;
+    justify-content: center;
+    padding: 80px 0;
+  }
+
+  /* -------- 技能文件浏览器：左侧目录 + 右侧内容 -------- */
+  &__explorer {
+    display: flex;
+    flex-direction: row;
+    gap: 16px;
+    /* 占满页面剩余高度，目录与内容各自内部滚动 */
+    flex: 1;
+    min-height: 0;
+
+    @media (max-width: 900px) {
+      flex-direction: column;
+    }
+  }
+
+  &__explorer-tree {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+    flex: none;
+    width: 260px;
+    border: 1px solid var(--color-border);
+    border-radius: 12px;
+    background: var(--color-background);
+    overflow: hidden;
+
+    @media (max-width: 900px) {
+      width: auto;
+      flex: 0 0 38%;
+      min-height: 180px;
+    }
+  }
+
+  &__explorer-tree-title {
+    flex: none;
+    padding: 10px 14px;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    color: var(--color-foreground-muted);
+    background: var(--color-background-subtle);
+    border-bottom: 1px solid var(--color-border);
+  }
+
+  &__explorer-tree-body {
+    flex: 1;
+    min-height: 0;
+    padding: 8px 6px;
+    overflow: auto;
+  }
+
+  &__explorer-view {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+    flex: 1;
+    border: 1px solid var(--color-border);
+    border-radius: 12px;
+    background: var(--color-background);
+    overflow: hidden;
+  }
+
+  &__explorer-view-head {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--color-border);
+    background: var(--color-background-subtle);
+  }
+
+  &__explorer-view-name {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--color-foreground);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* 文件内容区右上角操作（编辑 / 保存 / 取消） */
+  &__explorer-view-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-left: auto;
+    flex: none;
+  }
+
+  &__explorer-view-body {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    padding: 12px;
+    overflow: auto;
+  }
+
+  &__image-wrap {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 12px;
+    background: var(--color-background-subtle);
+    border-radius: 10px;
+    overflow: auto;
+  }
+
+  /* 让内嵌代码编辑器撑满内容区（配合 height="100%"） */
+  &__explorer-view-body .mcphub-monaco {
+    flex: 1;
+    min-height: 0;
+  }
+
+  &__image {
+    max-width: 100%;
+    max-height: 460px;
+    border-radius: 8px;
+    object-fit: contain;
+  }
+}
+
+/* 目录结构树（编辑表单与详情页共用） */
+.sk-tree {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+
+  .sk-tree__node {
+    display: block;
+  }
+
+  .sk-tree__row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 30px;
+    padding-right: 10px;
+    border-radius: 6px;
+    transition: background 0.15s ease;
+
+    &:hover {
+      background: var(--color-background-subtle, var(--color-background-soft, #f7f7f9));
+    }
+
+    /* 可点击的文件夹行（收叠 / 展开） */
+    &--folder {
+      cursor: pointer;
+      user-select: none;
+
+      &:hover {
+        background: var(--color-background-subtle, #f4f5f7);
+      }
+
+      &:focus-visible {
+        outline: 2px solid var(--color-brand-500, #3b6fff);
+        outline-offset: -2px;
+      }
+    }
+
+    /* 可点击的文件行（详情页文件浏览器） */
+    &--file {
+      cursor: pointer;
+      user-select: none;
+
+      &:hover {
+        background: var(--color-background-subtle, #f4f5f7);
+      }
+
+      &.is-selected {
+        background: var(--color-brand-50, #eef3ff);
+        box-shadow: inset 0 0 0 1px
+          color-mix(in srgb, var(--color-brand-600, #2563eb) 35%, transparent);
+
+        .sk-tree__name {
+          color: var(--color-brand-600, #2563eb);
+          font-weight: 600;
+        }
+      }
+
+      &:focus-visible {
+        outline: 2px solid var(--color-brand-500, #3b6fff);
+        outline-offset: -2px;
+      }
+    }
+  }
+
+  /* 收叠箭头：与文件行占位等宽，保证名称对齐 */
+  .sk-tree__caret {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    color: var(--color-foreground-muted, #888);
+
+    &--placeholder {
+      visibility: hidden;
+    }
+  }
+
+  .sk-tree__icon {
+    flex: none;
+
+    &--folder {
+      color: var(--color-brand-500, #3b6fff);
+    }
+
+    &--file {
+      color: var(--color-foreground-muted, #888);
+    }
+  }
+
+  .sk-tree__name {
+    font-size: 13px;
+    color: var(--color-foreground, #333);
+    white-space: nowrap;
+  }
+
+  .sk-tree__badge {
+    margin-left: 6px;
+    font-size: 11px;
+    padding: 1px 7px;
+    border-radius: 999px;
+    color: var(--color-success, #16a34a);
+    background: var(--color-success-50, #dcfce7);
+    border: 1px solid color-mix(in srgb, var(--color-success, #16a34a) 25%, transparent);
+  }
+
+  .sk-tree__badge--logo {
+    color: var(--color-brand-600, #2563eb);
+    background: var(--color-brand-50, #eef3ff);
+    border-color: color-mix(in srgb, var(--color-brand-600, #2563eb) 25%, transparent);
+  }
+
+  &__empty {
+    color: var(--color-foreground-muted, #888);
+    font-size: 13px;
+    padding: 24px 8px;
+  }
+}

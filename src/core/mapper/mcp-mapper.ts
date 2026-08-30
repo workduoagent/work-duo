@@ -20,7 +20,6 @@ import type {
   McpProtocolType,
   McpAuthType,
   McpStatus,
-  McpScenario,
 } from '@/types/core'
 import type { McpInfo, McpToolDefinition } from '@/core/file/mcp-file'
 import type { McpInfoRow, McpToolDefinitionRow } from '@/types/database'
@@ -56,6 +55,7 @@ function mcpToRow(m: McpInfo): McpInfoRow {
     properties: m.properties ? JSON.stringify(m.properties) : null,
     description: m.description || null,
     scenario: m.scenario ?? null,
+    timeout_sec: m.timeoutSec ?? 120,
     created_at: now,
     updated_at: now,
   }
@@ -78,7 +78,8 @@ function rowToMcp(r: McpInfoRow): McpInfo {
     properties:
       safeParse<Record<string, unknown> | null>(r.properties, null) ?? undefined,
     description: r.description ?? undefined,
-    scenario: (r.scenario as McpScenario) ?? undefined,
+    scenario: r.scenario ?? undefined,
+    timeoutSec: r.timeout_sec ?? 120,
     createdAt: new Date(r.created_at).toISOString(),
     updatedAt: new Date(r.updated_at).toISOString(),
   }
@@ -162,7 +163,7 @@ function lsSaveTools(list: McpToolDefinition[]): void {
 
 /** 列表（按创建时间倒序）。可传 scenario 过滤单一场景。 */
 export async function listMcps(
-  scenario?: McpScenario | null,
+  scenario?: string | null,
 ): Promise<McpInfo[]> {
   if (!isTauri) {
     const list = lsListMcp()
@@ -208,8 +209,8 @@ export async function upsertMcp(mcp: McpInfo): Promise<McpInfo[]> {
     `INSERT INTO mcp_info
        (id, alias_name, mcp_name, protocol_type, endpoint_url, headers, auth_type,
         auth_config, is_active, status, capabilities, properties, description,
-        scenario, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        scenario, timeout_sec, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET
        alias_name   = excluded.alias_name,
        mcp_name     = excluded.mcp_name,
@@ -224,6 +225,7 @@ export async function upsertMcp(mcp: McpInfo): Promise<McpInfo[]> {
        properties   = excluded.properties,
        description  = excluded.description,
        scenario     = excluded.scenario,
+       timeout_sec  = excluded.timeout_sec,
        updated_at   = excluded.updated_at`,
     [
       row.id,
@@ -240,6 +242,7 @@ export async function upsertMcp(mcp: McpInfo): Promise<McpInfo[]> {
       row.properties,
       row.description,
       row.scenario,
+      row.timeout_sec,
       row.created_at,
       row.updated_at,
     ],

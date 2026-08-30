@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ConfigProvider, theme as antdTheme } from 'antd'
+import { App, ConfigProvider, theme as antdTheme } from 'antd'
 import { useAppSelector } from '@/core/store'
 import { THEME_STORAGE_KEY } from '@/core/config/theme'
 import type { ThemeMode } from '@/core/store/slices/themeSlice'
@@ -65,6 +65,11 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   )
 
   return (
-    <ConfigProvider theme={antdThemeConfig}>{children}</ConfigProvider>
+    <ConfigProvider theme={antdThemeConfig}>
+      {/* message.top=72：顶栏高 56px + 16px 间距，避免消息提示遮挡顶部菜单栏 */}
+      <App component={false} message={{ top: 72 }}>
+        {children}
+      </App>
+    </ConfigProvider>
   )
 }

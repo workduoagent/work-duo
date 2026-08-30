@@ -5,7 +5,7 @@
  * `src/core/mapper/model-mapper.ts` 负责增删改查（@tauri-apps/plugin-sql）。
  * 这里只保留与 UI / 表单无关的纯领域定义，供页面、组件与 mapper 复用。
  */
-import type { ModelCategory, ModelProvider } from '@/types/core'
+import type { ModelProvider } from '@/types/core'
 
 /* ------------------------------------------------------------------ *
  * 1. 分类参数结构（异构，按 category 选其一挂载到 ModelConfig）
@@ -83,7 +83,7 @@ export interface RerankModelParams {
 export interface ModelConfig {
   id: string
   name: string // 展示名
-  category: ModelCategory
+  category: string // 模型大类（文本/多模态/语音转文字/...，驱动动态表单 paramFields）
   provider: ModelProvider
   baseUrl: string // API Base，如 https://api.openai.com/v1
   apiKey: string
@@ -108,17 +108,27 @@ export interface ModelConfig {
  * 3. 运行期常量 / 选项（枚举值在此，而非 core.d.ts）
  * ------------------------------------------------------------------ */
 
-export const MODEL_CATEGORY_OPTIONS: ReadonlyArray<{
-  value: ModelCategory
-  label: string
-}> = [
-  { value: 'text', label: '文本模型' },
-  { value: 'multimodal', label: '多模态模型' },
-  { value: 'stt', label: '语音转文字' },
-  { value: 'tts', label: '文字转语音' },
-  { value: 'embedding', label: '向量模型' },
-  { value: 'rerank', label: '重排序' },
-]
+const MODEL_CATEGORY_LABELS: Record<string, string> = {
+  text: '文本模型',
+  multimodal: '多模态模型',
+  stt: '语音转文字',
+  tts: '文字转语音',
+  embedding: '向量模型',
+  rerank: '重排序',
+}
+
+/** 模型大类展示名（兜底回退原 value）。分类固定、与代码参数结构严格对应，不进 scenario_category 字典。 */
+export function getModelCategoryLabel(s?: string | null): string {
+  if (!s) return '未分类'
+  return MODEL_CATEGORY_LABELS[s] ?? s
+}
+
+/** 模型大类固定选项（用于分类导航 / 表单下拉）。
+ *  注意：模型分类直接决定 paramFields 动态表单结构，必须与 model-file.ts 的参数接口、createEmptyModel 分支严格对应，
+ *  因此作为代码内固定枚举，不交由 scenario_category 字典托管（避免改名/排序导致与表单脱节）。 */
+export const MODEL_CATEGORY_OPTIONS: ReadonlyArray<{ value: string; label: string }> = Object.entries(
+  MODEL_CATEGORY_LABELS,
+).map(([value, label]) => ({ value, label }))
 
 export const PROVIDER_OPTIONS: ReadonlyArray<{
   value: ModelProvider
@@ -154,7 +164,7 @@ export const PROVIDER_OPTIONS: ReadonlyArray<{
 ];
 
 /** 创建一个带默认参数的新模型草稿（用于"新增"） */
-export function createEmptyModel(category: ModelCategory): ModelConfig {
+export function createEmptyModel(category: string): ModelConfig {
   const now = new Date().toISOString()
   const base: ModelConfig = {
     id: crypto.randomUUID(),
@@ -248,6 +258,9 @@ export function createEmptyModel(category: ModelCategory): ModelConfig {
           scoreThreshold: 0,
         },
       }
+    default:
+      // 自定义分类：无预置参数结构，由表单自身控制（paramFields 返回空）
+      return base
   }
 }
 
@@ -288,11 +301,11 @@ export function parseModelImport(text: string): ModelImportResult {
       return
     }
     const obj = item as Record<string, unknown>
-    const category = obj.category as ModelCategory
-    if (!MODEL_CATEGORY_OPTIONS.some((o) => o.value === category)) {
-      errors.push(`第 ${idx} 项 category 非法：${String(obj.category ?? '')}`)
-      return
-    }
+  const category = obj.category as string
+  if (typeof category !== 'string' || !category) {
+    errors.push(`第 ${idx} 项 category 缺失或非法`)
+    return
+  }
 
     const base = createEmptyModel(category)
     const merged: ModelConfig = {
@@ -313,7 +326,7 @@ export function parseModelImport(text: string): ModelImportResult {
     const param = obj[category]
     if (param && typeof param === 'object') {
       ;(merged as unknown as Record<string, unknown>)[category] = {
-        ...(base[category] as object),
+        ...((base as unknown as Record<string, unknown>)[category] as object),
         ...(param as object),
       }
     }

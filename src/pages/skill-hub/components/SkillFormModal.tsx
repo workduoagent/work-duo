@@ -19,11 +19,11 @@ import {
   Code2,
 } from 'lucide-react'
 import { Button, Input, Field, FieldLabel, Modal, Select } from '@/components/ui'
-import { Tabs, Upload, message, Alert, Radio, Divider } from 'antd'
+import { Tabs, Upload, Alert, Radio, Divider } from 'antd'
+import { useNotify } from '@/components/ui/notify'
 import { MarkdownEditor } from '@/components/markdown/MarkdownEditor'
 import { MonacoJsonEditor } from '@/components/code-editor'
 import {
-  SKILL_CATEGORY_OPTIONS,
   SCRIPT_LANGUAGE_OPTIONS,
   createEmptySkill,
   type SkillInfo,
@@ -31,7 +31,9 @@ import {
   type ResourceFile,
   type SkillFormData,
 } from '@/core/file/skill-file'
-import type { SkillCategory } from '@/types/core'
+import { readSkillFileTree, type SkillFileTreeNode } from '@/core/file/skillFs'
+import { ScenarioSelect } from '@/components/scenario'
+import { SkillFileTree } from './SkillFileTree'
 
 export interface SkillFormModalProps {
   open: boolean
@@ -62,6 +64,7 @@ export function SkillFormModal({
   skill,
   onSave,
 }: SkillFormModalProps) {
+  const { message } = useNotify()
   const [draft, setDraft] = useState<SkillInfo>(() =>
     skill ? structuredClone(skill) : createEmptySkill(),
   )
@@ -74,8 +77,14 @@ export function SkillFormModal({
   const [resDir, setResDir] = useState<string>('')
   const [resCustom, setResCustom] = useState<string>('')
 
+  // 头像（固定落盘为技能根目录 logo.<ext>，不单独入库字段）
+  const [logo, setLogo] = useState<{ file: ResourceFile; url: string } | null>(null)
+
   // 当前展开编辑内容的脚本 id
   const [expandedScriptId, setExpandedScriptId] = useState<string | null>(null)
+
+  // 编辑态：技能根目录下的文件树（只读展示）
+  const [fileTree, setFileTree] = useState<SkillFileTreeNode | null>(null)
 
   useEffect(() => {
     if (!open) return
@@ -85,7 +94,15 @@ export function SkillFormModal({
     setErrors(new Set())
     setResDir('')
     setResCustom('')
+    setLogo(null)
     setExpandedScriptId(null)
+    setFileTree(null)
+    // 编辑已有技能时，异步读取磁盘目录结构用于展示
+    if (skill) {
+      void readSkillFileTree(skill.identifier)
+        .then(setFileTree)
+        .catch(() => setFileTree(null))
+    }
   }, [open, skill])
 
   function patch(part: Partial<SkillInfo>) {
@@ -123,6 +140,25 @@ export function SkillFormModal({
     message.success(`已加入资源队列：${(dir ? dir + '/' : '') + file.name}`)
   }
 
+  async function handleLogoUpload(file: File) {
+    if (!/\.(png|jpe?g|gif|webp|svg)$/i.test(file.name)) {
+      message.warning('头像仅支持 png / jpg / gif / webp / svg 图片')
+      return false
+    }
+    const buf = await file.arrayBuffer()
+    const ext = file.name.split('.').pop()!.toLowerCase()
+    const mime = ext === 'jpg' ? 'jpeg' : ext === 'svg' ? 'svg+xml' : ext
+    const url = URL.createObjectURL(new Blob([buf], { type: `image/${mime}` }))
+    setLogo((prev) => {
+      if (prev) URL.revokeObjectURL(prev.url) // 释放上一张预览，避免泄漏
+      return {
+        file: { id: uid(), name: `logo.${ext}`, dir: '', data: new Uint8Array(buf) },
+        url,
+      }
+    })
+    message.success(`已选择头像（将落盘为 logo.${ext}）`)
+  }
+
   async function handleSave() {
     const errs = validate(draft)
     setErrors(errs)
@@ -132,7 +168,12 @@ export function SkillFormModal({
     }
     setSaving(true)
     try {
-      await onSave({ skill: { ...draft, updatedAt: new Date().toISOString() }, scripts, resources })
+      await onSave({
+        skill: { ...draft, updatedAt: new Date().toISOString() },
+        scripts,
+        // 头像作为根目录资源合并进去（无则不含）
+        resources: [...resources, ...(logo ? [logo.file] : [])],
+      })
       onOpenChange(false)
     } catch (e) {
       message.error(`保存失败：${e instanceof Error ? e.message : String(e)}`)
@@ -149,7 +190,7 @@ export function SkillFormModal({
       onOpenChange={onOpenChange}
       width={860}
       title={skill ? '编辑技能' : '新建技能'}
-      style={{ top: 24, maxWidth: '94vw' }}
+      style={{ maxWidth: '94vw' }}
       footer={
         <div className="sk__form-footer">
           <Button variant="soft" onClick={() => onOpenChange(false)}>
@@ -172,7 +213,7 @@ export function SkillFormModal({
               <div className="sk__grid">
                 <Field>
                   <FieldLabel>
-                    标识符 (identifier)<span className="sk__required">*</span>
+                    标识符<span className="sk__required">*</span>
                   </FieldLabel>
                   <Input
                     value={draft.identifier}
@@ -215,27 +256,66 @@ export function SkillFormModal({
                 </Field>
 
                 <Field>
-                  <FieldLabel>技能分类 (scenario)</FieldLabel>
-                  <Select
-                    value={draft.scenario}
-                    options={SKILL_CATEGORY_OPTIONS as never}
-                    allowClear
-                    placeholder="选择分类"
-                    onChange={(v) => patch({ scenario: (v as SkillCategory) ?? undefined })}
+                  <FieldLabel>技能分类</FieldLabel>
+                  <ScenarioSelect
+                    scope="SKILL"
+                    value={draft.scenario ?? null}
+                    onChange={(v) => patch({ scenario: v ?? undefined })}
+                    placeholder="选择或搜索分类，可回车新建"
                   />
                 </Field>
 
-                <Field>
-                  <FieldLabel>标签</FieldLabel>
-                  <Select
-                    mode="tags"
-                    value={draft.tags ?? []}
-                    placeholder="输入后回车，如 文档润色"
-                    tokenSeparators={[',']}
-                    onChange={(v) => patch({ tags: v as string[] })}
-                  />
-                </Field>
-              </div>
+        <Field>
+          <FieldLabel>标签</FieldLabel>
+          <Select
+            mode="tags"
+            value={draft.tags ?? []}
+            placeholder="输入后回车，如 文档润色"
+            tokenSeparators={[',']}
+            onChange={(v) => patch({ tags: v as string[] })}
+          />
+        </Field>
+
+        <Field className="sk__span-2">
+          <FieldLabel>技能头像</FieldLabel>
+          <div className="sk__logo-row">
+            <div className="sk__logo-preview">
+              {logo ? (
+                <img src={logo.url} alt="logo" className="sk__logo-img" />
+              ) : (
+                <span className="sk__logo-placeholder">
+                  <UploadIcon size={20} />
+                </span>
+              )}
+            </div>
+            <div className="sk__logo-actions">
+              <Upload
+                accept=".png,.jpg,.jpeg,.gif,.webp,.svg"
+                maxCount={1}
+                showUploadList={false}
+                beforeUpload={(file) => {
+                  void handleLogoUpload(file as unknown as File)
+                  return false
+                }}
+              >
+                <Button icon={<UploadIcon size={14} />}>
+                  {logo ? '更换头像' : '上传头像'}
+                </Button>
+              </Upload>
+              {logo && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  icon={<Trash2 size={14} />}
+                  onClick={() => setLogo(null)}
+                >
+                  移除
+                </Button>
+              )}
+            </div>
+          </div>
+        </Field>
+      </div>
             ),
           },
 
@@ -247,7 +327,7 @@ export function SkillFormModal({
               <Field>
                 <FieldLabel>
                   <Code2 size={14} className="sk__inline-icon" />
-                  指令内容 (instruction)
+                  指令内容
                 </FieldLabel>
                 <MarkdownEditor
                   value={draft.instruction ?? ''}
@@ -283,7 +363,7 @@ export function SkillFormModal({
                 <Field>
                   <FieldLabel>
                     <FileCode2 size={14} className="sk__inline-icon" />
-                    SKILL.md 正文 (skillMarkdown)
+                    SKILL.md 正文
                   </FieldLabel>
                   <MarkdownEditor
                     value={draft.skillMarkdown ?? ''}
@@ -307,7 +387,7 @@ export function SkillFormModal({
                   </Upload>
                 </div>
 
-                <Divider plain>脚本文件 (scripts)</Divider>
+                <Divider plain>脚本文件</Divider>
 
                 <div className="sk__script-list">
                   {scripts.map((s) => (
@@ -446,6 +526,20 @@ export function SkillFormModal({
                   </div>
                 )}
               </>
+            ),
+          },
+
+          /* ============ Tab 4：目录结构（编辑态展示磁盘文件树） ============ */
+          {
+            key: 'tree',
+            label: '目录结构',
+            children: (
+              <div className="sk__tree-wrap">
+                <p className="sk__tree-tip">
+                  当前技能在磁盘上的目录与文件（只读预览，修改请通过上方「文件资源」或编辑脚本）。
+                </p>
+                <SkillFileTree tree={fileTree} />
+              </div>
             ),
           },
         ]}

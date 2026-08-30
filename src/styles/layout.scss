@@ -283,7 +283,14 @@
   background: transparent;
   color: var(--color-foreground-muted);
   cursor: pointer;
-  transition: background-color 0.2s ease, color 0.2s ease, transform 0.2s ease;
+  overflow: hidden;
+  transition:
+    background-color 0.2s ease,
+    color 0.2s ease,
+    transform 0.2s ease,
+    width 0.5s cubic-bezier(0.32, 0.72, 0, 1),
+    margin 0.5s cubic-bezier(0.32, 0.72, 0, 1),
+    opacity 0.3s ease;
   -webkit-tap-highlight-color: transparent;
 }
 
@@ -304,37 +311,15 @@
   outline-offset: 2px;
 }
 
-/* 进入钻取态时，返回按钮轻微淡入 */
-.app-nav-pills__back[data-phase='in'] {
-  animation: pillBackIn 0.36s cubic-bezier(0.32, 0.72, 0, 1) both;
-}
-
-/* 退出钻取态（收起动画播放中）：返回按钮淡出且不可点 */
-.app-nav-pills__back[data-phase='out'] {
+/* 返回按钮：始终挂载，靠 data-hidden 平滑收起宽度。
+   返回上级时它由可见态过渡到 width:0，列表随之平滑变宽、菜单内容平滑左移，
+   避免直接卸载导致布局瞬间左跳（闪动）。 */
+.app-nav-pills__back[data-hidden='true'] {
+  width: 0;
+  margin: 0;
+  opacity: 0;
   pointer-events: none;
-  animation: pillBackOut 0.3s ease forwards;
-}
-
-@keyframes pillBackIn {
-  from {
-    opacity: 0;
-    transform: translateX(-6px);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(0);
-  }
-}
-
-@keyframes pillBackOut {
-  from {
-    opacity: 1;
-    transform: translateX(0);
-  }
-  to {
-    opacity: 0;
-    transform: translateX(-6px);
-  }
+  transform: scale(0.85);
 }
 
 /* 二级菜单：进场「从左往右依次铺开」（宽度展开 + 淡入 + 左侧滑入） */
@@ -389,10 +374,12 @@
   }
 
   .app-nav-pills__item--child[data-phase='enter'],
-  .app-nav-pills__item--child[data-phase='exit'],
-  .app-nav-pills__back[data-phase='in'],
-  .app-nav-pills__back[data-phase='out'] {
+  .app-nav-pills__item--child[data-phase='exit'] {
     animation: none;
+  }
+
+  .app-nav-pills__back {
+    transition: none;
   }
 
   .app-nav-pills__item--child[data-phase='exit'] {

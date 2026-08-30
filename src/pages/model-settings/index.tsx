@@ -6,8 +6,9 @@
  * - 数据持久化走 src/core/mapper/model-mapper.ts（SQLite：workduo.db）。
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { SquarePlus, Import } from 'lucide-react'
+import { SquarePlus, Import, Download } from 'lucide-react'
 import { Button } from '@/components/ui'
+import { useNotify } from '@/components/ui/notify'
 import {
   bulkUpsertModels,
   deleteModel,
@@ -15,8 +16,9 @@ import {
   setModelEnabled,
   upsertModel,
 } from '@/core/mapper/model-mapper'
-import type { ModelConfig } from '@/core/file/model-file'
-import type { ModelCategory } from '@/types/core'
+import { type ModelConfig, MODEL_CATEGORY_OPTIONS } from '@/core/file/model-file'
+import { saveTextFile } from '@/core/file/export-file'
+import { BatchExportModal } from '@/components/export'
 import { CategoryTabs } from './components/CategoryTabs'
 import { ModelList } from './components/ModelList'
 import { ModelFormModal } from './components/ModelFormModal'
@@ -24,11 +26,13 @@ import { ImportModal } from './components/ImportModal'
 import './index.scss'
 
 export default function ModelSettingsPage() {
-  const [category, setCategory] = useState<ModelCategory>('text')
+  const { message } = useNotify()
+  const [category, setCategory] = useState<string>('text')
   const [models, setModels] = useState<ModelConfig[]>([])
   const [loading, setLoading] = useState(true)
   const [modalOpen, setModalOpen] = useState(false)
   const [importOpen, setImportOpen] = useState(false)
+  const [exportOpen, setExportOpen] = useState(false)
   // null = 新增；非 null = 编辑该模型
   const [editing, setEditing] = useState<ModelConfig | null>(null)
 
@@ -47,12 +51,14 @@ export default function ModelSettingsPage() {
 
   // 各分类数量徽章
   const counts = useMemo(() => {
-    const acc = {} as Partial<Record<ModelCategory, number>>
+    const acc = {} as Partial<Record<string, number>>
     for (const m of models) {
       acc[m.category] = (acc[m.category] ?? 0) + 1
     }
     return acc
   }, [models])
+
+  const categoryOptions = [...MODEL_CATEGORY_OPTIONS]
 
   const visibleModels = useMemo(
     () => models.filter((m) => m.category === category),
@@ -85,6 +91,24 @@ export default function ModelSettingsPage() {
     setModels(await bulkUpsertModels(models))
   }
 
+  // 批量导出：弹窗选中的模型序列化为 models.json（结构同导入），由用户选择保存位置
+  const exportItems = useMemo(
+    () =>
+      models.map((m) => ({
+        id: m.id,
+        label: m.name || '(未命名)',
+        sub: m.modelName || m.id,
+      })),
+    [models],
+  )
+
+  async function handleExport(ids: string[]) {
+    const picked = models.filter((m) => ids.includes(m.id))
+    const json = JSON.stringify(picked, null, 2)
+    const ok = await saveTextFile('models.json', json)
+    if (ok) message.success(`已导出 ${picked.length} 个模型到 models.json`)
+  }
+
   return (
     <div className="ms">
       <header className="ms__head">
@@ -99,6 +123,15 @@ export default function ModelSettingsPage() {
             <Import size={14} />
             导入配置
           </Button>
+          <Button
+            variant="soft"
+            size="sm"
+            disabled={models.length === 0}
+            onClick={() => setExportOpen(true)}
+          >
+            <Download size={14} />
+            批量导出
+          </Button>
           <Button size="sm" onClick={openCreate}>
             <SquarePlus size={14} />
             接入模型
@@ -107,7 +140,12 @@ export default function ModelSettingsPage() {
       </header>
 
       <div className="ms__layout">
-        <CategoryTabs value={category} onChange={setCategory} counts={counts} />
+        <CategoryTabs
+          options={categoryOptions}
+          value={category}
+          onChange={setCategory}
+          counts={counts}
+        />
 
         <ModelList
           category={category}
@@ -131,6 +169,15 @@ export default function ModelSettingsPage() {
         open={importOpen}
         onOpenChange={setImportOpen}
         onImported={handleImport}
+      />
+
+      <BatchExportModal
+        open={exportOpen}
+        onOpenChange={setExportOpen}
+        title="批量导出模型"
+        description="勾选要导出的模型（可单选、多选或全选），导出为 models.json，便于备份或迁移。"
+        items={exportItems}
+        onConfirm={handleExport}
       />
     </div>
   )

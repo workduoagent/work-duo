@@ -90,6 +90,8 @@ INSERT OR IGNORE INTO app_config (key, value) VALUES ('session_auto_new', 'false
 INSERT OR IGNORE INTO app_config (key, value) VALUES ('session_idle_hours', '24');
 -- 导入的记忆列表（JSON 数组，见 ImportedMemory）。
 INSERT OR IGNORE INTO app_config (key, value) VALUES ('imported_memories', '[]');
+-- 知识库存储根路径（默认 $APPDATA/.knowledge_base，可在「设置」页修改）。
+INSERT OR IGNORE INTO app_config (key, value) VALUES ('knowledge_base_path', '$APPDATA/.knowledge_base');
 
 -- ============ MCP 服务接入表（mcp_info） ============
 -- 行映射见 src/types/database.d.ts 的 McpInfoRow。
@@ -110,7 +112,7 @@ CREATE TABLE IF NOT EXISTS mcp_info
     protocol_type TEXT   NOT NULL,
     endpoint_url TEXT,
     headers      TEXT,
-    auth_type    TEXT    NOT NULL,
+    auth_type    TEXT   NOT NULL,
     auth_config  TEXT,
     is_active    INTEGER NOT NULL DEFAULT 1,
     status       INTEGER NOT NULL DEFAULT 1,
@@ -118,6 +120,7 @@ CREATE TABLE IF NOT EXISTS mcp_info
     properties   TEXT,
     description  TEXT,
     scenario     TEXT,
+    timeout_sec  INTEGER NOT NULL DEFAULT 120,
     created_at   INTEGER NOT NULL,
     updated_at   INTEGER NOT NULL
 );
@@ -147,4 +150,99 @@ CREATE TABLE IF NOT EXISTS mcp_tool_definition
     test_params   TEXT,
     created_at    INTEGER NOT NULL,
     updated_at    INTEGER NOT NULL
+);
+
+-- ============ 场景分类字典表（scenario_category） ============
+-- 统一管理 MCP / Skill / KB 的「域(scope) - 选项(value) - 显示名(label)」枚举，
+-- 替代两处前端硬编码。业务表（mcp_info.scenario / skill_info.scenario / knowledge_base.scenario）
+-- 存的是 value；label 可在此行内编辑，删除某选项时会置空对应业务表引用。
+-- 注：LLM 模型分类不纳入本字典（模型大类直接驱动动态表单，须与代码严格对应）；
+--     KB 知识库分类接入本字典（scope='KB'，对应 knowledge_base.scenario）。
+-- 时间戳为 epoch 毫秒（整型），与既有表一致。
+CREATE TABLE IF NOT EXISTS scenario_category
+(
+    id          TEXT    PRIMARY KEY,
+    scope       TEXT    NOT NULL,   -- 域：MCP / SKILL / KB
+    value       TEXT    NOT NULL,   -- 业务引用 key（如 file-system / pay-skill）
+    label       TEXT    NOT NULL,   -- 可编辑显示名
+    created_at  INTEGER NOT NULL,
+    updated_at  INTEGER NOT NULL,
+    CONSTRAINT uk_scenario_scope_value UNIQUE (scope, value)
+);
+
+-- 种子：录入既有硬编码（value 与旧业务数据一致，零迁移）。
+-- INSERT OR IGNORE：手动改过的 label 不会被覆盖；新增自定义项不会冲突。
+INSERT OR IGNORE INTO scenario_category (id, scope, value, label, created_at, updated_at) VALUES
+  -- MCP 使用场景（原 mcp_info.scenario 的 6 个值）
+  ('sc-mcp-file-system',    'MCP', 'file-system',  '文件系统',   1700000000000, 1700000000000),
+  ('sc-mcp-web-search',     'MCP', 'web-search',    '网络搜索',   1700000000000, 1700000000000),
+  ('sc-mcp-database',       'MCP', 'database',      '数据库',     1700000000000, 1700000000000),
+  ('sc-mcp-dev-tools',      'MCP', 'dev-tools',     '开发工具',   1700000000000, 1700000000000),
+  ('sc-mcp-communication',  'MCP', 'communication', '通信协作',   1700000000000, 1700000000000),
+  ('sc-mcp-productivity',   'MCP', 'productivity',  '生产力',     1700000000000, 1700000000000),
+  -- Skill 技能分类（原 skill_info.scenario 的 13 个值）
+  ('sc-skill-pay-skill',          'SKILL', 'pay-skill',           'Pay Skill',     1700000000000, 1700000000000),
+  ('sc-skill-office-efficiency',  'SKILL', 'office-efficiency',   '办公效率',      1700000000000, 1700000000000),
+  ('sc-skill-content-creation',   'SKILL', 'content-creation',    '内容创作',      1700000000000, 1700000000000),
+  ('sc-skill-dev-programming',    'SKILL', 'dev-programming',     '开发编程',      1700000000000, 1700000000000),
+  ('sc-skill-data-analysis',      'SKILL', 'data-analysis',       '数据分析',      1700000000000, 1700000000000),
+  ('sc-skill-design-media',       'SKILL', 'design-media',        '设计多媒体',    1700000000000, 1700000000000),
+  ('sc-skill-ai-agent',           'SKILL', 'ai-agent',           'AI Agent',     1700000000000, 1700000000000),
+  ('sc-skill-knowledge-mgmt',     'SKILL', 'knowledge-management','知识管理',      1700000000000, 1700000000000),
+  ('sc-skill-business-ops',        'SKILL', 'business-ops',       '商业运营',      1700000000000, 1700000000000),
+  ('sc-skill-education',           'SKILL', 'education',          '教育学习',      1700000000000, 1700000000000),
+  ('sc-skill-professional',        'SKILL', 'professional',        '行业专业',      1700000000000, 1700000000000),
+  ('sc-skill-it-ops-security',     'SKILL', 'it-ops-security',     'IT 运维与安全', 1700000000000, 1700000000000),
+  ('sc-skill-life-service',        'SKILL', 'life-service',        '生活服务',      1700000000000, 1700000000000);
+
+-- ============ 知识库表（knowledge_base） ============
+-- 行映射见 src/types/database.d.ts 的 KnowledgeBaseRow。
+-- 严格适配用户给出的 PostgreSQL 设计（public.knowledge_base）转 SQLite：
+--   id         本地 UUID（文本主键），与 work-duo「模型/技能」约定一致（原 PG int8 转 TEXT）；
+--   logo       知识库 Logo（存相对 KB 目录的路径或 data URL，可空）；
+--   identifier 唯一标识 slug（同时是磁盘目录名），$APPDATA/.knowledge_base/<identifier>/；
+--   name       知识库名称；description 简介；
+--   scenario   场景分类 key（对应 scenario_category scope='KB' 的 value，可空）；
+--   created_at / updated_at：epoch 毫秒（整型，原 PG timestamp(6) 转 INTEGER）。
+--   file_count / file_size：冗余聚合字段（总文件数 / 总字节数），由资产扫描后回写 knowledge_base，
+--   列表/详情页直读这两列，不再 LEFT JOIN knowledge_asset 聚合。
+CREATE TABLE IF NOT EXISTS knowledge_base
+(
+    id          TEXT    PRIMARY KEY,
+    logo        TEXT,
+    identifier  TEXT    NOT NULL,
+    name        TEXT    NOT NULL,
+    description TEXT,
+    scenario    TEXT,
+    created_at  INTEGER NOT NULL,
+    updated_at  INTEGER NOT NULL,
+    file_count  INTEGER NOT NULL DEFAULT 0,
+    file_size   INTEGER NOT NULL DEFAULT 0,
+    CONSTRAINT uk_knowledge_base_identifier UNIQUE (identifier)
+);
+
+-- ============ 知识库资产表（knowledge_asset） ============
+-- 行映射见 src/types/database.d.ts 的 KnowledgeAssetRow。
+-- 严格适配用户给出的 PostgreSQL 设计（public.knowledge_asset）转 SQLite：
+--   id         本地 UUID（文本主键）；
+--   kb_id      外键，引用 knowledge_base.id（原 PG int8 转 TEXT）；
+--   name       数字资产名称（文件名，含扩展名）；
+--   type       资产大类：1-文档 2-图片 3-音频 4-视频 5-网页（原 PG int4）；
+--   file_ext   文件扩展名（不含点、小写，原 PG file_ext）；
+--   file_size  文件大小（字节，原 PG int8 转 INTEGER）；
+--   file_path  存储路径（相对知识库根目录，如 'docs/a.txt'，原 PG file_path）；
+--   created_at / updated_at：epoch 毫秒（整型，原 PG timestamp(6) 转 INTEGER）。
+-- 唯一约束：kb_id + file_path（同一知识库内路径唯一确定一个文件）。
+CREATE TABLE IF NOT EXISTS knowledge_asset
+(
+    id          TEXT    PRIMARY KEY,
+    kb_id       TEXT    NOT NULL,
+    name        TEXT    NOT NULL,
+    type        INTEGER NOT NULL DEFAULT 1,
+    file_ext    TEXT,
+    file_size   INTEGER NOT NULL DEFAULT 0,
+    file_path   TEXT    NOT NULL,
+    created_at  INTEGER NOT NULL,
+    updated_at  INTEGER NOT NULL,
+    CONSTRAINT uk_kb_asset UNIQUE (kb_id, file_path)
 );

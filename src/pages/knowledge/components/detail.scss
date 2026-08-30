@@ -1,0 +1,647 @@
+/* 知识库详情页 + 目录树 + 多格式查看器 */
+.kb-detail {
+  padding: 20px 28px 32px;
+  max-width: 1280px;
+  margin: 0 auto;
+  /* 参考 skill 模块详情页：钉死为窗口可用高度，页面本身不滚动；
+     头部 / 信息块为固定块，文件块 flex:1 占剩余高度，目录与内容各自内部细滚动；
+     窄屏（堆叠布局）才允许整体滚动。 */
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
+
+  @media (max-width: 900px) {
+    overflow-y: auto;
+  }
+
+  &__topbar {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex: none;
+    margin-bottom: 16px;
+  }
+
+  &__nav {
+    flex: none;
+    /* 返回按钮与头部信息同行排列，纵向间距交由 .kb-detail__topbar 统一处理 */
+    padding-top: 2px;
+  }
+
+  &__loading {
+    padding: 80px 0;
+    text-align: center;
+    color: var(--color-foreground-muted);
+  }
+
+  &__header {
+    flex: 1;
+    min-width: 0;
+  }
+
+  &__header-info {
+    min-width: 0;
+    display: grid;
+    // 三段并排成一行：标识(标题) | 简介(弹性占满) | 元信息(右对齐)
+    grid-template-columns: max-content minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 16px;
+  }
+
+  &__title-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: nowrap;
+    min-width: 0;
+  }
+
+  &__title {
+    margin: 0;
+    font-size: 20px;
+    font-weight: 650;
+    color: var(--color-foreground-intense);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  &__header-actions {
+    display: inline-flex;
+    gap: 8px;
+    margin-left: auto;
+  }
+
+  &__desc {
+    margin: 0;
+    font-size: 13px;
+    line-height: 1.4;
+    color: var(--color-foreground-muted);
+    min-width: 0;
+    // 单行省略，保持整行高度紧凑；完整内容由 JSX 的 title 悬浮提示展示
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &__meta {
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 16px;
+    flex: none;
+    justify-content: flex-end;
+    font-size: 12px;
+    color: var(--color-foreground-muted);
+  }
+
+  &__meta-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  // 窄屏回退：横向行放不下时改为垂直堆叠，避免溢出
+  @media (max-width: 720px) {
+    &__header-info {
+      grid-template-columns: 1fr;
+      gap: 8px;
+    }
+
+    &__meta {
+      justify-content: flex-start;
+      flex-wrap: wrap;
+    }
+  }
+
+  &__block {
+    margin-bottom: 18px;
+    flex: none;
+
+    &--fill {
+      margin-bottom: 0;
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+    }
+  }
+
+  &__block-title {
+    margin: 0 0 10px;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--color-foreground-intense);
+    flex: none;
+  }
+
+  &__url {
+    font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+    font-size: 12px;
+    color: var(--color-foreground-muted);
+    word-break: break-all;
+  }
+
+  &__explorer {
+    display: grid;
+    grid-template-columns: 280px 1fr;
+    gap: 16px;
+    flex: 1;
+    min-height: 0;
+  }
+
+  &__explorer-tree {
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-card);
+    background: var(--color-background-subtle);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  &__explorer-tree-title {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 10px 14px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--color-foreground-muted);
+    border-bottom: 1px solid var(--color-border-muted);
+    flex: none;
+  }
+
+  &__tree-title-left {
+    display: inline-flex;
+    align-items: center;
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  &__tree-tools {
+    display: inline-flex;
+    gap: 2px;
+  }
+
+  &__logo {
+    width: 40px;
+    height: 40px;
+    flex: none;
+    border-radius: 10px;
+    background: var(--color-brand-50);
+    color: var(--color-brand-600);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+
+    img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+  }
+
+  &__explorer-tree-body {
+    flex: 1;
+    min-height: 0;
+    padding: 8px 6px;
+    overflow: auto;
+  }
+
+  &__explorer-view {
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-card);
+    background: var(--color-background);
+    overflow: auto;
+    padding: 14px 16px;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    /* padding 已含在 100% 内，避免 100%+padding 撑破父级触发 X 轴滚动条 */
+    box-sizing: border-box;
+
+    /* 让右侧查看器的根元素（PDF / 图片 / 文档 / 表格 / 媒体等）默认撑满内容区高度，
+       避免再出现「容器只有一半」的情况 */
+    > * {
+      flex: 1 1 auto;
+      min-height: 0;
+      width: 100%;
+      box-sizing: border-box;
+    }
+
+    /* 文本 / 代码查看器（Monaco）撑满内容区，配合 height="100%" 不溢出页面 */
+    .mcphub-monaco {
+      flex: 1;
+      min-height: 0;
+    }
+  }
+
+  &__muted {
+    color: var(--color-foreground-muted);
+    font-size: 13px;
+    padding: 12px 0;
+  }
+
+  &__empty {
+    padding: 80px 0;
+    text-align: center;
+  }
+}
+
+/* 目录树 */
+.kb-tree {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+
+  &__empty {
+    padding: 16px;
+    color: var(--color-foreground-muted);
+    font-size: 13px;
+  }
+
+  &__row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 8px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 13px;
+    color: var(--color-foreground);
+    user-select: none;
+
+    &:hover {
+      background: var(--color-background-muted);
+    }
+
+    /* 当前在右侧展示的文件：仅以左侧色点（.kb-tree__dot）标记，不做整行反色；
+       与「选中目录」的浅色背景明显区分，避免与目录高亮混淆 */
+
+    /* 当前上传 / 新建目标目录（点击文件夹即选中）：浅色高亮，与文件选中背景区分 */
+    &--folder.is-active {
+      background: var(--color-brand-50);
+      color: var(--color-brand-700);
+      font-weight: 600;
+    }
+
+    /* 拖拽放置目标（文件夹）高亮 */
+    &--folder.is-drop-target {
+      background: var(--color-brand-100, var(--color-brand-50));
+      color: var(--color-brand-700);
+      box-shadow: inset 0 0 0 1.5px var(--color-brand-400, var(--color-brand-500));
+    }
+  }
+
+  &__caret {
+    display: inline-flex;
+    width: 14px;
+    color: var(--color-foreground-muted);
+
+    &--placeholder {
+      visibility: hidden;
+    }
+  }
+
+  &__icon {
+    flex: none;
+
+    &--folder {
+      color: var(--color-brand-500);
+    }
+
+    &--file {
+      color: var(--color-foreground-muted);
+    }
+  }
+
+  &__name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* 当前在右侧展示的文件的左侧色点（流内，不贴树边）；仅以色点指引，不做整行反色 */
+  &__dot {
+    flex: none;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--color-brand-500);
+    box-shadow: 0 0 0 2px var(--color-background);
+    margin-right: 2px;
+  }
+
+  /* 目录标题区展示的当前目标目录（相对根目录路径） */
+  &__active-dir {
+    margin-left: 6px;
+    font-size: 11px;
+    font-weight: 400;
+    color: var(--color-foreground-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 130px;
+  }
+
+  &__del {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    margin-left: auto;
+    padding: 0;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--color-foreground-muted);
+    cursor: pointer;
+    transition: color 0.15s ease, background 0.15s ease;
+
+    &:hover {
+      color: var(--color-danger);
+      background: var(--color-background-muted);
+    }
+  }
+}
+
+/* 多格式查看器 */
+.kb-viewer {
+  &__muted {
+    color: var(--color-foreground-muted);
+    font-size: 13px;
+    padding: 12px 0;
+  }
+
+  &__loading {
+    padding: 24px 0;
+    text-align: center;
+    color: var(--color-foreground-muted);
+  }
+
+  &__pdf {
+    /* 父级 .kb-detail__explorer-view > * 已设 flex:1，这里去掉固定高度，
+       让 PDF 预览区随右侧内容区 100% 自适应，不再只显示一半 */
+    min-height: 0;
+    border: none;
+    border-radius: 8px;
+    overflow: hidden;
+
+    /* react-pdf-viewer 的 viewer 默认占满容器；确保内部包装层也拉满 */
+    .rpv-core__viewer {
+      height: 100% !important;
+    }
+  }
+
+  &__docx {
+    padding: 8px 4px;
+    background: var(--color-background);
+    overflow: auto;
+  }
+
+  &__xlsx {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+
+    .kb-xlsx__tabs {
+      flex: none;
+    }
+
+    .kb-viewer__grid {
+      flex: 1;
+      min-height: 0;
+    }
+  }
+
+  &__pptx-stage {
+    width: 100%;
+    overflow: auto;
+    padding: 12px;
+    background: var(--color-background-muted, #f5f5f5);
+    border-radius: 8px;
+  }
+
+  .pptx-slide {
+    box-shadow: var(--shadow-sm);
+    border-radius: 4px;
+    overflow: hidden;
+  }
+
+  &__image-wrap {
+    /* 接住 .kb-detail__explorer-view（flex column + 100% 高度）的剩余高度，
+       否则只会塌缩成图片内容高度，看起来只占半屏 */
+    flex: 1;
+    min-height: 0;
+    width: 100%;
+    box-sizing: border-box; /* 含住 padding，避免 100%+padding 撑破父级触发 X 轴滚动条 */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 8px;
+
+    /* 让 react-zoom-pan-pinch 的缩放视口也撑满（库默认 inline width/height: fit-content） */
+    .react-transform-wrapper,
+    .react-transform-component {
+      width: 100% !important;
+      height: 100% !important;
+      max-width: 100%;
+      max-height: 100%;
+    }
+  }
+
+  &__image {
+    /* 在容器内按比例缩放铺满，而非写死 600px */
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+    border-radius: 8px;
+    box-shadow: var(--shadow-sm);
+    user-select: none;
+    -webkit-user-drag: none; /* 关键：禁用原生图片拖拽，否则鼠标拖图会触发浏览器 drag 而非平移 */
+  }
+
+  &__media-wrap {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 8px;
+    min-height: 0;
+  }
+
+  &__media {
+    max-width: 100%;
+    border-radius: 8px;
+    box-shadow: var(--shadow-sm);
+
+    /* 视频类保持 16:9 观感，音频类占满宽度 */
+    &:not(audio) {
+      max-height: 600px;
+    }
+
+    &audio {
+      width: 100%;
+    }
+  }
+
+  /* video.js 播放器尺寸约束 */
+  &__media-wrap .video-js {
+    width: 100%;
+    max-width: 880px;
+    border-radius: 8px;
+    overflow: hidden;
+  }
+
+  /* ag-grid 表格容器：在 xlsx 面板内随父级 flex:1 自适应，不再写死 560px */
+  &__grid {
+    width: 100%;
+    min-height: 0;
+
+    .ag-root-wrapper {
+      border-color: var(--color-border);
+      border-radius: var(--radius-card);
+    }
+  }
+
+  /* wavesurfer 音频预览 */
+  &__audio {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 12px 0;
+  }
+
+  &__wave {
+    width: 100%;
+  }
+
+  &__audio-btn {
+    align-self: flex-start;
+    padding: 6px 18px;
+    font-size: 13px;
+    border: 1px solid var(--color-border);
+    border-radius: 999px;
+    background: var(--color-brand-500);
+    color: #fff;
+    cursor: pointer;
+    transition: background 0.15s ease;
+
+    &:hover {
+      background: var(--color-brand-600);
+    }
+  }
+
+  /* react-reader 电子书容器：随父级 flex:1 自适应 */
+  &__epub {
+    min-height: 0;
+    background: var(--color-background);
+
+    .epub-container,
+    .epub-view {
+      height: 100% !important;
+    }
+  }
+}
+
+/* xlsx 表格样式 */
+.kb-xlsx {
+  &__sheet {
+    margin-bottom: 18px;
+  }
+
+  &__name {
+    margin: 0 0 8px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--color-foreground-intense);
+  }
+
+  &__tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 10px;
+  }
+
+  &__tab {
+    padding: 4px 12px;
+    font-size: 12px;
+    border: 1px solid var(--color-border);
+    border-radius: 999px;
+    background: var(--color-background);
+    color: var(--color-foreground-muted);
+    cursor: pointer;
+    transition: all 0.15s ease;
+
+    &.is-active {
+      background: var(--color-brand-500);
+      border-color: var(--color-brand-500);
+      color: #fff;
+    }
+
+    &:hover:not(.is-active) {
+      color: var(--color-foreground);
+      border-color: var(--color-border-strong);
+    }
+  }
+
+  table {
+    border-collapse: collapse;
+    font-size: 12px;
+    width: 100%;
+
+    th,
+    td {
+      border: 1px solid var(--color-border);
+      padding: 6px 10px;
+      text-align: left;
+      color: var(--color-foreground);
+      white-space: nowrap;
+    }
+
+    th {
+      background: var(--color-background-muted);
+      font-weight: 600;
+    }
+
+    tr:nth-child(even) td {
+      background: var(--color-background-subtle);
+    }
+  }
+}
+
+/* docx-preview 容器微调 */
+.kb-docx :global(.docx-wrapper) {
+  background: transparent;
+  padding: 0;
+}
+
+.kb-docx {
+  font-size: 14px;
+  color: var(--color-foreground);
+}
+
+/* Mermaid 代码块渲染结果 */
+.md-mermaid {
+  margin: 14px 0;
+  text-align: center;
+
+  svg {
+    max-width: 100%;
+    height: auto;
+  }
+}
+
+.md-mermaid__error {
+  text-align: left;
+  color: var(--color-danger, #d92d20);
+  font-size: 12px;
+  white-space: pre-wrap;
+}

@@ -62,6 +62,8 @@
   .mcphub-monaco__body {
     position: relative;
     min-height: 0;
+    /* 在定高父容器（如详情页文件浏览器）内撑满，配合 height="100%" 生效 */
+    flex: 1;
 
     // 让 Monaco 内嵌区域与容器圆角对齐
     .monaco-editor,

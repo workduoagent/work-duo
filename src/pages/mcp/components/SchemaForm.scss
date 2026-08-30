@@ -1,0 +1,78 @@
+.mcphub-schema-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+
+  &--nested {
+    padding: 12px 14px;
+    margin: 4px 0;
+    border: 1px dashed var(--color-border);
+    border-radius: 10px;
+    background: var(--color-bg-subtle, rgba(127, 127, 127, 0.04));
+  }
+
+  &__empty {
+    margin: 0;
+    color: var(--color-foreground-muted);
+    font-size: 13px;
+  }
+
+  &__field {
+    margin-bottom: 0;
+    align-items: flex-start; // Switch 等宽度自适应控件不会被拉伸到整行
+  }
+
+  &__key {
+    font-family: var(--font-mono, monospace);
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--color-foreground);
+  }
+
+  &__opt {
+    margin-left: 6px;
+    padding: 1px 6px;
+    font-size: 11px;
+    line-height: 1.6;
+    border-radius: 999px;
+    color: var(--color-foreground-muted);
+    background: var(--color-bg-subtle, rgba(127, 127, 127, 0.1));
+  }
+
+  &__desc {
+    margin: 4px 0 0;
+    font-size: 12px;
+    line-height: 1.6;
+    color: var(--color-foreground-muted);
+    white-space: pre-line;
+  }
+}
+
+.mcphub-tool-modal__mode {
+  display: inline-flex;
+  gap: 4px;
+  padding: 3px;
+  border-radius: 999px;
+  background: var(--color-bg-subtle, rgba(127, 127, 127, 0.1));
+
+  button {
+    border: none;
+    background: transparent;
+    color: var(--color-foreground-muted);
+    font-size: 12px;
+    padding: 4px 12px;
+    border-radius: 999px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+
+    &.is-active {
+      background: var(--color-bg, #fff);
+      color: var(--color-foreground);
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+    }
+
+    &:hover {
+      color: var(--color-foreground);
+    }
+  }
+}

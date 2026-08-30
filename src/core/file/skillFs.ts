@@ -17,7 +17,7 @@
  */
 import { isTauri } from '@/core/config'
 import { appDataDir, resourceDir, join } from '@tauri-apps/api/path'
-import { mkdir, writeTextFile, writeFile, remove } from '@tauri-apps/plugin-fs'
+import { mkdir, writeTextFile, writeFile, remove, readFile, readDir } from '@tauri-apps/plugin-fs'
 import {
   SKILL_SUBDIRS,
   withLangExt,
@@ -25,6 +25,10 @@ import {
   type ScriptFile,
   type SkillInfo,
 } from './skill-file'
+import { resolveSkillBasePath } from '@/core/mapper/skill-mapper'
+
+/** 头像支持的扩展名（固定前缀 logo，落盘于技能根目录）。 */
+export const LOGO_EXTS = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg']
 
 /** 解析 skill_path 中的 $APPDATA / $RESOURCE 占位为真实目录。 */
 export async function resolveRealSkillBasePath(rawBase: string): Promise<string> {
@@ -81,6 +85,8 @@ export async function writeScript(
 ): Promise<void> {
   if (!isTauri) return
   const fileName = withLangExt(name, language)
+  // 确保 scripts 父目录存在（自定义目录也能写）
+  await mkdir(await join(dir, 'scripts'), { recursive: true })
   await writeTextFile(await join(dir, 'scripts', fileName), content ?? '')
 }
 
@@ -92,10 +98,47 @@ export async function writeResourceFile(
   data: Uint8Array,
 ): Promise<void> {
   if (!isTauri) return
-  const target = subDir
-    ? await join(dir, subDir, name)
-    : await join(dir, name)
+  // 关键：确保目标父目录存在（导入技能可能含任意子目录，如 hooks/tests/references/sub），
+  // 否则在写入嵌套文件时会因父目录不存在而报 os error 3。
+  const parent = subDir ? await join(dir, subDir) : dir
+  await mkdir(parent, { recursive: true })
+  const target = subDir ? await join(dir, subDir, name) : await join(dir, name)
   await writeFile(target, data)
+}
+
+/** Uint8Array -> base64（分块避免大文件调用栈溢出）。 */
+function uint8ToBase64(bytes: Uint8Array): string {
+  let bin = ''
+  const chunk = 0x8000
+  for (let i = 0; i < bytes.length; i += chunk) {
+    bin += String.fromCharCode(...bytes.subarray(i, i + chunk))
+  }
+  return btoa(bin)
+}
+
+/**
+ * 读取技能头像（固定为技能根目录下的 logo.<ext>）。
+ * 依次尝试 LOGO_EXTS，找到即返回 data URL；都不存在或出错返回 null（由 UI 回退为名称首字）。
+ */
+export async function readSkillLogoBase64(identifier: string): Promise<string | null> {
+  if (!isTauri) return null
+  try {
+    const rawBase = await resolveSkillBasePath()
+    const base = await resolveRealSkillBasePath(rawBase)
+    const dir = await getSkillDir(base, identifier)
+    for (const ext of LOGO_EXTS) {
+      try {
+        const data = (await readFile(await join(dir, `logo.${ext}`))) as Uint8Array
+        const mime = ext === 'jpg' ? 'jpeg' : ext === 'svg' ? 'svg+xml' : ext
+        return `data:image/${mime};base64,${uint8ToBase64(data)}`
+      } catch {
+        /* 尝试下一个扩展名 */
+      }
+    }
+  } catch {
+    /* 路径解析失败等，统一回退 */
+  }
+  return null
 }
 
 /** 删除技能目录（删除技能时同步清理磁盘）。非 Tauri 或已不存在则静默。 */
@@ -107,6 +150,160 @@ export async function removeSkillDir(
   const base = await resolveRealSkillBasePath(rawBase)
   const dir = await getSkillDir(base, identifier)
   await remove(dir, { recursive: true })
+}
+
+/** 目录树节点（用于编辑/详情页展示技能根目录下的全部文件结构）。 */
+export interface SkillFileTreeNode {
+  /** 文件 / 目录名 */
+  name: string
+  /** 相对技能根目录的路径（不含根目录名），根节点为空串 */
+  relPath: string
+  isDir: boolean
+  children: SkillFileTreeNode[]
+}
+
+/**
+ * 递归读取技能根目录的文件树（目录优先、同类型按名称排序）。
+ * 非 Tauri 或路径不可读返回 null（由 UI 回退空提示）。
+ */
+export async function readSkillFileTree(
+  identifier: string,
+): Promise<SkillFileTreeNode | null> {
+  if (!isTauri) return null
+  try {
+    const rawBase = await resolveSkillBasePath()
+    const base = await resolveRealSkillBasePath(rawBase)
+    const dir = await getSkillDir(base, identifier)
+    const root: SkillFileTreeNode = {
+      name: identifier,
+      relPath: '',
+      isDir: true,
+      children: [],
+    }
+    const walk = async (
+      d: string,
+      parent: SkillFileTreeNode,
+      relBase: string,
+    ): Promise<void> => {
+      let entries
+      try {
+        entries = await readDir(d)
+      } catch {
+        return
+      }
+      entries.sort((a, b) => {
+        if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1
+        return a.name.localeCompare(b.name)
+      })
+      for (const e of entries) {
+        const rel = relBase ? `${relBase}/${e.name}` : e.name
+        const node: SkillFileTreeNode = {
+          name: e.name,
+          relPath: rel,
+          isDir: !!e.isDirectory,
+          children: [],
+        }
+        parent.children.push(node)
+        if (e.isDirectory) await walk(await join(d, e.name), node, rel)
+      }
+    }
+    await walk(dir, root, '')
+    return root
+  } catch {
+    return null
+  }
+}
+
+/** 单个技能文件的字节内容（供详情页查看文件内容用）。 */
+export interface SkillFileContent {
+  /** 相对技能根目录的路径 */
+  relPath: string
+  /** 文件名（basename） */
+  name: string
+  /** 原始字节 */
+  data: Uint8Array
+}
+
+/**
+ * 读取技能目录下某个文件的字节内容（详情页「点击文件查看内容」用）。
+ * relPath 为相对技能根目录的路径（与 readSkillFileTree 的 SkillFileTreeNode.relPath 一致）。
+ * 读取失败（文件不存在 / 非 Tauri）返回 null。
+ */
+export async function readSkillFileContent(
+  identifier: string,
+  relPath: string,
+): Promise<SkillFileContent | null> {
+  if (!isTauri) return null
+  try {
+    const rawBase = await resolveSkillBasePath()
+    const base = await resolveRealSkillBasePath(rawBase)
+    const dir = await getSkillDir(base, identifier)
+    const target = await join(dir, relPath)
+    const data = (await readFile(target)) as Uint8Array
+    return { relPath, name: relPath.split('/').pop() || relPath, data }
+  } catch {
+    return null
+  }
+}
+
+/**
+ * 覆盖写入技能目录下某个文件的文本内容（详情页「就地编辑文件」用）。
+ * 成功返回 true；非 Tauri / 写入失败返回 false（由调用方提示）。
+ */
+export async function writeSkillFileContent(
+  identifier: string,
+  relPath: string,
+  content: string,
+): Promise<boolean> {
+  if (!isTauri) return false
+  try {
+    const rawBase = await resolveSkillBasePath()
+    const base = await resolveRealSkillBasePath(rawBase)
+    const dir = await getSkillDir(base, identifier)
+    const target = await join(dir, relPath)
+    await writeTextFile(target, content)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * 把技能根目录打包为 ZIP（Uint8Array），供「导出技能」使用。
+ * 目录内文件以相对技能根目录的路径写入压缩包（不含技能根目录名本身），
+ * 与导入时「按公共顶层目录剥离」的逻辑一致，便于再次导入还原。
+ * 非 Tauri 或读取失败返回 null（由调用方提示）。
+ */
+export async function zipSkillDir(identifier: string): Promise<Uint8Array | null> {
+  if (!isTauri) return null
+  try {
+    const rawBase = await resolveSkillBasePath()
+    const base = await resolveRealSkillBasePath(rawBase)
+    const dir = await getSkillDir(base, identifier)
+    const JSZip = (await import('jszip')).default
+    const zip = new JSZip()
+    const walk = async (d: string, relBase: string): Promise<void> => {
+      let entries: Awaited<ReturnType<typeof readDir>>
+      try {
+        entries = await readDir(d)
+      } catch {
+        return
+      }
+      for (const e of entries) {
+        const rel = relBase ? `${relBase}/${e.name}` : e.name
+        if (e.isDirectory) {
+          await walk(await join(d, e.name), rel)
+        } else {
+          const data = (await readFile(await join(d, e.name))) as Uint8Array
+          zip.file(rel, data)
+        }
+      }
+    }
+    await walk(dir, '')
+    return await zip.generateAsync({ type: 'uint8array' })
+  } catch {
+    return null
+  }
 }
 
 export interface SkillDiskResult {

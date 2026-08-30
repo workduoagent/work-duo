@@ -11,17 +11,17 @@
  *   skill_path/<identifier>/{scripts,references,assets,templates,SKILL.md}。
  */
 import { useEffect, useState } from 'react'
-import { Inbox, FolderUp } from 'lucide-react'
+import { Inbox, FolderUp, Upload as UploadIcon, Trash2 } from 'lucide-react'
 import { Button, Modal, Input, Field, FieldLabel, Select } from '@/components/ui'
-import { Upload, Tag, Divider, Alert, message } from 'antd'
+import { Upload, Tag, Divider, Alert } from 'antd'
+import { useNotify } from '@/components/ui/notify'
 import {
   createEmptySkill,
-  SKILL_CATEGORY_OPTIONS,
   type SkillInfo,
   type SkillFormData,
   type ResourceFile,
 } from '@/core/file/skill-file'
-import type { SkillCategory } from '@/types/core'
+import { ScenarioSelect } from '@/components/scenario'
 import { isTauri } from '@/core/config'
 import { open as openDialog } from '@tauri-apps/plugin-dialog'
 import { readDir, readFile } from '@tauri-apps/plugin-fs'
@@ -113,6 +113,7 @@ export function SkillImportModal({
   onOpenChange,
   onImported,
 }: SkillImportModalProps) {
+  const { message } = useNotify()
   const [captured, setCaptured] = useState<CapturedFile[]>([])
   const [kind, setKind] = useState<'folder' | 'zip' | null>(null)
   const [submitting, setSubmitting] = useState(false)
@@ -121,9 +122,12 @@ export function SkillImportModal({
   const [identifier, setIdentifier] = useState('')
   const [name, setGroupName] = useState('')
   const [description, setDescription] = useState('')
-  const [scenario, setScenario] = useState<SkillCategory | undefined>()
+  const [scenario, setScenario] = useState<string | undefined>()
   const [tags, setTags] = useState<string[]>([])
   const [errors, setErrors] = useState<Set<string>>(new Set())
+
+  // 头像（可选）：固定落盘为技能根目录 logo.<ext>，不单独入库字段
+  const [logo, setLogo] = useState<{ file: ResourceFile; url: string } | null>(null)
 
   useEffect(() => {
     if (!open) {
@@ -135,6 +139,7 @@ export function SkillImportModal({
       setScenario(undefined)
       setTags([])
       setErrors(new Set())
+      setLogo(null)
       setSubmitting(false)
     }
   }, [open])
@@ -235,6 +240,25 @@ export function SkillImportModal({
 
   const hasError = (key: string) => (errors.has(key) ? 'error' : undefined)
 
+  async function handleLogoUpload(file: File) {
+    if (!/\.(png|jpe?g|gif|webp|svg)$/i.test(file.name)) {
+      message.warning('头像仅支持 png / jpg / gif / webp / svg 图片')
+      return false
+    }
+    const buf = await file.arrayBuffer()
+    const ext = file.name.split('.').pop()!.toLowerCase()
+    const mime = ext === 'jpg' ? 'jpeg' : ext === 'svg' ? 'svg+xml' : ext
+    const url = URL.createObjectURL(new Blob([buf], { type: `image/${mime}` }))
+    setLogo((prev) => {
+      if (prev) URL.revokeObjectURL(prev.url)
+      return {
+        file: { id: crypto.randomUUID(), name: `logo.${ext}`, dir: '', data: new Uint8Array(buf) },
+        url,
+      }
+    })
+    message.success(`已选择头像（将落盘为 logo.${ext}）`)
+  }
+
   async function handleOk() {
     if (!validate()) {
       message.warning('请完善必填项（标识符、技能名称）')
@@ -261,9 +285,17 @@ export function SkillImportModal({
         .map((f) => {
           const idx = f.relPath.lastIndexOf('/')
           const dir = idx >= 0 ? f.relPath.slice(0, idx) : ''
-          const fname = idx >= 0 ? f.relPath.slice(idx + 1) : f.relPath
+          let fname = idx >= 0 ? f.relPath.slice(idx + 1) : f.relPath
+          // 头像文件统一归一化：无论原在何处，强制落到技能根目录并命名为 logo.<ext>
+          const logoMatch = fname.match(/^logo\.(png|jpe?g|gif|webp|svg)$/i)
+          if (logoMatch) {
+            fname = `logo.${logoMatch[1].toLowerCase()}`
+            return { id: crypto.randomUUID(), name: fname, dir: '', data: f.data }
+          }
           return { id: crypto.randomUUID(), name: fname, dir, data: f.data }
         })
+      // 表单单独上传的头像（若有）同样归一化为根目录 logo.<ext>
+      if (logo) resources.push(logo.file)
       const skill: SkillInfo = {
         ...createEmptySkill(),
         identifier: identifier.trim(),
@@ -291,7 +323,7 @@ export function SkillImportModal({
       width={760}
       title="导入技能"
       description="拖入文件夹或选择 ZIP 压缩包，并填写基础信息后提交；系统会自动解析 SKILL.md、入库并落盘。"
-      style={{ top: 24, maxWidth: '92vw' }}
+      style={{ maxWidth: '92vw' }}
       footer={
         <div className="sk__form-footer">
           <Button variant="soft" onClick={() => onOpenChange(false)}>
@@ -327,39 +359,76 @@ export function SkillImportModal({
           </p>
         </Upload.Dragger>
 
-        <div className="sk-import__dropzone-actions">
-          <span className="sk-import__dropzone-label">选择文件夹</span>
-          <Upload
-            directory
-            multiple
-            showUploadList={false}
-            beforeUpload={(f) => handleDragFile(f as unknown as File)}
-          >
-            <Button icon={<FolderUp size={14} />}>选择文件夹</Button>
-          </Upload>
-          {isTauri && (
-            <Button icon={<FolderUp size={14} />} onClick={handleFolderDialog}>
-              选择文件夹（本地）
-            </Button>
+        {/* 两种导入来源：并排选项卡片（图标 + 标题 + 描述，悬浮高亮） */}
+        <div className="sk-import__pick">
+          {isTauri ? (
+            <div
+              className="sk-import__pick-item"
+              onClick={handleFolderDialog}
+              role="button"
+              tabIndex={0}
+            >
+              <span className="sk-import__pick-icon sk-import__pick-icon--folder">
+                <FolderUp size={20} />
+              </span>
+              <span className="sk-import__pick-text">
+                <span className="sk-import__pick-title">选择文件夹</span>
+                <span className="sk-import__pick-desc">本地目录，含 SKILL.md 与资源</span>
+              </span>
+            </div>
+          ) : (
+            <Upload
+              directory
+              multiple
+              showUploadList={false}
+              beforeUpload={(f) => handleDragFile(f as unknown as File)}
+              style={{ display: 'block' }}
+            >
+              <div className="sk-import__pick-item">
+                <span className="sk-import__pick-icon sk-import__pick-icon--folder">
+                  <FolderUp size={20} />
+                </span>
+                <span className="sk-import__pick-text">
+                  <span className="sk-import__pick-title">选择文件夹</span>
+                  <span className="sk-import__pick-desc">本地目录，含 SKILL.md 与资源</span>
+                </span>
+              </div>
+            </Upload>
           )}
-        </div>
 
-        <Divider plain style={{ margin: '12px 0' }}>或</Divider>
-
-        <div className="sk-import__dropzone-actions">
-          <span className="sk-import__dropzone-label">选择 ZIP 压缩包</span>
-          <Upload
-            accept=".zip"
-            multiple={false}
-            showUploadList={false}
-            beforeUpload={(f) => handleDragFile(f as unknown as File)}
-          >
-            <Button icon={<Inbox size={14} />}>选择 ZIP 压缩包</Button>
-          </Upload>
-          {isTauri && (
-            <Button icon={<Inbox size={14} />} onClick={handleZipDialog}>
-              选择 ZIP 压缩包（本地）
-            </Button>
+          {isTauri ? (
+            <div
+              className="sk-import__pick-item"
+              onClick={handleZipDialog}
+              role="button"
+              tabIndex={0}
+            >
+              <span className="sk-import__pick-icon sk-import__pick-icon--zip">
+                <Inbox size={20} />
+              </span>
+              <span className="sk-import__pick-text">
+                <span className="sk-import__pick-title">选择 ZIP 压缩包</span>
+                <span className="sk-import__pick-desc">.zip 归档，自动解压解析</span>
+              </span>
+            </div>
+          ) : (
+            <Upload
+              accept=".zip"
+              multiple={false}
+              showUploadList={false}
+              beforeUpload={(f) => handleDragFile(f as unknown as File)}
+              style={{ display: 'block' }}
+            >
+              <div className="sk-import__pick-item">
+                <span className="sk-import__pick-icon sk-import__pick-icon--zip">
+                  <Inbox size={20} />
+                </span>
+                <span className="sk-import__pick-text">
+                  <span className="sk-import__pick-title">选择 ZIP 压缩包</span>
+                  <span className="sk-import__pick-desc">.zip 归档，自动解压解析</span>
+                </span>
+              </div>
+            </Upload>
           )}
         </div>
       </div>
@@ -384,15 +453,15 @@ export function SkillImportModal({
               <Tag color="warning">未检测到 SKILL.md</Tag>
             )}
             {overLimit && <Tag color="error">超出限制</Tag>}
+            <Button
+              variant="soft"
+              size="sm"
+              style={{ marginLeft: 'auto' }}
+              onClick={() => setCaptured([])}
+            >
+              重新选择
+            </Button>
           </div>
-          <Button
-            variant="ghost"
-            size="sm"
-            style={{ paddingLeft: 0 }}
-            onClick={() => setCaptured([])}
-          >
-            重新选择
-          </Button>
         </div>
       )}
 
@@ -402,7 +471,7 @@ export function SkillImportModal({
       <div className="sk__grid">
         <Field>
           <FieldLabel>
-            标识符 (identifier)<span className="sk__required">*</span>
+            标识符<span className="sk__required">*</span>
           </FieldLabel>
           <Input
             value={identifier}
@@ -444,13 +513,12 @@ export function SkillImportModal({
         </Field>
 
         <Field>
-          <FieldLabel>技能分类 (scenario)</FieldLabel>
-          <Select
-            value={scenario}
-            options={SKILL_CATEGORY_OPTIONS as never}
-            allowClear
-            placeholder="选择分类"
-            onChange={(v) => setScenario((v as SkillCategory) ?? undefined)}
+          <FieldLabel>技能分类</FieldLabel>
+          <ScenarioSelect
+            scope="SKILL"
+            value={scenario ?? null}
+            onChange={(v) => setScenario(v ?? undefined)}
+            placeholder="选择或搜索分类，可回车新建"
           />
         </Field>
 
@@ -463,6 +531,46 @@ export function SkillImportModal({
             tokenSeparators={[',']}
             onChange={(v) => setTags(v as string[])}
           />
+        </Field>
+
+        <Field className="sk__span-2">
+          <FieldLabel>技能头像</FieldLabel>
+          <div className="sk__logo-row">
+            <div className="sk__logo-preview">
+              {logo ? (
+                <img src={logo.url} alt="logo" className="sk__logo-img" />
+              ) : (
+                <span className="sk__logo-placeholder">
+                  <UploadIcon size={20} />
+                </span>
+              )}
+            </div>
+            <div className="sk__logo-actions">
+              <Upload
+                accept=".png,.jpg,.jpeg,.gif,.webp,.svg"
+                maxCount={1}
+                showUploadList={false}
+                beforeUpload={(file) => {
+                  void handleLogoUpload(file as unknown as File)
+                  return false
+                }}
+              >
+                <Button icon={<UploadIcon size={14} />}>
+                  {logo ? '更换头像' : '上传头像'}
+                </Button>
+              </Upload>
+              {logo && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  icon={<Trash2 size={14} />}
+                  onClick={() => setLogo(null)}
+                >
+                  移除
+                </Button>
+              )}
+            </div>
+          </div>
         </Field>
       </div>
     </Modal>

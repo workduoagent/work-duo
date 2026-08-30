@@ -14,7 +14,7 @@
  *  - $API$/sql/load、execute、select（db = workduo.db）。
  */
 import { isTauri } from '@/core/config'
-import type { ModelCategory, ModelProvider } from '@/types/core'
+import type { ModelProvider } from '@/types/core'
 import type { ModelConfig } from '@/core/file/model-file'
 import type { ModelConfigRow } from '@/types/database'
 import { getDb } from '@/core/db/SqlService'
@@ -34,7 +34,7 @@ function safeParse<T>(s: string | null, fallback: T): T {
 
 function modelToRow(m: ModelConfig): ModelConfigRow {
   const now = Date.now()
-  const params = m[m.category] // 选中的分类参数对象（与 category 同键）
+  const params = (m as unknown as Record<string, unknown>)[m.category] // 选中的分类参数对象（与 category 同键）
   return {
     id: m.id,
     provider: m.provider,
@@ -54,7 +54,7 @@ function modelToRow(m: ModelConfig): ModelConfigRow {
 }
 
 function rowToModel(r: ModelConfigRow): ModelConfig {
-  const category = r.category as ModelCategory
+  const category = r.category
   const params = safeParse<Record<string, unknown> | null>(r.config, null)
   const model: ModelConfig = {
     id: r.id,

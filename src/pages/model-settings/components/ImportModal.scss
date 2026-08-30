@@ -22,9 +22,9 @@
   border-color: var(--color-border);
 }
 
-.import-modal__textarea {
-  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
-  font-size: 12.5px;
+.import-modal__editor {
+  /* MonacoJsonEditor 自带边框与圆角，这里仅作区块间距兜底 */
+  min-height: 0;
 }
 
 .import-modal__result {

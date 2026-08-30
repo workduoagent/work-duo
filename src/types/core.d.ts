@@ -109,6 +109,81 @@ export type McpScenario =
   | 'productivity'
 
 /**
+ * 场景分类字典的「域」标识（对应 scenario_category.scope）。
+ *  - MCP：MCP 使用场景（原 mcp_info.scenario）；
+ *  - SKILL：技能分类（原 skill_info.scenario）；
+ *  - KB：知识库分类（对应 knowledge_base.scenario，用户设计明确要求 KB 接入场景字典）。
+ *  注：LLM 模型分类不纳入本字典——模型大类直接驱动 paramFields 动态表单，须与代码参数结构严格对应。
+ */
+export type ScenarioScope = 'MCP' | 'SKILL' | 'KB'
+
+/**
+ * 场景分类字典行（对应 scenario_category 表）。
+ *  - scope + value 唯一确定一个枚举项（业务表存 value）；
+ *  - label 为可编辑显示名；createdAt / updatedAt 为 epoch 毫秒。
+ */
+export interface ScenarioCategory {
+  id: string
+  scope: ScenarioScope
+  value: string
+  label: string
+  createdAt: number
+  updatedAt: number
+}
+
+/**
+ * 知识库资产大类（对应 knowledge_asset.type，INTEGER）。
+ *  - 1：文档（md/doc/docx/pdf/txt/xls/xlsx/csv/ppt/pptx/epub/json/代码 等）
+ *  - 2：图片（png/jpg/gif/webp/svg/bmp/ico/avif）
+ *  - 3：音频（mp3/wav/ogg/flac/aac/m4a）
+ *  - 4：视频（mp4/webm/ogv/mov/mkv/avi）
+ *  - 5：网页（html/htm/xhtml/url）
+ */
+export type KnowledgeAssetType = 1 | 2 | 3 | 4 | 5
+
+/**
+ * 知识库（对应 knowledge_base 表）。
+ * - identifier：唯一标识 slug（同时是磁盘目录名），创建后作为物理路径一部分；
+ * - logo：Logo 路径 / data URL（可空）；
+ * - scenario：场景分类 key（对应 scenario_category scope='KB'，可空）；
+ * - fileCount / fileSize：由 knowledge_asset 聚合得到的文件数 / 总字节数（列表展示用，单条查询时为 undefined）；
+ * - createdAt / updatedAt：ISO 字符串。
+ */
+export interface KnowledgeBase {
+  id: string
+  logo?: string
+  identifier: string
+  name: string
+  description?: string
+  scenario?: string
+  createdAt: string
+  updatedAt: string
+  /** 物理目录（运行时派生：knowledge_base_path + '/' + identifier，不落库） */
+  path?: string
+  /** 资产文件数（列表聚合，详情页按需刷新） */
+  fileCount?: number
+  /** 资产总字节数（列表聚合） */
+  fileSize?: number
+}
+
+/**
+ * 知识库资产（对应 knowledge_asset 表），即知识库目录下的单个文件。
+ * - filePath：相对知识库根目录的路径（如 'docs/a.txt'，用于定位与分发渲染）；
+ * - fileExt：扩展名（不含点、小写）；type：资产大类（KnowledgeAssetType）。
+ */
+export interface KnowledgeAsset {
+  id: string
+  kbId: string
+  name: string
+  type: KnowledgeAssetType
+  fileExt?: string
+  fileSize: number
+  filePath: string
+  createdAt: string
+  updatedAt: string
+}
+
+/**
  * 网络代理模式（对应 app_config.network_proxy.mode）。
  *  - direct：直连（不使用代理）；
  *  - system：跟随系统代理；

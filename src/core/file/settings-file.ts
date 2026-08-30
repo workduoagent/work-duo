@@ -41,6 +41,8 @@ export interface AppSettings {
   workspacePath: string
   /** Skill 存储目录，默认 $APPDATA/.skills（与 app_config.skill_path 同键） */
   skillPath: string
+  /** 知识库存储根目录，默认 $APPDATA/.knowledge_base（与 app_config.knowledge_base_path 同键） */
+  knowledgeBasePath: string
   /** 客户端通知，默认开启 */
   clientNotify: boolean
   /** 生成对话记忆，默认关闭 */
@@ -59,6 +61,7 @@ export const CONFIG_KEYS = {
   networkProxy: 'network_proxy',
   workspacePath: 'workspace_path',
   skillPath: 'skill_path',
+  knowledgeBasePath: 'knowledge_base_path',
   clientNotify: 'client_notify',
   memoryEnabled: 'memory_enabled',
   sessionAutoNew: 'session_auto_new',
@@ -72,6 +75,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   networkProxy: { mode: 'direct' },
   workspacePath: '$APPDATA/.workspace',
   skillPath: '$APPDATA/.skills',
+  knowledgeBasePath: '$APPDATA/.knowledge_base',
   clientNotify: true,
   memoryEnabled: false,
   sessionAutoNew: false,
@@ -91,7 +95,7 @@ export const PROXY_MODE_OPTIONS: { value: ProxyMode; label: string }[] = [
  * ------------------------------------------------------------------ */
 
 /** 原始字符串存储的 key（不 JSON 包裹，保持与历史种子一致）。 */
-const RAW_STRING_KEYS = new Set<string>([CONFIG_KEYS.skillPath])
+const RAW_STRING_KEYS = new Set<string>([CONFIG_KEYS.skillPath, CONFIG_KEYS.knowledgeBasePath])
 
 function parseValue<T>(raw: string | undefined, fallback: T): T {
   if (raw == null) return fallback
@@ -137,6 +141,10 @@ export async function loadSettings(): Promise<AppSettings> {
       DEFAULT_SETTINGS.workspacePath,
     ),
     skillPath: parseValue<string>(all[k.skillPath], DEFAULT_SETTINGS.skillPath),
+    knowledgeBasePath: parseValue<string>(
+      all[k.knowledgeBasePath],
+      DEFAULT_SETTINGS.knowledgeBasePath,
+    ),
     clientNotify: parseValue<boolean>(
       all[k.clientNotify],
       DEFAULT_SETTINGS.clientNotify,
@@ -168,6 +176,10 @@ export async function saveSettings(next: AppSettings): Promise<void> {
     setRawConfig(k.networkProxy, serializeValue(k.networkProxy, next.networkProxy)),
     setRawConfig(k.workspacePath, serializeValue(k.workspacePath, next.workspacePath)),
     setRawConfig(k.skillPath, serializeValue(k.skillPath, next.skillPath)),
+    setRawConfig(
+      k.knowledgeBasePath,
+      serializeValue(k.knowledgeBasePath, next.knowledgeBasePath),
+    ),
     setRawConfig(k.clientNotify, serializeValue(k.clientNotify, next.clientNotify)),
     setRawConfig(k.memoryEnabled, serializeValue(k.memoryEnabled, next.memoryEnabled)),
     setRawConfig(

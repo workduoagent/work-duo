@@ -28,10 +28,15 @@ export function truncate(text: string, max = 50): string {
   return `${text.slice(0, max)}…`
 }
 
+/**
+ * 字节数格式化为可读体积（最小单位 KB，不显示 B）。
+ * 例如 0 → "0 KB"、500 → "0.5 KB"、1536 → "1.5 KB"、1048576 → "1 MB"。
+ * 用户约定：体积展示最小到 KB，避免出现 "B" 这类无意义的极小单位。
+ */
 export function formatBytes(bytes: number): string {
   if (bytes < 0) return '-'
-  const units = ['B', 'KB', 'MB', 'GB', 'TB']
-  let value = bytes
+  const units = ['KB', 'MB', 'GB', 'TB']
+  let value = bytes / 1024
   let unit = 0
   while (value >= 1024 && unit < units.length - 1) {
     value /= 1024

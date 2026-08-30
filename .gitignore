@@ -8,6 +8,9 @@ pnpm-debug.log*
 lerna-debug.log*
 
 node_modules
+# 依赖安装临时缓存目录（沙箱受限时用于离线合并依赖，非项目产物）
+.tmp_install/
+.tmp_cache/
 dist
 dist-ssr
 *.local

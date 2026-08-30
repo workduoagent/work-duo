@@ -28,12 +28,46 @@ export interface ModelConfigRow {
   updated_at: number // 更新时间，epoch 毫秒
 }
 
-/** 知识库表（knowledge_bases）行映射（预留，尚未接入 mapper）。 */
+/** 知识库表（knowledge_base）行映射。
+ * - id：本地 UUID（文本主键）；
+ * - logo：知识库 Logo（相对 KB 目录路径或 data URL，可空）；
+ * - identifier：唯一标识 slug（同时是磁盘目录名）；
+ * - name：知识库名称；description：简介；
+ * - scenario：场景分类 key（对应 scenario_category scope='KB' 的 value，可空）；
+ * - created_at / updated_at：epoch 毫秒（整型）；
+ * - file_count / file_size：冗余的聚合字段（该知识库文件总数 / 总字节数），
+ *   由 refreshAssets / createKnowledgeBase 写 knowledge_asset 后回写，避免详情页与列表页
+ *   每次都 LEFT JOIN knowledge_asset 聚合（反范式化，提升读取性能且消除聚合漂移）。
+ */
 export interface KnowledgeBaseRow {
   id: string
+  logo: string | null
+  identifier: string
   name: string
   description: string | null
-  doc_count: number
+  scenario: string | null
+  created_at: number
+  updated_at: number
+  file_count: number
+  file_size: number
+}
+
+/** 知识库资产表（knowledge_asset）行映射。
+ * - kb_id：外键，引用 knowledge_base.id；
+ * - name：文件名（含扩展名）；
+ * - type：资产大类（1-文档 2-图片 3-音频 4-视频 5-网页）；
+ * - file_ext：扩展名（不含点、小写）；file_size：文件字节数；
+ * - file_path：相对知识库根目录的路径（如 'docs/a.txt'）；
+ * - created_at / updated_at：epoch 毫秒（整型）。
+ */
+export interface KnowledgeAssetRow {
+  id: string
+  kb_id: string
+  name: string
+  type: number
+  file_ext: string | null
+  file_size: number
+  file_path: string
   created_at: number
   updated_at: number
 }
@@ -111,6 +145,7 @@ export interface McpInfoRow {
   properties: string | null // JSON 对象文本
   description: string | null
   scenario: string | null // 对应 McpScenario
+  timeout_sec: number // 请求超时（秒），默认 120
   created_at: number
   updated_at: number
 }

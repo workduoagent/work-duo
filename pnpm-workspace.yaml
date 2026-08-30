@@ -1,0 +1,9 @@
+allowBuilds:
+  '@parcel/watcher': set this to true or false
+  canvas: true
+  core-js: true
+  es5-ext: true
+  esbuild: set this to true or false
+
+overrides:
+  pdfjs-dist: 3.11.174

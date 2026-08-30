@@ -1,0 +1,76 @@
+/* 批量导出选择弹窗 */
+.batch-export {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+
+  &__bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--color-border);
+  }
+
+  &__count {
+    font-size: 13px;
+    color: var(--color-foreground-muted);
+
+    b {
+      color: var(--color-brand-600);
+    }
+  }
+
+  &__list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    max-height: 46vh;
+    overflow-y: auto;
+  }
+
+  &__item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 10px;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: background 0.15s ease;
+
+    &:hover {
+      background: var(--color-background-subtle);
+    }
+  }
+
+  &__item-text {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    min-width: 0;
+  }
+
+  &__item-label {
+    font-size: 13.5px;
+    color: var(--color-foreground-intense);
+    font-weight: 500;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &__item-sub {
+    font-size: 12px;
+    color: var(--color-foreground-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &__empty {
+    padding: 24px 0;
+    text-align: center;
+    color: var(--color-foreground-muted);
+    font-size: 13px;
+  }
+}

@@ -1,8 +1,6 @@
 /* LLM 模型接入页（model-settings）整体布局 */
 .ms {
   width: 100%;
-  max-width: 1680px;
-  margin: 0 auto;
   display: flex;
   flex-direction: column;
   gap: 18px;
@@ -61,12 +59,5 @@
   .ms__layout {
     grid-template-columns: 1fr;
     gap: 14px;
-  }
-}
-
-/* 超宽屏：适度收窄卡片最小宽度，避免单列过宽 */
-@media (min-width: 1600px) {
-  .ms {
-    max-width: 1840px;
   }
 }

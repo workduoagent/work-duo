@@ -6,16 +6,16 @@
  */
 import { useEffect, useState } from 'react'
 import { Copy, Plug } from 'lucide-react'
-import { Button, Input, Field, FieldLabel, Modal, Select, Switch } from '@/components/ui'
-import { message } from 'antd'
+import { Button, Input, Field, FieldLabel, Modal, Select, Switch, InputNumber } from '@/components/ui'
+import { useNotify } from '@/components/ui/notify'
 import {
   MCP_PROTOCOL_OPTIONS,
   MCP_AUTH_OPTIONS,
-  MCP_SCENARIO_OPTIONS,
   createEmptyMcp,
   type McpInfo,
 } from '@/core/file/mcp-file'
-import type { McpProtocolType, McpAuthType, McpScenario } from '@/types/core'
+import type { McpProtocolType, McpAuthType } from '@/types/core'
+import { ScenarioSelect } from '@/components/scenario'
 
 export interface McpFormModalProps {
   open: boolean
@@ -52,6 +52,7 @@ function parseJsonObject(text: string, field: string): Record<string, unknown> |
 }
 
 export function McpFormModal({ open, onOpenChange, mcp, onSave }: McpFormModalProps) {
+  const { message } = useNotify()
   const [draft, setDraft] = useState<McpInfo>(() =>
     mcp ? structuredClone(mcp) : createEmptyMcp(),
   )
@@ -165,7 +166,7 @@ export function McpFormModal({ open, onOpenChange, mcp, onSave }: McpFormModalPr
 
             <Field>
               <FieldLabel>
-                服务标识 (mcp_name)<span className="mcphub__required">*</span>
+                服务标识<span className="mcphub__required">*</span>
               </FieldLabel>
               <Input
                 value={draft.mcpName}
@@ -194,7 +195,7 @@ export function McpFormModal({ open, onOpenChange, mcp, onSave }: McpFormModalPr
 
             <Field>
               <FieldLabel>
-                访问地址 (endpoint_url)
+                访问地址
                 {draft.protocolType !== 'STDIO' && (
                   <span className="mcphub__required">*</span>
                 )}
@@ -220,13 +221,24 @@ export function McpFormModal({ open, onOpenChange, mcp, onSave }: McpFormModalPr
             </Field>
 
             <Field>
-              <FieldLabel>使用场景 (scenario)</FieldLabel>
-              <Select
-                value={draft.scenario}
-                options={MCP_SCENARIO_OPTIONS as never}
-                allowClear
-                placeholder="选择场景"
-                onChange={(v) => patch({ scenario: (v as McpScenario) ?? undefined })}
+              <FieldLabel>使用场景</FieldLabel>
+              <ScenarioSelect
+                scope="MCP"
+                value={draft.scenario ?? null}
+                onChange={(v) => patch({ scenario: v ?? undefined })}
+                placeholder="选择或搜索场景，可回车新建"
+              />
+            </Field>
+
+            <Field>
+              <FieldLabel>超时（秒）</FieldLabel>
+              <InputNumber
+                value={draft.timeoutSec ?? 120}
+                min={5}
+                max={600}
+                step={5}
+                style={{ width: '100%' }}
+                onChange={(v) => patch({ timeoutSec: typeof v === 'number' ? v : 120 })}
               />
             </Field>
 

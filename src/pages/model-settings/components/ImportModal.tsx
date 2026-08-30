@@ -5,7 +5,8 @@
  */
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react'
 import { Copy, Check } from 'lucide-react'
-import { Button, Input, Modal } from '@/components/ui'
+import { Button, Modal } from '@/components/ui'
+import { MonacoJsonEditor } from '@/components/code-editor'
 import { parseModelImport, type ModelConfig } from '@/core/file/model-file'
 import './ImportModal.scss'
 
@@ -102,7 +103,7 @@ export function ImportModal({ open, onOpenChange, onImported }: ImportModalProps
     <Modal
       open={open}
       onOpenChange={onOpenChange}
-      width={560}
+      width="40%"
       title="导入模型配置"
       description="支持 JSON 文件或粘贴文本；可为单个对象或对象数组，缺失字段将用默认值补齐。"
       footer={
@@ -132,15 +133,16 @@ export function ImportModal({ open, onOpenChange, onImported }: ImportModalProps
             {copied ? <Check size={12} /> : <Copy size={12} />}
             {copied ? '已复制' : '复制模板'}
           </Button>
-          <span className="import-modal__hint">或直接在下方粘贴 JSON 文本</span>
+          <span className="import-modal__hint">或直接在下方编辑器中粘贴 JSON 文本</span>
         </div>
 
-        <Input.TextArea
-          className="import-modal__textarea"
-          rows={8}
+        <MonacoJsonEditor
+          className="import-modal__editor"
+          mode="code"
+          language="json"
+          height={360}
           value={text}
-          placeholder='[{"name":"GPT-4o","category":"text","provider":"openai","baseUrl":"https://api.openai.com/v1","apiKey":"sk-...","modelName":"gpt-4o","toolCalls":true}]'
-          onChange={(e) => setText(e.target.value)}
+          onChange={(v) => setText(typeof v === 'string' ? v : '')}
         />
 
         {text.trim() !== '' && (

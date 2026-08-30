@@ -1,0 +1,95 @@
+/* ============================================================
+ * message.scss — 全局消息提示（antd message）美学改造
+ * ------------------------------------------------------------
+ * 目标：去掉「后台管理」既视感，做精致、有呼吸感的卡片提示。
+ * - 毛玻璃卡片 + 大圆角 + 柔和投影；
+ * - 图标做成圆形色底徽章（成功/错误/警告/信息各一色）；
+ * - 柔和下滑 + 淡入入场动画；
+ * - 全部跟随项目 .light / .dark 主题令牌。
+ * 下移避让顶栏由 ThemeProvider 的 <App message={{ top: 72 }}> 控制。
+ *
+ * 注：选择器加 .light/.dark/html 前缀，特异性高于 antd 运行时注入的
+ *     默认样式，确保覆盖生效（antd v5 用 CSS-in-JS 在运行期注入 head）。
+ * ============================================================ */
+
+/* 入场：轻微下滑 + 缩放淡入，比 antd 默认更柔和、更有存在感 */
+@keyframes wd-msg-in {
+  from {
+    opacity: 0;
+    transform: translateY(-12px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* 基础卡片容器（共享外观） */
+.light .ant-message-notice-content,
+.dark .ant-message-notice-content {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 18px;
+  border-radius: 14px;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.4;
+  color: var(--color-foreground);
+  max-width: min(440px, 88vw);
+  word-break: break-word;
+  white-space: normal;
+  box-shadow: var(--shadow-pop);
+  transform-origin: top center;
+  animation: wd-msg-in 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* 亮色：毛玻璃珍珠白 */
+.light .ant-message-notice-content {
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid var(--color-border);
+  backdrop-filter: blur(16px) saturate(180%);
+  -webkit-backdrop-filter: blur(16px) saturate(180%);
+}
+
+/* 暗色：毛玻璃深邃灰 */
+.dark .ant-message-notice-content {
+  background: rgba(24, 24, 27, 0.78);
+  border: 1px solid color-mix(in srgb, var(--color-foreground) 12%, transparent);
+  backdrop-filter: blur(16px) saturate(180%);
+  -webkit-backdrop-filter: blur(16px) saturate(180%);
+}
+
+/* 图标：放大 + 圆形色底徽章，去掉线性后台味 */
+html .ant-message .anticon {
+  font-size: 17px;
+}
+
+html .ant-message-success .anticon {
+  color: var(--color-success);
+  background: var(--color-success-50);
+  padding: 5px;
+  border-radius: 50%;
+}
+
+html .ant-message-error .anticon {
+  color: var(--color-danger);
+  background: var(--color-danger-bg);
+  padding: 5px;
+  border-radius: 50%;
+}
+
+html .ant-message-warning .anticon {
+  color: var(--color-warning);
+  background: var(--color-warning-50);
+  padding: 5px;
+  border-radius: 50%;
+}
+
+html .ant-message-info .anticon,
+html .ant-message-loading .anticon {
+  color: var(--color-brand-500);
+  background: var(--color-brand-100);
+  padding: 5px;
+  border-radius: 50%;
+}

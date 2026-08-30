@@ -15,4 +15,27 @@ ALTER TABLE models ADD COLUMN tool_calls INTEGER NOT NULL DEFAULT 0;
 -- 存量库（已建表但无这些列）通过本语句补齐；重复执行会被安全跳过。
 ALTER TABLE skill_info ADD COLUMN skill_markdown TEXT;
 ALTER TABLE skill_info ADD COLUMN status INTEGER NOT NULL DEFAULT 1;
+
+-- ---------- v3：MCP 服务表新增请求超时字段（秒） ----------
+-- 用于连通性测试 / 工具调用时按服务自定义超时（默认 120s，原写死 15s）。
+-- 存量库（已建表但无该列）通过本语句补齐；重复执行会被安全跳过。
+ALTER TABLE mcp_info ADD COLUMN timeout_sec INTEGER NOT NULL DEFAULT 120;
+
+-- ---------- v4：撤销 LLM 场景分类字典（模型分类回归固定枚举） ----------
+-- 任务一把模型大类并入 scenario_category(scope='LLM')，但模型分类直接决定动态表单结构，
+-- 须与代码参数接口 / createEmptyModel 分支严格对应，不应由字典托管。
+-- 此处清理存量库中的 LLM 字典行（幂等，重复执行无副作用；新装库在 init.sql 已不再播种 LLM 行）。
+DELETE FROM scenario_category WHERE scope = 'LLM';
+
+-- ---------- v5：知识库表新增 logo 字段 ----------
+-- knowledge_base 在 init.sql 建表时已含 logo（TEXT，可空），但存量库（在 logo 列加入建表语句之前已创建）
+-- 实际表结构缺少该列，新建知识库时 INSERT 含 logo 会报 "table knowledge_base has no column named logo"。
+-- 存量库通过本语句补齐；重复执行会被 updateTables 安全跳过（duplicate column name）。
+ALTER TABLE knowledge_base ADD COLUMN logo TEXT;
+
+-- ---------- v6：知识库表冗余 file_count / file_size（避免 LEFT JOIN 聚合漂移） ----------
+-- 列表/详情页直读这两列，由 refreshAssets / createKnowledgeBase 写 knowledge_asset 后回写。
+-- 存量库（建表时无该列）通过本语句补齐；重复执行会被 updateTables 安全跳过（duplicate column name）。
+ALTER TABLE knowledge_base ADD COLUMN file_count INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE knowledge_base ADD COLUMN file_size INTEGER NOT NULL DEFAULT 0;
 -- ============================================================

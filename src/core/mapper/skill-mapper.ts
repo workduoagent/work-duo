@@ -12,7 +12,6 @@
  *  - 非 Tauri 环境（浏览器 dev）回退 localStorage，保证可调试。
  */
 import { isTauri } from '@/core/config'
-import type { SkillCategory } from '@/types/core'
 import type { SkillInfo } from '@/core/file/skill-file'
 import type { SkillInfoRow } from '@/types/database'
 import { getDb } from '@/core/db/SqlService'
@@ -64,7 +63,7 @@ function rowToSkill(r: SkillInfoRow): SkillInfo {
     instruction: r.instruction ?? undefined,
     skillMarkdown: r.skill_markdown ?? undefined,
     tags: safeParse<string[] | null>(r.tags, null) ?? undefined,
-    scenario: (r.scenario as SkillCategory) ?? undefined,
+    scenario: r.scenario ?? undefined,
     status: r.status,
     path: r.path ?? undefined,
     createdAt: new Date(r.created_at).toISOString(),
@@ -115,7 +114,7 @@ function lsSave(list: SkillInfo[]): void {
 
 /** 列表（按创建时间倒序）。可传 scenario 过滤单一分类。 */
 export async function listSkills(
-  scenario?: SkillCategory | null,
+  scenario?: string | null,
 ): Promise<SkillInfo[]> {
   if (!isTauri) {
     const list = lsList()

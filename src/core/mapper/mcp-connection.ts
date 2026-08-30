@@ -55,7 +55,38 @@ function buildHeaders(
     const kv = cfg.key_value
     if (typeof kn === 'string' && typeof kv === 'string') h[kn] = kv
   }
+  // Streamable HTTP 协议必备：Accept 必须同时含 application/json 与 text/event-stream，
+  // Content-Type 必须为 application/json。放在最后覆盖用户误填的值，否则远端会返回
+  // 406 Not Acceptable（"Client must accept both application/json and text/event-stream"）。
+  h.Accept = 'application/json, text/event-stream'
+  h['Content-Type'] = 'application/json'
   return h
+}
+
+/**
+ * 发送 MCP `notifications/initialized` 通知（initialize 握手成功后、调用其它方法前）。
+ * 部分严格服务端（如 MinerU）会要求此通知，缺失会报 "not initialized"。
+ * 通知无 id、不期待结果，best-effort：发送失败也不阻断后续调用（由下游真实错误暴露）。
+ */
+async function notifyInitialized(
+  url: string,
+  headers: Record<string, string>,
+  sessionId: string | null,
+): Promise<void> {
+  const h: Record<string, string> = { ...headers }
+  if (sessionId) h['Mcp-Session-Id'] = sessionId
+  try {
+    await fetch(url, {
+      method: 'POST',
+      headers: h,
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'notifications/initialized',
+      }),
+    })
+  } catch {
+    /* best-effort：忽略通知发送失败 */
+  }
 }
 
 /** 把一个 MCP 原始工具对象映射为本域 McpToolDefinition（mcpId 由调用方回填）。 */
@@ -82,15 +113,16 @@ function mapTool(raw: Record<string, unknown>): McpToolDefinition {
 
 /**
  * 执行一次 MCP 连通性测试。
- * @param mcp 取 protocolType / endpointUrl / headers / authType / authConfig
+ * @param mcp 取 protocolType / endpointUrl / headers / authType / authConfig / timeoutSec
  */
 export async function testMcpConnection(
   mcp: Pick<
     McpInfo,
-    'protocolType' | 'endpointUrl' | 'headers' | 'authType' | 'authConfig'
+    'protocolType' | 'endpointUrl' | 'headers' | 'authType' | 'authConfig' | 'timeoutSec'
   >,
 ): Promise<McpConnectionResult> {
   const start = performance.now()
+  const timeoutMs = (mcp.timeoutSec ?? 120) * 1000
   const fail = (error: string): McpConnectionResult => ({
     status: 2,
     ok: false,
@@ -111,7 +143,7 @@ export async function testMcpConnection(
   const url = mcp.endpointUrl
   const headers = buildHeaders(mcp)
   const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), 15000)
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
 
   try {
     // 1) initialize 握手
@@ -139,6 +171,10 @@ export async function testMcpConnection(
       const text = await initRes.text().catch(() => '')
       return fail(`initialize 失败：HTTP ${initRes.status} ${text.slice(0, 200)}`)
     }
+
+    // 1.5) 发送 notifications/initialized（MCP 规范要求；部分严格服务端
+    // 会在 tools/list 前要求此通知，缺失会报 "not initialized"）。best-effort。
+    await notifyInitialized(url, headers, sessionId)
 
     // 2) tools/list
     const toolsRes = await fetch(url, {
@@ -188,7 +224,7 @@ export async function testMcpConnection(
 export async function connectMcp(
   mcp: Pick<
     McpInfo,
-    'protocolType' | 'endpointUrl' | 'headers' | 'authType' | 'authConfig'
+    'protocolType' | 'endpointUrl' | 'headers' | 'authType' | 'authConfig' | 'timeoutSec'
   >,
 ): Promise<McpConnectionResult> {
   if (!isTauri) return testMcpConnection(mcp)
@@ -207,6 +243,7 @@ export async function connectMcp(
         headers: mcp.headers ?? {},
         authType: mcp.authType,
         authConfig: mcp.authConfig ?? {},
+        timeoutSec: mcp.timeoutSec ?? 120,
       },
     })
     const tools: McpToolDefinition[] = (res.tools ?? []).map((t) => mapTool(t))
@@ -237,7 +274,7 @@ export async function connectMcp(
 export async function callMcpTool(
   mcp: Pick<
     McpInfo,
-    'protocolType' | 'endpointUrl' | 'headers' | 'authType' | 'authConfig'
+    'protocolType' | 'endpointUrl' | 'headers' | 'authType' | 'authConfig' | 'timeoutSec'
   >,
   toolName: string,
   args: Record<string, unknown> | undefined,
@@ -253,6 +290,7 @@ export async function callMcpTool(
           headers: mcp.headers ?? {},
           authType: mcp.authType,
           authConfig: mcp.authConfig ?? {},
+          timeoutSec: mcp.timeoutSec ?? 120,
           toolName,
           arguments: args ?? {},
         },
@@ -277,7 +315,7 @@ export async function callMcpTool(
 async function callMcpToolFetch(
   mcp: Pick<
     McpInfo,
-    'protocolType' | 'endpointUrl' | 'headers' | 'authType' | 'authConfig'
+    'protocolType' | 'endpointUrl' | 'headers' | 'authType' | 'authConfig' | 'timeoutSec'
   >,
   toolName: string,
   args: Record<string, unknown> | undefined,
@@ -297,7 +335,7 @@ async function callMcpToolFetch(
   const url = mcp.endpointUrl
   const headers = buildHeaders(mcp)
   const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), 15000)
+  const timer = setTimeout(() => controller.abort(), (mcp.timeoutSec ?? 120) * 1000)
 
   try {
     // 1) initialize 握手
@@ -324,6 +362,9 @@ async function callMcpToolFetch(
       const text = await initRes.text().catch(() => '')
       return fail(`initialize 失败：HTTP ${initRes.status} ${text.slice(0, 200)}`)
     }
+
+    // 1.5) 发送 notifications/initialized（MCP 规范要求；best-effort）
+    await notifyInitialized(url, headers, sessionId)
 
     // 2) tools/call
     const callRes = await fetch(url, {

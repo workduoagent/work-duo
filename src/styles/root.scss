@@ -8,6 +8,7 @@
 @use "./variables.scss";
 @use "./mixins.scss";
 @use "./layout.scss";
+@use "./message.scss";
 
 /* 全局基础 */
 html,
@@ -28,19 +29,38 @@ body {
   -webkit-text-size-adjust: 100%;
 }
 
-/* 滚动条 */
+/* 滚动条：细、默认隐藏，悬浮或滚动时出现，失焦隐藏 */
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
+  background: transparent;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
   border-radius: 999px;
-  background: color-mix(in srgb, var(--color-foreground) 18%, transparent);
+  background-color: transparent;
+  transition: background-color 0.2s ease;
 }
 
-::-webkit-scrollbar-thumb:hover {
-  background: color-mix(in srgb, var(--color-foreground) 28%, transparent);
+/* 鼠标悬浮滚动容器，或正在滚动（.wd-scrolling）时显示 */
+*:hover::-webkit-scrollbar-thumb,
+.wd-scrolling::-webkit-scrollbar-thumb {
+  background-color: color-mix(in srgb, var(--color-foreground) 22%, transparent);
+}
+
+*:hover::-webkit-scrollbar-thumb:hover,
+.wd-scrolling::-webkit-scrollbar-thumb:hover {
+  background-color: color-mix(in srgb, var(--color-foreground) 32%, transparent);
+}
+
+/* Firefox 兜底：细滚动条（Firefox 不支持滚动时自动隐藏，退化为常显细条） */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--color-foreground) 22%, transparent) transparent;
 }
 
 /* 暗色下 antd 等第三方可能会注入 body 默认色，这里兜底确保整页底色跟随主题 */

@@ -1,0 +1,178 @@
+/* ============================================================
+ * MCP 导入弹窗（McpImportModal）
+ * 用设计令牌 var(--color-*)，不写 hex / px 字面量。
+ * ============================================================ */
+
+.mcp-import {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.mcp-import__footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* 配置输入区 */
+.mcp-import__editor {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg, 12px);
+  background: var(--color-background-subtle);
+  overflow: hidden;
+}
+
+.mcp-import__toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--color-border-muted);
+}
+
+.mcp-import__editor-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--color-foreground-muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.mcp-import__toolbar-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mcp-import__editor :global(.mcphub__json-textarea),
+.mcp-import__editor textarea {
+  border: none !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8rem;
+  resize: vertical;
+}
+
+/* 解析结果 */
+.mcp-import__result {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.mcp-import__bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.mcp-import__count {
+  font-size: 0.8rem;
+  color: var(--color-foreground-muted);
+}
+
+.mcp-import__warnings {
+  margin: 4px 0 0;
+  padding-left: 18px;
+  font-size: 0.78rem;
+  color: var(--color-foreground-muted);
+}
+
+.mcp-import__list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 320px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.mcp-import__item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md, 10px);
+  background: var(--color-background);
+  cursor: pointer;
+  transition: border-color 0.18s ease, background-color 0.18s ease;
+}
+
+.mcp-import__item:hover {
+  border-color: var(--color-border-strong, var(--color-brand-500));
+  background: var(--color-background-subtle);
+}
+
+.mcp-import__item-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  border-radius: 999px;
+  background: var(--color-background-subtle);
+  color: var(--color-brand-600);
+}
+
+.mcp-import__item-text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  flex: 1;
+}
+
+.mcp-import__item-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.mcp-import__item-name {
+  font-weight: 600;
+  color: var(--color-foreground-intense);
+}
+
+.mcp-import__item-id {
+  font-size: 0.75rem;
+  color: var(--color-foreground-muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.mcp-import__item-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 0.78rem;
+  color: var(--color-foreground-muted);
+}
+
+.mcp-import__chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--color-background-subtle);
+  border: 1px solid var(--color-border-muted);
+  color: var(--color-foreground-muted);
+}
+
+.mcp-import__url {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

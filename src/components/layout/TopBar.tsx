@@ -9,7 +9,7 @@ import {
 import { useLocation, useNavigate } from 'react-router-dom'
 import {
   Boxes,
-  Coffee,
+  BookOpen,
   Bot,
   Users,
   Settings,
@@ -44,7 +44,7 @@ interface MenuNode {
 }
 
 // 顶栏菜单树：一级菜单 + 二级子菜单。
-// 百宝箱 / 设置 为父容器（含二级）；茶水间 / 搭子 / 小分队 为叶子菜单。
+// 百宝箱 / 设置 为父容器（含二级）；知识库 / 搭子 / 小分队 为叶子菜单。
 const MENUS: MenuNode[] = [
   {
     key: 'treasure',
@@ -57,7 +57,7 @@ const MENUS: MenuNode[] = [
       // 后续接入的服务继续在此追加子项即可
     ],
   },
-  { key: 'tea', label: '茶水间', icon: Coffee },
+  { key: 'kb', label: '知识库', icon: BookOpen, path: ROUTES.knowledge },
   { key: 'buddy', label: '搭子', icon: Bot, path: ROUTES.agentStudio },
   { key: 'squads', label: '小分队', icon: Users, path: ROUTES.squadsWorkspace },
   {
@@ -211,9 +211,12 @@ export function TopBar() {
     )
   }, [selected])
 
-  // 钻取切换期间逐帧测量，滑块实时跟随布局动画（收起/铺开）。
+  // 仅「进入二级」时逐帧测量，滑块实时跟随布局动画避免拖影。
+  // 返回上级（drilledKey 已清空、仅 exiting 播放收起动画）时不开启跟踪：
+  // 此时高亮项已锚定在左侧父级且位置不再移动，交还 CSS 过渡让滑块平滑过渡
+  // 宽度/位移，避免从二级窄项瞬变回父级宽项时出现的宽度闪动。
   useEffect(() => {
-    if (drilledKey === null && exiting === null) return
+    if (drilledKey === null) return
     setTracking(true)
     const start = performance.now()
     let raf = 0
@@ -315,19 +318,18 @@ export function TopBar() {
           data-ready={ready}
           data-tracking={tracking}
         >
-          {/* 返回上级（钻取态显示；收起动画期间淡出且不可点，不随滚动移动） */}
-          {showBack && (
-            <button
-              type="button"
-              className="app-nav-pills__back"
-              data-phase={drilledKey ? 'in' : 'out'}
-              onClick={handleBack}
-              aria-label="返回上级菜单"
-              tabIndex={drilledKey ? 0 : -1}
-            >
+          {/* 返回上级：始终挂载，靠 data-hidden 平滑收起宽度，避免卸载时列表左扩导致菜单整体左移闪动 */}
+          <button
+            type="button"
+            className="app-nav-pills__back"
+            data-hidden={showBack ? 'false' : 'true'}
+            onClick={handleBack}
+            aria-label="返回上级菜单"
+            aria-hidden={showBack ? 'false' : 'true'}
+            tabIndex={showBack ? 0 : -1}
+          >
               <ChevronLeft className="app-nav-pills__icon" />
             </button>
-          )}
 
           {/* 菜单轨道（钻取态可横向滚动） */}
           <div className="app-nav-pills__list" ref={listRef}>

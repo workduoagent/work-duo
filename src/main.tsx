@@ -9,6 +9,7 @@ import { ThemeProvider, InitProvider } from '@/core/contexts'
 import { THEME_STORAGE_KEY } from '@/core/config/theme'
 import { setTheme } from '@/core/store/slices/themeSlice'
 import type { ThemeMode } from '@/core/store/slices/themeSlice'
+import { initScrollbarAutoHide } from '@/utils/scrollbar-autohide'
 
 // 启动即把持久化的主题模式注入 Redux（旧值键名保持 work-duo-theme 不变）。
 try {
@@ -19,6 +20,9 @@ try {
 } catch {
   /* ignore */
 }
+
+// 全局滚动条：滚动/悬浮时出现，失焦隐藏
+initScrollbarAutoHide()
 
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
   <React.StrictMode>

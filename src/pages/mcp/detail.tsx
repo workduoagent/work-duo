@@ -23,7 +23,8 @@ import {
   XCircle,
   CircleDashed,
 } from 'lucide-react'
-import { Tag, Descriptions, Tabs, Empty, Spin, Popconfirm, Tooltip, message } from 'antd'
+import { Tag, Descriptions, Tabs, Empty, Spin, Popconfirm, Tooltip } from 'antd'
+import { useNotify } from '@/components/ui/notify'
 import { Button, Card, Switch } from '@/components/ui'
 import {
   getMcp,
@@ -81,6 +82,7 @@ function StatusTag({ status }: { status: McpStatus | number }) {
 }
 
 export default function McpDetailPage() {
+  const { message, result } = useNotify()
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const [loading, setLoading] = useState(true)
@@ -131,15 +133,20 @@ export default function McpDetailPage() {
         await syncMcpTools(mcp.id, mapped)
         setTools(mapped)
       }
-      await updateMcpStatus(mcp.id, res.status)
-      await loadCounts(mcp.id)
-      if (res.ok) {
-        message.success(
-          `连接成功，耗时 ${res.latencyMs}ms，已同步 ${res.tools.length} 个工具`,
-        )
-      } else {
-        message.error(`连接失败：${res.error}`)
+      result(
+        res,
+        `连接成功，耗时 ${res.latencyMs}ms，已同步 ${res.tools.length} 个工具`,
+        '连接失败',
+      )
+      // 状态/计数刷新独立于「连接结果」提示：即便写库失败也不掩盖上面的提示
+      try {
+        await updateMcpStatus(mcp.id, res.status)
+        await loadCounts(mcp.id)
+      } catch {
+        /* 状态/计数写入失败不影响结果提示 */
       }
+    } catch (e) {
+      message.error(`同步工具异常：${e instanceof Error ? e.message : String(e)}`)
     } finally {
       setSyncing(false)
     }

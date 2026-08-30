@@ -12,8 +12,10 @@ export interface ModalProps {
   closeLabel?: string
   /** 弹窗宽度（px 或 CSS 长度），长表单建议 640~720 */
   width?: number | string
-  /** 透传 antd Modal 的 style，用于大表单定位（如 { top, maxWidth }） */
+  /** 透传 antd Modal 的 style，用于大表单定位（如 { maxWidth }） */
   style?: CSSProperties
+  /** 是否垂直水平居中（默认 true）；设 false 则回退 antd 顶部定位 */
+  centered?: boolean
 }
 
 // 受控封装 antd Modal：open/onOpenChange 与旧 Modal 一致。
@@ -26,6 +28,7 @@ export function Modal({
   footer,
   width = 640,
   style,
+  centered = true,
 }: ModalProps) {
   const titleNode = description ? (
     <div className="app-modal__title-wrap">
@@ -44,6 +47,7 @@ export function Modal({
       footer={footer ?? null}
       width={width}
       style={style}
+      centered={centered}
       destroyOnHidden
       maskClosable={false}
       styles={{ body: { maxHeight: '72vh', overflowY: 'auto' } }}

@@ -23,6 +23,9 @@ pub struct McpSyncRequest {
     auth_type: Option<String>,
     #[serde(default)]
     auth_config: Option<serde_json::Value>,
+    /// 请求超时（秒），默认 120
+    #[serde(default)]
+    timeout_sec: Option<u64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -61,6 +64,53 @@ fn fail_resp(start: Instant, error: String) -> McpSyncResponse {
     }
 }
 
+/// 解析 JSON-RPC 响应体：兼容纯 JSON 与 SSE（text/event-stream）。
+///
+/// Streamable HTTP 服务端在 Accept 含 text/event-stream 时，会以 SSE 形式返回
+/// `event: message\ndata: {...}`（data 字段内才是 JSON-RPC 响应）。reqwest 的
+/// `.json()` 无法解析 SSE 流，故先取文本再抽取 data 行解析。
+fn parse_json_rpc_body(body: &str) -> Result<serde_json::Value, String> {
+    let trimmed = body.trim_start();
+    // 纯 JSON：直接解析
+    if trimmed.starts_with('{') || trimmed.starts_with('[') {
+        return serde_json::from_str::<serde_json::Value>(body)
+            .map_err(|e| format!("响应 JSON 解析失败：{e}"));
+    }
+    // 视为 SSE：抽取所有 data: 行拼接为 JSON（多行 data 以换行连接，符合 SSE 规范）
+    let mut buf = String::new();
+    for line in body.lines() {
+        let line = line.trim_end();
+        if let Some(rest) = line.strip_prefix("data:") {
+            buf.push_str(rest.trim_start());
+            buf.push('\n');
+        }
+    }
+    if buf.trim().is_empty() {
+        let preview: String = body.chars().take(200).collect();
+        return Err(format!("响应体为空或无法识别（非 JSON / 非 SSE），前 200 字符：{preview}"));
+    }
+    serde_json::from_str::<serde_json::Value>(buf.trim())
+        .map_err(|e| format!("SSE data 解析失败：{e}"))
+}
+
+/// 发送 MCP `notifications/initialized` 通知（initialize 握手成功后、调用其它方法前）。
+/// 部分严格服务端（如 MinerU）会要求此通知，缺失会报 "not initialized"。
+/// 通知无 id、不期待结果，best-effort：发送失败也不阻断后续调用。
+async fn notify_initialized(
+    client: &reqwest::Client,
+    url: &str,
+    session_id: &Option<String>,
+) {
+    let mut req = client.post(url).json(&serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": "notifications/initialized"
+    }));
+    if let Some(sid) = session_id {
+        req = req.header("Mcp-Session-Id", sid.as_str());
+    }
+    let _ = req.send().await;
+}
+
 #[tauri::command]
 pub async fn sync_mcp_tools(request: McpSyncRequest) -> McpSyncResponse {
     let start = Instant::now();
@@ -75,16 +125,9 @@ pub async fn sync_mcp_tools(request: McpSyncRequest) -> McpSyncResponse {
         return fail_resp(start, "缺少 endpointUrl（SSE / HTTP 类型必须填写访问地址）".into());
     }
 
-    // 构造基础请求头
+    // 构造基础请求头（用户头与认证头先放，协议必备头在末尾覆盖，避免被误填的
+    // Accept 覆盖而触发 406 Not Acceptable）
     let mut header_map = reqwest::header::HeaderMap::new();
-    for (k, v) in JSON_RPC_HEADERS {
-        if let (Ok(name), Ok(val)) = (
-            reqwest::header::HeaderName::from_bytes(k.as_bytes()),
-            reqwest::header::HeaderValue::from_str(v),
-        ) {
-            header_map.insert(name, val);
-        }
-    }
     if let Some(map) = &request.headers {
         for (k, v) in map {
             if let (Ok(name), Ok(val)) = (
@@ -112,8 +155,20 @@ pub async fn sync_mcp_tools(request: McpSyncRequest) -> McpSyncResponse {
         }
     }
 
+    // Streamable HTTP 协议必备头：Content-Type=application/json、Accept 须含
+    // text/event-stream。放在最后覆盖用户 headers，防止其 Accept 仅 application/json
+    // 触发 406 Not Acceptable（"Client must accept both ..."）。
+    for (k, v) in JSON_RPC_HEADERS {
+        if let (Ok(name), Ok(val)) = (
+            reqwest::header::HeaderName::from_bytes(k.as_bytes()),
+            reqwest::header::HeaderValue::from_str(v),
+        ) {
+            header_map.insert(name, val);
+        }
+    }
+
     let client = match reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(15))
+        .timeout(std::time::Duration::from_secs(request.timeout_sec.unwrap_or(120)))
         .default_headers(header_map)
         .build()
     {
@@ -155,6 +210,9 @@ pub async fn sync_mcp_tools(request: McpSyncRequest) -> McpSyncResponse {
         return fail_resp(start, format!("initialize 失败：HTTP {} {}", status, preview));
     }
 
+    // 1.5) 发送 notifications/initialized（MCP 规范要求；部分严格服务端会要求）
+    notify_initialized(&client, &url, &session_id).await;
+
     // 2) tools/list（携带会话 id）
     let tools_body = serde_json::json!({
         "jsonrpc": "2.0",
@@ -179,10 +237,22 @@ pub async fn sync_mcp_tools(request: McpSyncRequest) -> McpSyncResponse {
         return fail_resp(start, format!("tools/list 失败：HTTP {} {}", status, preview));
     }
 
-    let data: serde_json::Value = match tools_res.json().await {
-        Ok(v) => v,
-        Err(e) => return fail_resp(start, format!("tools/list 响应解析失败：{e}")),
+    let data: serde_json::Value = match tools_res.text().await {
+        Ok(text) => match parse_json_rpc_body(&text) {
+            Ok(v) => v,
+            Err(e) => return fail_resp(start, format!("tools/list 响应解析失败：{e}")),
+        },
+        Err(e) => return fail_resp(start, format!("tools/list 读取响应失败：{e}")),
     };
+
+    // JSON-RPC 层错误（服务端在 result 之外返回 error）
+    if let Some(err) = data.get("error") {
+        let msg = err
+            .get("message")
+            .and_then(|m| m.as_str())
+            .unwrap_or("未知错误");
+        return fail_resp(start, format!("tools/list 返回错误：{msg}"));
+    }
 
     let raw_tools = data
         .get("result")
@@ -239,6 +309,9 @@ pub struct McpCallRequest {
     tool_name: String,
     #[serde(default)]
     arguments: Option<serde_json::Value>,
+    /// 请求超时（秒），默认 120
+    #[serde(default)]
+    timeout_sec: Option<u64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -272,16 +345,9 @@ pub async fn call_mcp_tool(request: McpCallRequest) -> McpCallResponse {
         };
     }
 
-    // 构造基础请求头
+    // 构造基础请求头（用户头与认证头先放，协议必备头在末尾覆盖，避免被误填的
+    // Accept 覆盖而触发 406 Not Acceptable）
     let mut header_map = reqwest::header::HeaderMap::new();
-    for (k, v) in JSON_RPC_HEADERS {
-        if let (Ok(name), Ok(val)) = (
-            reqwest::header::HeaderName::from_bytes(k.as_bytes()),
-            reqwest::header::HeaderValue::from_str(v),
-        ) {
-            header_map.insert(name, val);
-        }
-    }
     if let Some(map) = &request.headers {
         for (k, v) in map {
             if let (Ok(name), Ok(val)) = (
@@ -309,8 +375,20 @@ pub async fn call_mcp_tool(request: McpCallRequest) -> McpCallResponse {
         }
     }
 
+    // Streamable HTTP 协议必备头：Content-Type=application/json、Accept 须含
+    // text/event-stream。放在最后覆盖用户 headers，防止其 Accept 仅 application/json
+    // 触发 406 Not Acceptable（"Client must accept both ..."）。
+    for (k, v) in JSON_RPC_HEADERS {
+        if let (Ok(name), Ok(val)) = (
+            reqwest::header::HeaderName::from_bytes(k.as_bytes()),
+            reqwest::header::HeaderValue::from_str(v),
+        ) {
+            header_map.insert(name, val);
+        }
+    }
+
     let client = match reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(15))
+        .timeout(std::time::Duration::from_secs(request.timeout_sec.unwrap_or(120)))
         .default_headers(header_map)
         .build()
     {
@@ -370,6 +448,9 @@ pub async fn call_mcp_tool(request: McpCallRequest) -> McpCallResponse {
         };
     }
 
+    // 1.5) 发送 notifications/initialized（MCP 规范要求；部分严格服务端会要求）
+    notify_initialized(&client, &url, &session_id).await;
+
     // 2) tools/call
     let call_body = serde_json::json!({
         "jsonrpc": "2.0",
@@ -399,7 +480,12 @@ pub async fn call_mcp_tool(request: McpCallRequest) -> McpCallResponse {
     };
 
     let status = call_res.status();
-    let raw = call_res.text().await.unwrap_or_default();
+    let raw_text = call_res.text().await.unwrap_or_default();
+    // 兼容 SSE 响应：抽取 data 行解析为 JSON，失败则原样返回文本
+    let raw = match parse_json_rpc_body(&raw_text) {
+        Ok(v) => serde_json::to_string_pretty(&v).unwrap_or_else(|_| raw_text.clone()),
+        Err(_) => raw_text,
+    };
     let ok = status.is_success();
     let error = if ok {
         None

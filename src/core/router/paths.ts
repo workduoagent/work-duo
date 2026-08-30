@@ -11,4 +11,6 @@ export const ROUTES = {
 
 export const mcpDetailPath = (id: string): string => `/mcp-hub/${id}`
 
+export const skillDetailPath = (id: string): string => `/skill-hub/${id}`
+
 export const knowledgeDetailPath = (id: string): string => `/knowledge/${id}`

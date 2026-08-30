@@ -1,7 +1,7 @@
 import { useRef, type ChangeEvent } from 'react'
 import { Brain, Upload, Trash2, FileText } from 'lucide-react'
 import { Button, Switch } from '@/components/ui'
-import { message } from 'antd'
+import { useNotify } from '@/components/ui/notify'
 import { SettingItem } from './SettingItem'
 import type { AppSettings, ImportedMemory } from '@/core/file/settings-file'
 
@@ -55,6 +55,7 @@ function parseMemoryFile(filename: string, text: string): ImportedMemory[] {
 
 /** 记忆存储分区：生成对话记忆开关 + 记忆导入。 */
 export function MemoryPanel({ settings, onChange }: Props) {
+  const { message } = useNotify()
   const fileRef = useRef<HTMLInputElement>(null)
 
   const handleFile = (e: ChangeEvent<HTMLInputElement>) => {

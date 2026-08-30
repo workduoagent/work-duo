@@ -26,7 +26,7 @@ export interface SkillInfo {
   /** SKILL.md 正文：落盘到 <identifier>/SKILL.md 的内容（与 instruction 不同字段）。 */
   skillMarkdown?: string
   tags?: string[]
-  scenario?: SkillCategory // 技能分类 key
+  scenario?: string // 技能分类 key（对应 scenario_category.value）
   /** 启用状态：1 启用 / 0 禁用（卡片右上角 Switch 控制）。 */
   status?: number
   /** 本地存储目录（app_config.skill_path + '/' + identifier，可能含 $APPDATA/$RESOURCE 占位）。 */
@@ -194,10 +194,9 @@ export function parseSkillImport(text: string): SkillImportResult {
       errors.push(`第 ${idx} 项 identifier 为空，已跳过`)
       return
     }
-    const scenarioRaw = obj.scenario as string | undefined
-    const scenario = SKILL_CATEGORY_OPTIONS.some((o) => o.value === scenarioRaw)
-      ? (scenarioRaw as SkillCategory)
-      : undefined
+  const scenarioRaw = obj.scenario as string | undefined
+  const scenario =
+    typeof scenarioRaw === 'string' && scenarioRaw ? scenarioRaw : undefined
     const now = new Date().toISOString()
     skills.push({
       id: typeof obj.id === 'string' && obj.id ? obj.id : crypto.randomUUID(),

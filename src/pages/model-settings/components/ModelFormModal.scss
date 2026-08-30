@@ -2,9 +2,9 @@
 .mfm {
   display: flex;
   flex-direction: column;
-  gap: 32px; /* 增加整体段落间距，提供呼吸感 */
+  gap: 24px; /* 段落间距，兼顾呼吸感与整体高度 */
 
-  /* 新增：给右侧滚动条和底部留出安全距离 */
+  /* 给右侧滚动条和底部留出安全距离 */
   padding-right: 16px;
   padding-bottom: 8px;
 }
@@ -12,7 +12,7 @@
 .mfm__section {
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 16px;
 }
 
 .mfm__section-title {
@@ -33,6 +33,19 @@
 
 .mfm__span-2 {
   grid-column: span 2;
+}
+
+/* 分类参数：紧凑 2 列，缩短纵向高度，尽量不触发滚动条 */
+.mfm__param-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px 24px;
+  align-items: start;
+
+  /* 仅长文本（系统提示词等）独占整行，其余控件均按 2 列排布 */
+  .mfm__span-2 {
+    grid-column: span 2;
+  }
 }
 
 /* 必填星号柔化处理 */
@@ -179,4 +192,41 @@
   align-items: center;
   gap: 12px;
   flex: 0 0 auto;
+}
+
+/* 模型分类：分段按钮式 Radio 组（选中态跟随主题主色 #3b6fff） */
+.mfm__category-radio {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+
+  .ant-radio-button-wrapper {
+    margin-inline-start: 0; /* 取消 antd 默认的按钮间叠加左边框 */
+    height: 34px;
+    line-height: 32px;
+    padding-inline: 16px;
+    border-radius: 8px;
+    border: 1px solid var(--color-border, #e5e7eb);
+    transition: color 0.18s ease, background 0.18s ease, border-color 0.18s ease,
+      box-shadow 0.18s ease;
+
+    &::before {
+      display: none; /* 去掉分段控件之间的竖向分隔线 */
+    }
+
+    &:hover {
+      color: var(--color-brand-500, #3b6fff);
+    }
+  }
+
+  .ant-radio-button-wrapper-checked:not(.ant-radio-button-wrapper-disabled) {
+    color: #fff;
+    background: var(--color-brand-500, #3b6fff);
+    border-color: var(--color-brand-500, #3b6fff);
+    box-shadow: 0 4px 12px rgba(59, 111, 255, 0.28);
+
+    &:hover {
+      color: #fff;
+    }
+  }
 }

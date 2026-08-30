@@ -21,9 +21,9 @@ import {
 import {
     PROVIDER_OPTIONS,
     createEmptyModel,
+    MODEL_CATEGORY_OPTIONS,
     type ModelConfig,
 } from '@/core/file/model-file'
-import type {ModelCategory} from '@/types/core'
 import {testModelConnection, type ModelTestResult} from '@/utils/modelTest'
 import {getParamFields} from './paramFields'
 import './ModelFormModal.scss'
@@ -34,7 +34,7 @@ export interface ModelFormModalProps {
     /** 编辑时传入原模型；新增时传 null */
     model: ModelConfig | null
     /** 新增时使用的分类（编辑时以 model.category 为准） */
-    category: ModelCategory
+    category: string
     onSave: (model: ModelConfig) => Promise<void> | void
 }
 
@@ -76,17 +76,30 @@ export function ModelFormModal({
     // Tool/Function Calling 仅对 LLM 类（纯文本 / 多模态）有意义，故仅这两类展示开关
     const showToolCalls = activeCategory === 'text' || activeCategory === 'multimodal'
     // 分类参数挂在 draft[category] 上；类型上为按需可选，这里统一当记录用
-    const paramValues = (draft[activeCategory] ?? {}) as unknown as Record<string, unknown>
+    const paramValues = ((draft as unknown as Record<string, unknown>)[activeCategory] ?? {}) as unknown as Record<string, unknown>
 
     function patch(part: Partial<ModelConfig>) {
         setDraft((prev) => ({...prev, ...part}))
+    }
+
+    // 表单内切换「模型分类」：保留通用字段，新分类参数取「已有值 || 默认」，
+    // 旧分类参数保留备用（不删），从而由表单自身控制分类、不再依赖左侧栏。
+    function changeCategory(next: string) {
+        setDraft((prev) => {
+            const base = createEmptyModel(next)
+            const merged = {...prev} as unknown as Record<string, unknown>
+            const existing = merged[next]
+            merged.category = next
+            merged[next] = existing ?? (base as unknown as Record<string, unknown>)[next]
+            return merged as unknown as ModelConfig
+        })
     }
 
     function setParam(key: string, value: unknown) {
         setDraft((prev) => ({
             ...prev,
             [prev.category]: {
-                ...(prev[prev.category] as unknown as Record<string, unknown>),
+                ...((prev as unknown as Record<string, unknown>)[prev.category] as unknown as Record<string, unknown>),
                 [key]: value,
             },
         }))
@@ -120,7 +133,7 @@ export function ModelFormModal({
         <Modal
             open={open}
             onOpenChange={onOpenChange}
-            width={680}
+            width={"50%"}
             title={model ? '编辑模型' : '接入模型'}
             description={
                 model
@@ -163,6 +176,16 @@ export function ModelFormModal({
                 <section className="mfm__section">
                     <h4 className="mfm__section-title">基础信息</h4>
                     <div className="mfm__grid">
+                        <Field className="mfm__span-2">
+                            <FieldLabel>模型分类<span className="mfm__required">*</span></FieldLabel>
+                            <Select
+                                value={draft.category}
+                                options={MODEL_CATEGORY_OPTIONS as never}
+                                onChange={(v) => changeCategory(v ?? 'text')}
+                                placeholder="选择模型分类"
+                            />
+                        </Field>
+
                         <Field>
                             <FieldLabel>展示名称<span className="mfm__required">*</span></FieldLabel>
                             <Input
@@ -246,14 +269,14 @@ export function ModelFormModal({
                 {/* ---------- 分类参数 ---------- */}
                 <section className="mfm__section">
                     <h4 className="mfm__section-title">分类参数</h4>
-                    <div className="mfm__grid">
+                    <div className="mfm__param-grid">
                         {paramFields.map((def) => {
                             const value = paramValues[def.key]
                             return (
                                 <Field
                                     key={def.key}
                                     className={
-                                        def.control === 'textarea' || def.control === 'slider'
+                                        def.control === 'textarea'
                                             ? 'mfm__span-2'
                                             : undefined
                                     }

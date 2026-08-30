@@ -1,5 +1,5 @@
 import type { ChangeEvent, ReactNode } from 'react'
-import { Power, Globe, FolderOpen, Boxes, Bell, MessagesSquare } from 'lucide-react'
+import { Power, Globe, FolderOpen, Boxes, Bell, MessagesSquare, BookOpen } from 'lucide-react'
 import { Input, Switch, InputNumber } from '@/components/ui'
 import { Radio } from 'antd'
 import { SettingItem } from './SettingItem'
@@ -26,7 +26,8 @@ function Title({ icon, children }: { icon: ReactNode; children: ReactNode }) {
 /** 系统设置分区：开机自启 / 网络代理 / 工作空间 / Skill 目录 / 客户端通知 / 会话管理。 */
 export function SystemSettingsPanel({ settings, onChange }: Props) {
   const commitText =
-    (key: 'workspacePath' | 'skillPath') => (e: ChangeEvent<HTMLInputElement>) =>
+    (key: 'workspacePath' | 'skillPath' | 'knowledgeBasePath') =>
+    (e: ChangeEvent<HTMLInputElement>) =>
       onChange({ [key]: e.target.value } as Partial<AppSettings>)
 
   const setProxy = (patch: Partial<ProxyConfig>) =>
@@ -119,6 +120,18 @@ export function SystemSettingsPanel({ settings, onChange }: Props) {
             className="set-item__input"
             defaultValue={settings.skillPath}
             onBlur={commitText('skillPath')}
+          />
+        }
+      />
+
+      <SettingItem
+        title={<Title icon={<BookOpen size={15} />}>知识库存储目录</Title>}
+        description="知识库文件存放的根目录（对应 app_config.knowledge_base_path）；每个知识库对应其下一个子目录。"
+        control={
+          <Input
+            className="set-item__input"
+            defaultValue={settings.knowledgeBasePath}
+            onBlur={commitText('knowledgeBasePath')}
           />
         }
       />

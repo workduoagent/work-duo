@@ -24,17 +24,19 @@ import {
   Wrench,
   MessagesSquare,
   Briefcase,
+  Download,
+  Upload,
   type LucideIcon,
 } from 'lucide-react'
 import { Button, Input, Card, Switch } from '@/components/ui'
 import {
   Popconfirm,
-  message,
   Empty,
   Spin,
   Pagination,
   Tooltip,
 } from 'antd'
+import { useNotify } from '@/components/ui/notify'
 import {
   listMcps,
   upsertMcp,
@@ -44,12 +46,17 @@ import {
   type McpToolCount,
 } from '@/core/mapper/mcp-mapper'
 import {
-  MCP_SCENARIO_OPTIONS,
   getMcpScenarioLabel,
   getMcpProtocolLabel,
+  buildMcpServersJson,
   type McpInfo,
 } from '@/core/file/mcp-file'
+import { listByScope } from '@/core/mapper/scenario-mapper'
+import type { ScenarioCategory } from '@/types/core'
+import { saveTextFile } from '@/core/file/export-file'
+import { BatchExportModal } from '@/components/export'
 import { McpFormModal } from './components/McpFormModal'
+import { McpImportModal } from './components/McpImportModal'
 import './index.scss'
 
 const PAGE_SIZE = 12
@@ -118,6 +125,7 @@ function StatusArea({
 }
 
 export default function McpHubPage() {
+  const { message } = useNotify()
   const [scenarioFilter, setScenarioFilter] = useState<string>('all')
   const [keyword, setKeyword] = useState('')
   const [records, setRecords] = useState<McpInfo[]>([])
@@ -126,6 +134,10 @@ export default function McpHubPage() {
   const [editing, setEditing] = useState<McpInfo | null>(null)
   const [currentPage, setCurrentPage] = useState(1)
   const [toolCounts, setToolCounts] = useState<Record<string, McpToolCount>>({})
+  const [exportOpen, setExportOpen] = useState(false)
+  const [importOpen, setImportOpen] = useState(false)
+  const [scenarios, setScenarios] = useState<ScenarioCategory[]>([])
+  const [scenarioLabels, setScenarioLabels] = useState<Record<string, string>>({})
   const navigate = useNavigate()
 
   const reload = useCallback(async () => {
@@ -139,9 +151,16 @@ export default function McpHubPage() {
     }
   }, [])
 
+  const loadScenarios = useCallback(async () => {
+    const list = await listByScope('MCP')
+    setScenarios(list)
+    setScenarioLabels(Object.fromEntries(list.map((s) => [s.value, s.label])))
+  }, [])
+
   useEffect(() => {
     void reload()
-  }, [reload])
+    void loadScenarios()
+  }, [reload, loadScenarios])
 
   const filtered = useMemo(() => {
     const kw = keyword.trim().toLowerCase()
@@ -183,8 +202,11 @@ export default function McpHubPage() {
   }, [records])
 
   const categories = useMemo(
-    () => [{ value: 'all', label: '全部 MCP' }, ...MCP_SCENARIO_OPTIONS],
-    [],
+    () => [
+      { value: 'all', label: '全部 MCP' },
+      ...scenarios.map((s) => ({ value: s.value, label: s.label })),
+    ],
+    [scenarios],
   )
 
   function openCreate() {
@@ -211,6 +233,35 @@ export default function McpHubPage() {
     message.success(!m.isActive ? '服务已启用' : '服务已禁用')
   }
 
+  // 批量导出：选中 MCP 转为标准 mcpServers.json，由用户选择保存位置
+  const exportItems = useMemo(
+    () =>
+      records.map((m) => ({
+        id: m.id,
+        label: m.aliasName || m.mcpName || '(未命名)',
+        sub: m.mcpName,
+      })),
+    [records],
+  )
+
+  async function handleExport(ids: string[]) {
+    const picked = records.filter((m) => ids.includes(m.id))
+    const json = JSON.stringify(buildMcpServersJson(picked), null, 2)
+    const ok = await saveTextFile('mcpServers.json', json)
+    if (ok) message.success(`已导出 ${picked.length} 个 MCP 服务到 mcpServers.json`)
+  }
+
+  // 批量导入：解析草稿逐个落库（同名服务按 id 覆盖，保证幂等）
+  async function handleImport(items: McpInfo[]) {
+    let current = records
+    for (const it of items) {
+      const exist = current.find((r) => r.mcpName === it.mcpName)
+      current = await upsertMcp(exist ? { ...it, id: exist.id } : it)
+    }
+    setRecords(current)
+    message.success(`已导入 ${items.length} 个 MCP 服务`)
+  }
+
   return (
     <div className="mcphub">
       {/* 顶部 Header：标题 / 描述 + 搜索框 + 接入服务按钮（整行横跨，位于侧栏上方） */}
@@ -231,6 +282,23 @@ export default function McpHubPage() {
             onPressEnter={() => setCurrentPage(1)}
             style={{ width: 280 }}
           />
+          <Button
+            variant="soft"
+            size="sm"
+            onClick={() => setImportOpen(true)}
+          >
+            <Upload size={14} />
+            导入
+          </Button>
+          <Button
+            variant="soft"
+            size="sm"
+            disabled={records.length === 0}
+            onClick={() => setExportOpen(true)}
+          >
+            <Download size={14} />
+            批量导出
+          </Button>
           <Button size="sm" onClick={openCreate}>
             <Plus size={14} />
             接入服务
@@ -310,7 +378,7 @@ export default function McpHubPage() {
                         {getMcpProtocolLabel(mcp.protocolType)}
                       </span>
                       <span className="mcphub-grid-item__chip mcphub-grid-item__chip--muted">
-                        {getMcpScenarioLabel(mcp.scenario)}
+                        {scenarioLabels[mcp.scenario ?? ''] ?? getMcpScenarioLabel(mcp.scenario)}
                       </span>
                     </div>
 
@@ -401,6 +469,21 @@ export default function McpHubPage() {
         onOpenChange={setModalOpen}
         mcp={editing}
         onSave={handleSave}
+      />
+
+      <BatchExportModal
+        open={exportOpen}
+        onOpenChange={setExportOpen}
+        title="批量导出 MCP 服务"
+        description="勾选要导出的服务（可单选、多选或全选），导出为标准 mcpServers.json，便于备份或迁移。"
+        items={exportItems}
+        onConfirm={handleExport}
+      />
+
+      <McpImportModal
+        open={importOpen}
+        onOpenChange={setImportOpen}
+        onConfirm={handleImport}
       />
     </div>
   )

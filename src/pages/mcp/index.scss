@@ -8,8 +8,6 @@
 
 .mcphub {
   width: 100%;
-  max-width: 1680px;
-  margin: 0 auto;
   display: flex;
   flex-direction: column;
   gap: 18px;
@@ -488,6 +486,16 @@
 .mcphub__form-footer {
   display: flex;
   justify-content: flex-end;
+  gap: 10px;
+}
+
+/* 工具测试弹窗：将「测试」独立置于最左，取消/保存在最右，物理隔开避免误触 */
+.mcphub__test-footer {
+  justify-content: space-between;
+}
+
+.mcphub__test-footer-right {
+  display: flex;
   gap: 10px;
 }
 
