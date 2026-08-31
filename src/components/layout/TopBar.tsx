@@ -19,7 +19,6 @@ import {
   ChevronLeft,
   ChevronRight,
 } from 'lucide-react'
-import { PythonLogo } from '@/components/icons/PythonLogo'
 import { WindowControls } from './WindowControls'
 import { ThemeToggle } from './ThemeToggle'
 import { isTauri } from '@/core/config'
@@ -44,7 +43,8 @@ interface MenuNode {
 }
 
 // 顶栏菜单树：一级菜单 + 二级子菜单。
-// 百宝箱 / 设置 为父容器（含二级）；知识库 / 搭子 / 小分队 为叶子菜单。
+// 百宝箱 为父容器（含二级 LLM / MCP / Skill）；知识库 / 搭子 / 小分队 / 设置 为叶子菜单。
+// 沙箱环境（含 Python）已并入「设置」页左侧栏，不再作为顶层菜单。
 const MENUS: MenuNode[] = [
   {
     key: 'treasure',
@@ -54,7 +54,6 @@ const MENUS: MenuNode[] = [
       { key: 'llm', label: 'LLM', icon: Sparkles, path: ROUTES.modelSettings },
       { key: 'mcp', label: 'MCP', icon: Plug, path: ROUTES.mcpHub },
       { key: 'skill', label: 'Skill', icon: Wand2, path: ROUTES.skillHub },
-      { key: 'sandbox-python', label: 'Python', icon: PythonLogo, path: ROUTES.sandboxPython },
     ],
   },
   { key: 'kb', label: '知识库', icon: BookOpen, path: ROUTES.knowledge },
@@ -74,7 +73,7 @@ MENUS.forEach((m) => (m.children ?? []).forEach((c) => (PARENT_OF[c.key] = m.key
 
 function routeToTopKey(pathname: string): string | null {
   if (pathname.startsWith(ROUTES.modelSettings)) return 'treasure'
-  if (pathname.startsWith(ROUTES.sandboxPython)) return 'treasure'
+  if (pathname.startsWith(ROUTES.sandboxPython)) return 'settings'
   if (pathname.startsWith(ROUTES.agentStudio)) return 'buddy'
   if (pathname.startsWith(ROUTES.squadsWorkspace)) return 'squads'
   return null
@@ -85,7 +84,7 @@ function routeToTopKey(pathname: string): string | null {
  *  - 左侧：图片 Logo + 固定品牌名 + 版本号胶囊徽章
  *  - 中部：两级胶囊菜单（钻取动画：点击父容器 → 其余一级收起、被点项归位最左、
  *          左侧出现返回按钮、二级菜单从左往右依次铺开；返回时从右往左依次收起；
- *          二级过多时最右出现右移箭头）
+ *          菜单项（一级或二级）过多溢出时最右出现右移箭头、最左出现左移箭头）
  *  - 右侧：主题切换 + 分隔线 + 窗口控制三键
  *
  * 菜单使用纯 HTML 实现（不依赖任何 UI 库组件），避免内部样式与自定义胶囊层叠冲突。
@@ -188,6 +187,7 @@ export function TopBar() {
   const thumbRef = useRef<HTMLSpanElement>(null)
   const [ready, setReady] = useState(false)
   const [canScrollRight, setCanScrollRight] = useState(false)
+  const [canScrollLeft, setCanScrollLeft] = useState(false)
 
   // 直接用 ref 写入滑块的 CSS 变量（--pill-x / --pill-w），避免逐帧 setState 触发
   // React 重渲染——这是钻取动画卡顿的主因。钻取期关闭 transition 由 rAF 每帧直写，
@@ -235,11 +235,17 @@ export function TopBar() {
   const updateScroll = useCallback(() => {
     const el = listRef.current
     if (!el) return
-    setCanScrollRight(el.scrollWidth - el.clientWidth - el.scrollLeft > 1)
+    const max = el.scrollWidth - el.clientWidth
+    setCanScrollLeft(el.scrollLeft > 1)
+    setCanScrollRight(max - el.scrollLeft > 1)
   }, [])
 
   const scrollRight = () => {
     listRef.current?.scrollBy({ left: 180, behavior: 'smooth' })
+  }
+
+  const scrollLeft = () => {
+    listRef.current?.scrollBy({ left: -180, behavior: 'smooth' })
   }
 
   useLayoutEffect(() => {
@@ -327,7 +333,19 @@ export function TopBar() {
               <ChevronLeft className="app-nav-pills__icon" />
             </button>
 
-          {/* 菜单轨道（钻取态可横向滚动） */}
+          {/* 左移箭头（菜单项过多溢出时显示，钻取态与一级态通用） */}
+          {canScrollLeft && (
+            <button
+              type="button"
+              className="app-nav-pills__scroll"
+              onClick={scrollLeft}
+              aria-label="向左滚动菜单"
+            >
+              <ChevronLeft className="app-nav-pills__icon" />
+            </button>
+          )}
+
+          {/* 菜单轨道（钻取态 / 一级态均可横向滚动） */}
           <div className="app-nav-pills__list" ref={listRef}>
             {/* 滑块（几何由 measure() 经 thumbRef 直写 CSS 变量驱动） */}
             <span className="app-nav-pills__thumb" ref={thumbRef} aria-hidden="true" />
@@ -392,8 +410,8 @@ export function TopBar() {
             ))}
           </div>
 
-          {/* 右移箭头（仅钻取态且溢出时显示） */}
-          {drilledKey && canScrollRight && (
+          {/* 右移箭头（菜单项过多溢出时显示，钻取态与一级态通用） */}
+          {canScrollRight && (
             <button
               type="button"
               className="app-nav-pills__scroll"

@@ -26,10 +26,10 @@ export function useNotify() {
      */
     result(res: ResultLike, okText: string, failPrefix = '操作失败', silentOk = false): boolean {
       if (res.ok) {
-        if (!silentOk) message.success(okText)
+        if (!silentOk) message.success(okText).then()
         return true
       }
-      message.error(`${failPrefix}：${res.error || '未知错误（服务无返回信息）'}`)
+      message.error(`${failPrefix}：${res.error || '未知错误（服务无返回信息）'}`).then()
       return false
     },
   }

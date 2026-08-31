@@ -105,6 +105,33 @@
   white-space: nowrap;
 }
 
+.settings__nav-icon-img {
+  width: 18px;
+  height: 18px;
+  display: block;
+}
+
+/* 左侧栏分组（如「沙箱环境」）与其下子菜单（如 Python） */
+.settings__nav-group {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.settings__nav-group-title {
+  padding: 6px 12px 4px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-foreground-muted);
+}
+
+.settings__nav-item--sub {
+  padding-left: 22px;
+}
+
 /* ---------------- 右侧主内容 ---------------- */
 .settings__content {
   flex: 1 1 auto;

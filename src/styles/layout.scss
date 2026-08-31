@@ -239,9 +239,12 @@
   outline-offset: 2px;
 }
 
-/* 一级菜单占位槽：钻取态下非活动项收起（宽度 + 透明 + 缩放过渡） */
+/* 一级菜单占位槽：钻取态下非活动项收起（宽度 + 透明 + 缩放过渡）。
+   flex-shrink:0 关键 —— 防止一级菜单项在胶囊宽度不足时被压缩（出现「半边菜单」），
+   改为溢出后由轨道横向滚动 + 左右箭头处理。 */
 .app-nav-pills__slot {
   display: inline-flex;
+  flex-shrink: 0;
   max-width: 240px;
   transition:
     max-width 0.32s cubic-bezier(0.32, 0.72, 0, 1),
@@ -326,9 +329,9 @@
 .app-nav-pills__item--child {
   flex-shrink: 0;
   overflow: hidden;
-  /* 二级项紧凑布局：百宝箱现含 4 个子项（LLM / MCP / Skill / Python），
+  /* 二级项紧凑布局：百宝箱现含 3 个子项（LLM / MCP / Skill），
      覆盖父级 .app-nav-pills__item 的 padding:8px 14px; gap:6px; 14px 为紧凑版，
-     使 4 个子项在常见窗口宽度下一字排开、不再触发右移箭头。 */
+     使子项在常见窗口宽度下一字排开、不再触发右移箭头。 */
   padding: 8px 10px;
   gap: 5px;
   font-size: 13px;

@@ -1,12 +1,15 @@
 /**
  * 路由页面「设置」：一级菜单，点击直接跳转。
  * - 左侧栏：四个分区（系统设置 / 记忆存储 / 安全中心 / 关于我们）；
- * - 右侧主内容：当前分区对应的面板；
+ *           分组「沙箱环境」下含子菜单「Python」（内嵌沙箱 Python 运行时管理界面）。
+ * - 右侧主内容：当前分区 / 子菜单对应的面板；
  * - 所有配置经 src/core/file/settings-file.ts 落库到 app_config 表。
  */
 import { useCallback, useEffect, useState } from 'react'
 import { SlidersHorizontal, Brain, ShieldCheck, Info } from 'lucide-react'
 import { Spin } from 'antd'
+import { PythonLogo } from '@/components/icons/PythonLogo'
+import SandboxPythonPage from '@/pages/sandbox/python'
 import {
   loadSettings,
   saveSettings,
@@ -18,13 +21,31 @@ import { SecurityPanel } from './components/SecurityPanel'
 import { AboutPanel } from './components/AboutPanel'
 import './index.scss'
 
-type SectionId = 'system' | 'memory' | 'security' | 'about'
+type SectionId = 'system' | 'memory' | 'security' | 'about' | 'sandbox-python'
 
-const SECTIONS: { id: SectionId; label: string; icon: React.ReactNode }[] = [
+interface FlatNavItem {
+  id: SectionId
+  label: string
+  icon: React.ReactNode
+}
+
+interface NavGroup {
+  label: string
+  items: FlatNavItem[]
+}
+
+const SECTIONS: FlatNavItem[] = [
   { id: 'system', label: '系统设置', icon: <SlidersHorizontal size={18} /> },
   { id: 'memory', label: '记忆存储', icon: <Brain size={18} /> },
   { id: 'security', label: '安全中心', icon: <ShieldCheck size={18} /> },
   { id: 'about', label: '关于我们', icon: <Info size={18} /> },
+]
+
+const GROUPS: NavGroup[] = [
+  {
+    label: '沙箱环境',
+    items: [{ id: 'sandbox-python', label: 'Python', icon: <PythonLogo className="settings__nav-icon-img" /> }],
+  },
 ]
 
 export default function SettingsPage() {
@@ -69,6 +90,24 @@ export default function SettingsPage() {
               <span className="settings__nav-label">{s.label}</span>
             </button>
           ))}
+
+          {GROUPS.map((g) => (
+            <div key={g.label} className="settings__nav-group">
+              <div className="settings__nav-group-title">{g.label}</div>
+              {g.items.map((it) => (
+                <button
+                  key={it.id}
+                  type="button"
+                  className={`settings__nav-item settings__nav-item--sub${active === it.id ? ' is-active' : ''}`}
+                  onClick={() => setActive(it.id)}
+                  aria-current={active === it.id ? 'page' : undefined}
+                >
+                  <span className="settings__nav-icon">{it.icon}</span>
+                  <span className="settings__nav-label">{it.label}</span>
+                </button>
+              ))}
+            </div>
+          ))}
         </nav>
       </aside>
 
@@ -81,6 +120,7 @@ export default function SettingsPage() {
           <SecurityPanel settings={settings} onChange={commit} />
         )}
         {active === 'about' && <AboutPanel />}
+        {active === 'sandbox-python' && <SandboxPythonPage />}
       </main>
     </div>
   )

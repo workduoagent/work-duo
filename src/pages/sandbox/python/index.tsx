@@ -149,6 +149,33 @@ export default function SandboxPythonPage() {
     void refresh()
   }, [refresh])
 
+  /** 默认环境（default）自动创建兜底：应用启动已在后台静默创建它，但若那次创建
+   *  未完成或失败，进入本页即静默补齐，避免用户手动点击「创建环境」。
+   *  仅在列表加载完成、且无其它操作进行、且 default 确实缺失时尝试一次。 */
+  const autoInitRef = useRef(false)
+  useEffect(() => {
+    if (autoInitRef.current) return
+    if (envs.length === 0) return // 列表尚未加载完成，等 refresh 返回后再判定
+    if (busy !== null) return // 有其它操作进行中，稍后由 busy 变化再次判定
+    const def = envs.find((e) => e.name === RESERVED)
+    if (!def || def.exists) {
+      autoInitRef.current = true
+      return
+    }
+    autoInitRef.current = true
+    setBusy(`init:${RESERVED}`)
+    createEnv(RESERVED, '3.11')
+      .then((res) => {
+        if (res.ok) message.success('默认 Python 环境已就绪')
+        else message.warning(res.error || '默认 Python 环境创建失败')
+      })
+      .catch(() => {})
+      .finally(() => {
+        setBusy(null)
+        void refresh()
+      })
+  }, [envs, busy, message, refresh])
+
   /** 统一「带忙等 + 结果提示 + 成功后刷新」的操作执行器（用于重置 / 删除等非创建操作）。 */
   const runOp = useCallback(
     async (key: string, fn: () => Promise<{ ok: boolean; error?: string }>, okText: string) => {
