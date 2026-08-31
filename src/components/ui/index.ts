@@ -11,5 +11,5 @@ export {
 } from './Card'
 export { Modal, type ModalProps } from './Modal'
 export { Field, FieldLabel } from './Field'
-export { Select, Slider, Switch, InputNumber, Radio, Checkbox, Popconfirm } from './controls'
+export { Select, AutoComplete, Slider, Switch, InputNumber, Radio, Checkbox, Popconfirm } from './controls'
 export * from './icons'

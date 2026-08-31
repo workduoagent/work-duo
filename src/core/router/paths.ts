@@ -6,6 +6,8 @@ export const ROUTES = {
   squadsWorkspace: '/squads-workspace',
   skillHub: '/skill-hub',
   mcpHub: '/mcp-hub',
+  sandbox: '/sandbox',
+  sandboxPython: '/sandbox/python',
   settings: '/settings',
 } as const
 

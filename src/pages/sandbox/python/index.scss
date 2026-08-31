@@ -1,0 +1,462 @@
+/* ============================================================
+ * pages/sandbox/python — Python 沙箱环境
+ * 风格对齐 MCP 模块：卡片上（名称 + 状态）/ 中（版本 + 依赖数）/ 下（图标按钮组）。
+ * 仅使用设计令牌 var(--color-*)，不写 hex / px 字面量；页面根容器全宽。
+ * ============================================================ */
+
+.sandbox-py {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  height: 100%;
+  overflow: hidden;
+  background: var(--color-background);
+}
+
+/* ---------------- 顶部 Header ---------------- */
+.sandbox-py__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.sandbox-py__title {
+  margin: 0 0 6px;
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--color-foreground-intense);
+}
+
+.sandbox-py__lead {
+  margin: 0;
+  max-width: 680px;
+  color: var(--color-foreground-muted);
+  font-size: 0.875rem;
+  line-height: 1.6;
+}
+
+.sandbox-py__actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 0 auto;
+}
+
+.sandbox-py__loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 64px 0;
+}
+
+/* ---------------- 环境卡片网格 ---------------- */
+.sandbox-py__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 16px;
+  align-content: start;
+  overflow-y: auto;
+  /* 留白要足够大：hover 时卡片 translateY(-3px) 上移 + box-shadow 扩散，
+   * 若 padding 太小，顶部 border / 阴影会被 overflow-y:auto 滚动容器裁掉。 */
+  padding: 16px 12px;
+}
+
+/* Card 封装把 className 挂在 antd Card 根节点，内容渲染在 .ant-card-body；
+ * flex 列布局必须下沉到 body 层，gap 才会作用在 上/中/下 之间。特异性 (0,3,0) 高于 antd。 */
+.app-card.sandbox-py__card .ant-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  height: 100%;
+  padding: 16px;
+}
+
+.sandbox-py__card {
+  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+}
+
+.sandbox-py__card:hover {
+  transform: translateY(-3px);
+  border-color: var(--color-brand-300, var(--color-brand-600));
+  box-shadow: var(--shadow-md);
+}
+
+/* ---- 上：名称 + 状态 ---- */
+.sandbox-py__card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.sandbox-py__card-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--color-foreground-intense);
+
+  span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+.sandbox-py__badge {
+  flex: 0 0 auto;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  line-height: 18px;
+  font-weight: 500;
+  color: var(--color-brand-600);
+  background-color: var(--color-brand-50, var(--color-background-muted));
+  border: 1px solid var(--color-border);
+}
+
+.sandbox-py__status {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  line-height: 18px;
+  background-color: var(--color-background-muted);
+  color: var(--color-foreground-muted);
+}
+
+.sandbox-py__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+  background-color: currentColor;
+}
+
+.sandbox-py__status.is-ready {
+  background-color: var(--color-success-50, var(--color-background-muted));
+  color: var(--color-success);
+}
+
+.sandbox-py__status.is-ready .sandbox-py__dot {
+  /* 收紧发光半径：原 3px 在 hover + translateY(-3px) 时会贴近卡片右上角边框，遮住边框顶端一段。
+   * 改 2px + 35% 浓度后，层次感保留、不再触碰边框。 */
+  box-shadow: 0 0 0 2px color-mix(in srgb, currentColor 35%, transparent);
+}
+
+/* ---- 中：版本 + 依赖数 ---- */
+.sandbox-py__card-mid {
+  display: flex;
+  gap: 16px;
+  padding: 10px 12px;
+  border-radius: calc(var(--radius-card) - 6px);
+  background: var(--color-background-muted);
+}
+
+.sandbox-py__meta-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8125rem;
+  color: var(--color-foreground-muted);
+}
+
+.sandbox-py__meta-label {
+  color: var(--color-foreground-muted);
+}
+
+.sandbox-py__meta-item b {
+  color: var(--color-foreground-intense);
+  font-weight: 600;
+}
+
+/* ---- 下：图标按钮组 ---- */
+.sandbox-py__card-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-top: 12px;
+  border-top: 1px solid var(--color-border);
+  margin-top: auto; /* 推到卡片最底部 */
+}
+
+/* 高位操作：重置（黄）/ 删除（红）常态即着色，hover 加同色浅底，禁用态不强制着色以免误导。 */
+.sandbox-py__act-reset:not(:disabled) {
+  color: var(--color-warning) !important;
+}
+
+.sandbox-py__act-reset:not(:disabled):hover {
+  color: var(--color-warning) !important;
+  background-color: var(--color-warning-50) !important;
+}
+
+.sandbox-py__act-del:not(:disabled) {
+  color: var(--color-danger) !important;
+}
+
+.sandbox-py__act-del:not(:disabled):hover {
+  color: var(--color-danger) !important;
+  background-color: var(--color-danger-bg) !important;
+}
+
+/* ---------------- 表单（新建环境弹窗） ---------------- */
+.sandbox-py__required {
+  color: var(--color-danger);
+  margin-left: 2px;
+  font-weight: 600;
+}
+
+.sandbox-py__field-error {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--color-danger);
+}
+
+.sandbox-py__hint {
+  margin-top: 4px;
+  font-size: 0.75rem;
+  color: var(--color-foreground-muted);
+}
+
+.sandbox-py__autocomplete {
+  width: 100%;
+}
+
+/* ---------------- 详情弹窗：依赖管理 ---------------- */
+.sandbox-py__detail {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.sandbox-py__detail-install {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.sandbox-py__detail-install > :last-child {
+  align-self: flex-end;
+}
+
+.sandbox-py__detail-list {
+  /* 固定高度滚动区：搜索过滤时列表条数变化只改内部滚动量，弹窗整体高度恒定，不再抖动。 */
+  height: 46vh;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.sandbox-py__detail-search {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  /* 吸顶：始终可见；背景盖住下方滚上来的列表文字 */
+  background: var(--color-background);
+  margin-bottom: 12px;
+}
+
+.sandbox-py__deps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.sandbox-py__deps li + li {
+  margin-top: 6px;
+}
+
+/* 依赖列表表头：与每行三列（包名 / 版本号 / 操作）对齐；纯视觉分隔，屏读忽略。 */
+.sandbox-py__dep-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 2px 12px 8px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--color-border);
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--color-foreground-muted);
+}
+
+.sandbox-py__dep-head-name {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.sandbox-py__dep-head-ver {
+  flex: 0 0 auto;
+  color: var(--color-foreground-muted);
+}
+
+.sandbox-py__dep-head-op {
+  flex: 0 0 auto;
+  min-width: 24px;
+  text-align: right;
+}
+
+.sandbox-py__dep {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  border-radius: calc(var(--radius-card) - 8px);
+  background: var(--color-background-subtle);
+}
+
+.sandbox-py__dep-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--color-foreground-intense);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sandbox-py__dep-ver {
+  flex: 0 0 auto;
+  color: var(--color-foreground-muted);
+  font-size: 0.8125rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.sandbox-py__dep-del:hover {
+  color: var(--color-danger) !important;
+}
+
+/* ---------------- 运行脚本输出 ---------------- */
+.sandbox-py__path-row {
+  display: flex;
+  gap: 8px;
+}
+
+.sandbox-py__path-row > :first-child {
+  flex: 1;
+}
+
+.sandbox-py__output {
+  margin-top: 4px;
+}
+
+.sandbox-py__output-label {
+  font-size: 0.8125rem;
+  color: var(--color-foreground-muted);
+  margin-bottom: 6px;
+}
+
+.sandbox-py__output-pre {
+  margin: 0;
+  padding: 12px 14px;
+  min-height: 120px;
+  max-height: 40vh;
+  overflow: auto;
+  border-radius: var(--radius-card);
+  background: var(--color-background-subtle);
+  color: var(--color-foreground);
+  font-size: 0.8125rem;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  border: 1px solid var(--color-border);
+}
+
+/* ---------------- 全屏创建进度遮罩 ---------------- */
+.sandbox-py__creating {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: color-mix(in srgb, var(--color-background) 62%, transparent);
+  backdrop-filter: blur(4px);
+}
+
+.sandbox-py__creating-card {
+  width: 420px;
+  max-width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 24px;
+  border-radius: var(--radius-card);
+  background: var(--color-background);
+  border: 1px solid var(--color-border);
+  box-shadow: var(--shadow-pop);
+}
+
+.sandbox-py__creating-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--color-foreground-intense);
+}
+
+.sandbox-py__creating-icon--ok {
+  color: var(--color-success);
+}
+
+.sandbox-py__creating-icon--err {
+  color: var(--color-danger);
+}
+
+.sandbox-py__creating-msg {
+  font-size: 0.875rem;
+  color: var(--color-foreground-muted);
+  min-height: 1.25em;
+}
+
+.sandbox-py__creating-bar {
+  height: 8px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--color-background-muted);
+}
+
+.sandbox-py__creating-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--color-brand-600);
+  transition: width 0.3s ease;
+}
+
+.sandbox-py__creating-fill.is-done {
+  background: var(--color-success);
+}
+
+.sandbox-py__creating-fill.is-error {
+  background: var(--color-danger);
+}
+
+.sandbox-py__creating-pct {
+  align-self: flex-end;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--color-foreground-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.sandbox-py__creating-error {
+  padding: 10px 12px;
+  border-radius: calc(var(--radius-card) - 8px);
+  background: var(--color-danger-bg);
+  color: var(--color-danger);
+  font-size: 0.8125rem;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}

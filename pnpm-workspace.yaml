@@ -3,7 +3,7 @@ allowBuilds:
   canvas: true
   core-js: true
   es5-ext: true
-  esbuild: set this to true or false
+  esbuild: true
 
 overrides:
   pdfjs-dist: 3.11.174

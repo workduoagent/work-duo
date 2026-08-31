@@ -11,6 +11,7 @@ import SkillDetailPage from '@/pages/skill-hub/detail'
 import McpHubPage from '@/pages/mcp'
 import McpDetailPage from '@/pages/mcp/detail'
 import SettingsPage from '@/pages/settings'
+import SandboxPythonPage from '@/pages/sandbox/python'
 
 // HashRouter is used so deep links survive reloads inside the Tauri custom
 // protocol (no SPA fallback on tauri://). Swap to createBrowserRouter if the
@@ -30,6 +31,7 @@ export const router = createHashRouter([
       { path: 'skill-hub/:id', element: <SkillDetailPage /> },
       { path: 'mcp-hub', element: <McpHubPage /> },
       { path: 'mcp-hub/:id', element: <McpDetailPage /> },
+      { path: 'sandbox/python', element: <SandboxPythonPage /> },
       { path: 'settings', element: <SettingsPage /> },
     ],
   },

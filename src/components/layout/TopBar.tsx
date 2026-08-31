@@ -4,7 +4,7 @@ import {
   useLayoutEffect,
   useRef,
   useState,
-  type CSSProperties,
+  type ComponentType,
 } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import {
@@ -18,25 +18,25 @@ import {
   Wand2,
   ChevronLeft,
   ChevronRight,
-  type LucideIcon,
 } from 'lucide-react'
+import { PythonLogo } from '@/components/icons/PythonLogo'
 import { WindowControls } from './WindowControls'
 import { ThemeToggle } from './ThemeToggle'
 import { isTauri } from '@/core/config'
 import { ROUTES } from '@/core/router/paths'
 
 /** 二级菜单单项动画时长 / 逐项出场间隔（出场从左往右、收起从右往左依次错开） */
-const CHILD_ANIM_MS = 500
-const CHILD_STAGGER_MS = 80
+const CHILD_ANIM_MS = 320
+const CHILD_STAGGER_MS = 50
 /** 收起动画总时长（单项时长 + 最大逐项延迟 + 缓冲），到期后从 DOM 移除 */
-const CHILD_EXIT_MS = CHILD_ANIM_MS + CHILD_STAGGER_MS * 3 + 150
-/** 钻取切换期间逐帧测量滑块的窗口时长（布局动画期间滑块实时跟随） */
-const TRACK_MS = 900
+const CHILD_EXIT_MS = CHILD_ANIM_MS + CHILD_STAGGER_MS * 3 + 120
+/** 钻取切换期间逐帧测量滑块的窗口时长（略大于动画总时长，确保滑块实时跟到底） */
+const TRACK_MS = 480
 
 interface MenuNode {
   key: string
   label: string
-  icon: LucideIcon
+  icon: ComponentType<{ className?: string }>
   /** 已建成页面的路由；缺省则点击仅高亮不跳转。 */
   path?: string
   /** 存在子项即为「父容器」，点击进入二级钻取而非跳转。 */
@@ -54,7 +54,7 @@ const MENUS: MenuNode[] = [
       { key: 'llm', label: 'LLM', icon: Sparkles, path: ROUTES.modelSettings },
       { key: 'mcp', label: 'MCP', icon: Plug, path: ROUTES.mcpHub },
       { key: 'skill', label: 'Skill', icon: Wand2, path: ROUTES.skillHub },
-      // 后续接入的服务继续在此追加子项即可
+      { key: 'sandbox-python', label: 'Python', icon: PythonLogo, path: ROUTES.sandboxPython },
     ],
   },
   { key: 'kb', label: '知识库', icon: BookOpen, path: ROUTES.knowledge },
@@ -74,15 +74,10 @@ MENUS.forEach((m) => (m.children ?? []).forEach((c) => (PARENT_OF[c.key] = m.key
 
 function routeToTopKey(pathname: string): string | null {
   if (pathname.startsWith(ROUTES.modelSettings)) return 'treasure'
+  if (pathname.startsWith(ROUTES.sandboxPython)) return 'treasure'
   if (pathname.startsWith(ROUTES.agentStudio)) return 'buddy'
   if (pathname.startsWith(ROUTES.squadsWorkspace)) return 'squads'
   return null
-}
-
-/** 滑块几何：x = 相对底槽 padding box 的左偏移，w = 选中项宽度。 */
-interface ThumbRect {
-  x: number
-  w: number
 }
 
 /**
@@ -190,13 +185,17 @@ export function TopBar() {
   const showBack = drilledKey !== null || exiting !== null
 
   const listRef = useRef<HTMLDivElement>(null)
-  const [thumb, setThumb] = useState<ThumbRect>({ x: 0, w: 0 })
+  const thumbRef = useRef<HTMLSpanElement>(null)
   const [ready, setReady] = useState(false)
   const [canScrollRight, setCanScrollRight] = useState(false)
 
+  // 直接用 ref 写入滑块的 CSS 变量（--pill-x / --pill-w），避免逐帧 setState 触发
+  // React 重渲染——这是钻取动画卡顿的主因。钻取期关闭 transition 由 rAF 每帧直写，
+  // 滑块精确贴合且不抢占主线程；非钻取期沿用 CSS transition 平滑过渡。
   const measure = useCallback(() => {
     const list = listRef.current
-    if (!list) return
+    const thumbEl = thumbRef.current
+    if (!list || !thumbEl) return
     const item = list.querySelector<HTMLElement>(`[data-nav-value="${selected}"]`)
     if (!item) return
 
@@ -204,11 +203,8 @@ export function TopBar() {
     const itemBox = item.getBoundingClientRect()
     const x = itemBox.left - listBox.left - list.clientLeft + list.scrollLeft
 
-    setThumb((prev) =>
-      Math.abs(prev.x - x) < 0.5 && Math.abs(prev.w - itemBox.width) < 0.5
-        ? prev
-        : { x, w: itemBox.width },
-    )
+    thumbEl.style.setProperty('--pill-x', `${x}px`)
+    thumbEl.style.setProperty('--pill-w', `${itemBox.width}px`)
   }, [selected])
 
   // 仅「进入二级」时逐帧测量，滑块实时跟随布局动画避免拖影。
@@ -333,17 +329,8 @@ export function TopBar() {
 
           {/* 菜单轨道（钻取态可横向滚动） */}
           <div className="app-nav-pills__list" ref={listRef}>
-            {/* 滑块 */}
-            <span
-              className="app-nav-pills__thumb"
-              style={
-                {
-                  '--pill-x': `${thumb.x}px`,
-                  '--pill-w': `${thumb.w}px`,
-                } as CSSProperties
-              }
-              aria-hidden="true"
-            />
+            {/* 滑块（几何由 measure() 经 thumbRef 直写 CSS 变量驱动） */}
+            <span className="app-nav-pills__thumb" ref={thumbRef} aria-hidden="true" />
 
             {/* 一级菜单 */}
             {MENUS.map((node) => (

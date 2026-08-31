@@ -176,8 +176,8 @@
 .app-nav-pills[data-ready='true'] .app-nav-pills__thumb {
   opacity: 1;
   transition:
-    transform 0.5s cubic-bezier(0.32, 0.72, 0, 1),
-    width 0.5s cubic-bezier(0.32, 0.72, 0, 1),
+    transform 0.32s cubic-bezier(0.32, 0.72, 0, 1),
+    width 0.32s cubic-bezier(0.32, 0.72, 0, 1),
     opacity 0.2s ease,
     background-color 0.2s ease;
 }
@@ -244,9 +244,9 @@
   display: inline-flex;
   max-width: 240px;
   transition:
-    max-width 0.55s cubic-bezier(0.32, 0.72, 0, 1),
+    max-width 0.32s cubic-bezier(0.32, 0.72, 0, 1),
     opacity 0.3s ease,
-    transform 0.55s cubic-bezier(0.32, 0.72, 0, 1);
+    transform 0.32s cubic-bezier(0.32, 0.72, 0, 1);
 }
 
 .app-nav-pills__slot[data-collapsed='true'] {
@@ -288,8 +288,8 @@
     background-color 0.2s ease,
     color 0.2s ease,
     transform 0.2s ease,
-    width 0.5s cubic-bezier(0.32, 0.72, 0, 1),
-    margin 0.5s cubic-bezier(0.32, 0.72, 0, 1),
+    width 0.32s cubic-bezier(0.32, 0.72, 0, 1),
+    margin 0.32s cubic-bezier(0.32, 0.72, 0, 1),
     opacity 0.3s ease;
   -webkit-tap-highlight-color: transparent;
 }
@@ -326,45 +326,45 @@
 .app-nav-pills__item--child {
   flex-shrink: 0;
   overflow: hidden;
+  /* 二级项紧凑布局：百宝箱现含 4 个子项（LLM / MCP / Skill / Python），
+     覆盖父级 .app-nav-pills__item 的 padding:8px 14px; gap:6px; 14px 为紧凑版，
+     使 4 个子项在常见窗口宽度下一字排开、不再触发右移箭头。 */
+  padding: 8px 10px;
+  gap: 5px;
+  font-size: 13px;
 }
 
 .app-nav-pills__item--child[data-phase='enter'] {
-  animation: pillChildIn 0.5s cubic-bezier(0.32, 0.72, 0, 1) backwards;
+  animation: pillChildIn 0.32s cubic-bezier(0.32, 0.72, 0, 1) backwards;
 }
 
 /* 退场「从右往左依次收起」：由 JS 反序写入 animation-delay */
 .app-nav-pills__item--child[data-phase='exit'] {
   pointer-events: none;
-  animation: pillChildOut 0.5s cubic-bezier(0.32, 0.72, 0, 1) forwards;
+  animation: pillChildOut 0.32s cubic-bezier(0.32, 0.72, 0, 1) forwards;
 }
 
+/* 仅用 opacity + transform（合成层，不触发重排），避免钻取动画卡顿；
+   二级项宽度由 flex 自然排布，靠 stagger 实现「从左往右依次出现」。 */
 @keyframes pillChildIn {
   from {
-    max-width: 0;
-    padding-inline: 0;
     opacity: 0;
-    transform: translateX(-12px);
+    transform: translateX(-10px) scale(0.96);
   }
   to {
-    max-width: 200px;
-    padding-inline: 14px;
     opacity: 1;
-    transform: translateX(0);
+    transform: translateX(0) scale(1);
   }
 }
 
 @keyframes pillChildOut {
   from {
-    max-width: 200px;
-    padding-inline: 14px;
     opacity: 1;
-    transform: translateX(0);
+    transform: translateX(0) scale(1);
   }
   to {
-    max-width: 0;
-    padding-inline: 0;
     opacity: 0;
-    transform: translateX(-12px);
+    transform: translateX(-10px) scale(0.96);
   }
 }
 

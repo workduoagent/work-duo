@@ -22,6 +22,17 @@
     "dialog:default",
     "dialog:allow-save",
     "opener:default",
+    "shell:default",
+    {
+      "identifier": "shell:allow-execute",
+      "allow": [
+        {
+          "args": true,
+          "name": "binaries/micromamba",
+          "sidecar": true
+        }
+      ]
+    },
     "sql:default",
     {
       "identifier": "sql:default",
