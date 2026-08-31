@@ -26,9 +26,11 @@ React19+TS+Vite+**Tauri2**；UI=**antd v5**(ConfigProvider+darkAlgorithm)，Appi
 - **Skill(skill-hub)**：`skill_info`+`skill-mapper`；**禁 scope/version 字段**，仅 status（卡片右上角 Switch）；`instruction`(技能指令) 与 `skillMarkdown`(SKILL.md 正文) 两独立字段、分 Tab/分渲染；落盘 `skillFs.persistSkillFiles`，骨架 `<identifier>/{scripts,references,assets,templates}`+`SKILL.md`；头像固定 `<identifier>/logo.<ext>`(无则显名称首字)；导入支持文件夹/ZIP(jszip)；卡片/分页对齐 MCP；详情独立页 `/skill-hub/:id`。
 - **MCP(mcp-hub)**：仅接不建；同步/调用走 Rust `src-tauri/src/mcp.rs` 经 invoke 绕 CORS；JSON 编辑统一 `MonacoJsonEditor`（本地加载，worker 坑已解勿回退）；卡片操作 编辑/详情/禁用/删除。
 - **设置(settings)**：`app_config` KV，9 键种子（含 skill_path 种子 `$APPDATA/.skills`）。
+- **沙箱 Python(sandbox/python)**：Rust `src-tauri/src/mamba_manager.rs` 内嵌 micromamba 绿色便携（`$RESOURCES/mamba_root`，8 命令：init/list/install/uninstall/reset/run/list_envs/delete；`default` 环境启动经 `lib.rs` `.setup()` 后台自动建、禁删禁重置；`run_python_script` 中文路径走 ASCII 临时副本+`cwd` 规避 Windows cmd 编码坑）；前端 `src/pages/sandbox/python`（MCP 风格卡片上中下 + 详情弹窗融合装卸依赖 + 全屏百分比进度遮罩）；`src/core/mapper/sandbox-mapper.ts` 封装 `Result<String,String>`→`{ok,error?,data?}`。**Rust 改动需 `npm run tauri` 重编译后前端 invoke 才生效**；纯前端改动仅 `npm run typecheck`。
 
 ## 全局消息
 统一 `useNotify()`（=`App.useApp()` 的 message），禁静态 `import {message}`；`<App message={{top:72}}>` 避让顶栏；美学在 `src/styles/message.scss`（毛玻璃/大圆角/图标徽章/下滑入场，跟随 `.light/.dark`）。
 
 ## UI/状态
 `@/components/ui`(Button/Card/Input/Modal 受控/Field+FieldLabel/controls)；Redux+themeSlice；`ThemeProvider` 切 `document.documentElement` `.light/.dark`。顶栏 `TopBar.tsx` 纯 HTML 胶囊两级钻取。
+**导航 IA 现状（2026-08-31 校准）**：一级菜单=百宝箱(父容器)/知识库/搭子/小分队/设置；【百宝箱】二级=LLM·MCP·Skill·Python（Python 用官方徽标 `src/components/icons/PythonLogo`，路由仍 `/sandbox/python`）。原独立一级【沙箱环境】已撤销、NodeJs 未做已移除；死代码 `src/pages/sandbox/node/` 待用户在 IDE/资源管理器手动删。钻取滑块用 `thumbRef` 直写 CSS 变量（非 setState），见 `2026-08-31.md`。
