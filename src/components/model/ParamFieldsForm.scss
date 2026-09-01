@@ -1,0 +1,48 @@
+/* 分类参数动态表单（ParamFieldsForm）的控件样式。
+   布局（网格列数、跨列）由调用方通过 className / fullWidthClassName 注入，
+   这里只负责「单个控件」的观感，保证 LLM 模块与智能体向导两处一致。 */
+
+.param-fields {
+  &__hint {
+    font-weight: 400;
+    color: var(--color-foreground-muted);
+    font-size: 0.75rem;
+    margin-left: 6px;
+  }
+
+  /* Slider 行：滑块铺满，右侧数值徽标定宽 */
+  &__slider {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+
+    .ant-slider {
+      flex: 1 1 0;
+      min-width: 0;
+      margin: 8px 0;
+    }
+  }
+
+  &__slider-value {
+    flex: 0 0 48px;
+    text-align: right;
+    font-size: 0.75rem;
+    font-variant-numeric: tabular-nums;
+    color: var(--color-foreground);
+    background: var(--color-background-soft);
+    padding: 4px 8px;
+    border-radius: 4px;
+  }
+
+  &__input-number {
+    width: 100%;
+    max-width: 200px;
+  }
+
+  /* 控件统一对齐包装器 */
+  &__control-wrapper {
+    display: flex;
+    align-items: center;
+    min-height: 36px;
+  }
+}

@@ -112,10 +112,11 @@ export type McpScenario =
  * 场景分类字典的「域」标识（对应 scenario_category.scope）。
  *  - MCP：MCP 使用场景（原 mcp_info.scenario）；
  *  - SKILL：技能分类（原 skill_info.scenario）；
- *  - KB：知识库分类（对应 knowledge_base.scenario，用户设计明确要求 KB 接入场景字典）。
+ *  - KB：知识库分类（对应 knowledge_base.scenario，用户设计明确要求 KB 接入场景字典）；
+ *  - AGENT：智能体应用场景（对应 agent_info.scenario）。
  *  注：LLM 模型分类不纳入本字典——模型大类直接驱动 paramFields 动态表单，须与代码参数结构严格对应。
  */
-export type ScenarioScope = 'MCP' | 'SKILL' | 'KB'
+export type ScenarioScope = 'MCP' | 'SKILL' | 'KB' | 'AGENT'
 
 /**
  * 场景分类字典行（对应 scenario_category 表）。
@@ -181,6 +182,95 @@ export interface KnowledgeAsset {
   filePath: string
   createdAt: string
   updatedAt: string
+}
+
+/**
+ * 智能体（对应 agent_info 表）。
+ * - identifier：唯一标识，系统随机生成（用户可自定义）；
+ * - logo：Base64 data URL 头像；为空时前端回退 lucide 图标（不落盘文件）；
+ * - scenario：场景分类 key（对应 scenario_category scope='AGENT'，可空）；
+ * - llmId / ttsId / sttId：绑定的模型 id（引用 models.id）；
+ * - llmConfig / ttsConfig / sttConfig：模型参数的「智能体私有副本」
+ *   （models.config 只作为初始默认值，向导里改的是这里）；
+ * - isActive：启用开关；autoToolExecMode：外部资源自动执行模式。
+ */
+export interface AgentInfo {
+  id: string
+  logo?: string
+  scenario?: string
+  name: string
+  identifier: string
+  description?: string
+  systemPrompt?: string
+  welcomeMessage?: string
+  llmId?: string
+  llmConfig?: Record<string, unknown>
+  ttsId?: string
+  ttsConfig?: Record<string, unknown>
+  sttId?: string
+  sttConfig?: Record<string, unknown>
+  isActive: boolean
+  autoToolExecMode: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+/**
+ * 智能体绑定的 MCP 工具（对应 agent_mcp_ref 表）。
+ * 关联的最小单元是工具（toolId → mcp_tool_definition.id），
+ * mcpId 仅用于按服务分组展示与级联清理。
+ */
+export interface AgentMcpToolRef {
+  id: string
+  agentId: string
+  mcpId: string
+  toolId: string
+  isActive: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+/** 智能体编排的技能（对应 agent_skill_ref 表）。 */
+export interface AgentSkillRef {
+  id: string
+  agentId: string
+  skillId: string
+  isActive: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+/** 智能体的工具计数（列表卡片展示用，不落库）。 */
+export interface AgentRefCounts {
+  /** 已绑定的 MCP 工具数 */
+  mcpTools: number
+  /** 已编排的技能数 */
+  skills: number
+}
+
+/** 新建 / 编辑智能体的入参（向导一次性提交：主表 + 两张关联表）。 */
+export interface AgentUpsertInput {
+  /** 传入则为更新；为空为新建 */
+  id?: string
+  name: string
+  identifier: string
+  logo?: string
+  scenario?: string
+  description?: string
+  systemPrompt?: string
+  welcomeMessage?: string
+  llmId?: string
+  llmConfig?: Record<string, unknown>
+  ttsId?: string
+  ttsConfig?: Record<string, unknown>
+  sttId?: string
+  sttConfig?: Record<string, unknown>
+  isActive?: boolean
+  autoToolExecMode?: boolean
+  /** 绑定的 MCP 工具（最小单元 = toolId；mcpId 为冗余分组信息） */
+  mcpTools: Array<{ mcpId: string; toolId: string }>
+  /** 编排的技能 id */
+  skillIds: string[]
 }
 
 /**

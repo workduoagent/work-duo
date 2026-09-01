@@ -72,16 +72,62 @@ export interface KnowledgeAssetRow {
   updated_at: number
 }
 
-/** 智能体表（agents）行映射（预留，尚未接入 mapper）。
- * model_id 为外键，引用 models.id。
+/** 智能体表（agent_info）行映射（对应 PostgreSQL public.agent_info）。
+ * - id：本地 UUID（文本主键）；
+ * - identifier：智能体唯一标识（系统随机生成，用户可自定义），UNIQUE；
+ * - logo：Base64 data URL 头像（未设置时前端回退 lucide 图标）；
+ * - scenario：场景分类 key（对应 scenario_category scope='AGENT' 的 value，可空）；
+ * - llm_id / tts_id / stt_id：外键，引用 models.id；
+ * - llm_config / tts_config / stt_config：JSON 文本，是对应 models.config 的「私有副本」
+ *   （models 表仅作初始默认，智能体向导里可自由调参，改的是本列）；
+ * - is_active：启用开关（0/1）；auto_tool_exec_mode：外部资源自动执行模式（0/1）；
+ * - created_at / updated_at：epoch 毫秒（整型）。
  */
-export interface AgentRow {
+export interface AgentInfoRow {
   id: string
+  logo: string | null
+  scenario: string | null
   name: string
-  role: string
-  model_id: string | null
+  identifier: string
+  description: string | null
   system_prompt: string | null
+  welcome_message: string | null
+  llm_id: string | null
+  llm_config: string | null
+  tts_id: string | null
+  tts_config: string | null
+  stt_id: string | null
+  stt_config: string | null
+  is_active: number // SQLite 布尔：0 / 1
+  auto_tool_exec_mode: number // SQLite 布尔：0 / 1
   created_at: number
+  updated_at: number
+}
+
+/** 智能体 × MCP 工具关联表（agent_mcp_ref）行映射。
+ * 关联的最小单元是「工具」：tool_id 引用 mcp_tool_definition.id；
+ * mcp_id 为冗余列（工具所属 MCP 服务），仅用于按服务分组展示与级联清理，不参与唯一约束。
+ */
+export interface AgentMcpRefRow {
+  id: string
+  agent_id: string
+  mcp_id: string
+  tool_id: string
+  is_active: number // SQLite 布尔：0 / 1
+  created_at: number
+  updated_at: number
+}
+
+/** 智能体 × Skill 关联表（agent_skill_ref）行映射。
+ * skill_id 引用 skill_info.id；一个智能体可编排多个技能。
+ */
+export interface AgentSkillRefRow {
+  id: string
+  agent_id: string
+  skill_id: string
+  is_active: number // SQLite 布尔：0 / 1
+  created_at: number
+  updated_at: number
 }
 
 /** 小分队表（squads）行映射（预留，尚未接入 mapper）。

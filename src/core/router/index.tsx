@@ -5,6 +5,8 @@ import ModelSettingsPage from '@/pages/model-settings'
 import KnowledgeListPage from '@/pages/knowledge'
 import KnowledgeDetailPage from '@/pages/knowledge/components/detail.tsx'
 import AgentStudioPage from '@/pages/agent-studio'
+import AgentWizardPage from '@/pages/agent-studio/wizard'
+import AgentChatPage from '@/pages/agent-studio/chat'
 import SquadsWorkspacePage from '@/pages/squads-workspace'
 import SkillHubPage from '@/pages/skill-hub'
 import SkillDetailPage from '@/pages/skill-hub/detail'
@@ -26,6 +28,10 @@ export const router = createHashRouter([
       { path: 'knowledge', element: <KnowledgeListPage /> },
       { path: 'knowledge/:id', element: <KnowledgeDetailPage /> },
       { path: 'agent-studio', element: <AgentStudioPage /> },
+      // 新建必须排在 ':id/edit' 之前：否则 'new' 会被当作 id
+      { path: 'agent-studio/new', element: <AgentWizardPage /> },
+      { path: 'agent-studio/:id/edit', element: <AgentWizardPage /> },
+      { path: 'agent-studio/:id/chat', element: <AgentChatPage /> },
       { path: 'squads-workspace', element: <SquadsWorkspacePage /> },
       { path: 'skill-hub', element: <SkillHubPage /> },
       { path: 'skill-hub/:id', element: <SkillDetailPage /> },

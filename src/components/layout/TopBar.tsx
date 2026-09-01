@@ -43,7 +43,7 @@ interface MenuNode {
 }
 
 // 顶栏菜单树：一级菜单 + 二级子菜单。
-// 百宝箱 为父容器（含二级 LLM / MCP / Skill）；知识库 / 搭子 / 小分队 / 设置 为叶子菜单。
+// 百宝箱 为父容器（含二级 LLM / MCP / Skill）；知识库 / 智能体 / 小分队 / 设置 为叶子菜单。
 // 沙箱环境（含 Python）已并入「设置」页左侧栏，不再作为顶层菜单。
 const MENUS: MenuNode[] = [
   {
@@ -57,7 +57,7 @@ const MENUS: MenuNode[] = [
     ],
   },
   { key: 'kb', label: '知识库', icon: BookOpen, path: ROUTES.knowledge },
-  { key: 'buddy', label: '搭子', icon: Bot, path: ROUTES.agentStudio },
+  { key: 'agent', label: '智能体', icon: Bot, path: ROUTES.agentStudio },
   { key: 'squads', label: '小分队', icon: Users, path: ROUTES.squadsWorkspace },
   {
     key: 'settings',
@@ -74,7 +74,7 @@ MENUS.forEach((m) => (m.children ?? []).forEach((c) => (PARENT_OF[c.key] = m.key
 function routeToTopKey(pathname: string): string | null {
   if (pathname.startsWith(ROUTES.modelSettings)) return 'treasure'
   if (pathname.startsWith(ROUTES.sandboxPython)) return 'settings'
-  if (pathname.startsWith(ROUTES.agentStudio)) return 'buddy'
+  if (pathname.startsWith(ROUTES.agentStudio)) return 'agent'
   if (pathname.startsWith(ROUTES.squadsWorkspace)) return 'squads'
   return null
 }

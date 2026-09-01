@@ -86,41 +86,8 @@
   line-height: 1.5;
 }
 
-/* Slider 行 */
-.mfm__slider {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-
-  .ant-slider {
-    flex: 1 1 0;
-    min-width: 0;
-    margin: 8px 0;
-  }
-}
-
-.mfm__slider-value {
-  flex: 0 0 48px;
-  text-align: right;
-  font-size: 0.75rem;
-  font-variant-numeric: tabular-nums;
-  color: var(--color-foreground, #333);
-  background: var(--color-background-soft, #f9f9f9);
-  padding: 4px 8px;
-  border-radius: 4px; /* 给数值增加一点底色衬托 */
-}
-
-.mfm__input-number {
-  width: 100%;
-  max-width: 200px;
-}
-
-/* 控件统一对齐包装器 */
-.mfm__control-wrapper {
-  display: flex;
-  align-items: center;
-  min-height: 36px; /* 统一表单控件的最小高度 */
-}
+/* 分类参数区的控件样式已上移到公共组件 ParamFieldsForm
+   （src/components/model/ParamFieldsForm.scss），此处仅保留本弹窗专属的布局类。 */
 
 /* 窄屏兜底 */
 @media (max-width: 640px) {

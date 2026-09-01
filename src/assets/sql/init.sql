@@ -170,6 +170,72 @@ CREATE TABLE IF NOT EXISTS scenario_category
     CONSTRAINT uk_scenario_scope_value UNIQUE (scope, value)
 );
 
+-- ============ 智能体表（agent_info） ============
+-- 行映射见 src/types/database.d.ts 的 AgentInfoRow。
+-- 由 PostgreSQL 设计（public.agent_info）转 SQLite：
+--   id           本地 UUID（文本主键），与 work-duo「模型/技能/知识库」约定一致（原 PG int8 转 TEXT）；
+--   identifier   智能体唯一标识：系统随机生成（用户可自定义），UNIQUE；
+--   logo         头像：Base64 data URL（未设置时前端回退 lucide 图标，不落盘文件）；
+--   scenario     场景分类 key（对应 scenario_category scope='AGENT' 的 value，可空）；
+--   llm_id / tts_id / stt_id            外键，引用 models.id；
+--   llm_config / tts_config / stt_config JSON 文本，是对应 models.config 的「私有副本」：
+--       models.config 只作为初始默认值，智能体向导里可自由调参，改的是本列（原 PG jsonb 转 TEXT）；
+--   is_active            启用开关（INTEGER 0/1，默认 1，原 PG bool）；
+--   auto_tool_exec_mode  外部资源自动执行模式（INTEGER 0/1，默认 0）；
+--   created_at / updated_at：epoch 毫秒（原 PG timestamp(6) 转 INTEGER）。
+CREATE TABLE IF NOT EXISTS agent_info
+(
+    id                  TEXT    PRIMARY KEY,
+    logo                TEXT,
+    scenario            TEXT,
+    name                TEXT    NOT NULL,
+    identifier          TEXT    NOT NULL,
+    description         TEXT,
+    system_prompt       TEXT,
+    welcome_message     TEXT,
+    llm_id              TEXT,
+    llm_config          TEXT,
+    tts_id              TEXT,
+    tts_config          TEXT,
+    stt_id              TEXT,
+    stt_config          TEXT,
+    is_active           INTEGER NOT NULL DEFAULT 1,
+    auto_tool_exec_mode INTEGER NOT NULL DEFAULT 0,
+    created_at          INTEGER NOT NULL,
+    updated_at          INTEGER NOT NULL,
+    CONSTRAINT uk_agent_identifier UNIQUE (identifier)
+);
+
+-- ============ 智能体 × MCP 工具关联表（agent_mcp_ref） ============
+-- 行映射见 src/types/database.d.ts 的 AgentMcpRefRow。
+-- 最小关联单元是「工具」而不是「服务」：tool_id 引用 mcp_tool_definition.id；
+-- mcp_id 是冗余列（工具所属 MCP 服务），仅用于按服务分组展示与级联清理，不参与唯一约束。
+CREATE TABLE IF NOT EXISTS agent_mcp_ref
+(
+    id         TEXT    PRIMARY KEY,
+    agent_id   TEXT    NOT NULL,
+    mcp_id     TEXT    NOT NULL,
+    tool_id    TEXT    NOT NULL,
+    is_active  INTEGER NOT NULL DEFAULT 1,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    CONSTRAINT uk_agent_mcp_tool UNIQUE (agent_id, tool_id)
+);
+
+-- ============ 智能体 × Skill 关联表（agent_skill_ref） ============
+-- 行映射见 src/types/database.d.ts 的 AgentSkillRefRow。
+-- skill_id 引用 skill_info.id；一个智能体可编排多个技能。
+CREATE TABLE IF NOT EXISTS agent_skill_ref
+(
+    id         TEXT    PRIMARY KEY,
+    agent_id   TEXT    NOT NULL,
+    skill_id   TEXT    NOT NULL,
+    is_active  INTEGER NOT NULL DEFAULT 1,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    CONSTRAINT uk_agent_skill UNIQUE (agent_id, skill_id)
+);
+
 -- 种子：录入既有硬编码（value 与旧业务数据一致，零迁移）。
 -- INSERT OR IGNORE：手动改过的 label 不会被覆盖；新增自定义项不会冲突。
 INSERT OR IGNORE INTO scenario_category (id, scope, value, label, created_at, updated_at) VALUES
@@ -193,7 +259,15 @@ INSERT OR IGNORE INTO scenario_category (id, scope, value, label, created_at, up
   ('sc-skill-education',           'SKILL', 'education',          '教育学习',      1700000000000, 1700000000000),
   ('sc-skill-professional',        'SKILL', 'professional',        '行业专业',      1700000000000, 1700000000000),
   ('sc-skill-it-ops-security',     'SKILL', 'it-ops-security',     'IT 运维与安全', 1700000000000, 1700000000000),
-  ('sc-skill-life-service',        'SKILL', 'life-service',        '生活服务',      1700000000000, 1700000000000);
+  ('sc-skill-life-service',        'SKILL', 'life-service',        '生活服务',      1700000000000, 1700000000000),
+  -- 智能体应用场景（对应 agent_info.scenario）
+  ('sc-agent-customer-service',   'AGENT', 'customer-service',  '客服助手',   1700000000000, 1700000000000),
+  ('sc-agent-office-efficiency',  'AGENT', 'office-efficiency', '办公效率',   1700000000000, 1700000000000),
+  ('sc-agent-dev-programming',    'AGENT', 'dev-programming',   '开发编程',   1700000000000, 1700000000000),
+  ('sc-agent-content-creation',   'AGENT', 'content-creation',  '内容创作',   1700000000000, 1700000000000),
+  ('sc-agent-data-analysis',      'AGENT', 'data-analysis',     '数据分析',   1700000000000, 1700000000000),
+  ('sc-agent-education',          'AGENT', 'education',         '教育学习',   1700000000000, 1700000000000),
+  ('sc-agent-life-service',       'AGENT', 'life-service',      '生活服务',   1700000000000, 1700000000000);
 
 -- ============ 知识库表（knowledge_base） ============
 -- 行映射见 src/types/database.d.ts 的 KnowledgeBaseRow。

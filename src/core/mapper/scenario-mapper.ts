@@ -6,7 +6,8 @@
  *  - 所有 SQL 集中在本目录；建表在 init.sql；
  *  - 驱动 @tauri-apps/plugin-sql；非 Tauri 回退 localStorage（全量数组集中存储）；
  *  - deleteScenario 会先按 scope 置空对应业务表的引用
- *    （SKILL→skill_info.scenario、MCP→mcp_info.scenario），再删字典行；
+ *    （SKILL→skill_info.scenario、MCP→mcp_info.scenario、KB→knowledge_base.scenario、
+ *     AGENT→agent_info.scenario），再删字典行；
  *  - 业务表存的是 value（不变），因此删除字典项不影响旧数据的 value，仅将其引用置空。
  */
 import { isTauri } from '@/core/config'
@@ -20,6 +21,7 @@ const SCOPE_REF: Partial<
   SKILL: { table: 'skill_info', column: 'scenario', notNull: false },
   MCP: { table: 'mcp_info', column: 'scenario', notNull: false },
   KB: { table: 'knowledge_base', column: 'scenario', notNull: false },
+  AGENT: { table: 'agent_info', column: 'scenario', notNull: false },
 }
 
 interface Row {

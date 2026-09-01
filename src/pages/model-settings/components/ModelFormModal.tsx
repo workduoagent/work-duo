@@ -3,6 +3,7 @@
  * 结构：基础信息（名称、服务商、Base URL、密钥、模型标识、备注）
  *      + 分类参数（由 paramFields.ts 的字段描述动态渲染，随分类切换）。
  * 新增分类时只需扩展 paramFields.ts 与 model-file.ts 的默认值。
+ * 分类参数区复用公共组件 ParamFieldsForm（智能体向导「步骤2 选择模型」用的是同一个）。
  */
 import {useEffect, useState} from 'react'
 import {Zap, Wrench} from 'lucide-react'
@@ -13,11 +14,10 @@ import {
     FieldLabel,
     Modal,
     Select,
-    Slider,
     Switch,
-    InputNumber,
     SpinnerIcon
 } from '@/components/ui'
+import {ParamFieldsForm} from '@/components/model/ParamFieldsForm'
 import {
     PROVIDER_OPTIONS,
     createEmptyModel,
@@ -25,7 +25,6 @@ import {
     type ModelConfig,
 } from '@/core/file/model-file'
 import {testModelConnection, type ModelTestResult} from '@/utils/modelTest'
-import {getParamFields} from './paramFields'
 import './ModelFormModal.scss'
 
 export interface ModelFormModalProps {
@@ -72,7 +71,6 @@ export function ModelFormModal({
     }, [open, model, category])
 
     const activeCategory = draft.category
-    const paramFields = getParamFields(activeCategory)
     // Tool/Function Calling 仅对 LLM 类（纯文本 / 多模态）有意义，故仅这两类展示开关
     const showToolCalls = activeCategory === 'text' || activeCategory === 'multimodal'
     // 分类参数挂在 draft[category] 上；类型上为按需可选，这里统一当记录用
@@ -269,95 +267,13 @@ export function ModelFormModal({
                 {/* ---------- 分类参数 ---------- */}
                 <section className="mfm__section">
                     <h4 className="mfm__section-title">分类参数</h4>
-                    <div className="mfm__param-grid">
-                        {paramFields.map((def) => {
-                            const value = paramValues[def.key]
-                            return (
-                                <Field
-                                    key={def.key}
-                                    className={
-                                        def.control === 'textarea'
-                                            ? 'mfm__span-2'
-                                            : undefined
-                                    }
-                                >
-                                    <FieldLabel>
-                                        {def.label}
-                                        {def.hint && (
-                                            <span className="mfm__hint">（{def.hint}）</span>
-                                        )}
-                                    </FieldLabel>
-
-                                    {def.control === 'slider' && typeof value === 'number' && (
-                                        <div className="mfm__slider">
-                                            <Slider
-                                                value={value}
-                                                min={def.min}
-                                                max={def.max}
-                                                step={def.step ?? 0.01}
-                                                onChange={(v) => setParam(def.key, v)}
-                                            />
-                                            <span className="mfm__slider-value">{value}</span>
-                                        </div>
-                                    )}
-
-                                    {def.control === 'number' && (
-                                        <InputNumber
-                                            className="mfm__input-number"
-                                            value={typeof value === 'number' ? value : undefined}
-                                            min={def.min}
-                                            max={def.max}
-                                            step={def.step ?? 1}
-                                            onChange={(v) => setParam(def.key, v ?? 0)}
-                                        />
-                                    )}
-
-                                    {def.control === 'switch' && (
-                                        <div className="mfm__control-wrapper">
-                                            <Switch
-                                                checked={value === true}
-                                                onChange={(v) => setParam(def.key, v)}
-                                            />
-                                        </div>
-                                    )}
-
-                                    {def.control === 'select' && (
-                                        <Select
-                                            value={value as string}
-                                            options={def.options as never}
-                                            onChange={(v) => setParam(def.key, v)}
-                                        />
-                                    )}
-
-                                    {def.control === 'checkbox' && (
-                                        <Select
-                                            mode="multiple"
-                                            value={(value as string[]) ?? []}
-                                            options={def.options as never}
-                                            placeholder="选择支持的输入模态"
-                                            onChange={(v) => setParam(def.key, v)}
-                                        />
-                                    )}
-
-                                    {def.control === 'text' && (
-                                        <Input
-                                            value={(value as string) ?? ''}
-                                            placeholder={def.hint}
-                                            onChange={(e) => setParam(def.key, e.target.value)}
-                                        />
-                                    )}
-
-                                    {def.control === 'textarea' && (
-                                        <Input.TextArea
-                                            rows={2}
-                                            value={(value as string) ?? ''}
-                                            onChange={(e) => setParam(def.key, e.target.value)}
-                                        />
-                                    )}
-                                </Field>
-                            )
-                        })}
-                    </div>
+                    <ParamFieldsForm
+                        category={activeCategory}
+                        values={paramValues}
+                        onChange={setParam}
+                        className="mfm__param-grid"
+                        fullWidthClassName="mfm__span-2"
+                    />
                 </section>
             </div>
         </Modal>

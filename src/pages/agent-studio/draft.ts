@@ -1,0 +1,102 @@
+/**
+ * 智能体向导的「草稿模型」。
+ *
+ * 新建 / 编辑共用同一份草稿，4 个步骤只改这一份对象，最后一次性提交：
+ *   agent_info（主表）+ agent_mcp_ref / agent_skill_ref（两张关联表）。
+ *
+ * 与落库实体的差异：
+ *  - 关联表在草稿里是「勾选结果」（mcpTools / skillIds 数组），保存时再展开成行；
+ *  - *_config 在这里是对象，落库时由 mapper 序列化成 JSON 文本。
+ */
+import type {
+  AgentInfo,
+  AgentMcpToolRef,
+  AgentSkillRef,
+  AgentUpsertInput,
+} from '@/types/core'
+
+export interface AgentDraft {
+  name: string
+  identifier: string
+  logo?: string
+  scenario?: string
+  description?: string
+  /** 人设与指令（Markdown） */
+  systemPrompt?: string
+  welcomeMessage?: string
+  llmId?: string
+  llmConfig?: Record<string, unknown>
+  ttsId?: string
+  ttsConfig?: Record<string, unknown>
+  sttId?: string
+  sttConfig?: Record<string, unknown>
+  isActive: boolean
+  autoToolExecMode: boolean
+  /** 已勾选的 MCP 工具（最小单元 = toolId，mcpId 仅作分组冗余） */
+  mcpTools: Array<{ mcpId: string; toolId: string }>
+  /** 已编排的技能 id */
+  skillIds: string[]
+}
+
+/** 新建时的空草稿（identifier 由调用方预先随机生成，便于用户直接看到可改） */
+export function createEmptyDraft(identifier: string): AgentDraft {
+  return {
+    name: '',
+    identifier,
+    isActive: true,
+    autoToolExecMode: false,
+    mcpTools: [],
+    skillIds: [],
+  }
+}
+
+/** 编辑时：把主表 + 两张关联表的行还原成草稿 */
+export function draftFromAgent(
+  agent: AgentInfo,
+  mcpRefs: AgentMcpToolRef[],
+  skillRefs: AgentSkillRef[],
+): AgentDraft {
+  return {
+    name: agent.name,
+    identifier: agent.identifier,
+    logo: agent.logo,
+    scenario: agent.scenario,
+    description: agent.description,
+    systemPrompt: agent.systemPrompt,
+    welcomeMessage: agent.welcomeMessage,
+    llmId: agent.llmId,
+    llmConfig: agent.llmConfig,
+    ttsId: agent.ttsId,
+    ttsConfig: agent.ttsConfig,
+    sttId: agent.sttId,
+    sttConfig: agent.sttConfig,
+    isActive: agent.isActive,
+    autoToolExecMode: agent.autoToolExecMode,
+    mcpTools: mcpRefs.map((r) => ({ mcpId: r.mcpId, toolId: r.toolId })),
+    skillIds: skillRefs.map((r) => r.skillId),
+  }
+}
+
+/** 提交前：草稿 → mapper 入参（补齐必填项的兜底） */
+export function draftToInput(draft: AgentDraft, id?: string): AgentUpsertInput {
+  return {
+    id,
+    name: draft.name.trim(),
+    identifier: draft.identifier.trim(),
+    logo: draft.logo,
+    scenario: draft.scenario,
+    description: draft.description?.trim() || undefined,
+    systemPrompt: draft.systemPrompt,
+    welcomeMessage: draft.welcomeMessage?.trim() || undefined,
+    llmId: draft.llmId,
+    llmConfig: draft.llmConfig,
+    ttsId: draft.ttsId,
+    ttsConfig: draft.ttsConfig,
+    sttId: draft.sttId,
+    sttConfig: draft.sttConfig,
+    isActive: draft.isActive,
+    autoToolExecMode: draft.autoToolExecMode,
+    mcpTools: draft.mcpTools,
+    skillIds: draft.skillIds,
+  }
+}
