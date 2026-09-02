@@ -38,4 +38,10 @@ ALTER TABLE knowledge_base ADD COLUMN logo TEXT;
 -- 存量库（建表时无该列）通过本语句补齐；重复执行会被 updateTables 安全跳过（duplicate column name）。
 ALTER TABLE knowledge_base ADD COLUMN file_count INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE knowledge_base ADD COLUMN file_size INTEGER NOT NULL DEFAULT 0;
+
+-- ---------- v7：智能体表新增「是否允许使用沙箱环境」开关字段 ----------
+-- 对应 init.sql 已建表即含该列；存量库（在 allow_sandbox 加入建表语句之前已创建）实际表结构缺少该列，
+-- 新建/更新智能体时 INSERT 含 allow_sandbox 会报 "table agent_info has no column named allow_sandbox"。
+-- 存量库通过本语句补齐；重复执行会被 updateTables 安全跳过（duplicate column name）。
+ALTER TABLE agent_info ADD COLUMN allow_sandbox INTEGER NOT NULL DEFAULT 0;
 -- ============================================================

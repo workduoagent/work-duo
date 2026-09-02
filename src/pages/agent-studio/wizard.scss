@@ -1,6 +1,7 @@
 /* 智能体新建 / 编辑向导（4 步）
    整页布局：顶部步骤条固定、内容区内部滚动、底部操作栏固定。 */
 .agent-wizard {
+  position: relative;
   width: 100%;
   height: 100%;
   box-sizing: border-box;
@@ -23,8 +24,23 @@
   &__head-top {
     display: flex;
     align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
     gap: 12px;
     margin-bottom: 16px;
+  }
+
+  &__head-left {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-width: 0;
+  }
+
+  &__head-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
   }
 
   &__title {
@@ -134,29 +150,34 @@
     }
   }
 
-  /* ---------- 内容区 ---------- */
+  /* ---------- 内容区（水平垂直居中，限宽 80%） ---------- */
   &__body {
     flex: 1 1 auto;
     min-height: 0;
     overflow-y: auto;
-    padding: 2px 4px 24px;
+    padding: 24px 4px 24px;
+    display: flex;
+    flex-direction: column;
+    align-items: center; /* 水平居中 */
+    justify-content: safe center; /* 垂直居中；内容超高时安全回退到顶部可滚动 */
+
+    > * {
+      width: 100%;
+      max-width: 80%;
+    }
   }
 
   &__form {
     display: flex;
     flex-direction: column;
     gap: 18px;
-    max-width: 980px;
+    width: 100%;
   }
 
   &__grid {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 360px), 1fr));
     gap: 16px 18px;
-
-    @media (max-width: 720px) {
-      grid-template-columns: 1fr;
-    }
   }
 
   &__span-2 {
@@ -186,7 +207,7 @@
     color: var(--color-foreground-muted);
   }
 
-  /* ---------- 步骤1：头像 ---------- */
+  /* ---------- 步骤1：头像（顶部，点击上传） ---------- */
   &__logo {
     display: flex;
     align-items: center;
@@ -194,13 +215,29 @@
   }
 
   &__logo-preview {
-    width: 56px;
-    height: 56px;
+    position: relative;
+    width: 72px;
+    height: 72px;
     flex: none;
-    border-radius: 12px;
+    border-radius: 14px;
     overflow: hidden;
     border: 1px solid var(--color-border);
     background-color: var(--color-background-muted);
+  }
+
+  &__logo-upload {
+    cursor: pointer;
+    transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
+
+    &:hover {
+      border-color: var(--color-brand-600);
+      box-shadow: 0 0 0 3px var(--color-brand-50);
+    }
+
+    &:focus-visible {
+      outline: 2px solid var(--color-brand-600);
+      outline-offset: 2px;
+    }
   }
 
   &__logo-img {
@@ -213,31 +250,53 @@
     width: 100%;
     height: 100%;
     display: flex;
+    flex-direction: column;
     align-items: center;
     justify-content: center;
+    gap: 4px;
     color: var(--color-foreground-muted);
   }
 
-  &__logo-actions {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    flex-wrap: wrap;
+  &__logo-tip {
+    font-size: 11px;
+    line-height: 1;
   }
 
-  &__logo-del {
-    color: var(--color-danger);
+  &__logo-clear {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    border: none;
+    border-radius: 999px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background-color: var(--color-danger);
+    color: #fff;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.18s ease;
+
+    &:hover {
+      filter: brightness(0.92);
+    }
+  }
+
+  &__logo-preview:hover &__logo-clear {
+    opacity: 1;
   }
 
   /* ---------- 步骤1：开关组 ---------- */
   &__switches {
-    display: flex;
-    flex-wrap: wrap;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr));
     gap: 12px;
   }
 
   &__switch-row {
-    flex: 1 1 300px;
     display: flex;
     align-items: flex-start;
     gap: 10px;
@@ -246,6 +305,7 @@
     border: 1px solid var(--color-border);
     background-color: var(--color-background-subtle);
     cursor: pointer;
+    max-width: 480px;
 
     > span {
       display: flex;
@@ -259,10 +319,10 @@
 
   /* ---------- 步骤2：模型槽位 ---------- */
   &__slots {
-    display: flex;
-    flex-direction: column;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 360px), 1fr));
     gap: 14px;
-    max-width: 980px;
+    width: 100%;
   }
 
   &__slot.app-card .ant-card-body {
@@ -331,25 +391,25 @@
 
   &__param-grid {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
     gap: 14px 18px;
-
-    @media (max-width: 720px) {
-      grid-template-columns: 1fr;
-    }
   }
 
   /* ---------- 步骤3/4：三栏挑选器 ---------- */
   &__picker {
     display: grid;
-    grid-template-columns: 220px 1fr 260px;
+    grid-template-columns: 220px minmax(0, 1fr) 260px;
     gap: 14px;
     align-items: start;
-    height: 100%;
+    flex: 1 1 auto;
     min-height: 0;
 
     @media (max-width: 1100px) {
-      grid-template-columns: 200px 1fr;
+      grid-template-columns: 200px minmax(0, 1fr);
+    }
+
+    @media (max-width: 720px) {
+      grid-template-columns: 1fr;
     }
   }
 
@@ -543,6 +603,10 @@
     font-size: 12px;
     line-height: 1.5;
     color: var(--color-foreground-muted);
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
   }
 
   /* ---------- 已选汇总 ---------- */
@@ -721,25 +785,56 @@
     color: var(--color-foreground-muted);
   }
 
-  /* ---------- 底部操作栏 ---------- */
-  &__foot {
-    flex-shrink: 0;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 16px;
-    padding: 12px 4px 16px;
-    border-top: 1px solid var(--color-border);
-  }
-
-  &__foot-hint {
+  /* ---------- 字段错误提示 ---------- */
+  &__error {
     font-size: 12px;
-    color: var(--color-foreground-muted);
+    line-height: 1.4;
+    color: var(--color-danger);
   }
 
-  &__foot-actions {
-    display: flex;
+  /* ---------- 边缘步骤切换箭头（轮播式） ---------- */
+  &__nav {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 5;
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    border-radius: 999px;
+    border: 1px solid var(--color-border);
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    box-shadow: var(--shadow-md);
+    display: inline-flex;
     align-items: center;
-    gap: 8px;
+    justify-content: center;
+    cursor: pointer;
+    transition: border-color 0.18s ease, color 0.18s ease, opacity 0.18s ease;
+
+    &:hover:not(:disabled) {
+      border-color: var(--color-brand-600);
+      color: var(--color-brand-600);
+    }
+
+    &:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+
+    &--prev {
+      left: 8px;
+    }
+
+    &--next {
+      right: 8px;
+    }
+  }
+
+  @media (max-width: 720px) {
+    &__body {
+      padding-left: 52px;
+      padding-right: 52px;
+    }
   }
 }

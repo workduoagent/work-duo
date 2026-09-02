@@ -66,6 +66,7 @@ function rowToAgent(r: AgentInfoRow): AgentInfo {
     sttConfig: safeParse<Record<string, unknown> | null>(r.stt_config, null) ?? undefined,
     isActive: r.is_active === 1,
     autoToolExecMode: r.auto_tool_exec_mode === 1,
+    allowSandbox: r.allow_sandbox === 1,
     createdAt: new Date(r.created_at).toISOString(),
     updatedAt: new Date(r.updated_at).toISOString(),
   }
@@ -254,6 +255,7 @@ export async function upsertAgent(input: AgentUpsertInput): Promise<AgentInfo[]>
       sttConfig: input.sttConfig,
       isActive: input.isActive ?? true,
       autoToolExecMode: input.autoToolExecMode ?? false,
+      allowSandbox: input.allowSandbox ?? false,
       createdAt: isUpdate
         ? list.find((a) => a.id === id)?.createdAt ?? new Date(now).toISOString()
         : new Date(now).toISOString(),
@@ -298,8 +300,8 @@ export async function upsertAgent(input: AgentUpsertInput): Promise<AgentInfo[]>
     `INSERT INTO agent_info
        (id, logo, scenario, name, identifier, description, system_prompt, welcome_message,
         llm_id, llm_config, tts_id, tts_config, stt_id, stt_config,
-        is_active, auto_tool_exec_mode, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        is_active, auto_tool_exec_mode, allow_sandbox, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET
         logo                = excluded.logo,
         scenario            = excluded.scenario,
@@ -316,6 +318,7 @@ export async function upsertAgent(input: AgentUpsertInput): Promise<AgentInfo[]>
         stt_config          = excluded.stt_config,
         is_active           = excluded.is_active,
         auto_tool_exec_mode = excluded.auto_tool_exec_mode,
+        allow_sandbox       = excluded.allow_sandbox,
         updated_at          = excluded.updated_at`,
     [
       id,
@@ -334,6 +337,7 @@ export async function upsertAgent(input: AgentUpsertInput): Promise<AgentInfo[]>
       toJson(input.sttConfig),
       (input.isActive ?? true) ? 1 : 0,
       (input.autoToolExecMode ?? false) ? 1 : 0,
+      (input.allowSandbox ?? false) ? 1 : 0,
       now,
       now,
     ],

@@ -16,7 +16,7 @@ export interface ModelConfigRow {
   provider: string // 对应 ModelProvider
   name: string // 展示名
   model_name: string // 服务商侧模型标识
-  base_url: string | null // API Base，如 https://api.openai.com/v1
+  base_url: string | null // 完整接口地址，如 https://api.openai.com/v1/chat/completions
   api_key: string | null // 密钥（本地明文，安全方案后续统一处理）
   category: string // 对应 ModelCategory
   enabled: number // SQLite 布尔：0 / 1
@@ -81,6 +81,7 @@ export interface KnowledgeAssetRow {
  * - llm_config / tts_config / stt_config：JSON 文本，是对应 models.config 的「私有副本」
  *   （models 表仅作初始默认，智能体向导里可自由调参，改的是本列）；
  * - is_active：启用开关（0/1）；auto_tool_exec_mode：外部资源自动执行模式（0/1）；
+ *   allow_sandbox：是否允许该智能体使用沙箱环境（0/1）；
  * - created_at / updated_at：epoch 毫秒（整型）。
  */
 export interface AgentInfoRow {
@@ -100,6 +101,7 @@ export interface AgentInfoRow {
   stt_config: string | null
   is_active: number // SQLite 布尔：0 / 1
   auto_tool_exec_mode: number // SQLite 布尔：0 / 1
+  allow_sandbox: number // SQLite 布尔：0 / 1
   created_at: number
   updated_at: number
 }

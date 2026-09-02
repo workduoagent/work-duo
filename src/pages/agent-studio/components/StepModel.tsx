@@ -21,6 +21,10 @@ export interface StepModelProps {
   patch: (part: Partial<AgentDraft>) => void
   /** 候选模型（由向导一次性加载，步骤内不再查库） */
   models: ModelConfig[]
+  /** 字段级校验错误（key: llm），由向导下发 */
+  errors?: Record<string, string>
+  /** 清除某个字段的校验错误，输入时调用 */
+  clearError?: (key: string) => void
 }
 
 type SlotKey = 'llm' | 'tts' | 'stt'
@@ -88,7 +92,7 @@ function patchSlot(
   else patch({ sttId: modelId, sttConfig: config })
 }
 
-export function StepModel({ draft, patch, models }: StepModelProps) {
+export function StepModel({ draft, patch, models, errors, clearError }: StepModelProps) {
   function handleSelect(slot: SlotKey, modelId: string | undefined) {
     if (!modelId) {
       patchSlot(patch, slot, undefined, undefined)
@@ -142,10 +146,11 @@ export function StepModel({ draft, patch, models }: StepModelProps) {
             <div className="agent-wizard__slot-head">
               <div className="agent-wizard__slot-icon">{slot.icon}</div>
               <div className="agent-wizard__slot-titles">
-                <div className="agent-wizard__slot-title">
-                  {slot.title}
-                  {slot.required && <span className="agent-wizard__required">必选</span>}
-                </div>
+              <div className="agent-wizard__slot-title">
+                {slot.required && <span className="mfm__required">*</span>}
+                {slot.title}
+                {slot.required && <span className="agent-wizard__required">必选</span>}
+              </div>
                 <div className="agent-wizard__slot-desc">{slot.desc}</div>
               </div>
             </div>
@@ -159,8 +164,15 @@ export function StepModel({ draft, patch, models }: StepModelProps) {
                   options.length ? '选择已录入的模型' : '暂无该类型模型，请先到 LLM 模块录入'
                 }
                 options={options}
-                onChange={(v) => handleSelect(slot.key, v)}
+                status={slot.key === 'llm' && errors?.llm ? 'error' : undefined}
+                onChange={(v) => {
+                  handleSelect(slot.key, v)
+                  if (slot.key === 'llm') clearError?.('llm')
+                }}
               />
+              {slot.key === 'llm' && errors?.llm && (
+                <div className="agent-wizard__error">{errors.llm}</div>
+              )}
             </Field>
 
             {model && (

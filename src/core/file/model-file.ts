@@ -85,7 +85,7 @@ export interface ModelConfig {
   name: string // 展示名
   category: string // 模型大类（文本/多模态/语音转文字/...，驱动动态表单 paramFields）
   provider: ModelProvider
-  baseUrl: string // API Base，如 https://api.openai.com/v1
+  baseUrl: string // 完整接口地址，如 https://api.openai.com/v1/chat/completions
   apiKey: string
   modelName: string // 服务商侧的模型标识
   enabled: boolean

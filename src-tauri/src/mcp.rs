@@ -298,30 +298,30 @@ pub async fn sync_mcp_tools(request: McpSyncRequest) -> McpSyncResponse {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct McpCallRequest {
-    endpoint_url: String,
-    protocol_type: String,
+    pub endpoint_url: String,
+    pub protocol_type: String,
     #[serde(default)]
-    headers: Option<HashMap<String, String>>,
+    pub headers: Option<HashMap<String, String>>,
     #[serde(default)]
-    auth_type: Option<String>,
+    pub auth_type: Option<String>,
     #[serde(default)]
-    auth_config: Option<serde_json::Value>,
-    tool_name: String,
+    pub auth_config: Option<serde_json::Value>,
+    pub tool_name: String,
     #[serde(default)]
-    arguments: Option<serde_json::Value>,
+    pub arguments: Option<serde_json::Value>,
     /// 请求超时（秒），默认 120
     #[serde(default)]
-    timeout_sec: Option<u64>,
+    pub timeout_sec: Option<u64>,
 }
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct McpCallResponse {
-    ok: bool,
-    error: Option<String>,
-    latency_ms: u64,
+    pub ok: bool,
+    pub error: Option<String>,
+    pub latency_ms: u64,
     /// tools/call 响应的原始 JSON 文本（前端解析后展示）
-    raw: String,
+    pub raw: String,
 }
 
 #[tauri::command]

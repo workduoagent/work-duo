@@ -1,4 +1,5 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
+mod agent;
 mod mcp;
 mod mamba_manager;
 
@@ -15,6 +16,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .manage(mamba)
+        .manage(agent::runtime::AgentRuntime::new())
         .setup(|app| -> Result<(), Box<dyn std::error::Error>> {
             // 后台静默确保 Agent 默认环境（default）存在；失败仅日志，不阻塞启动。
             let handle = app.handle().clone();
@@ -35,7 +37,10 @@ pub fn run() {
             mamba_manager::uninstall_mamba_packages,
             mamba_manager::reset_mamba_env,
             mamba_manager::delete_mamba_env,
-            mamba_manager::run_python_script
+            mamba_manager::run_python_script,
+            agent::commands::run_agent_task,
+            agent::commands::submit_approval_decision,
+            agent::commands::cancel_agent_task
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

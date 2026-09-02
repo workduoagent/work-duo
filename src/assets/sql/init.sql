@@ -182,6 +182,7 @@ CREATE TABLE IF NOT EXISTS scenario_category
 --       models.config 只作为初始默认值，智能体向导里可自由调参，改的是本列（原 PG jsonb 转 TEXT）；
 --   is_active            启用开关（INTEGER 0/1，默认 1，原 PG bool）；
 --   auto_tool_exec_mode  外部资源自动执行模式（INTEGER 0/1，默认 0）；
+--   allow_sandbox        是否允许该智能体使用沙箱环境（INTEGER 0/1，默认 0）；
 --   created_at / updated_at：epoch 毫秒（原 PG timestamp(6) 转 INTEGER）。
 CREATE TABLE IF NOT EXISTS agent_info
 (
@@ -201,6 +202,7 @@ CREATE TABLE IF NOT EXISTS agent_info
     stt_config          TEXT,
     is_active           INTEGER NOT NULL DEFAULT 1,
     auto_tool_exec_mode INTEGER NOT NULL DEFAULT 0,
+    allow_sandbox       INTEGER NOT NULL DEFAULT 0,
     created_at          INTEGER NOT NULL,
     updated_at          INTEGER NOT NULL,
     CONSTRAINT uk_agent_identifier UNIQUE (identifier)

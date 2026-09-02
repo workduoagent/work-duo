@@ -23,5 +23,5 @@ export const agentNewPath = '/agent-studio/new'
 /** 编辑智能体（4 步向导，复用同一页面） */
 export const agentEditPath = (id: string): string => `/agent-studio/${id}/edit`
 
-/** 调试智能体（对话页） */
+/** 进入智能体（对话/运行页，原「调试」语义升级为「进入会话」） */
 export const agentChatPath = (id: string): string => `/agent-studio/${id}/chat`

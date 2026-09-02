@@ -208,9 +208,10 @@ export function ModelFormModal({
                             <Input
                                 value={draft.baseUrl}
                                 status={errStatus('baseUrl')}
-                                placeholder="https://api.openai.com/v1"
+                                placeholder="完整接口地址，如 https://api.openai.com/v1/chat/completions"
                                 onChange={(e) => patch({baseUrl: e.target.value})}
                             />
+                            <span className="mfm__hint">填写可直接调用的完整地址（含端点路径），不做拼接</span>
                         </Field>
 
                         <Field className="mfm__span-2">

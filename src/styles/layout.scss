@@ -126,7 +126,7 @@
   display: flex;
   align-items: center;
   /* 固定轨道宽度：钻取展开二级菜单时不因子项多少改变胶囊宽度（窄窗口自适应收缩） */
-  width: min(480px, 100%);
+  width: min(660px, 100%);
   max-width: 100%;
   padding: 4px;
   border-radius: 999px;
@@ -143,6 +143,7 @@
 .app-nav-pills__list {
   display: flex;
   align-items: center;
+  justify-content: space-evenly;
   gap: 2px;
   position: relative;
   z-index: 1;

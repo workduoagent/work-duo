@@ -203,7 +203,9 @@ export function StepMcp({ draft, patch }: StepMcpProps) {
                       )}
                     </div>
                     {tool.description && (
-                      <div className="agent-wizard__tool-desc">{tool.description}</div>
+                      <div className="agent-wizard__tool-desc" title={tool.description}>
+                        {tool.description}
+                      </div>
                     )}
                   </div>
                 </label>

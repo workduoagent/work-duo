@@ -7,7 +7,7 @@
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, Check, Save } from 'lucide-react'
+import { ArrowLeft, Check, Save, ChevronLeft, ChevronRight } from 'lucide-react'
 import { Button } from '@/components/ui'
 import { useNotify } from '@/components/ui/notify'
 import {
@@ -48,9 +48,20 @@ export default function AgentWizardPage() {
   const [draft, setDraft] = useState<AgentDraft>(() =>
     createEmptyDraft(generateAgentIdentifier()),
   )
+  /** 字段级校验错误（key: name / identifier / llm），由步骤组件内联展示 */
+  const [errors, setErrors] = useState<Record<string, string>>({})
 
   const patch = useCallback((part: Partial<AgentDraft>) => {
     setDraft((prev) => ({ ...prev, ...part }))
+  }, [])
+
+  const clearError = useCallback((key: string) => {
+    setErrors((prev) => {
+      if (!prev[key]) return prev
+      const next = { ...prev }
+      delete next[key]
+      return next
+    })
   }, [])
 
   useEffect(() => {
@@ -86,25 +97,20 @@ export default function AgentWizardPage() {
     }
   }, [id, message, navigate])
 
-  /** 步骤级校验：返回 false 时阻止进入下一步 */
+  /** 步骤级校验：把错误写入 errors（内联展示），返回 false 时阻止进入下一步 */
   function validateStep(target: number): boolean {
+    const errs: Record<string, string> = {}
     if (target > 0) {
-      if (!draft.name.trim()) {
-        message.warning('请填写智能体名称')
-        return false
-      }
+      if (!draft.name.trim()) errs.name = '请填写智能体名称'
       const identifier = draft.identifier.trim() || generateAgentIdentifier()
-      if (!IDENTIFIER_RE.test(identifier)) {
-        message.warning('唯一标识仅允许字母、数字、- 和 _')
-        return false
-      }
+      if (!IDENTIFIER_RE.test(identifier)) errs.identifier = '唯一标识仅允许字母、数字、- 和 _'
       if (identifier !== draft.identifier) patch({ identifier })
     }
-    if (target > 1 && !draft.llmId) {
-      message.warning('请先选择大脑（LLM 模型）')
-      return false
-    }
-    return true
+    if (target > 1 && !draft.llmId) errs.llm = '请先选择大脑（LLM 模型）'
+    setErrors(errs)
+    const ok = Object.keys(errs).length === 0
+    if (!ok) message.warning(errs.name || errs.identifier || errs.llm)
+    return ok
   }
 
   function goNext() {
@@ -170,51 +176,62 @@ export default function AgentWizardPage() {
     <div className="agent-wizard">
       <header className="agent-wizard__head">
         <div className="agent-wizard__head-top">
-          <Button variant="ghost" size="sm" onClick={() => navigate('/agent-studio')}>
-            <ArrowLeft size={15} />
-            返回列表
-          </Button>
-          <h2 className="agent-wizard__title">{isEdit ? '编辑智能体' : '新建智能体'}</h2>
-          {isEdit && <code className="agent-wizard__identifier-tag">{draft.identifier}</code>}
+          <div className="agent-wizard__head-left">
+            <Button variant="ghost" size="sm" onClick={() => navigate('/agent-studio')}>
+              <ArrowLeft size={15} />
+              返回列表
+            </Button>
+            <h2 className="agent-wizard__title">{isEdit ? '编辑智能体' : '新建智能体'}</h2>
+            {isEdit && <code className="agent-wizard__identifier-tag">{draft.identifier}</code>}
+          </div>
+          <div className="agent-wizard__head-actions">
+            <Button variant="soft" size="sm" onClick={() => navigate('/agent-studio')}>
+              取消
+            </Button>
+            <Button variant="solid" size="sm" loading={saving} onClick={handleSave}>
+              <Save size={14} />
+              保存
+            </Button>
+          </div>
         </div>
         {stepper}
       </header>
 
       <div className="agent-wizard__body">
-        {step === 0 && <StepBasic draft={draft} patch={patch} />}
-        {step === 1 && <StepModel draft={draft} patch={patch} models={models} />}
+        {step === 0 && (
+          <StepBasic draft={draft} patch={patch} errors={errors} clearError={clearError} />
+        )}
+        {step === 1 && (
+          <StepModel
+            draft={draft}
+            patch={patch}
+            models={models}
+            errors={errors}
+            clearError={clearError}
+          />
+        )}
         {step === 2 && <StepMcp draft={draft} patch={patch} />}
         {step === 3 && <StepSkill draft={draft} patch={patch} />}
       </div>
 
-      <footer className="agent-wizard__foot">
-        <span className="agent-wizard__foot-hint">
-          第 {step + 1} / {STEPS.length} 步 · {STEPS[step].title}
-        </span>
-        <div className="agent-wizard__foot-actions">
-          <Button variant="soft" size="sm" onClick={() => navigate('/agent-studio')}>
-            取消
-          </Button>
-          <Button variant="outline" size="sm" disabled={step === 0} onClick={goPrev}>
-            上一步
-          </Button>
-          {step < STEPS.length - 1 ? (
-            <Button variant="solid" size="sm" onClick={goNext}>
-              下一步
-            </Button>
-          ) : (
-            <Button variant="solid" size="sm" loading={saving} onClick={handleSave}>
-              <Save size={14} />
-              保存
-            </Button>
-          )}
-          {step < STEPS.length - 1 && (
-            <Button variant="ghost" size="sm" loading={saving} onClick={handleSave}>
-              保存并退出
-            </Button>
-          )}
-        </div>
-      </footer>
+      <button
+        type="button"
+        className="agent-wizard__nav agent-wizard__nav--prev"
+        aria-label="上一步"
+        disabled={step === 0}
+        onClick={goPrev}
+      >
+        <ChevronLeft size={20} />
+      </button>
+      <button
+        type="button"
+        className="agent-wizard__nav agent-wizard__nav--next"
+        aria-label="下一步"
+        disabled={step >= STEPS.length - 1}
+        onClick={goNext}
+      >
+        <ChevronRight size={20} />
+      </button>
     </div>
   )
 }

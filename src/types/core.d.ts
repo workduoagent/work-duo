@@ -192,7 +192,8 @@ export interface KnowledgeAsset {
  * - llmId / ttsId / sttId：绑定的模型 id（引用 models.id）；
  * - llmConfig / ttsConfig / sttConfig：模型参数的「智能体私有副本」
  *   （models.config 只作为初始默认值，向导里改的是这里）；
- * - isActive：启用开关；autoToolExecMode：外部资源自动执行模式。
+ * - isActive：启用开关；autoToolExecMode：外部资源自动执行模式；
+ *   allowSandbox：是否允许该智能体使用沙箱环境。
  */
 export interface AgentInfo {
   id: string
@@ -211,6 +212,7 @@ export interface AgentInfo {
   sttConfig?: Record<string, unknown>
   isActive: boolean
   autoToolExecMode: boolean
+  allowSandbox: boolean
   createdAt: string
   updatedAt: string
 }
@@ -267,6 +269,8 @@ export interface AgentUpsertInput {
   sttConfig?: Record<string, unknown>
   isActive?: boolean
   autoToolExecMode?: boolean
+  /** 是否允许该智能体使用沙箱环境 */
+  allowSandbox?: boolean
   /** 绑定的 MCP 工具（最小单元 = toolId；mcpId 为冗余分组信息） */
   mcpTools: Array<{ mcpId: string; toolId: string }>
   /** 编排的技能 id */

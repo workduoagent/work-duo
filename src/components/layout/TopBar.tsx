@@ -17,7 +17,6 @@ import {
   Plug,
   Wand2,
   ChevronLeft,
-  ChevronRight,
 } from 'lucide-react'
 import { WindowControls } from './WindowControls'
 import { ThemeToggle } from './ThemeToggle'
@@ -186,8 +185,6 @@ export function TopBar() {
   const listRef = useRef<HTMLDivElement>(null)
   const thumbRef = useRef<HTMLSpanElement>(null)
   const [ready, setReady] = useState(false)
-  const [canScrollRight, setCanScrollRight] = useState(false)
-  const [canScrollLeft, setCanScrollLeft] = useState(false)
 
   // 直接用 ref 写入滑块的 CSS 变量（--pill-x / --pill-w），避免逐帧 setState 触发
   // React 重渲染——这是钻取动画卡顿的主因。钻取期关闭 transition 由 rAF 每帧直写，
@@ -231,23 +228,6 @@ export function TopBar() {
     }
   }, [drilledKey, exiting, measure])
 
-  // 二级菜单溢出时才显示右移箭头
-  const updateScroll = useCallback(() => {
-    const el = listRef.current
-    if (!el) return
-    const max = el.scrollWidth - el.clientWidth
-    setCanScrollLeft(el.scrollLeft > 1)
-    setCanScrollRight(max - el.scrollLeft > 1)
-  }, [])
-
-  const scrollRight = () => {
-    listRef.current?.scrollBy({ left: 180, behavior: 'smooth' })
-  }
-
-  const scrollLeft = () => {
-    listRef.current?.scrollBy({ left: -180, behavior: 'smooth' })
-  }
-
   useLayoutEffect(() => {
     measure()
     // 钻取切换后布局需一帧才稳定，补一次测量
@@ -260,15 +240,12 @@ export function TopBar() {
     if (!list) return
     const ro = new ResizeObserver(() => {
       measure()
-      updateScroll()
     })
     ro.observe(list)
-    list.addEventListener('scroll', updateScroll)
     return () => {
       ro.disconnect()
-      list.removeEventListener('scroll', updateScroll)
     }
-  }, [measure, updateScroll])
+  }, [measure])
 
   useEffect(() => {
     let alive = true
@@ -332,18 +309,6 @@ export function TopBar() {
           >
               <ChevronLeft className="app-nav-pills__icon" />
             </button>
-
-          {/* 左移箭头（菜单项过多溢出时显示，钻取态与一级态通用） */}
-          {canScrollLeft && (
-            <button
-              type="button"
-              className="app-nav-pills__scroll"
-              onClick={scrollLeft}
-              aria-label="向左滚动菜单"
-            >
-              <ChevronLeft className="app-nav-pills__icon" />
-            </button>
-          )}
 
           {/* 菜单轨道（钻取态 / 一级态均可横向滚动） */}
           <div className="app-nav-pills__list" ref={listRef}>
@@ -409,18 +374,6 @@ export function TopBar() {
               </button>
             ))}
           </div>
-
-          {/* 右移箭头（菜单项过多溢出时显示，钻取态与一级态通用） */}
-          {canScrollRight && (
-            <button
-              type="button"
-              className="app-nav-pills__scroll"
-              onClick={scrollRight}
-              aria-label="显示更多菜单"
-            >
-              <ChevronRight className="app-nav-pills__icon" />
-            </button>
-          )}
         </nav>
       </div>
 

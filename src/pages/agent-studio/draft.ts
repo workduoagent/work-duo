@@ -32,6 +32,8 @@ export interface AgentDraft {
   sttConfig?: Record<string, unknown>
   isActive: boolean
   autoToolExecMode: boolean
+  /** 是否允许该智能体使用沙箱环境 */
+  allowSandbox: boolean
   /** 已勾选的 MCP 工具（最小单元 = toolId，mcpId 仅作分组冗余） */
   mcpTools: Array<{ mcpId: string; toolId: string }>
   /** 已编排的技能 id */
@@ -45,6 +47,7 @@ export function createEmptyDraft(identifier: string): AgentDraft {
     identifier,
     isActive: true,
     autoToolExecMode: false,
+    allowSandbox: true,
     mcpTools: [],
     skillIds: [],
   }
@@ -72,6 +75,7 @@ export function draftFromAgent(
     sttConfig: agent.sttConfig,
     isActive: agent.isActive,
     autoToolExecMode: agent.autoToolExecMode,
+    allowSandbox: agent.allowSandbox,
     mcpTools: mcpRefs.map((r) => ({ mcpId: r.mcpId, toolId: r.toolId })),
     skillIds: skillRefs.map((r) => r.skillId),
   }
@@ -96,6 +100,7 @@ export function draftToInput(draft: AgentDraft, id?: string): AgentUpsertInput {
     sttConfig: draft.sttConfig,
     isActive: draft.isActive,
     autoToolExecMode: draft.autoToolExecMode,
+    allowSandbox: draft.allowSandbox,
     mcpTools: draft.mcpTools,
     skillIds: draft.skillIds,
   }

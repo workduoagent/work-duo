@@ -1,4 +1,4 @@
-# work-duo 长期约定（单一事实源 · 校准 2026-09-01）
+# work-duo 长期约定（单一事实源 · 校准 2026-09-02）
 
 > 与每日日志冲突以本文件为准；细节见 `.workbuddy/memory/2026-08-*.md`，前端规范见仓库根《前端开发规范.md》。
 
@@ -20,6 +20,7 @@ React19+TS+Vite+**Tauri2**；UI=**antd v5**(ConfigProvider+darkAlgorithm)，Appi
 
 ## 数据持久化
 文件JSON→`src/core/file/`+plugin-fs 落 $APPDATA（非 Tauri 回退 localStorage）；SQL→SQLite `workduo.db`+`src/core/mapper/`（**禁组件直写 SQL/db.execute**）。DDL 单一事实源 `init.sql`(幂等)+`updater.sql`。`InitContext.initDB()` **顺序铁律**：建表必须先于任何 `app_config` 查询（否则首启 no such table 连锁）。KV→plugin-store；`isTauri` 是布尔常量非函数。
+- **Rust 侧读 SQLite（tauri-plugin-sql 2.x 坑）**：`DbPool` 是 `enum`，其 `select`/`execute` 均为 `pub(crate)`，外部 crate 不可直接调；插件经 `DbInstances`(`RwLock<HashMap<String, DbPool>>`)托管连接（key=`"sqlite:workduo.db"`，与前端 `load()` 一致），不是 `State<DbPool>`。正确姿势：`app.state::<tauri_plugin_sql::DbInstances>()`→读锁取 `DbPool`→`match DbPool::Sqlite(p){ p.clone() }`→用 `sqlx`(0.8, features sqlite+runtime-tokio，对齐插件 0.8.6) 直查 `sqlx::query(...).bind(...).fetch_optional/fetch_all(&pool)`。`Cargo.toml` 需显式加 `sqlx` 依赖（插件是间接依赖）。前端须先 `load('sqlite:workduo.db')` 库才在 `DbInstances` 内。
 
 ## 模块落点
 - **LLM(model-settings)**：`models`+`model-mapper`；动态表单 `paramFields.ts`(`ParamFieldDef[]`)；连通性 `src/utils/modelTest.ts`（Tauri 走 plugin-http 绕 CORS，三态 success/warn/error）。
@@ -46,7 +47,7 @@ React19+TS+Vite+**Tauri2**；UI=**antd v5**(ConfigProvider+darkAlgorithm)，Appi
   - **列表页** `src/pages/agent-studio/index.tsx`：左侧场景分类侧栏（`ScenarioSelect` scope=`AGENT`，可动态新建）+ 右侧卡片网格（头像 Base64/默认 `Bot`、名称/唯一标识/场景 chip/描述/绑定 LLM 名/已挂 MCP 工具数/技能数/启用 `Switch`）+ 按钮组 编辑/调试/删除（`Popconfirm`）；分页与知识库对齐。
   - **向导页** `wizard.tsx`（路由 `/agent-studio/new` 与 `/agent-studio/:id/edit` 共用）：4 步 `StepBasic`(名称/标识[留空随机生成]/场景/欢迎语/描述/Markdown 人设/Base64 头像/两个 Switch) → `StepModel`(大脑 LLM=text+multimodal 必选，嘴巴 TTS、耳朵 STT 可选，参数用公共 `ParamFieldsForm` 改智能体私有副本) → `StepMcp`(左选服务/中勾具体 tool/右汇总，最小单元=tool_id) → `StepSkill`(勾选 `skill_info`)。草稿模型 `draft.ts`，保存时 `agent-mapper.upsertAgent` 一次性写主表+两关联表。
   - **调试页** `chat.tsx`（路由 `/agent-studio/:id/chat`）：仿 WorkBuddy 对话页（侧栏选工作空间[plugin-dialog 选本地目录]+主区消息流[MarkdownRenderer 渲染]+输入区 Enter 发送）；顶部固定「编辑智能体」快捷入口；本版为**UI 原型**，回复走 `src/core/agent/chat.ts` 的 `buildMockReply`+`streamText`(打字机)，真实 LLM 调用接口位已留（注释写明：plugin-http 发 OpenAI 兼容请求、tools 由 agent_mcp_ref 生成）。
-  - **数据层**：`agent_info`(int8→TEXT UUID、jsonb→TEXT、bool→INTEGER、timestamp→epochms) + `agent_mcp_ref`(最小单元 `tool_id`→`mcp_tool_definition.id`，`mcp_id` 仅分组冗余) + `agent_skill_ref`(最小单元 `skill_id`→`skill_info.id`)；`src/core/mapper/agent-mapper.ts`（`listAgents/getAgent/listAgentMcpTools/listAgentSkills/getAgentRefCounts/upsertAgent/deleteAgent/setAgentActive`，非 Tauri 回退 localStorage）；DDL 在 `init.sql`（幂等）+ AGENT 场景种子；`scenario-mapper` 已注册 `AGENT` 引用清理表；domain 类型在 `core.d.ts`(`AgentInfo/AgentMcpToolRef/AgentSkillRef/AgentUpsertInput/AgentRefCounts` + `ScenarioScope` 含 `'AGENT'`)，行类型在 `database.d.ts`。
+  - **数据层**：`agent_info`(int8→TEXT UUID、jsonb→TEXT、bool→INTEGER、timestamp→epochms) + `agent_mcp_ref`(最小单元 `tool_id`→`mcp_tool_definition.id`，`mcp_id` 仅分组冗余) + `agent_skill_ref`(最小单元 `skill_id`→`skill_info.id`)；`src/core/mapper/agent-mapper.ts`（`listAgents/getAgent/listAgentMcpTools/listAgentSkills/getAgentRefCounts/upsertAgent/deleteAgent/setAgentActive`，非 Tauri 回退 localStorage；`generateAgentIdentifier`=`agent-`+8位hex）；DDL 在 `init.sql`（幂等）+ AGENT 场景种子（客服/办公/开发/内容/数据/教育/生活 共 7 条）；`scenario-mapper` 已注册 `AGENT` 引用清理表；domain 类型在 `core.d.ts`(`AgentInfo/AgentMcpToolRef/AgentSkillRef/AgentUpsertInput/AgentRefCounts` + `ScenarioScope` 含 `'AGENT'`)，行类型在 `database.d.ts`。
   - **复用沉淀**：`src/components/model/paramFields.ts`(从 model-settings 抽出，`getParamFields()`)+`ParamFieldsForm.tsx`(`category/values/onChange`) 供 StepModel 与 ModelFormModal 共用动态参数表单。
 - 死代码 `src/pages/sandbox/node/`（2026-09-01 确认仍在）待用户在 IDE/资源管理器手动删（agent 删除被 EPERM 拦截）。
 - 钻取滑块用 `thumbRef` 直写 CSS 变量（非 setState），见 `2026-08-31.md`。

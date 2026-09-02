@@ -517,6 +517,59 @@ pub async fn run_python_script(
     }
 }
 
+/// 供智能体运行时直接调用的沙箱执行入口（**非 Tauri 命令**，供 `agent::native` 模块复用）。
+///
+/// 逻辑与 `run_python_script` 命令完全一致，但签名去掉 `AppHandle`/`State`，由调用方注入
+/// `app` 与 `mgr`，避免在原生工具 trait 里走命令通道（跨 `async` 调用更简洁、可单测）。
+pub async fn run_python_in_sandbox(
+    app: &AppHandle,
+    mgr: &MambaManager,
+    env_name: Option<String>,
+    script_path: String,
+) -> Result<String, String> {
+    let (mamba_root, rc) = mgr.setup(app)?;
+
+    let env = env_name.unwrap_or_else(|| DEFAULT_ENV.to_string());
+
+    let script = PathBuf::from(&script_path);
+    if !script.exists() {
+        return Err(format!("脚本文件不存在：{script_path}"));
+    }
+    let original_parent = script.parent().map(|p| p.to_path_buf());
+
+    let env_path = mamba_root.join("envs").join(&env);
+    if !env_path.exists() {
+        return Err(format!("{env} 环境尚未创建，请先调用 init_mamba_env。"));
+    }
+
+    let run_tmp = mamba_root.join("run_tmp");
+    std::fs::create_dir_all(&run_tmp).map_err(|e| format!("创建脚本运行临时目录失败：{e}"))?;
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let tmp_path = run_tmp.join(format!("__sandbox_run_{stamp}.py"));
+    std::fs::copy(&script, &tmp_path).map_err(|e| format!("复制脚本到临时文件失败：{e}"))?;
+
+    let mut args = global_args(&mamba_root, &rc);
+    args.extend([
+        "run".into(),
+        "-n".into(),
+        env.clone(),
+        "python".into(),
+        tmp_path.to_string_lossy().to_string(),
+    ]);
+
+    let (stdout, stderr, code) =
+        run_sidecar(app, args, original_parent.as_deref()).await?;
+    let _ = std::fs::remove_file(&tmp_path);
+    match code {
+        Some(0) => Ok(stdout),
+        Some(c) => Err(format!("脚本执行失败（退出码 {c}）：\n{stderr}")),
+        None => Err(format!("脚本进程异常终止，未收到退出码：\n{stderr}")),
+    }
+}
+
 /// 查询单个环境的元信息（是否存在 / Python 版本 / 依赖数）。
 ///
 /// 环境目录不存在时直接返回 `exists=false`（无需调用 micromamba）；

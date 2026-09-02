@@ -265,7 +265,7 @@ export default function AgentStudioPage() {
                         <Button
                           variant="ghost"
                           size="icon-sm"
-                          aria-label="调试"
+                          aria-label="进入"
                           onClick={() => navigate(agentChatPath(agent.id))}
                         >
                           <MessageSquare size={16} />
