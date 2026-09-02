@@ -55,6 +55,18 @@ impl AgentRuntime {
 
     /// 启动一轮任务（被 `run_agent_task` 命令调用，后台 spawn）。
     pub async fn run_task(&self, app: &AppHandle, cfg: AgentRuntimeConfig, prompt: String) {
+        // 0) 动态重算并回写 tools_tokens：按当前已解析的 MCP/Skill 工具数覆盖写入会话表，
+        //    中途移除 Skill / 停用（解绑）MCP 后，下一轮会自动下调；重新绑定则上调。
+        if let Some(sid) = &cfg.session_id {
+            crate::agent::round_compactor::persist_tools_tokens(
+                app,
+                sid,
+                cfg.mcp_tools.len(),
+                cfg.skill_tools.len(),
+            )
+            .await;
+        }
+
         // 1) 组装工具注册表（基础原生 + 绑定的 Skill/MCP 工具）
         let mut base = self.native.lock().await.clone();
         native::register_native_tools(&mut base, app);
@@ -83,12 +95,21 @@ impl AgentRuntime {
             sandbox_enabled: cfg.allow_sandbox,
         };
 
-        // 3) messages 初始化
-        let mut messages: Vec<Value> = Vec::new();
-        if !cfg.system_prompt.is_empty() {
-            messages.push(json!({ "role": "system", "content": cfg.system_prompt }));
-        }
-        messages.push(json!({ "role": "user", "content": prompt }));
+        // 3) 组装发送给 LLM 的 messages（含滑动窗口压缩 / 历史摘要）。
+        //    上下文封装抽离在 `context` 模块：system + 压缩摘要 + 最近 N 轮 verbatim + 当前 prompt；
+        //    工具定义不经此注入（由 ReAct 循环作为顶层 tools 参数传入，保 prompt-cache 命中）。
+        let mut messages = match crate::agent::context::build_context_messages(app, &cfg, &prompt).await {
+            Ok(m) => m,
+            Err(e) => {
+                println!("[agent] run_task: 上下文组装失败：{e}");
+                events::emit_task_error(app, &format!("上下文组装失败：{e}"));
+                return;
+            }
+        };
+
+        // 记录当前轮提问在 messages 中的下标；ReAct 循环结束后据此截取
+        // 「本轮产生的完整消息序列」用于 raw_messages_json 回填（协议视图，无损）。
+        let round_base = messages.len().saturating_sub(1);
 
         // 4) ReAct 循环
         let mut iteration = 0;
@@ -273,12 +294,30 @@ impl AgentRuntime {
         }
 
         events::emit_task_done(app);
+
+        // 第 N 轮结束后：回填本轮 raw_messages_json（协议视图），累计轮次，
+        // 并派发后台滚动压缩（Tokio 异步、非阻塞，用户下一轮提问零前置等待）。
+        if let Some(round_id) = &cfg.round_id {
+            let round_messages = &messages[round_base..];
+            match serde_json::to_string(round_messages) {
+                Ok(raw_json) => {
+                    crate::agent::round_compactor::persist_round_raw(app, round_id, &raw_json).await;
+                }
+                Err(e) => {
+                    println!("[agent] run_task: 序列化 raw_messages_json 失败：{e}");
+                }
+            }
+            if let Some(sid) = &cfg.session_id {
+                crate::agent::round_compactor::bump_session_turns(app, sid).await;
+                crate::agent::round_compactor::trigger_background_compaction(app, &cfg, sid).await;
+            }
+        }
     }
 }
 
 /* ----------------------------- LLM 调用 ----------------------------- */
 
-async fn call_llm(
+pub(crate) async fn call_llm(
     cfg: &AgentRuntimeConfig,
     messages: &[Value],
     tools: &[Value],
@@ -559,7 +598,7 @@ fn trim_history(messages: &[Value]) -> Vec<Value> {
     out
 }
 
-fn now_ms() -> i64 {
+pub(crate) fn now_ms() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)

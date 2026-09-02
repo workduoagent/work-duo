@@ -87,12 +87,25 @@ export interface ApprovalDecision {
   reason?: string
 }
 
+/** 消息附件（图片等），随 prompt 一起交给后端组装多模态 content。 */
+export interface ChatAttachmentInput {
+  type: 'image'
+  dataUrl: string
+  name?: string
+}
+
 /** 运行一轮任务的前端入参（对应 Rust `run_agent_task` 命令）。 */
 export interface RunAgentTaskInput {
   agentId: string
   prompt: string
   /** 工作空间本地目录（沙箱工具的相对路径以此为基准）。 */
   workspace?: string | null
+  /** 用户消息附件（多模态图片）。 */
+  attachments?: ChatAttachmentInput[]
   /** 历史消息（可选，首轮通常不带，由 Rust 侧从最近 session 读取）。 */
   history?: Array<{ role: 'user' | 'assistant' | 'agent'; content: string }>
+  /** 当前会话 id（前端建好的 agent_conversation_session.id），用于后端累计 input_token 与上下文压缩。 */
+  sessionId?: string
+  /** 当前轮次 id（前端建好的 agent_conversation_round.id），ReAct 循环结束后由 Rust 回填 raw_messages_json。 */
+  roundId?: string
 }

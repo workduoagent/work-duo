@@ -53,4 +53,6 @@ pub struct AgentRuntimeConfig {
     pub workspace: Option<String>,
     pub mcp_tools: Vec<MountedMcpTool>, // 已挂载 MCP 工具（含真实 tool_code 与描述）
     pub skill_tools: Vec<SkillToolWrapper>, // 已绑定技能包装
+    pub session_id: Option<String>, // 前端建好的会话 id（用于累计 input_token 与上下文压缩）
+    pub round_id: Option<String>, // 前端建好的本轮 id（ReAct 循环结束后回填 raw_messages_json）
 }

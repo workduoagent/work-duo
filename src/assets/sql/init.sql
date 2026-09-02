@@ -322,3 +322,59 @@ CREATE TABLE IF NOT EXISTS knowledge_asset
     updated_at  INTEGER NOT NULL,
     CONSTRAINT uk_kb_asset UNIQUE (kb_id, file_path)
 );
+
+-- ============ 智能体会话表（agent_conversation_session） ============
+-- 对应 PostgreSQL public.agent_conversation_session 转 SQLite：
+--   id 本地 UUID（文本主键）；agent_code 对应 agent_info.identifier；
+--   start_time / end_time / create_at / update_at 用 epoch 毫秒；
+--   is_collection / is_top / is_archive 用 INTEGER 0/1；
+--   from_site 默认 'DEBUG_CHAT'（单个智能体调试/对话页）。
+CREATE TABLE IF NOT EXISTS agent_conversation_session
+(
+    id             TEXT    PRIMARY KEY,
+    session_name   TEXT,
+    agent_code     TEXT    NOT NULL,
+    start_time     INTEGER,
+    end_time       INTEGER,
+    status         TEXT    NOT NULL DEFAULT 'RUNNING',
+    error_message  TEXT,
+    is_collection  INTEGER NOT NULL DEFAULT 0,
+    is_top         INTEGER NOT NULL DEFAULT 0,
+    is_archive     INTEGER NOT NULL DEFAULT 0,
+    from_site      TEXT    NOT NULL DEFAULT 'DEBUG_CHAT',
+    summary        TEXT,
+    total_prompt_tokens     INTEGER NOT NULL DEFAULT 0,
+    total_completion_tokens INTEGER NOT NULL DEFAULT 0,
+    tools_tokens  INTEGER NOT NULL DEFAULT 0,
+    summary_round_count INTEGER NOT NULL DEFAULT 0,
+    total_turns   INTEGER NOT NULL DEFAULT 0,
+    created_at     INTEGER NOT NULL,
+    updated_at     INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_agent_session_agent ON agent_conversation_session(agent_code, created_at DESC);
+
+-- ============ 智能体对话轮次表（agent_conversation_round） ============
+-- 对应 PostgreSQL public.agent_conversation_round 转 SQLite：
+--   id / session_id 本地 UUID 文本；input_tokens / output_tokens 用 INTEGER；
+--   tool_calls_summary JSON 数组/对象序列化文本；
+--   start_time / end_time / create_at / update_at 用 epoch 毫秒。
+CREATE TABLE IF NOT EXISTS agent_conversation_round
+(
+    id                 TEXT    PRIMARY KEY,
+    session_id         TEXT    NOT NULL,
+    llm_code           TEXT,
+    round_index        INTEGER NOT NULL,
+    user_question      TEXT,
+    thinking_content   TEXT,
+    assistant_answer    TEXT,
+    tool_calls_summary TEXT,
+    raw_messages_json  TEXT NOT NULL DEFAULT '',
+    input_tokens       INTEGER,
+    output_tokens      INTEGER,
+    start_time         INTEGER,
+    end_time           INTEGER,
+    created_at         INTEGER NOT NULL,
+    updated_at         INTEGER NOT NULL,
+    FOREIGN KEY(session_id) REFERENCES agent_conversation_session(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_agent_round_session ON agent_conversation_round(session_id, round_index);

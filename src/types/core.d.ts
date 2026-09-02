@@ -284,3 +284,90 @@ export interface AgentUpsertInput {
  *  - manual：手动配置（提供 http(s) / socks5 地址输入框）。
  */
 export type ProxyMode = 'direct' | 'system' | 'manual'
+
+/**
+ * 智能体会话来源（对应 agent_conversation_session.from_site）。
+ *  - DEBUG_CHAT：单个智能体调试/对话页；
+ *  - AGENT_GROUP：多 Agent 协作会话（预留）。
+ */
+export type AgentConversationFromSite = 'DEBUG_CHAT' | 'AGENT_GROUP'
+
+/**
+ * 智能体会话状态（对应 agent_conversation_session.status）。
+ */
+export type AgentConversationStatus = 'RUNNING' | 'COMPLETED' | 'ERROR'
+
+/**
+ * 智能体会话（对应 agent_conversation_session 表）。
+ * - id：本地 UUID（文本主键）；
+ * - sessionName：会话名称，默认取首轮第一个问题；
+ * - agentCode：智能体 identifier；
+ * - status：RUNNING / COMPLETED / ERROR；
+ * - fromSite：DEBUG_CHAT（当前页面）。
+ */
+export interface AgentConversationSession {
+  id: string
+  sessionName?: string
+  agentCode: string
+  startTime?: number
+  endTime?: number
+  status: AgentConversationStatus
+  errorMessage?: string
+  isCollection: boolean
+  isTop: boolean
+  isArchive: boolean
+  fromSite: AgentConversationFromSite
+  summary?: string
+  /** 累计提示词（输入）token 数。 */
+  totalPromptTokens?: number
+  /** 累计对话（输出）token 数。 */
+  totalCompletionTokens?: number
+  /** 工具 / Skill 定义占用的上下文 token 数（理论固定，移除 Skill / 停用 MCP 时下调）。 */
+  toolsTokens?: number
+  /** 已被压缩摘要覆盖的轮次数（滑动窗口增量合并用）。 */
+  summaryRoundCount?: number
+  createdAt: string
+  updatedAt: string
+}
+
+/**
+ * 单条对话轮次（对应 agent_conversation_round 表）。
+ * - roundIndex：会话内序号，从 0 开始；
+ * - userQuestion：用户提问（可能含图片附件序列化 JSON）；
+ * - assistantAnswer：AI 最终回答；
+ * - thinkingContent：AI 思考过程文本；
+ * - toolCallsSummary：工具调用汇总 JSON；
+ * - inputTokens / outputTokens：消耗 token 数。
+ */
+export interface AgentConversationRound {
+  id: string
+  sessionId: string
+  llmCode?: string
+  roundIndex: number
+  userQuestion?: string
+  thinkingContent?: string
+  assistantAnswer?: string
+  toolCallsSummary?: Record<string, unknown>[]
+  inputTokens?: number
+  outputTokens?: number
+  startTime?: number
+  endTime?: number
+  createdAt: string
+  updatedAt: string
+}
+
+/** 用户消息中的附件（图片等）。前端以 base64 data URL 形式携带。 */
+export interface ChatAttachment {
+  type: 'image'
+  dataUrl: string
+  name?: string
+}
+
+/** 创建 / 追加轮次时需要的输入项。 */
+export interface AppendRoundInput {
+  sessionId: string
+  llmCode?: string
+  roundIndex: number
+  userQuestion?: string
+  startTime?: number
+}

@@ -242,6 +242,9 @@ export function useAgentSession(): AgentSessionState {
             agentId: input.agentId,
             prompt: input.prompt,
             workspace: input.workspace ?? null,
+            attachments: input.attachments ?? [],
+            sessionId: input.sessionId ?? null,
+            roundId: input.roundId ?? null,
           },
         })
       } catch (e) {

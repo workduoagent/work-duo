@@ -17,6 +17,8 @@
 
 pub mod approval;
 pub mod commands;
+pub mod context;
+pub mod round_compactor;
 pub mod events;
 pub mod native;
 pub mod runtime;

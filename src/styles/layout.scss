@@ -155,6 +155,12 @@
   scroll-behavior: smooth;
 }
 
+/* 钻取态：二级菜单保持之前的紧凑/左对齐样子，不随胶囊宽度增加而被 space-evenly 拉开。
+   一级菜单仍用上面的均匀分布；二级菜单内容整体向左靠近。 */
+.app-nav-pills[data-mode='drilled'] .app-nav-pills__list {
+  justify-content: flex-start;
+}
+
 .app-nav-pills__list::-webkit-scrollbar {
   display: none;
 }

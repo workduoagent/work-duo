@@ -30,6 +30,12 @@ pub struct RunAgentTaskInput {
     pub prompt: String,
     #[serde(default)]
     pub workspace: Option<String>,
+    /// 前端建好的会话 id（agent_conversation_session.id），用于累计 input_token 与上下文压缩。
+    #[serde(default)]
+    pub session_id: Option<String>,
+    /// 前端建好的本轮 id（agent_conversation_round.id），ReAct 循环结束后由 Rust 回填 raw_messages_json。
+    #[serde(default)]
+    pub round_id: Option<String>,
 }
 
 /// 启动一轮智能体任务。
@@ -39,7 +45,7 @@ pub async fn run_agent_task(
     runtime: State<'_, AgentRuntime>,
     input: RunAgentTaskInput,
 ) -> Result<(), String> {
-    let cfg = load_config(&app, &input.agent_id, input.workspace.clone()).await?;
+    let cfg = load_config(&app, &input.agent_id, input.workspace.clone(), input.session_id.clone(), input.round_id.clone()).await?;
 
     println!(
         "[agent] run_agent_task 收到请求: agent_id={} prompt_len={} workspace={:?}",
@@ -86,6 +92,8 @@ async fn load_config(
     app: &AppHandle,
     agent_id: &str,
     workspace: Option<String>,
+    session_id: Option<String>,
+    round_id: Option<String>,
 ) -> Result<AgentRuntimeConfig, String> {
     let instances = app.state::<DbInstances>();
     let guard = instances.0.read().await;
@@ -262,5 +270,7 @@ async fn load_config(
         workspace,
         mcp_tools,
         skill_tools,
+        session_id,
+        round_id,
     })
 }

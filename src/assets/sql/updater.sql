@@ -44,4 +44,75 @@ ALTER TABLE knowledge_base ADD COLUMN file_size INTEGER NOT NULL DEFAULT 0;
 -- 新建/更新智能体时 INSERT 含 allow_sandbox 会报 "table agent_info has no column named allow_sandbox"。
 -- 存量库通过本语句补齐；重复执行会被 updateTables 安全跳过（duplicate column name）。
 ALTER TABLE agent_info ADD COLUMN allow_sandbox INTEGER NOT NULL DEFAULT 0;
+
+-- ---------- v8：新增智能体会话表与对话轮次表 ----------
+-- 对应 Web 端 PostgreSQL 设计转本地 SQLite，用于在单个智能体调试页持久化会话/轮次。
+CREATE TABLE IF NOT EXISTS agent_conversation_session
+(
+    id             TEXT    PRIMARY KEY,
+    session_name   TEXT,
+    agent_code     TEXT    NOT NULL,
+    start_time     INTEGER,
+    end_time       INTEGER,
+    status         TEXT    NOT NULL DEFAULT 'RUNNING',
+    error_message  TEXT,
+    is_collection  INTEGER NOT NULL DEFAULT 0,
+    is_top         INTEGER NOT NULL DEFAULT 0,
+    is_archive     INTEGER NOT NULL DEFAULT 0,
+    from_site      TEXT    NOT NULL DEFAULT 'DEBUG_CHAT',
+    summary        TEXT,
+    created_at     INTEGER NOT NULL,
+    updated_at     INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_agent_session_agent ON agent_conversation_session(agent_code, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS agent_conversation_round
+(
+    id                 TEXT    PRIMARY KEY,
+    session_id         TEXT    NOT NULL,
+    llm_code           TEXT,
+    round_index        INTEGER NOT NULL,
+    user_question      TEXT,
+    thinking_content   TEXT,
+    assistant_answer    TEXT,
+    tool_calls_summary TEXT,
+    input_tokens       INTEGER,
+    output_tokens      INTEGER,
+    start_time         INTEGER,
+    end_time           INTEGER,
+    created_at         INTEGER NOT NULL,
+    updated_at         INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_agent_round_session ON agent_conversation_round(session_id, round_index);
+
+-- ---------- v9：智能体会话表新增 token 累计字段 ----------
+-- total_prompt_tokens：累计提示词（输入）token，total_completion_tokens：累计对话（输出）token。
+-- 二者之和近似「已占用的上下文总量」，用于底部环形图回显「已消耗 / 上下文限制」占比，
+-- 以及超出限制时触发后端上下文压缩。
+-- 存量库（在这两个字段加入建表语句之前已创建）实际表结构缺少该列，
+-- 新建/更新会话时 UPDATE 含该列会报 "table agent_conversation_session has no column named ..."。
+-- 存量库通过本语句补齐；重复执行会被 updateTables 安全跳过（duplicate column name）。
+ALTER TABLE agent_conversation_session ADD COLUMN total_prompt_tokens INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE agent_conversation_session ADD COLUMN total_completion_tokens INTEGER NOT NULL DEFAULT 0;
+
+-- ---------- v9（续）：智能体会话表新增 tools_tokens 字段 ----------
+-- 工具/Skill 定义占用的上下文 token 数。理论固定，除非用户中途移除 Skill / 停用 MCP
+-- （此时应在前端相应下调该值）。用于环形图悬浮明细的「工具占比」。
+ALTER TABLE agent_conversation_session ADD COLUMN tools_tokens INTEGER NOT NULL DEFAULT 0;
+
+-- ---------- v10：智能体会话表新增摘要覆盖轮数（滑动窗口压缩用） ----------
+-- summary_round_count：已被压缩摘要覆盖的轮次数，用于上下文滑动窗口增量合并，
+-- 避免每轮都重新压缩全部历史（节省 LLM 调用、保留既有摘要质量）。
+-- 存量库通过本语句补齐；重复执行会被 updateTables 安全跳过（duplicate column name）。
+ALTER TABLE agent_conversation_session ADD COLUMN summary_round_count INTEGER NOT NULL DEFAULT 0;
+
+-- ---------- v11：后台滚动压缩（Rolling Compaction）所需字段 ----------
+-- total_turns：会话累计执行的轮次数，用于判断「未压缩轮数 = total_turns - summary_round_count
+--   是否达到触发阈值（通常为 5）」，驱动后台 Tokio 异步任务向前滚动合并旧轮次进 summary。
+-- 存量库通过本语句补齐；重复执行会被 updateTables 安全跳过（duplicate column name）。
+ALTER TABLE agent_conversation_session ADD COLUMN total_turns INTEGER NOT NULL DEFAULT 0;
+-- raw_messages_json：当前轮次产生的完整 ChatMessage 数组 JSON（含 tool_calls / tool_call_id /
+-- 工具结果），即「协议执行视图」。多轮上下文恢复时原样反序列化展开，保证无损、零格式损耗。
+-- 非空默认 ''（前端建轮时不写，由 Rust 在 ReAct 循环结束后回填真实 JSON）。
+ALTER TABLE agent_conversation_round ADD COLUMN raw_messages_json TEXT NOT NULL DEFAULT '';
 -- ============================================================

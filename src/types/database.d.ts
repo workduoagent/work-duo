@@ -198,6 +198,46 @@ export interface McpInfoRow {
   updated_at: number
 }
 
+/** 智能体会话表（agent_conversation_session）行映射。 */
+export interface AgentConversationSessionRow {
+  id: string
+  session_name: string | null
+  agent_code: string
+  start_time: number | null
+  end_time: number | null
+  status: string
+  error_message: string | null
+  is_collection: number
+  is_top: number
+  is_archive: number
+  from_site: string
+  summary: string | null
+  total_prompt_tokens: number
+  total_completion_tokens: number
+  tools_tokens: number
+  summary_round_count: number
+  created_at: number
+  updated_at: number
+}
+
+/** 智能体对话轮次表（agent_conversation_round）行映射。 */
+export interface AgentConversationRoundRow {
+  id: string
+  session_id: string
+  llm_code: string | null
+  round_index: number
+  user_question: string | null
+  thinking_content: string | null
+  assistant_answer: string | null
+  tool_calls_summary: string | null
+  input_tokens: number | null
+  output_tokens: number | null
+  start_time: number | null
+  end_time: number | null
+  created_at: number
+  updated_at: number
+}
+
 /** MCP 工具定义表（mcp_tool_definition）行映射。
  * - id：本地 UUID（文本主键）；
  * - mcp_id：外键，引用 mcp_info.id；
