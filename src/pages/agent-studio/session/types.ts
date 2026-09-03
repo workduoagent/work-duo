@@ -108,4 +108,10 @@ export interface RunAgentTaskInput {
   sessionId?: string
   /** 当前轮次 id（前端建好的 agent_conversation_round.id），ReAct 循环结束后由 Rust 回填 raw_messages_json。 */
   roundId?: string
+  /** 本轮临时禁用的技能 id 列表（仅会话内有效，不写库）。Rust 侧据此从工具集中剔除对应 Skill。 */
+  disabledSkillIds?: string[]
+  /** 本轮临时禁用的 MCP 服务 id 列表（仅会话内有效，不写库）。Rust 侧据此剔除该服务下全部工具。 */
+  disabledMcpIds?: string[]
+  /** 本轮临时禁用的单个 MCP 工具 id 列表（仅会话内有效，不写库）。键为 mcp_tool_definition.id。 */
+  disabledMcpToolIds?: string[]
 }

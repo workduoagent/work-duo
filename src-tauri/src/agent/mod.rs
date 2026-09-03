@@ -26,3 +26,4 @@ pub mod skill_adapter;
 pub mod mcp_adapter;
 pub mod tools;
 pub mod types;
+pub mod wd_mem;

@@ -42,6 +42,8 @@ function modelToRow(m: ModelConfig): ModelConfigRow {
     model_name: m.modelName,
     base_url: m.baseUrl || null,
     api_key: m.apiKey || null,
+    app_id: m.appId || null,
+    api_secret: m.apiSecret || null,
     category: m.category,
     enabled: m.enabled ? 1 : 0,
     tool_calls: m.toolCalls ? 1 : 0,
@@ -63,6 +65,8 @@ function rowToModel(r: ModelConfigRow): ModelConfig {
     provider: r.provider as ModelProvider,
     baseUrl: r.base_url ?? '',
     apiKey: r.api_key ?? '',
+    appId: r.app_id ?? '',
+    apiSecret: r.api_secret ?? '',
     modelName: r.model_name,
     enabled: r.enabled === 1,
     toolCalls: r.tool_calls === 1,
@@ -135,14 +139,16 @@ export async function upsertModel(model: ModelConfig): Promise<ModelConfig[]> {
   const row = modelToRow(model)
   await db.execute(
     `INSERT INTO models
-       (id, provider, name, model_name, base_url, api_key, category, enabled, tool_calls, config, description, tags, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       (id, provider, name, model_name, base_url, api_key, app_id, api_secret, category, enabled, tool_calls, config, description, tags, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET
        provider    = excluded.provider,
        name        = excluded.name,
        model_name  = excluded.model_name,
        base_url    = excluded.base_url,
        api_key     = excluded.api_key,
+       app_id      = excluded.app_id,
+       api_secret  = excluded.api_secret,
        category    = excluded.category,
        enabled     = excluded.enabled,
        tool_calls  = excluded.tool_calls,
@@ -157,6 +163,8 @@ export async function upsertModel(model: ModelConfig): Promise<ModelConfig[]> {
       row.model_name,
       row.base_url,
       row.api_key,
+      row.app_id,
+      row.api_secret,
       row.category,
       row.enabled,
       row.tool_calls,
@@ -221,14 +229,16 @@ export async function bulkUpsertModels(
     const row = modelToRow(m)
     await db.execute(
       `INSERT INTO models
-         (id, provider, name, model_name, base_url, api_key, category, enabled, tool_calls, config, description, tags, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         (id, provider, name, model_name, base_url, api_key, app_id, api_secret, category, enabled, tool_calls, config, description, tags, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          provider    = excluded.provider,
          name        = excluded.name,
          model_name  = excluded.model_name,
          base_url     = excluded.base_url,
          api_key      = excluded.api_key,
+         app_id       = excluded.app_id,
+         api_secret   = excluded.api_secret,
          category     = excluded.category,
          enabled      = excluded.enabled,
          tool_calls  = excluded.tool_calls,

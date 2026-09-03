@@ -18,6 +18,8 @@ export interface ModelConfigRow {
   model_name: string // 服务商侧模型标识
   base_url: string | null // 完整接口地址，如 https://api.openai.com/v1/chat/completions
   api_key: string | null // 密钥（本地明文，安全方案后续统一处理）
+  app_id: string | null // 讯飞（iflytek）三件套鉴权：AppId（通用厂商为空）
+  api_secret: string | null // 讯飞（iflytek）三件套鉴权：APISecret（通用厂商为空）
   category: string // 对应 ModelCategory
   enabled: number // SQLite 布尔：0 / 1
   tool_calls: number // SQLite 布尔：0 / 1（是否支持 Tool/Function Calling，默认 0=不支持，由用户显式开启）
@@ -212,10 +214,27 @@ export interface AgentConversationSessionRow {
   is_archive: number
   from_site: string
   summary: string | null
+  project_id: string | null
   total_prompt_tokens: number
   total_completion_tokens: number
   tools_tokens: number
   summary_round_count: number
+  total_turns: number
+  created_at: number
+  updated_at: number
+}
+
+/** 工程档案表（agent_project）行映射。 */
+export interface AgentProjectRow {
+  id: string
+  name: string
+  root_path: string
+  description: string | null
+  icon: string | null
+  is_pinned: number
+  is_archived: number
+  custom_rules: string | null
+  last_active_at: number
   created_at: number
   updated_at: number
 }

@@ -1,27 +1,27 @@
 import {
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useState,
-  type ComponentType,
+    useCallback,
+    useEffect,
+    useLayoutEffect,
+    useRef,
+    useState,
+    type ComponentType,
 } from 'react'
-import { useLocation, useNavigate } from 'react-router-dom'
+import {useLocation, useNavigate} from 'react-router-dom'
 import {
-  Boxes,
-  BookOpen,
-  Bot,
-  Users,
-  Settings,
-  Sparkles,
-  Plug,
-  Wand2,
-  ChevronLeft,
+    Boxes,
+    BookOpen,
+    Bot,
+    Users,
+    Settings,
+    Sparkles,
+    Plug,
+    Wand2,
+    ChevronLeft,
 } from 'lucide-react'
-import { WindowControls } from './WindowControls'
-import { ThemeToggle } from './ThemeToggle'
-import { isTauri } from '@/core/config'
-import { ROUTES } from '@/core/router/paths'
+import {WindowControls} from './WindowControls'
+import {ThemeToggle} from './ThemeToggle'
+import {isTauri} from '@/core/config'
+import {ROUTES} from '@/core/router/paths'
 
 /** 二级菜单单项动画时长 / 逐项出场间隔（出场从左往右、收起从右往左依次错开） */
 const CHILD_ANIM_MS = 320
@@ -32,38 +32,38 @@ const CHILD_EXIT_MS = CHILD_ANIM_MS + CHILD_STAGGER_MS * 3 + 120
 const TRACK_MS = 480
 
 interface MenuNode {
-  key: string
-  label: string
-  icon: ComponentType<{ className?: string }>
-  /** 已建成页面的路由；缺省则点击仅高亮不跳转。 */
-  path?: string
-  /** 存在子项即为「父容器」，点击进入二级钻取而非跳转。 */
-  children?: MenuNode[]
+    key: string
+    label: string
+    icon: ComponentType<{ className?: string }>
+    /** 已建成页面的路由；缺省则点击仅高亮不跳转。 */
+    path?: string
+    /** 存在子项即为「父容器」，点击进入二级钻取而非跳转。 */
+    children?: MenuNode[]
 }
 
 // 顶栏菜单树：一级菜单 + 二级子菜单。
 // 百宝箱 为父容器（含二级 LLM / MCP / Skill）；知识库 / 智能体 / 小分队 / 设置 为叶子菜单。
 // 沙箱环境（含 Python）已并入「设置」页左侧栏，不再作为顶层菜单。
 const MENUS: MenuNode[] = [
-  {
-    key: 'treasure',
-    label: '百宝箱',
-    icon: Boxes,
-    children: [
-      { key: 'llm', label: 'LLM', icon: Sparkles, path: ROUTES.modelSettings },
-      { key: 'mcp', label: 'MCP', icon: Plug, path: ROUTES.mcpHub },
-      { key: 'skill', label: 'Skill', icon: Wand2, path: ROUTES.skillHub },
-    ],
-  },
-  { key: 'kb', label: '知识库', icon: BookOpen, path: ROUTES.knowledge },
-  { key: 'agent', label: '智能体', icon: Bot, path: ROUTES.agentStudio },
-  { key: 'squads', label: '小分队', icon: Users, path: ROUTES.squadsWorkspace },
-  {
-    key: 'settings',
-    label: '设置',
-    icon: Settings,
-    path: ROUTES.settings,
-  },
+    {
+        key: 'treasure',
+        label: '百宝箱',
+        icon: Boxes,
+        children: [
+            {key: 'llm', label: 'LLM', icon: Sparkles, path: ROUTES.modelSettings},
+            {key: 'mcp', label: 'MCP', icon: Plug, path: ROUTES.mcpHub},
+            {key: 'skill', label: 'Skill', icon: Wand2, path: ROUTES.skillHub},
+        ],
+    },
+    {key: 'kb', label: '知识库', icon: BookOpen, path: ROUTES.knowledge},
+    {key: 'agent', label: '智能体', icon: Bot, path: ROUTES.agentStudio},
+    {key: 'squads', label: '小分队', icon: Users, path: ROUTES.squadsWorkspace},
+    {
+        key: 'settings',
+        label: '设置',
+        icon: Settings,
+        path: ROUTES.settings,
+    },
 ]
 
 // 子项 → 父项 key，用于「返回上级」时把高亮切回父容器。
@@ -71,11 +71,11 @@ const PARENT_OF: Record<string, string> = {}
 MENUS.forEach((m) => (m.children ?? []).forEach((c) => (PARENT_OF[c.key] = m.key)))
 
 function routeToTopKey(pathname: string): string | null {
-  if (pathname.startsWith(ROUTES.modelSettings)) return 'treasure'
-  if (pathname.startsWith(ROUTES.sandboxPython)) return 'settings'
-  if (pathname.startsWith(ROUTES.agentStudio)) return 'agent'
-  if (pathname.startsWith(ROUTES.squadsWorkspace)) return 'squads'
-  return null
+    if (pathname.startsWith(ROUTES.modelSettings)) return 'treasure'
+    if (pathname.startsWith(ROUTES.sandboxPython)) return 'settings'
+    if (pathname.startsWith(ROUTES.agentStudio)) return 'agent'
+    if (pathname.startsWith(ROUTES.squadsWorkspace)) return 'squads'
+    return null
 }
 
 /**
@@ -90,299 +90,301 @@ function routeToTopKey(pathname: string): string | null {
  * 图标统一使用 lucide-react。
  */
 export function TopBar() {
-  const navigate = useNavigate()
-  const location = useLocation()
-  const [version, setVersion] = useState('0.0.1')
-  const [drilledKey, setDrilledKey] = useState<string | null>(null)
-  /** 正在播放「收起动画」的旧二级菜单，动画结束后从 DOM 移除。 */
-  const [exiting, setExiting] = useState<MenuNode[] | null>(null)
-  const [selected, setSelected] = useState<string>(
-    () => routeToTopKey(location.pathname) ?? '',
-  )
-  /** 布局动画进行中：滑块逐帧跟随，关闭 transform 过渡避免拖影。 */
-  const [tracking, setTracking] = useState(false)
+    const navigate = useNavigate()
+    const location = useLocation()
+    const [version, setVersion] = useState('0.0.1')
+    const [drilledKey, setDrilledKey] = useState<string | null>(null)
+    /** 正在播放「收起动画」的旧二级菜单，动画结束后从 DOM 移除。 */
+    const [exiting, setExiting] = useState<MenuNode[] | null>(null)
+    const [selected, setSelected] = useState<string>(
+        () => routeToTopKey(location.pathname) ?? '',
+    )
+    /** 布局动画进行中：滑块逐帧跟随，关闭 transform 过渡避免拖影。 */
+    const [tracking, setTracking] = useState(false)
 
-  // drilledKey 的同步 ref：路由副作用里读取最新值而不重新触发自身。
-  const drilledKeyRef = useRef<string | null>(drilledKey)
-  useEffect(() => {
-    drilledKeyRef.current = drilledKey
-  }, [drilledKey])
+    // drilledKey 的同步 ref：路由副作用里读取最新值而不重新触发自身。
+    const drilledKeyRef = useRef<string | null>(drilledKey)
+    useEffect(() => {
+        drilledKeyRef.current = drilledKey
+    }, [drilledKey])
 
-  const exitTimer = useRef<number>(0)
+    const exitTimer = useRef<number>(0)
 
-  /** 让指定父级的二级菜单播放「从右往左依次收起」动画，结束后从 DOM 移除。 */
-  const scheduleDismiss = useCallback((fromKey: string | null) => {
-    if (!fromKey) return
-    const children = MENUS.find((m) => m.key === fromKey)?.children
-    if (!children?.length) return
-    setExiting(children)
-    window.clearTimeout(exitTimer.current)
-    exitTimer.current = window.setTimeout(() => setExiting(null), CHILD_EXIT_MS)
-  }, [])
+    /** 让指定父级的二级菜单播放「从右往左依次收起」动画，结束后从 DOM 移除。 */
+    const scheduleDismiss = useCallback((fromKey: string | null) => {
+        if (!fromKey) return
+        const children = MENUS.find((m) => m.key === fromKey)?.children
+        if (!children?.length) return
+        setExiting(children)
+        window.clearTimeout(exitTimer.current)
+        exitTimer.current = window.setTimeout(() => setExiting(null), CHILD_EXIT_MS)
+    }, [])
 
-  useEffect(() => () => window.clearTimeout(exitTimer.current), [])
+    useEffect(() => () => window.clearTimeout(exitTimer.current), [])
 
-  // 路由变化时同步高亮（例如从其他入口进入 model-settings）。
-  // 点击二级菜单跳转时保持钻取态，只移动高亮；切到其他模块则收起钻取。
-  useEffect(() => {
-    const top = routeToTopKey(location.pathname)
-    if (!top) return
-    const current = drilledKeyRef.current
-    if (current === top) {
-      const child = MENUS.find((m) => m.key === top)
-        ?.children?.find((c) => c.path && location.pathname.startsWith(c.path))
-      setSelected(child?.key ?? top)
-      return
+    // 路由变化时同步高亮（例如从其他入口进入 model-settings）。
+    // 点击二级菜单跳转时保持钻取态，只移动高亮；切到其他模块则收起钻取。
+    useEffect(() => {
+        const top = routeToTopKey(location.pathname)
+        if (!top) return
+        const current = drilledKeyRef.current
+        if (current === top) {
+            const child = MENUS.find((m) => m.key === top)
+                ?.children?.find((c) => c.path && location.pathname.startsWith(c.path))
+            setSelected(child?.key ?? top)
+            return
+        }
+        if (current) {
+            scheduleDismiss(current)
+            setDrilledKey(null)
+        }
+        setSelected(top)
+    }, [location.pathname, scheduleDismiss])
+
+    const handleSelect = (node: MenuNode) => {
+        const isChild = PARENT_OF[node.key] !== undefined
+
+        // 父容器
+        if (node.children?.length) {
+            // 钻取态下点击当前锚定的一级菜单：不响应（返回上级只走左侧返回按钮）
+            if (drilledKey === node.key) return
+            // 切换钻取目标：旧二级菜单先播放收起动画
+            if (drilledKey) scheduleDismiss(drilledKey)
+            setDrilledKey(node.key)
+            setSelected(node.key)
+            return
+        }
+
+        // 二级项：仅高亮与跳转，保持钻取态（不自动返回上级）
+        if (isChild) {
+            if (node.path) navigate(node.path)
+            setSelected(node.key)
+            return
+        }
+
+        // 一级叶子：跳转并收起钻取
+        if (node.path) navigate(node.path)
+        if (drilledKey) {
+            scheduleDismiss(drilledKey)
+            setDrilledKey(null)
+        }
+        setSelected(node.key)
     }
-    if (current) {
-      scheduleDismiss(current)
-      setDrilledKey(null)
-    }
-    setSelected(top)
-  }, [location.pathname, scheduleDismiss])
 
-  const handleSelect = (node: MenuNode) => {
-    const isChild = PARENT_OF[node.key] !== undefined
-
-    // 父容器
-    if (node.children?.length) {
-      // 钻取态下点击当前锚定的一级菜单：不响应（返回上级只走左侧返回按钮）
-      if (drilledKey === node.key) return
-      // 切换钻取目标：旧二级菜单先播放收起动画
-      if (drilledKey) scheduleDismiss(drilledKey)
-      setDrilledKey(node.key)
-      setSelected(node.key)
-      return
+    const handleBack = () => {
+        if (!drilledKey) return
+        scheduleDismiss(drilledKey)
+        setDrilledKey(null)
+        setSelected((prev) => PARENT_OF[prev] ?? prev)
     }
 
-    // 二级项：仅高亮与跳转，保持钻取态（不自动返回上级）
-    if (isChild) {
-      if (node.path) navigate(node.path)
-      setSelected(node.key)
-      return
-    }
+    const drilledNode = MENUS.find((m) => m.key === drilledKey) ?? null
+    /** 钻取态或收起动画播放中：返回按钮可见（收起动画期间淡出且不可点）。 */
+    const showBack = drilledKey !== null || exiting !== null
 
-    // 一级叶子：跳转并收起钻取
-    if (node.path) navigate(node.path)
-    if (drilledKey) {
-      scheduleDismiss(drilledKey)
-      setDrilledKey(null)
-    }
-    setSelected(node.key)
-  }
+    const listRef = useRef<HTMLDivElement>(null)
+    const thumbRef = useRef<HTMLSpanElement>(null)
+    const [ready, setReady] = useState(false)
 
-  const handleBack = () => {
-    if (!drilledKey) return
-    scheduleDismiss(drilledKey)
-    setDrilledKey(null)
-    setSelected((prev) => PARENT_OF[prev] ?? prev)
-  }
+    // 直接用 ref 写入滑块的 CSS 变量（--pill-x / --pill-w），避免逐帧 setState 触发
+    // React 重渲染——这是钻取动画卡顿的主因。钻取期关闭 transition 由 rAF 每帧直写，
+    // 滑块精确贴合且不抢占主线程；非钻取期沿用 CSS transition 平滑过渡。
+    const measure = useCallback(() => {
+        const list = listRef.current
+        const thumbEl = thumbRef.current
+        if (!list || !thumbEl) return
+        const item = list.querySelector<HTMLElement>(`[data-nav-value="${selected}"]`)
+        if (!item) return
 
-  const drilledNode = MENUS.find((m) => m.key === drilledKey) ?? null
-  /** 钻取态或收起动画播放中：返回按钮可见（收起动画期间淡出且不可点）。 */
-  const showBack = drilledKey !== null || exiting !== null
+        const listBox = list.getBoundingClientRect()
+        const itemBox = item.getBoundingClientRect()
+        const x = itemBox.left - listBox.left - list.clientLeft + list.scrollLeft
 
-  const listRef = useRef<HTMLDivElement>(null)
-  const thumbRef = useRef<HTMLSpanElement>(null)
-  const [ready, setReady] = useState(false)
+        thumbEl.style.setProperty('--pill-x', `${x}px`)
+        thumbEl.style.setProperty('--pill-w', `${itemBox.width}px`)
+    }, [selected])
 
-  // 直接用 ref 写入滑块的 CSS 变量（--pill-x / --pill-w），避免逐帧 setState 触发
-  // React 重渲染——这是钻取动画卡顿的主因。钻取期关闭 transition 由 rAF 每帧直写，
-  // 滑块精确贴合且不抢占主线程；非钻取期沿用 CSS transition 平滑过渡。
-  const measure = useCallback(() => {
-    const list = listRef.current
-    const thumbEl = thumbRef.current
-    if (!list || !thumbEl) return
-    const item = list.querySelector<HTMLElement>(`[data-nav-value="${selected}"]`)
-    if (!item) return
+    // 仅「进入二级」或「退出二级」时逐帧测量，滑块实时跟随布局动画避免拖影。
+    useEffect(() => {
+        // 【修复 1】：只要在钻取中，或者正在播放收起动画，都必须开启跟踪
+        if (drilledKey === null && exiting === null) return
 
-    const listBox = list.getBoundingClientRect()
-    const itemBox = item.getBoundingClientRect()
-    const x = itemBox.left - listBox.left - list.clientLeft + list.scrollLeft
-
-    thumbEl.style.setProperty('--pill-x', `${x}px`)
-    thumbEl.style.setProperty('--pill-w', `${itemBox.width}px`)
-  }, [selected])
-
-  // 仅「进入二级」时逐帧测量，滑块实时跟随布局动画避免拖影。
-  // 返回上级（drilledKey 已清空、仅 exiting 播放收起动画）时不开启跟踪：
-  // 此时高亮项已锚定在左侧父级且位置不再移动，交还 CSS 过渡让滑块平滑过渡
-  // 宽度/位移，避免从二级窄项瞬变回父级宽项时出现的宽度闪动。
-  useEffect(() => {
-    if (drilledKey === null) return
-    setTracking(true)
-    const start = performance.now()
-    let raf = 0
-    const tick = () => {
-      measure()
-      if (performance.now() - start < TRACK_MS) {
+        setTracking(true)
+        const start = performance.now()
+        let raf = 0
+        const tick = () => {
+            measure()
+            // 【修复 2】：确保跟踪时间足够覆盖整个退场动画 (CHILD_EXIT_MS)，保底 600ms
+            if (performance.now() - start < Math.max(TRACK_MS, 600)) {
+                raf = requestAnimationFrame(tick)
+            } else {
+                setTracking(false)
+            }
+        }
         raf = requestAnimationFrame(tick)
-      } else {
-        setTracking(false)
-      }
-    }
-    raf = requestAnimationFrame(tick)
-    return () => {
-      cancelAnimationFrame(raf)
-      setTracking(false)
-    }
-  }, [drilledKey, exiting, measure])
+        return () => {
+            cancelAnimationFrame(raf)
+            setTracking(false)
+        }
+    }, [drilledKey, exiting, measure])
 
-  useLayoutEffect(() => {
-    measure()
-    // 钻取切换后布局需一帧才稳定，补一次测量
-    const raf = requestAnimationFrame(() => measure())
-    return () => cancelAnimationFrame(raf)
-  }, [measure, drilledKey])
+    useLayoutEffect(() => {
+        measure()
+        // 钻取切换后布局需一帧才稳定，补一次测量
+        const raf = requestAnimationFrame(() => measure())
+        return () => cancelAnimationFrame(raf)
+    }, [measure, drilledKey])
 
-  useEffect(() => {
-    const list = listRef.current
-    if (!list) return
-    const ro = new ResizeObserver(() => {
-      measure()
-    })
-    ro.observe(list)
-    return () => {
-      ro.disconnect()
-    }
-  }, [measure])
+    useEffect(() => {
+        const list = listRef.current
+        if (!list) return
+        const ro = new ResizeObserver(() => {
+            measure()
+        })
+        ro.observe(list)
+        return () => {
+            ro.disconnect()
+        }
+    }, [measure])
 
-  useEffect(() => {
-    let alive = true
-    document.fonts?.ready
-      .then(() => {
-        if (alive) measure()
-      })
-      .catch(() => {})
-    return () => {
-      alive = false
-    }
-  }, [measure])
+    useEffect(() => {
+        let alive = true
+        document.fonts?.ready
+            .then(() => {
+                if (alive) measure()
+            })
+            .catch(() => {
+            })
+        return () => {
+            alive = false
+        }
+    }, [measure])
 
-  useEffect(() => {
-    const raf = requestAnimationFrame(() => setReady(true))
-    return () => cancelAnimationFrame(raf)
-  }, [])
+    useEffect(() => {
+        const raf = requestAnimationFrame(() => setReady(true))
+        return () => cancelAnimationFrame(raf)
+    }, [])
 
-  useEffect(() => {
-    if (!isTauri) return
-    let alive = true
-    import('@tauri-apps/api/app')
-      .then(({ getVersion }) => getVersion())
-      .then((v) => {
-        if (alive) setVersion(v)
-      })
-      .catch(() => {})
-    return () => {
-      alive = false
-    }
-  }, [])
+    useEffect(() => {
+        if (!isTauri) return
+        let alive = true
+        import('@tauri-apps/api/app')
+            .then(({getVersion}) => getVersion())
+            .then((v) => {
+                if (alive) setVersion(v)
+            })
+            .catch(() => {
+            })
+        return () => {
+            alive = false
+        }
+    }, [])
 
-  return (
-    <header className="app-topbar" data-tauri-drag-region>
-      {/* 左侧：品牌区 */}
-      <div className="app-topbar__brand no-drag-region">
-        <img src="/tauri.svg" alt="Work Duo" className="app-brand-logo" />
-        <span className="app-topbar__brand-name">Work Duo</span>
-        <div className="app-version-tag" title="当前版本">
-          <span className="app-version-tag__text">v{version}</span>
-        </div>
-      </div>
+    return (
+        <header className="app-topbar" data-tauri-drag-region>
+            {/* 左侧：品牌区 */}
+            <div className="app-topbar__brand no-drag-region">
+                <img src="/tauri.svg" alt="Work Duo" className="app-brand-logo"/>
+                <span className="app-topbar__brand-name">Work Duo</span>
+                <div className="app-version-tag" title="当前版本">
+                    <span className="app-version-tag__text">v{version}</span>
+                </div>
+            </div>
 
-      {/* 中部：两级胶囊菜单（纯 HTML，无第三方组件依赖） */}
-      <div className="app-topbar__nav no-drag-region">
-        <nav
-          className="app-nav-pills"
-          data-mode={drilledKey || exiting ? 'drilled' : 'top'}
-          data-ready={ready}
-          data-tracking={tracking}
-        >
-          {/* 返回上级：始终挂载，靠 data-hidden 平滑收起宽度，避免卸载时列表左扩导致菜单整体左移闪动 */}
-          <button
-            type="button"
-            className="app-nav-pills__back"
-            data-hidden={showBack ? 'false' : 'true'}
-            onClick={handleBack}
-            aria-label="返回上级菜单"
-            aria-hidden={showBack ? 'false' : 'true'}
-            tabIndex={showBack ? 0 : -1}
-          >
-              <ChevronLeft className="app-nav-pills__icon" />
-            </button>
-
-          {/* 菜单轨道（钻取态 / 一级态均可横向滚动） */}
-          <div className="app-nav-pills__list" ref={listRef}>
-            {/* 滑块（几何由 measure() 经 thumbRef 直写 CSS 变量驱动） */}
-            <span className="app-nav-pills__thumb" ref={thumbRef} aria-hidden="true" />
-
-            {/* 一级菜单 */}
-            {MENUS.map((node) => (
-              <span
-                key={node.key}
-                className="app-nav-pills__slot"
-                data-collapsed={
-                  drilledKey !== null && drilledKey !== node.key ? 'true' : 'false'
-                }
-              >
-                <button
-                  type="button"
-                  data-nav-value={node.key}
-                  className={`app-nav-pills__item${
-                    selected === node.key ? ' app-nav-pills__item--active' : ''
-                  }${node.children?.length ? ' app-nav-pills__item--parent' : ''}`}
-                  onClick={() => handleSelect(node)}
+            {/* 中部：两级胶囊菜单（纯 HTML，无第三方组件依赖） */}
+            <div className="app-topbar__nav no-drag-region">
+                <nav
+                    className="app-nav-pills"
+                    data-mode={drilledKey || exiting ? 'drilled' : 'top'}
+                    data-ready={ready}
+                    data-tracking={tracking}
                 >
-                  <node.icon className="app-nav-pills__icon" />
+                    {/* 返回上级：始终挂载，靠 data-hidden 平滑收起宽度，避免卸载时列表左扩导致菜单整体左移闪动 */}
+                    <button
+                        type="button"
+                        className="app-nav-pills__back"
+                        data-hidden={showBack ? 'false' : 'true'}
+                        onClick={handleBack}
+                        aria-label="返回上级菜单"
+                        aria-hidden={showBack ? 'false' : 'true'}
+                        tabIndex={showBack ? 0 : -1}
+                    >
+                        <ChevronLeft className="app-nav-pills__icon"/>
+                    </button>
+
+                    {/* 菜单轨道（钻取态 / 一级态均可横向滚动） */}
+                    <div className="app-nav-pills__list" ref={listRef}>
+                        {/* 滑块（几何由 measure() 经 thumbRef 直写 CSS 变量驱动） */}
+                        <span className="app-nav-pills__thumb" ref={thumbRef} aria-hidden="true"/>
+
+                        {/* 一级菜单 */}
+                        {MENUS.map((node) => (
+                            <span
+                                key={node.key}
+                                className="app-nav-pills__slot"
+                                data-collapsed={
+                                    drilledKey !== null && drilledKey !== node.key ? 'true' : 'false'
+                                }
+                            >
+                <button
+                    type="button"
+                    data-nav-value={node.key}
+                    className={`app-nav-pills__item${
+                        selected === node.key ? ' app-nav-pills__item--active' : ''
+                    }${node.children?.length ? ' app-nav-pills__item--parent' : ''}`}
+                    onClick={() => handleSelect(node)}
+                >
+                  <node.icon className="app-nav-pills__icon"/>
                   <span className="app-nav-pills__label">{node.label}</span>
                 </button>
               </span>
-            ))}
+                        ))}
 
-            {/* 二级菜单（钻取态渲染，从左往右依次铺开） */}
-            {drilledNode?.children?.map((child, i) => (
-              <button
-                key={`in-${child.key}`}
-                type="button"
-                data-nav-value={child.key}
-                data-phase="enter"
-                style={{ animationDelay: `${i * CHILD_STAGGER_MS}ms` }}
-                className={`app-nav-pills__item app-nav-pills__item--child${
-                  selected === child.key ? ' app-nav-pills__item--active' : ''
-                }`}
-                onClick={() => handleSelect(child)}
-              >
-                <child.icon className="app-nav-pills__icon" />
-                <span className="app-nav-pills__label">{child.label}</span>
-              </button>
-            ))}
+                        {/* 二级菜单（钻取态渲染，从左往右依次铺开） */}
+                        {drilledNode?.children?.map((child, i) => (
+                            <button
+                                key={`in-${child.key}`}
+                                type="button"
+                                data-nav-value={child.key}
+                                data-phase="enter"
+                                style={{animationDelay: `${i * CHILD_STAGGER_MS}ms`}}
+                                className={`app-nav-pills__item app-nav-pills__item--child${
+                                    selected === child.key ? ' app-nav-pills__item--active' : ''
+                                }`}
+                                onClick={() => handleSelect(child)}
+                            >
+                                <child.icon className="app-nav-pills__icon"/>
+                                <span className="app-nav-pills__label">{child.label}</span>
+                            </button>
+                        ))}
 
-            {/* 正在收起的旧二级菜单（从右往左依次收起，动画结束后移除） */}
-            {exiting?.map((child, i) => (
-              <button
-                key={`out-${child.key}`}
-                type="button"
-                data-phase="exit"
-                tabIndex={-1}
-                aria-hidden="true"
-                style={{
-                  animationDelay: `${(exiting.length - 1 - i) * CHILD_STAGGER_MS}ms`,
-                }}
-                className="app-nav-pills__item app-nav-pills__item--child"
-              >
-                <child.icon className="app-nav-pills__icon" />
-                <span className="app-nav-pills__label">{child.label}</span>
-              </button>
-            ))}
-          </div>
-        </nav>
-      </div>
+                        {/* 正在收起的旧二级菜单（从右往左依次收起，动画结束后移除） */}
+                        {exiting?.map((child, i) => (
+                            <button
+                                key={`out-${child.key}`}
+                                type="button"
+                                data-phase="exit"
+                                tabIndex={-1}
+                                aria-hidden="true"
+                                style={{
+                                    animationDelay: `${(exiting.length - 1 - i) * CHILD_STAGGER_MS}ms`,
+                                }}
+                                className="app-nav-pills__item app-nav-pills__item--child"
+                            >
+                                <child.icon className="app-nav-pills__icon"/>
+                                <span className="app-nav-pills__label">{child.label}</span>
+                            </button>
+                        ))}
+                    </div>
+                </nav>
+            </div>
 
-      {/* 右侧 */}
-      <div className="app-topbar__actions no-drag-region">
-        <ThemeToggle />
-        <span className="app-topbar__divider" />
-        <WindowControls />
-      </div>
-    </header>
-  )
+            {/* 右侧 */}
+            <div className="app-topbar__actions no-drag-region">
+                <ThemeToggle/>
+                <span className="app-topbar__divider"/>
+                <WindowControls/>
+            </div>
+        </header>
+    )
 }

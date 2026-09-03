@@ -29,7 +29,7 @@
   }
 
   &__new {
-    width: 100%;
+    flex: 1 1 auto;
     justify-content: center;
   }
 
@@ -169,28 +169,26 @@
     min-width: 0;
   }
 
-  &__head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 12px 20px;
-    border-bottom: 1px solid var(--color-border, #e5e5e5);
-
-    .dark & {
-      border-color: #2a2a2a;
-    }
-  }
-
-  &__head-info {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-  }
-
-  &__head-actions {
+  &__side-head {
     display: flex;
     align-items: center;
     gap: 8px;
+  }
+
+  &__side-nav {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    flex: 0 0 auto;
+  }
+
+  &__icon-btn {
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
   }
 
   &__status {
@@ -604,6 +602,244 @@
     }
   }
 
+  // 底部工具条里的技能头像 + 临时移除/恢复按钮
+  &__skill-chip {
+    position: relative;
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    // 为右上角按钮留出足够内边距，避免 absolute 按钮被父级 overflow 裁剪
+    padding: 4px;
+    border-radius: 999px;
+    transition: opacity 0.15s ease, background 0.15s ease;
+
+    // 默认隐藏操作按钮，悬浮时显示，避免界面过于拥挤
+    &:hover .agent-chat__skill-toggle {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    :global(.ant-avatar) {
+      border: 1px solid var(--color-border, #e5e5e5);
+      box-sizing: border-box;
+    }
+
+    // 已临时移除：整体变灰、头像半透明 + 虚线边框
+    &.is-removed {
+      opacity: 0.45;
+
+      :global(.ant-avatar) {
+        filter: grayscale(1);
+        border-style: dashed;
+      }
+    }
+  }
+
+  &__skill-toggle {
+    position: absolute;
+    // 正值定位确保完全位于 chip 内部，不再被 toolbar-left 的 overflow:hidden 裁剪
+    top: 4px;
+    right: 4px;
+    width: 14px;
+    height: 14px;
+    padding: 0;
+    border: none;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    color: #fff;
+    background: var(--color-danger, #ff4d4f);
+    box-shadow: 0 0 0 2px var(--color-background, #fff);
+    transition: background 0.15s ease, transform 0.1s ease, opacity 0.15s ease;
+    opacity: 0;
+    pointer-events: none;
+    z-index: 1;
+
+    &:hover {
+      transform: scale(1.12);
+    }
+
+    // 已移除态显示「恢复」按钮，用中性色区分
+    .agent-chat__skill-chip.is-removed & {
+      background: var(--color-text-secondary, #8c8c8c);
+    }
+  }
+
+  // 底部工具条里的 MCP 服务文字胶囊 + 悬浮 Pop（移除服务 / 工具开关）
+  &__mcp-pill {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    flex: 0 0 auto;
+    // 右侧留空给 14px 的移除/恢复按钮，顶部留空避免被父级裁剪
+    padding: 5px 18px 5px 10px;
+    border-radius: 999px;
+    background: var(--color-background-soft, #f0f0f0);
+    color: var(--color-text, #333);
+    font-size: 12px;
+    line-height: 1;
+    cursor: default;
+    white-space: nowrap;
+    transition: opacity 0.15s ease, background 0.15s ease;
+
+    .dark & {
+      background: #2a2a2a;
+      color: #e6e6e6;
+    }
+
+    // 默认隐藏操作按钮，悬浮时显示
+    &:hover .agent-chat__mcp-toggle {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    // 已临时移除：变灰 + 删除线感
+    &.is-removed {
+      opacity: 0.5;
+      text-decoration: line-through;
+      border: 1px dashed var(--color-border, #d9d9d9);
+    }
+  }
+
+  &__mcp-label {
+    padding: 1px 2px;
+  }
+
+  &__mcp-toggle {
+    position: absolute;
+    top: 50%;
+    right: 4px;
+    transform: translateY(-50%);
+    width: 14px;
+    height: 14px;
+    padding: 0;
+    border: none;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    color: #fff;
+    background: var(--color-danger, #ff4d4f);
+    transition: background 0.15s ease, transform 0.1s ease, opacity 0.15s ease;
+    opacity: 0;
+    pointer-events: none;
+    z-index: 1;
+
+    &:hover {
+      transform: translateY(-50%) scale(1.12);
+    }
+
+    // 生效态的「移除」按钮用危险色
+    &--remove {
+      background: var(--color-danger, #ff4d4f);
+    }
+
+    // 已移除态（恢复按钮）用中性色
+    .agent-chat__mcp-pill.is-removed & {
+      background: var(--color-text-secondary, #8c8c8c);
+    }
+  }
+
+  // 悬浮弹层（fixed 定位，逃逸 overflow 裁剪）
+  &__mcp-pop {
+    z-index: 50;
+  }
+
+  &__mcp-pop-card {
+    width: 244px;
+    max-height: 280px;
+    overflow: auto;
+    padding: 10px;
+    border-radius: 10px;
+    background: var(--color-background, #fff);
+    border: 1px solid var(--color-border, #e5e5e5);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.14);
+
+    .dark & {
+      background: #1f1f1f;
+      border-color: #333;
+    }
+  }
+
+  &__mcp-pop-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 8px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--color-border, #eee);
+  }
+
+  &__mcp-pop-title {
+    font-weight: 600;
+    font-size: 13px;
+    color: var(--color-text, #222);
+
+    .dark & {
+      color: #e6e6e6;
+    }
+  }
+
+  &__mcp-pop-remove {
+    flex: 0 0 auto;
+    padding: 2px 8px;
+    border: 1px solid var(--color-danger, #ff4d4f);
+    border-radius: 6px;
+    background: transparent;
+    color: var(--color-danger, #ff4d4f);
+    font-size: 12px;
+    cursor: pointer;
+
+    &:hover {
+      background: var(--color-danger, #ff4d4f);
+      color: #fff;
+    }
+  }
+
+  &__mcp-pop-tools {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  &__mcp-tool {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 6px;
+    border-radius: 6px;
+    cursor: pointer;
+
+    &:hover {
+      background: var(--color-background-soft, #f5f5f5);
+    }
+
+    .dark & {
+      &:hover {
+        background: #2a2a2a;
+      }
+    }
+  }
+
+  &__mcp-tool-name {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 12px;
+    color: var(--color-text, #333);
+
+    .dark & {
+      color: #d9d9d9;
+    }
+  }
+
   &__chip {
     display: inline-flex;
     align-items: center;
@@ -624,6 +860,246 @@
     &--sandbox {
       color: var(--color-success, #52c41a);
       border-color: var(--color-success, #52c41a);
+    }
+
+    // 处于目录绑定态时高亮，提示当前会话已绑定工作空间
+    &--workspace {
+      color: var(--color-primary, #1677ff);
+      border-color: var(--color-primary, #1677ff);
+      cursor: pointer;
+    }
+
+    // 未绑定目录的「选择目录」入口（任务态），悬停高亮提示可升级为工程
+    &--pick {
+      cursor: pointer;
+      gap: 5px;
+      transition: border-color 0.15s ease, color 0.15s ease;
+
+      &:hover {
+        color: var(--color-primary, #1677ff);
+        border-color: var(--color-primary, #1677ff);
+      }
+    }
+  }
+
+  // 新建对话按钮的包裹层
+  &__new-wrap {
+    position: relative;
+    display: flex;
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  // 左侧树状分组（GLOBAL + 各 PROJECT）
+  &__group {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin-bottom: 8px;
+
+    &:last-child {
+      margin-bottom: 0;
+    }
+  }
+
+  &__group-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 8px;
+    border-radius: 8px;
+    background: var(--color-background-soft, #f0f0f0);
+    color: var(--color-foreground, #333);
+
+    .dark & {
+      background: #1f1f1f;
+      color: #ddd;
+    }
+  }
+
+  &__group-head--global {
+    background: transparent;
+    padding-left: 2px;
+    .dark & {
+      background: transparent;
+    }
+  }
+
+  &__group-icon {
+    flex: 0 0 auto;
+    color: var(--color-muted, #888);
+  }
+
+  &__group-info {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+  }
+
+  &__group-name {
+    font-size: 0.78rem;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  &__group-path {
+    font-size: 0.66rem;
+    color: var(--color-muted, #999);
+    font-family: var(--font-mono, monospace);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  &__group-more {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2px;
+    border-radius: 6px;
+    color: var(--color-muted, #888);
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease;
+
+    &:hover {
+      background: var(--color-background, #fff);
+      color: var(--color-foreground, #333);
+    }
+    .dark & {
+      &:hover {
+        background: #2a2a2a;
+        color: #ddd;
+      }
+    }
+  }
+
+  // 工程分组下的会话缩进 + 左侧引导线，体现层级关系
+  &__group--project &__session {
+    padding-left: 22px;
+    margin-left: 10px;
+    border-left: 1px solid var(--color-border, #eee);
+
+    .dark & {
+      border-left-color: #2a2a2a;
+    }
+  }
+
+  // 会话行右侧操作区（删除 + 更多）
+  &__session-ops {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 2px;
+  }
+
+  &__session-more {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--color-muted, #999);
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.15s ease, color 0.15s ease, background 0.15s ease;
+
+    &:hover {
+      color: var(--color-foreground, #333);
+      background: var(--color-background-soft, #f0f0f0);
+    }
+  }
+
+  &__session:hover &__session-more {
+    opacity: 1;
+  }
+
+  &__session-arch {
+    color: var(--color-muted, #999);
+    flex: 0 0 auto;
+  }
+
+  // 通用点击外部关闭的下拉菜单（fixed 定位，视觉样式在此，位置由内联 style 控制）
+  &__menu-wrap {
+    position: relative;
+    display: inline-flex;
+  }
+
+  &__menu-trigger {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+  }
+
+  &__menu {
+    z-index: 40;
+    padding: 4px;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    border-radius: 10px;
+    background: var(--color-background, #fff);
+    border: 1px solid var(--color-border, #e5e5e5);
+    box-shadow: var(--shadow-pop, 0 8px 24px rgba(0, 0, 0, 0.14));
+
+    .dark & {
+      background: #1f1f1f;
+      border-color: #333;
+    }
+  }
+
+  &__menu-title {
+    padding: 4px 8px;
+    font-size: 0.7rem;
+    color: var(--color-muted, #999);
+  }
+
+  &__menu-item {
+    display: block;
+    width: 100%;
+    padding: 6px 8px;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--color-foreground, #333);
+    font-family: inherit;
+    font-size: 0.78rem;
+    text-align: left;
+    cursor: pointer;
+    transition: background 0.15s ease;
+
+    &:hover:not(:disabled) {
+      background: var(--color-background-soft, #f0f0f0);
+    }
+
+    &:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+
+    &.is-danger {
+      color: var(--color-danger, #ff4d4f);
+      &:hover:not(:disabled) {
+        background: var(--color-danger-bg, #fff1f0);
+      }
+    }
+
+    .dark & {
+      color: #ddd;
+      &:hover:not(:disabled) {
+        background: #2a2a2a;
+      }
+      &.is-danger {
+        color: var(--color-danger, #ff4d4f);
+      }
     }
   }
 

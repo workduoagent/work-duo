@@ -31,6 +31,9 @@ CREATE TABLE IF NOT EXISTS models
     model_name  TEXT    NOT NULL,
     base_url    TEXT,
     api_key     TEXT,
+    -- 讯飞（iflytek）等厂商的三件套鉴权：appId + apiKey + apiSecret（通用厂商仅用 api_key）
+    app_id      TEXT,
+    api_secret  TEXT,
     category    TEXT    NOT NULL,
     enabled     INTEGER NOT NULL DEFAULT 1,
     tool_calls  INTEGER NOT NULL DEFAULT 0,
@@ -323,6 +326,29 @@ CREATE TABLE IF NOT EXISTS knowledge_asset
     CONSTRAINT uk_kb_asset UNIQUE (kb_id, file_path)
 );
 
+-- ============ 工程表（agent_project） ============
+-- 绑定本地真实目录的「工程档案」。一个物理目录（规范化绝对路径）唯一对应一条记录，
+-- 通过 root_path 唯一索引保证物理工程单例；同一目录不论盘符大小写/斜杠差异都归属同一工程。
+-- custom_rules：项目专属 System Prompt 注入规则（继承到该工程下新建的会话）。
+-- is_pinned / is_archived：置顶 / 归档（INTEGER 0/1）。
+-- last_active_at：最后活跃时间戳，每次新建/追加轮次都刷新，用于工程级排序。
+CREATE TABLE IF NOT EXISTS agent_project
+(
+    id             TEXT    PRIMARY KEY,            -- 工程 UUID（如 "proj_xxx"）
+    name           TEXT    NOT NULL,               -- 工程名（默认取目录名，支持重命名）
+    root_path      TEXT    NOT NULL UNIQUE,        -- 规范化物理绝对路径（唯一索引保证物理工程单例）
+    description    TEXT,                           -- 工程说明
+    icon           TEXT,                           -- 工程图标/徽标
+    is_pinned      INTEGER NOT NULL DEFAULT 0,     -- 是否置顶（0: 否, 1: 是）
+    is_archived    INTEGER NOT NULL DEFAULT 0,     -- 是否归档（0: 否, 1: 是）
+    custom_rules   TEXT,                           -- 项目专属 System Prompt 注入规则
+    last_active_at INTEGER NOT NULL,               -- 最后活跃时间戳（用于排序，每次新建/追加轮次都刷新）
+    created_at     INTEGER NOT NULL,               -- 创建时间戳（Unix ms）
+    updated_at     INTEGER NOT NULL               -- 更新时间戳（Unix ms）
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_project_root ON agent_project(root_path);
+CREATE INDEX IF NOT EXISTS idx_agent_project_active ON agent_project(is_pinned DESC, last_active_at DESC);
+
 -- ============ 智能体会话表（agent_conversation_session） ============
 -- 对应 PostgreSQL public.agent_conversation_session 转 SQLite：
 --   id 本地 UUID（文本主键）；agent_code 对应 agent_info.identifier；
@@ -342,6 +368,7 @@ CREATE TABLE IF NOT EXISTS agent_conversation_session
     is_top         INTEGER NOT NULL DEFAULT 0,
     is_archive     INTEGER NOT NULL DEFAULT 0,
     from_site      TEXT    NOT NULL DEFAULT 'DEBUG_CHAT',
+    project_id     TEXT,                           -- 所属工程 ID（NULL 代表通用日常任务/无项目模式）
     summary        TEXT,
     total_prompt_tokens     INTEGER NOT NULL DEFAULT 0,
     total_completion_tokens INTEGER NOT NULL DEFAULT 0,
@@ -349,9 +376,12 @@ CREATE TABLE IF NOT EXISTS agent_conversation_session
     summary_round_count INTEGER NOT NULL DEFAULT 0,
     total_turns   INTEGER NOT NULL DEFAULT 0,
     created_at     INTEGER NOT NULL,
-    updated_at     INTEGER NOT NULL
+    updated_at     INTEGER NOT NULL,
+    FOREIGN KEY(project_id) REFERENCES agent_project(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_agent_session_agent ON agent_conversation_session(agent_code, created_at DESC);
+-- 注：idx_agent_session_lookup（含 project_id）移到 updater.sql，在 ALTER 补齐 project_id 后再建，
+--     避免现有库（agent_conversation_session 已存在、无 project_id 列）建索引时整段 init.sql 失败。
 
 -- ============ 智能体对话轮次表（agent_conversation_round） ============
 -- 对应 PostgreSQL public.agent_conversation_round 转 SQLite：

@@ -15,6 +15,13 @@ import type {
   AgentUpsertInput,
 } from '@/types/core'
 
+/** 智能体配置上限（新建 / 编辑统一校验，选择时实时拦截 + 保存时硬校验共用） */
+export const MAX_MCP_SERVERS = 3
+/** 已绑定 MCP 服务的总工具数量上限 */
+export const MAX_MCP_TOOLS = 10
+/** 编排 Skill 数量上限 */
+export const MAX_SKILLS = 3
+
 export interface AgentDraft {
   name: string
   identifier: string

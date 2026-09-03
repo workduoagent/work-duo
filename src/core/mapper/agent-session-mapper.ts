@@ -49,11 +49,13 @@ function rowToSession(r: AgentConversationSessionRow): AgentConversationSession 
     isTop: r.is_top === 1,
     isArchive: r.is_archive === 1,
     fromSite: r.from_site as 'DEBUG_CHAT' | 'AGENT_GROUP',
+    projectId: r.project_id ?? undefined,
     summary: r.summary ?? undefined,
     totalPromptTokens: r.total_prompt_tokens ?? undefined,
     totalCompletionTokens: r.total_completion_tokens ?? undefined,
     toolsTokens: r.tools_tokens ?? undefined,
     summaryRoundCount: r.summary_round_count ?? undefined,
+    totalTurns: r.total_turns ?? undefined,
     createdAt: new Date(r.created_at).toISOString(),
     updatedAt: new Date(r.updated_at).toISOString(),
   }
@@ -102,11 +104,23 @@ function lsWrite<T>(key: string, list: T[]): void {
  * 会话 CRUD
  * ---------------------------------------------------------------- */
 
-/** 创建新会话。sessionName 可空，通常首轮发送后回填为第一个问题。 */
+/** 创建新会话。sessionName 可空，通常首轮发送后回填为第一个问题。
+ *  - opts.projectId：绑定到某工程（NULL 代表通用日常任务）；
+ *  - opts.workspacePath：传入时自动按规范化路径建档/复用工程并绑定（智能工作空间绑定）。 */
 export async function createSession(
   agentCode: string,
   sessionName?: string,
+  opts?: { projectId?: string | null; workspacePath?: string },
 ): Promise<AgentConversationSession> {
+  let projectId: string | null | undefined = opts?.projectId ?? null
+
+  // 传入工作空间路径：智能绑定——规范化后查重，复用已有工程或自动建档
+  if (!projectId && opts?.workspacePath) {
+    const { ensureProjectByPath } = await import('./agent-project-mapper')
+    const proj = await ensureProjectByPath(opts.workspacePath)
+    projectId = proj.id
+  }
+
   const now = Date.now()
   const id = crypto.randomUUID()
   const session: AgentConversationSession = {
@@ -119,6 +133,7 @@ export async function createSession(
     isTop: false,
     isArchive: false,
     fromSite: 'DEBUG_CHAT',
+    projectId: projectId ?? undefined,
     totalPromptTokens: 0,
     totalCompletionTokens: 0,
     toolsTokens: 0,
@@ -138,9 +153,9 @@ export async function createSession(
   await db.execute(
     `INSERT INTO agent_conversation_session
        (id, session_name, agent_code, start_time, end_time, status, error_message,
-        is_collection, is_top, is_archive, from_site, summary, total_prompt_tokens,
+        is_collection, is_top, is_archive, from_site, project_id, summary, total_prompt_tokens,
         total_completion_tokens, tools_tokens, summary_round_count, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       id,
       sessionName ?? null,
@@ -153,6 +168,7 @@ export async function createSession(
       0,
       0,
       'DEBUG_CHAT',
+      projectId ?? null,
       null,
       0,
       0,
@@ -196,7 +212,22 @@ export async function getSession(id: string): Promise<AgentConversationSession |
 /** 更新会话基础信息（名称/状态/结束时间/摘要/错误）。 */
 export async function updateSession(
   id: string,
-  patch: Partial<Pick<AgentConversationSession, 'sessionName' | 'status' | 'endTime' | 'summary' | 'errorMessage' | 'totalPromptTokens' | 'totalCompletionTokens' | 'toolsTokens'>>,
+  patch: Partial<
+    Pick<
+      AgentConversationSession,
+      | 'sessionName'
+      | 'status'
+      | 'endTime'
+      | 'summary'
+      | 'errorMessage'
+      | 'totalPromptTokens'
+      | 'totalCompletionTokens'
+      | 'toolsTokens'
+    >
+  > & {
+    /** 允许传 null 以解绑工程（置为自由会话）。 */
+    projectId?: string | null
+  },
 ): Promise<void> {
   const now = Date.now()
   if (!isTauri) {
@@ -212,6 +243,7 @@ export async function updateSession(
             totalPromptTokens: patch.totalPromptTokens ?? s.totalPromptTokens,
             totalCompletionTokens: patch.totalCompletionTokens ?? s.totalCompletionTokens,
             toolsTokens: patch.toolsTokens ?? s.toolsTokens,
+            projectId: patch.projectId ?? s.projectId,
             updatedAt: new Date(now).toISOString(),
           }
         : s,
@@ -230,6 +262,7 @@ export async function updateSession(
         total_prompt_tokens = COALESCE(?, total_prompt_tokens),
         total_completion_tokens = COALESCE(?, total_completion_tokens),
         tools_tokens = COALESCE(?, tools_tokens),
+        project_id = COALESCE(?, project_id),
         updated_at = ?
      WHERE id = ?`,
     [
@@ -241,6 +274,7 @@ export async function updateSession(
       patch.totalPromptTokens ?? null,
       patch.totalCompletionTokens ?? null,
       patch.toolsTokens ?? null,
+      patch.projectId ?? null,
       now,
       id,
     ],
@@ -318,6 +352,170 @@ export async function toggleSessionTop(id: string, top: boolean): Promise<void> 
     'UPDATE agent_conversation_session SET is_top = ?, updated_at = ? WHERE id = ?',
     [top ? 1 : 0, now, id],
   )
+}
+
+/** 重命名会话。 */
+export async function renameSession(id: string, name: string): Promise<void> {
+  await updateSession(id, { sessionName: name })
+}
+
+/** 切换归档。 */
+export async function setSessionArchived(id: string, archived: boolean): Promise<void> {
+  const now = Date.now()
+  if (!isTauri) {
+    const list = lsRead<AgentConversationSession>(LS_SESSION).map((s) =>
+      s.id === id ? { ...s, isArchive: archived, updatedAt: new Date(now).toISOString() } : s,
+    )
+    lsWrite(LS_SESSION, list)
+    return
+  }
+  const db = await getDb()
+  await db.execute('UPDATE agent_conversation_session SET is_archive = ?, updated_at = ? WHERE id = ?', [
+    archived ? 1 : 0,
+    now,
+    id,
+  ])
+}
+
+/* ------------------------------------------------------------------ *
+ * 树状分组（左侧会话抽屉驱动结构）
+ * ---------------------------------------------------------------- */
+
+/** 树中单个会话的精简视图。 */
+export interface SessionTreeItem {
+  id: string
+  sessionName?: string
+  totalTurns: number
+  updatedAt: number
+  isTop: boolean
+  isArchived: boolean
+  projectId?: string
+}
+
+/** 树的一个分组：GLOBAL（通用任务）或 PROJECT（某工程下会话）。 */
+export interface SessionTreeGroup {
+  groupType: 'GLOBAL' | 'PROJECT'
+  groupId: string
+  projectName: string
+  rootPath: string | null
+  isPinned?: boolean
+  isArchived?: boolean
+  sessions: SessionTreeItem[]
+}
+
+interface SessionJoinRow extends AgentConversationSessionRow {
+  project_name?: string | null
+  project_root_path?: string | null
+  project_is_pinned?: number
+  project_is_archived?: number
+}
+
+/** 会话 + 其所属工程信息的投影（用于树状分组）。 */
+interface ProjectedSession extends AgentConversationSession {
+  projectName?: string
+  projectRootPath?: string
+  projectIsPinned?: boolean
+  projectIsArchived?: boolean
+}
+
+/**
+ * 列出某智能体的会话，按「通用任务 / 各工程」分组输出树状结构：
+ *  - GLOBAL 组：project_id 为 NULL 的会话，按 updated_at 倒序；
+ *  - PROJECT 组：每个工程一组，组按工程 last_active_at 倒序（置顶优先），组内会话按 updated_at 倒序。
+ * 通过单次 JOIN 查询驱动前端左侧抽屉渲染。
+ */
+export async function listSessionTree(agentCode: string): Promise<SessionTreeGroup[]> {
+  if (!isTauri) {
+    const all = lsRead<AgentConversationSession>(LS_SESSION).filter((s) => s.agentCode === agentCode)
+    return buildTree(all)
+  }
+  const db = await getDb()
+  const rows = await db.select<SessionJoinRow[]>(
+    `SELECT s.*, p.name AS project_name, p.root_path AS project_root_path, p.is_pinned AS project_is_pinned, p.is_archived AS project_is_archived
+     FROM agent_conversation_session s
+     LEFT JOIN agent_project p ON p.id = s.project_id
+     WHERE s.agent_code = ?
+     ORDER BY COALESCE(p.is_pinned, 0) DESC, COALESCE(p.last_active_at, 0) DESC, s.updated_at DESC`,
+    [agentCode],
+  )
+  const sessions: ProjectedSession[] = rows.map((r) => ({
+    id: r.id,
+    sessionName: r.session_name ?? undefined,
+    agentCode: r.agent_code,
+    startTime: r.start_time ?? undefined,
+    endTime: r.end_time ?? undefined,
+    status: r.status as AgentConversationStatus,
+    errorMessage: r.error_message ?? undefined,
+    isCollection: r.is_collection === 1,
+    isTop: r.is_top === 1,
+    isArchive: r.is_archive === 1,
+    fromSite: r.from_site as 'DEBUG_CHAT' | 'AGENT_GROUP',
+    projectId: r.project_id ?? undefined,
+    summary: r.summary ?? undefined,
+    totalPromptTokens: r.total_prompt_tokens ?? undefined,
+    totalCompletionTokens: r.total_completion_tokens ?? undefined,
+    toolsTokens: r.tools_tokens ?? undefined,
+    summaryRoundCount: r.summary_round_count ?? undefined,
+    totalTurns: r.total_turns ?? undefined,
+    createdAt: new Date(r.created_at).toISOString(),
+    updatedAt: new Date(r.updated_at).toISOString(),
+    projectName: r.project_name ?? undefined,
+    projectRootPath: r.project_root_path ?? undefined,
+    projectIsPinned: r.project_is_pinned === 1,
+    projectIsArchived: r.project_is_archived === 1,
+  }))
+  return buildTree(sessions)
+}
+
+/** 从已加载的会话列表构建树（Tauri 与非 Tauri 共用）。 */
+function buildTree(sessions: ProjectedSession[]): SessionTreeGroup[] {
+  const toItem = (s: ProjectedSession): SessionTreeItem => ({
+    id: s.id,
+    sessionName: s.sessionName,
+    totalTurns: s.totalTurns ?? 0,
+    updatedAt: Date.parse(s.updatedAt) || 0,
+    isTop: s.isTop,
+    isArchived: s.isArchive,
+    projectId: s.projectId,
+  })
+
+  // GLOBAL 组
+  const globalSessions = sessions
+    .filter((s) => !s.projectId)
+    .sort((a, b) => (Date.parse(b.updatedAt) || 0) - (Date.parse(a.updatedAt) || 0))
+    .map(toItem)
+
+  const groups: SessionTreeGroup[] = [
+    {
+      groupType: 'GLOBAL',
+      groupId: 'GLOBAL',
+      projectName: '通用任务 / 自由会话',
+      rootPath: null,
+      sessions: globalSessions,
+    },
+  ]
+
+  // PROJECT 组：按 projectId 聚合
+  const byProject = new Map<string, ProjectedSession[]>()
+  for (const s of sessions) {
+    if (!s.projectId) continue
+    const arr = byProject.get(s.projectId) ?? []
+    arr.push(s)
+    byProject.set(s.projectId, arr)
+  }
+  for (const [pid, arr] of byProject) {
+    arr.sort((a, b) => (Date.parse(b.updatedAt) || 0) - (Date.parse(a.updatedAt) || 0))
+    groups.push({
+      groupType: 'PROJECT',
+      groupId: pid,
+      projectName: arr[0].projectName ?? '未命名工程',
+      rootPath: arr[0].projectRootPath ?? null,
+      isPinned: arr[0].projectIsPinned,
+      isArchived: arr[0].projectIsArchived,
+      sessions: arr.map(toItem),
+    })
+  }
+  return groups
 }
 
 /** 删除会话（级联删除其轮次）。 */

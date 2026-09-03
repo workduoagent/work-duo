@@ -2,6 +2,7 @@
 mod agent;
 mod mcp;
 mod mamba_manager;
+mod fs_helper;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -40,7 +41,10 @@ pub fn run() {
             mamba_manager::run_python_script,
             agent::commands::run_agent_task,
             agent::commands::submit_approval_decision,
-            agent::commands::cancel_agent_task
+            agent::commands::cancel_agent_task,
+            agent::wd_mem::wd_mem_read_project_memory,
+            agent::wd_mem::wd_mem_write_project_memory,
+            fs_helper::canonicalize_path
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

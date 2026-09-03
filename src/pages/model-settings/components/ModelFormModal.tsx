@@ -37,13 +37,18 @@ export interface ModelFormModalProps {
     onSave: (model: ModelConfig) => Promise<void> | void
 }
 
-/** 必填基础字段的校验 */
+/** 必填基础字段的校验（通用厂商与讯飞三件套分支） */
 function validate(draft: ModelConfig): Set<string> {
     const errors = new Set<string>()
     if (!draft.name.trim()) errors.add('name')
     if (!draft.modelName.trim()) errors.add('modelName')
     if (!draft.baseUrl.trim()) errors.add('baseUrl')
     if (!draft.apiKey.trim()) errors.add('apiKey')
+    // 讯飞（iflytek）三件套：AppId + APISecret 同样必填
+    if (draft.provider === 'iflytek') {
+        if (!draft.appId?.trim()) errors.add('appId')
+        if (!draft.apiSecret?.trim()) errors.add('apiSecret')
+    }
     return errors
 }
 
@@ -71,6 +76,8 @@ export function ModelFormModal({
     }, [open, model, category])
 
     const activeCategory = draft.category
+    // 讯飞（iflytek）走三件套鉴权（AppId + APIKey + APISecret），凭证块与通用厂商不同
+    const isXfyun = draft.provider === 'iflytek'
     // Tool/Function Calling 仅对 LLM 类（纯文本 / 多模态）有意义，故仅这两类展示开关
     const showToolCalls = activeCategory === 'text' || activeCategory === 'multimodal'
     // 分类参数挂在 draft[category] 上；类型上为按需可选，这里统一当记录用
@@ -203,26 +210,73 @@ export function ModelFormModal({
                             />
                         </Field>
 
-                        <Field className="mfm__span-2">
-                            <FieldLabel>API Base URL<span className="mfm__required">*</span></FieldLabel>
-                            <Input
-                                value={draft.baseUrl}
-                                status={errStatus('baseUrl')}
-                                placeholder="完整接口地址，如 https://api.openai.com/v1/chat/completions"
-                                onChange={(e) => patch({baseUrl: e.target.value})}
-                            />
-                            <span className="mfm__hint">填写可直接调用的完整地址（含端点路径），不做拼接</span>
-                        </Field>
+                        {isXfyun ? (
+                            <>
+                                <Field className="mfm__span-2">
+                                    <FieldLabel>Host URL<span className="mfm__required">*</span></FieldLabel>
+                                    <Input
+                                        value={draft.baseUrl}
+                                        status={errStatus('baseUrl')}
+                                        placeholder="讯飞开放平台地址，如 https://tts-api.xfyun.cn/v2/tts 或 https://iat-api.xfyun.cn/v2/iat"
+                                        onChange={(e) => patch({baseUrl: e.target.value})}
+                                    />
+                                    <span className="mfm__hint">TTS 用 tts-api.xfyun.cn/v2/tts；STT 用 iat-api.xfyun.cn/v2/iat。调用走签名 WebSocket，不以 Bearer 传 Key。</span>
+                                </Field>
 
-                        <Field className="mfm__span-2">
-                            <FieldLabel>API Key<span className="mfm__required">*</span></FieldLabel>
-                            <Input.Password
-                                value={draft.apiKey}
-                                status={errStatus('apiKey')}
-                                placeholder="sk-…"
-                                onChange={(e) => patch({apiKey: e.target.value})}
-                            />
-                        </Field>
+                                <Field>
+                                    <FieldLabel>AppId<span className="mfm__required">*</span></FieldLabel>
+                                    <Input
+                                        value={draft.appId ?? ''}
+                                        status={errStatus('appId')}
+                                        placeholder="讯飞开放平台 AppId"
+                                        onChange={(e) => patch({appId: e.target.value})}
+                                    />
+                                </Field>
+
+                                <Field>
+                                    <FieldLabel>API Key<span className="mfm__required">*</span></FieldLabel>
+                                    <Input.Password
+                                        value={draft.apiKey}
+                                        status={errStatus('apiKey')}
+                                        placeholder="讯飞 APIKey"
+                                        onChange={(e) => patch({apiKey: e.target.value})}
+                                    />
+                                </Field>
+
+                                <Field className="mfm__span-2">
+                                    <FieldLabel>API Secret<span className="mfm__required">*</span></FieldLabel>
+                                    <Input.Password
+                                        value={draft.apiSecret ?? ''}
+                                        status={errStatus('apiSecret')}
+                                        placeholder="讯飞 APISecret"
+                                        onChange={(e) => patch({apiSecret: e.target.value})}
+                                    />
+                                </Field>
+                            </>
+                        ) : (
+                            <>
+                                <Field className="mfm__span-2">
+                                    <FieldLabel>API Base URL<span className="mfm__required">*</span></FieldLabel>
+                                    <Input
+                                        value={draft.baseUrl}
+                                        status={errStatus('baseUrl')}
+                                        placeholder="完整接口地址，如 https://api.openai.com/v1/chat/completions"
+                                        onChange={(e) => patch({baseUrl: e.target.value})}
+                                    />
+                                    <span className="mfm__hint">填写可直接调用的完整地址（含端点路径），不做拼接</span>
+                                </Field>
+
+                                <Field className="mfm__span-2">
+                                    <FieldLabel>API Key<span className="mfm__required">*</span></FieldLabel>
+                                    <Input.Password
+                                        value={draft.apiKey}
+                                        status={errStatus('apiKey')}
+                                        placeholder="sk-…"
+                                        onChange={(e) => patch({apiKey: e.target.value})}
+                                    />
+                                </Field>
+                            </>
+                        )}
 
                         <Field>
                             <FieldLabel>模型标识<span className="mfm__required">*</span></FieldLabel>

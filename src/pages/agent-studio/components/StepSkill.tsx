@@ -12,6 +12,7 @@ import { useNotify } from '@/components/ui/notify'
 import { listSkills } from '@/core/mapper/skill-mapper'
 import type { SkillInfo } from '@/core/file/skill-file'
 import type { AgentDraft } from '../draft'
+import { MAX_SKILLS } from '../draft'
 
 export interface StepSkillProps {
   draft: AgentDraft
@@ -43,6 +44,10 @@ export function StepSkill({ draft, patch }: StepSkillProps) {
   const selected = new Set(draft.skillIds)
 
   function toggle(skillId: string) {
+    if (!selected.has(skillId) && draft.skillIds.length >= MAX_SKILLS) {
+      message.warning(`编排的 Skill 最多 ${MAX_SKILLS} 个`)
+      return
+    }
     patch({
       skillIds: selected.has(skillId)
         ? draft.skillIds.filter((id) => id !== skillId)
@@ -85,7 +90,13 @@ export function StepSkill({ draft, patch }: StepSkillProps) {
             indeterminate={
               skills.some((s) => selected.has(s.id)) && !skills.every((s) => selected.has(s.id))
             }
-            onChange={(e) => patch({ skillIds: e.target.checked ? skills.map((s) => s.id) : [] })}
+            onChange={(e) => {
+              if (e.target.checked && skills.length > MAX_SKILLS) {
+                message.warning(`编排的 Skill 最多 ${MAX_SKILLS} 个`)
+                return
+              }
+              patch({ skillIds: e.target.checked ? skills.map((s) => s.id) : [] })
+            }}
           >
             全选
           </Checkbox>
@@ -114,7 +125,7 @@ export function StepSkill({ draft, patch }: StepSkillProps) {
 
       <aside className="agent-wizard__picker-aside agent-wizard__picker-aside--right">
         <div className="agent-wizard__picker-title">
-          <span>已编排技能（{draft.skillIds.length}）</span>
+          <span>已编排技能（{draft.skillIds.length}/{MAX_SKILLS}）</span>
           {draft.skillIds.length > 0 && (
             <Button variant="ghost" size="sm" onClick={() => patch({ skillIds: [] })}>
               清空

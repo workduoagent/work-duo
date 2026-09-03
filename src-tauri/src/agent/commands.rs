@@ -36,6 +36,15 @@ pub struct RunAgentTaskInput {
     /// 前端建好的本轮 id（agent_conversation_round.id），ReAct 循环结束后由 Rust 回填 raw_messages_json。
     #[serde(default)]
     pub round_id: Option<String>,
+    /// 本轮临时禁用的技能 id 列表（仅会话内有效，不写库）。load_config 据此从技能工具集中剔除。
+    #[serde(default)]
+    pub disabled_skill_ids: Option<Vec<String>>,
+    /// 本轮临时禁用的 MCP 服务 id 列表（仅会话内有效，不写库）。load_config 据此剔除该服务下全部工具。
+    #[serde(default)]
+    pub disabled_mcp_ids: Option<Vec<String>>,
+    /// 本轮临时禁用的单个 MCP 工具 id 列表（仅会话内有效，不写库）。键为 mcp_tool_definition.id。
+    #[serde(default)]
+    pub disabled_mcp_tool_ids: Option<Vec<String>>,
 }
 
 /// 启动一轮智能体任务。
@@ -45,7 +54,17 @@ pub async fn run_agent_task(
     runtime: State<'_, AgentRuntime>,
     input: RunAgentTaskInput,
 ) -> Result<(), String> {
-    let cfg = load_config(&app, &input.agent_id, input.workspace.clone(), input.session_id.clone(), input.round_id.clone()).await?;
+    let cfg = load_config(
+        &app,
+        &input.agent_id,
+        input.workspace.clone(),
+        input.session_id.clone(),
+        input.round_id.clone(),
+        input.disabled_skill_ids.clone(),
+        input.disabled_mcp_ids.clone(),
+        input.disabled_mcp_tool_ids.clone(),
+    )
+    .await?;
 
     println!(
         "[agent] run_agent_task 收到请求: agent_id={} prompt_len={} workspace={:?}",
@@ -94,6 +113,9 @@ async fn load_config(
     workspace: Option<String>,
     session_id: Option<String>,
     round_id: Option<String>,
+    disabled_skill_ids: Option<Vec<String>>,
+    disabled_mcp_ids: Option<Vec<String>>,
+    disabled_mcp_tool_ids: Option<Vec<String>>,
 ) -> Result<AgentRuntimeConfig, String> {
     let instances = app.state::<DbInstances>();
     let guard = instances.0.read().await;
@@ -151,7 +173,7 @@ async fn load_config(
     };
 
     let mcp_rows = sqlx::query(
-        "SELECT m.mcp_id AS mcp_id, m.tool_code AS tool_code, m.description AS description, \
+        "SELECT m.id AS tool_def_id, m.mcp_id AS mcp_id, m.tool_code AS tool_code, m.description AS description, \
                 i.endpoint_url AS endpoint_url, i.protocol_type AS protocol_type, \
                 i.headers AS headers, i.auth_type AS auth_type, i.auth_config AS auth_config \
          FROM mcp_tool_definition m \
@@ -163,10 +185,20 @@ async fn load_config(
     .fetch_all(&pool)
     .await
     .map_err(|e| format!("查询 MCP 工具失败：{e}"))?;
+    // 临时禁用：前端按会话内移除的 MCP 服务 / 单个工具 id（均不写库），Rust 侧从工具集剔除。
+    let disabled_mcp: std::collections::HashSet<String> =
+        disabled_mcp_ids.unwrap_or_default().into_iter().collect();
+    let disabled_mcp_tool: std::collections::HashSet<String> =
+        disabled_mcp_tool_ids.unwrap_or_default().into_iter().collect();
     let mcp_tools: Vec<MountedMcpTool> = mcp_rows
         .iter()
         .filter_map(|r| {
+            let tool_def_id = r.try_get::<Option<String>, _>("tool_def_id").ok().flatten()?;
             let mcp_id = r.try_get::<Option<String>, _>("mcp_id").ok().flatten()?;
+            // 整服务被临时移除，或单个工具被临时关闭 → 跳过
+            if disabled_mcp.contains(&mcp_id) || disabled_mcp_tool.contains(&tool_def_id) {
+                return None;
+            }
             let tool_code = r.try_get::<Option<String>, _>("tool_code").ok().flatten()?;
             let description = r
                 .try_get::<Option<String>, _>("description")
@@ -217,8 +249,21 @@ async fn load_config(
     .fetch_all(&pool)
     .await
     .map_err(|e| format!("查询技能失败：{e}"))?;
+    // 临时禁用：前端按会话内移除的技能 id（不写库），Rust 侧从工具集剔除。
+    let disabled: std::collections::HashSet<String> = disabled_skill_ids
+        .unwrap_or_default()
+        .into_iter()
+        .collect();
     let skill_tools: Vec<SkillToolWrapper> = skill_rows
         .iter()
+        .filter(|r| {
+            let skill_id = r
+                .try_get::<Option<String>, _>("skill_id")
+                .ok()
+                .flatten()
+                .unwrap_or_default();
+            !disabled.contains(&skill_id)
+        })
         .map(|r| {
             let skill_id = r
                 .try_get::<Option<String>, _>("skill_id")

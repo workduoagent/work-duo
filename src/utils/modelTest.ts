@@ -22,12 +22,19 @@
 
 import { isTauri } from '@/core/config'
 import { fetch as tauriFetch } from '@tauri-apps/plugin-http'
+import { testXfyun } from '@/core/model/iflytek'
 
 export interface ModelTestInput {
   baseUrl: string
   apiKey?: string
   modelName?: string
   category?: string
+  /** 服务商（决定是否走讯飞签名 WebSocket 测试） */
+  provider?: string
+  /** 讯飞三件套：AppId */
+  appId?: string
+  /** 讯飞三件套：APISecret */
+  apiSecret?: string
 }
 
 export interface ModelTestResult {
@@ -182,6 +189,17 @@ export async function testModelConnection(
 ): Promise<ModelTestResult> {
   const raw = input.baseUrl?.trim()
   if (!raw) return { ok: false, level: 'error', message: '缺少 Base URL' }
+
+  // 讯飞（iflytek）TTS/STT：走签名 WebSocket 测试，不走通用 HTTP 探测
+  if (input.provider === 'iflytek' && (input.category === 'tts' || input.category === 'stt')) {
+    return testXfyun({
+      category: input.category as 'tts' | 'stt',
+      hostUrl: raw,
+      appId: input.appId ?? '',
+      apiKey: input.apiKey ?? '',
+      apiSecret: input.apiSecret ?? '',
+    })
+  }
 
   const { url, method, body } = resolveProbe(raw, input.modelName)
   const headers = buildHeaders(input.apiKey)

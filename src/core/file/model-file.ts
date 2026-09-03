@@ -87,6 +87,10 @@ export interface ModelConfig {
   provider: ModelProvider
   baseUrl: string // 完整接口地址，如 https://api.openai.com/v1/chat/completions
   apiKey: string
+  /** 讯飞（iflytek）等三件套鉴权厂商的 AppId；通用厂商为空 */
+  appId?: string
+  /** 讯飞（iflytek）等三件套鉴权厂商的 APISecret；通用厂商为空 */
+  apiSecret?: string
   modelName: string // 服务商侧的模型标识
   enabled: boolean
   /** Tool/Function Calling 能力标记：默认 false（不支持），由用户接入时显式开启；对 Agent 集成至关重要 */
@@ -173,6 +177,8 @@ export function createEmptyModel(category: string): ModelConfig {
     provider: 'openai',
     baseUrl: '',
     apiKey: '',
+    appId: '',
+    apiSecret: '',
     modelName: '',
     enabled: true,
     toolCalls: false,
@@ -315,6 +321,8 @@ export function parseModelImport(text: string): ModelImportResult {
       provider: typeof obj.provider === 'string' ? (obj.provider as ModelProvider) : base.provider,
       baseUrl: typeof obj.baseUrl === 'string' ? obj.baseUrl : base.baseUrl,
       apiKey: typeof obj.apiKey === 'string' ? obj.apiKey : base.apiKey,
+      appId: typeof obj.appId === 'string' ? obj.appId : base.appId,
+      apiSecret: typeof obj.apiSecret === 'string' ? obj.apiSecret : base.apiSecret,
       modelName: typeof obj.modelName === 'string' ? obj.modelName : base.modelName,
       enabled: typeof obj.enabled === 'boolean' ? obj.enabled : base.enabled,
       toolCalls: typeof obj.toolCalls === 'boolean' ? obj.toolCalls : base.toolCalls,

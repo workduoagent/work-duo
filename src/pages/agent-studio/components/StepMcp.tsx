@@ -13,6 +13,7 @@ import { useNotify } from '@/components/ui/notify'
 import { listMcps, listMcpTools } from '@/core/mapper/mcp-mapper'
 import type { McpInfo, McpToolDefinition } from '@/core/file/mcp-file'
 import type { AgentDraft } from '../draft'
+import { MAX_MCP_SERVERS, MAX_MCP_TOOLS } from '../draft'
 
 export interface StepMcpProps {
   draft: AgentDraft
@@ -75,8 +76,22 @@ export function StepMcp({ draft, patch }: StepMcpProps) {
 
   const selectedIds = new Set(draft.mcpTools.map((t) => t.toolId))
 
+  const boundServers = new Set(draft.mcpTools.map((t) => t.mcpId)).size
+
   function toggleTool(mcpId: string, toolId: string) {
     const exists = selectedIds.has(toolId)
+    if (!exists) {
+      // 实时拦截：超过上限不给勾选（保存时还有兜底校验）
+      const alreadyBound = draft.mcpTools.some((t) => t.mcpId === mcpId)
+      if (!alreadyBound && boundServers >= MAX_MCP_SERVERS) {
+        message.warning(`最多绑定 ${MAX_MCP_SERVERS} 个 MCP 服务`)
+        return
+      }
+      if (draft.mcpTools.length >= MAX_MCP_TOOLS) {
+        message.warning(`MCP 工具总数量不能超过 ${MAX_MCP_TOOLS} 个`)
+        return
+      }
+    }
     patch({
       mcpTools: exists
         ? draft.mcpTools.filter((t) => t.toolId !== toolId)
@@ -153,7 +168,7 @@ export function StepMcp({ draft, patch }: StepMcpProps) {
             </div>
             <div className="agent-wizard__picker-head-desc">
               {activeMcpId
-                ? `${STATUS_TEXT[mcps.find((m) => m.id === activeMcpId)?.status ?? 0]} · 勾选需要开放给智能体的工具`
+                ? `${STATUS_TEXT[mcps.find((m) => m.id === activeMcpId)?.status ?? 0]} · 已选 ${boundServers}/${MAX_MCP_SERVERS} 服务 · 勾选需要开放给智能体的工具`
                 : '从左侧选择一个 MCP 服务'}
             </div>
           </div>
@@ -166,11 +181,23 @@ export function StepMcp({ draft, patch }: StepMcpProps) {
             onChange={(e) => {
               const checked = e.target.checked
               const rest = draft.mcpTools.filter((t) => t.mcpId !== activeMcpId)
-              patch({
-                mcpTools: checked
-                  ? [...rest, ...activeTools.map((t) => ({ mcpId: activeMcpId as string, toolId: t.id }))]
-                  : rest,
-              })
+              if (checked) {
+                // 实时拦截：全选本服务不得突破绑定服务数 / 总工具数上限
+                const restServers = new Set(rest.map((t) => t.mcpId)).size
+                if (!draft.mcpTools.some((t) => t.mcpId === activeMcpId) && restServers >= MAX_MCP_SERVERS) {
+                  message.warning(`最多绑定 ${MAX_MCP_SERVERS} 个 MCP 服务`)
+                  return
+                }
+                if (rest.length + activeTools.length > MAX_MCP_TOOLS) {
+                  message.warning(`MCP 工具总数量不能超过 ${MAX_MCP_TOOLS} 个`)
+                  return
+                }
+                patch({
+                  mcpTools: [...rest, ...activeTools.map((t) => ({ mcpId: activeMcpId as string, toolId: t.id }))],
+                })
+              } else {
+                patch({ mcpTools: rest })
+              }
             }}
           >
             全选本服务
@@ -217,7 +244,7 @@ export function StepMcp({ draft, patch }: StepMcpProps) {
 
       <aside className="agent-wizard__picker-aside agent-wizard__picker-aside--right">
         <div className="agent-wizard__picker-title">
-          <span>已选工具（{draft.mcpTools.length}）</span>
+          <span>已选工具（{draft.mcpTools.length}/{MAX_MCP_TOOLS}）</span>
           {draft.mcpTools.length > 0 && (
             <Button variant="ghost" size="sm" onClick={clearAll}>
               清空

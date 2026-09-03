@@ -245,6 +245,11 @@ export function useAgentSession(): AgentSessionState {
             attachments: input.attachments ?? [],
             sessionId: input.sessionId ?? null,
             roundId: input.roundId ?? null,
+            // 临时移除的技能 id（会话内有效，不写库）；Rust load_config 据此从工具集剔除
+            disabledSkillIds: input.disabledSkillIds ?? [],
+            // 临时移除的 MCP 服务 / 其下单个工具（会话内有效，不写库）
+            disabledMcpIds: input.disabledMcpIds ?? [],
+            disabledMcpToolIds: input.disabledMcpToolIds ?? [],
           },
         })
       } catch (e) {

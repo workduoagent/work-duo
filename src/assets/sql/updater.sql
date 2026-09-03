@@ -115,4 +115,38 @@ ALTER TABLE agent_conversation_session ADD COLUMN total_turns INTEGER NOT NULL D
 -- 工具结果），即「协议执行视图」。多轮上下文恢复时原样反序列化展开，保证无损、零格式损耗。
 -- 非空默认 ''（前端建轮时不写，由 Rust 在 ReAct 循环结束后回填真实 JSON）。
 ALTER TABLE agent_conversation_round ADD COLUMN raw_messages_json TEXT NOT NULL DEFAULT '';
+
+-- ---------- v12：模型表新增讯飞三件套鉴权字段（app_id / api_secret） ----------
+-- 通用厂商（OpenAI 兼容）仅用 api_key；科大讯飞（iflytek）需 appId + apiKey + apiSecret 三件套，
+-- 其 TTS/STT 鉴权方式为 WebSocket 动态签名（HMAC-SHA256），与标准 Bearer 不同，表单按 provider 分支渲染。
+-- 存量库（建表时无该列）通过本语句补齐；重复执行会被 updateTables 安全跳过（duplicate column name）。
+ALTER TABLE models ADD COLUMN app_id TEXT;
+ALTER TABLE models ADD COLUMN api_secret TEXT;
+
+-- ---------- v13：新增工程表（agent_project）与会话 project_id 绑定 ----------
+-- 智能体工作空间智能绑定：用户选目录新建会话时，系统按规范化绝对路径自动建档/复用工程，
+-- 会话通过 project_id 绑定到该工程（NULL 代表通用日常任务）。删除工程级联清除其下会话与轮次。
+-- 1) agent_project 表（init.sql 已含 CREATE TABLE IF NOT EXISTS，此处再补一次以保证存量库在
+--    仅执行 updater 的路径下也能拿到表；重复执行 CREATE TABLE IF NOT EXISTS 幂等无副作用）。
+-- 2) 存量 agent_conversation_session（在 project_id 加入建表语句之前已创建）补齐该列；
+--    重复执行会被 updateTables 安全跳过（duplicate column name）。
+CREATE TABLE IF NOT EXISTS agent_project
+(
+    id             TEXT    PRIMARY KEY,
+    name           TEXT    NOT NULL,
+    root_path      TEXT    NOT NULL UNIQUE,
+    description    TEXT,
+    icon           TEXT,
+    is_pinned      INTEGER NOT NULL DEFAULT 0,
+    is_archived    INTEGER NOT NULL DEFAULT 0,
+    custom_rules   TEXT,
+    last_active_at INTEGER NOT NULL,
+    created_at     INTEGER NOT NULL,
+    updated_at     INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_project_root ON agent_project(root_path);
+CREATE INDEX IF NOT EXISTS idx_agent_project_active ON agent_project(is_pinned DESC, last_active_at DESC);
+
+ALTER TABLE agent_conversation_session ADD COLUMN project_id TEXT;
+CREATE INDEX IF NOT EXISTS idx_agent_session_lookup ON agent_conversation_session(project_id, is_top DESC, updated_at DESC);
 -- ============================================================

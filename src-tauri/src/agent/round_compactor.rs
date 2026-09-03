@@ -30,6 +30,7 @@ use crate::agent::events;
 use crate::agent::runtime::call_llm;
 use crate::agent::runtime::now_ms;
 use crate::agent::types::AgentRuntimeConfig;
+use crate::agent::wd_mem;
 
 /// 单个工具 / Skill 定义占用的上下文 token 估算（与前端 `AVG_TOOL_TOKENS` 保持一致）。
 /// 工具/Skill 定义理论固定不变，仅当用户中途移除 Skill 或停用（解绑）MCP 时总占用才会下降。
@@ -100,24 +101,36 @@ pub(crate) async fn get_pool(app: &AppHandle) -> Result<SqlitePool, String> {
 /* ----------------------------- 读路径：上下文装配 ----------------------------- */
 
 /// 装配发往大模型的完整消息序列（纯函数，不做 IO）：
-///   [Slot 0] 静态 System Prompt
-///   [Slot 1] 累积状态快照（当 summary 非空时注入，role=system）
-///   [Slot 2..M] 活跃窗口轮次无损回填（反序列化 raw_messages_json 原样展开）
+///   [Slot 0] 静态 System Prompt（+ 工程专属 custom_rules 已在调用方并入 system_prompt）
+///   [Slot 1] 项目长期记忆（project_memory.md，role=system，仅工程绑定时存在）
+///   [Slot 2] 累积状态快照（当 summary 非空时注入，role=system）
+///   [Slot 3..M] 活跃窗口轮次无损回填（反序列化 raw_messages_json 原样展开）
 ///   [Slot M+1] 当前新指令（user）
 ///
 /// 注意：`tools` 由调用方经 ReAct 循环作为顶层参数传入，绝不在此注入，保 prompt-cache 命中。
 pub(crate) fn build_request_messages(
     system_prompt: &str,
+    project_memory: Option<&str>,
     session_summary: Option<&str>,
     active_rounds: &[ConversationRoundRecord],
     current_query: &str,
 ) -> Vec<Value> {
     let mut messages: Vec<Value> = Vec::new();
 
-    // [Slot 0] 静态系统提示词
+    // [Slot 0] 静态系统提示词（已含工程 custom_rules）
     messages.push(json!({ "role": "system", "content": system_prompt }));
 
-    // [Slot 1] 累积状态快照
+    // [Slot 1] 项目长期记忆（第二轨 .wd_mem/project_memory.md）
+    if let Some(mem) = project_memory {
+        if !mem.trim().is_empty() {
+            messages.push(json!({
+                "role": "system",
+                "content": format!("[Work Duo Project Long-Term Memory]:\n{mem}")
+            }));
+        }
+    }
+
+    // [Slot 2] 累积状态快照（DB summary 或 .wd_mem/sessions/{id}.summary.md）
     if let Some(summary) = session_summary {
         if !summary.trim().is_empty() {
             messages.push(json!({
@@ -127,7 +140,7 @@ pub(crate) fn build_request_messages(
         }
     }
 
-    // [Slot 2..M] 活跃窗口轮次无损还原
+    // [Slot 3..M] 活跃窗口轮次无损还原
     for round in active_rounds {
         messages.extend(round.restore_messages());
     }
@@ -342,6 +355,14 @@ pub(crate) async fn trigger_background_compaction(
                     "[Compactor] 已滚动压缩 turns {}..{} 进摘要（session={}）",
                     range_start, range_end, sid
                 );
+
+                // 双轨落盘：若会话绑定工程，额外将摘要写入 .wd_mem/sessions/{id}.summary.md。
+                if let Some(root) = resolve_project_root(&pool, &sid).await {
+                    if let Err(e) = wd_mem::write_session_summary(&root, &sid, &new_summary) {
+                        println!("[Compactor] 写会话摘要文件失败（仅影响文件轨）：{e}");
+                    }
+                }
+
                 events::emit_status(&app_bg, "历史对话已自动压缩进上下文摘要");
             }
             Err(err) => {
@@ -349,6 +370,26 @@ pub(crate) async fn trigger_background_compaction(
             }
         }
     });
+}
+
+/// 解析会话所绑定工程的规范化根路径（无绑定 / 无工程记录返回 None）。
+async fn resolve_project_root(pool: &SqlitePool, session_id: &str) -> Option<String> {
+    let pid = sqlx::query("SELECT project_id FROM agent_conversation_session WHERE id = ?")
+        .bind(session_id)
+        .fetch_optional(pool)
+        .await
+        .ok()
+        .flatten()
+        .and_then(|r| r.try_get::<Option<String>, _>("project_id").ok().flatten())
+        .filter(|s| !s.trim().is_empty())?;
+    sqlx::query("SELECT root_path FROM agent_project WHERE id = ?")
+        .bind(pid)
+        .fetch_optional(pool)
+        .await
+        .ok()
+        .flatten()
+        .and_then(|r| r.try_get::<Option<String>, _>("root_path").ok().flatten())
+        .filter(|s| !s.trim().is_empty())
 }
 
 /// 执行压缩大模型调用（按规范 SummaryPrompt 契约生成结构化状态摘要）。

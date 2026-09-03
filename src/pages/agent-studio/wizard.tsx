@@ -23,7 +23,7 @@ import { StepBasic } from './components/StepBasic'
 import { StepModel } from './components/StepModel'
 import { StepMcp } from './components/StepMcp'
 import { StepSkill } from './components/StepSkill'
-import { createEmptyDraft, draftFromAgent, draftToInput, type AgentDraft } from './draft'
+import { createEmptyDraft, draftFromAgent, draftToInput, type AgentDraft, MAX_MCP_SERVERS, MAX_MCP_TOOLS, MAX_SKILLS } from './draft'
 import './wizard.scss'
 
 const STEPS = [
@@ -107,9 +107,25 @@ export default function AgentWizardPage() {
       if (identifier !== draft.identifier) patch({ identifier })
     }
     if (target > 1 && !draft.llmId) errs.llm = '请先选择大脑（LLM 模型）'
+    // MCP 约束：绑定服务数 ≤ 3，总工具数 ≤ 10（target>2 表示已到达/越过 MCP 步骤）
+    if (target > 2) {
+      const mcpServers = new Set(draft.mcpTools.map((t) => t.mcpId)).size
+      if (mcpServers > MAX_MCP_SERVERS) {
+        errs.mcp = `配置的 MCP 服务不能超过 ${MAX_MCP_SERVERS} 个`
+      } else if (draft.mcpTools.length > MAX_MCP_TOOLS) {
+        errs.mcp = `MCP 工具总数量不能超过 ${MAX_MCP_TOOLS} 个`
+      }
+    }
+    // Skill 约束：编排数量 ≤ 3（target>3 表示已到达/越过 Skill 步骤）
+    if (target > 3 && draft.skillIds.length > MAX_SKILLS) {
+      errs.skill = `编排的 Skill 不能超过 ${MAX_SKILLS} 个`
+    }
     setErrors(errs)
     const ok = Object.keys(errs).length === 0
-    if (!ok) message.warning(errs.name || errs.identifier || errs.llm)
+    if (!ok) {
+      const msgs = [errs.name, errs.identifier, errs.llm, errs.mcp, errs.skill].filter(Boolean)
+      message.warning(msgs.join('；'))
+    }
     return ok
   }
 

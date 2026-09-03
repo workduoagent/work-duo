@@ -326,8 +326,33 @@ export interface AgentConversationSession {
   toolsTokens?: number
   /** 已被压缩摘要覆盖的轮次数（滑动窗口增量合并用）。 */
   summaryRoundCount?: number
+  /** 会话累计轮次数（total_turns）。 */
+  totalTurns?: number
+  /** 绑定的工程 ID（NULL 代表通用日常任务 / 无项目模式）。 */
+  projectId?: string
   createdAt: string
   updatedAt: string
+}
+
+/**
+ * 工程档案（对应 agent_project 表）。
+ * - id：工程 UUID（"proj_xxx"）；
+ * - name：工程名（默认取目录名，可重命名）；
+ * - rootPath：规范化物理绝对路径，唯一；同一目录不论盘符大小写/斜杠差异都归属同一工程；
+ * - customRules：项目专属 System Prompt 注入规则，继承到该工程下新建的会话。
+ */
+export interface AgentProject {
+  id: string
+  name: string
+  rootPath: string
+  description?: string
+  icon?: string
+  isPinned: boolean
+  isArchived: boolean
+  customRules?: string
+  lastActiveAt: number
+  createdAt: number
+  updatedAt: number
 }
 
 /**
