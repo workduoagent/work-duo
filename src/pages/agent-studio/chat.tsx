@@ -49,7 +49,15 @@ import {
   Folder,
   MoreVertical,
   Archive,
+  MessageSquarePlus,
+  Pin,
+  PinOff,
+  ArchiveRestore,
+  FilePen,
+  FolderEdit,
+  Unlink,
 } from 'lucide-react'
+import { createPortal } from 'react-dom'
 import { appDataDir, resourceDir } from '@tauri-apps/api/path'
 import { open } from '@tauri-apps/plugin-dialog'
 import { Button, Switch, Modal, Input } from '@/components/ui'
@@ -635,6 +643,7 @@ function McpPill({
 interface MenuItem {
   label: string
   onClick: () => void
+  icon?: React.ReactNode
   danger?: boolean
   disabled?: boolean
 }
@@ -653,20 +662,26 @@ function DropdownMenu({
   const [pos, setPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 })
   const wrapRef = useRef<HTMLDivElement>(null)
   const triggerRef = useRef<HTMLSpanElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
     if (!open) return
     const onDown = (e: MouseEvent) => {
-      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false)
+      const t = e.target as Node
+      // 触发器与浮层（已 portal 到 body）都算内部，点击外部才关闭
+      if (wrapRef.current && !wrapRef.current.contains(t) && menuRef.current && !menuRef.current.contains(t)) {
+        setOpen(false)
+      }
     }
     document.addEventListener('mousedown', onDown)
     return () => document.removeEventListener('mousedown', onDown)
   }, [open])
-  // 点击触发器：按触发器实际位置用 fixed 定位，逃逸侧栏 / 滚动容器的 overflow 裁剪
+  // 点击触发器：用触发器实际位置 + fixed 定位。浮层 portal 到 body，
+  // 彻底逃逸任何祖先 transform / overflow 裁剪，避免定位大幅偏移。
   const handleClick = () => {
     const el = triggerRef.current
     if (el) {
       const r = el.getBoundingClientRect()
-      const width = 148
+      const width = 168
       const left = align === 'right' ? r.right - width : r.left
       setPos({ top: r.bottom + 4, left: Math.max(8, left) })
     }
@@ -677,28 +692,32 @@ function DropdownMenu({
       <span className="agent-chat__menu-trigger" ref={triggerRef} onClick={handleClick}>
         {trigger}
       </span>
-      {open && (
-        <div
-          className={`agent-chat__menu${align === 'right' ? ' is-right' : ''}`}
-          style={{ position: 'fixed', top: pos.top, left: pos.left, minWidth: 148 }}
-        >
-          {title && <div className="agent-chat__menu-title">{title}</div>}
-          {items.map((it, i) => (
-            <button
-              key={i}
-              type="button"
-              className={`agent-chat__menu-item${it.danger ? ' is-danger' : ''}`}
-              disabled={it.disabled}
-              onClick={() => {
-                setOpen(false)
-                it.onClick()
-              }}
-            >
-              {it.label}
-            </button>
-          ))}
-        </div>
-      )}
+      {open &&
+        createPortal(
+          <div
+            ref={menuRef}
+            className={`agent-chat__menu${align === 'right' ? ' is-right' : ''}`}
+            style={{ position: 'fixed', top: pos.top, left: pos.left, minWidth: 168 }}
+          >
+            {title && <div className="agent-chat__menu-title">{title}</div>}
+            {items.map((it, i) => (
+              <button
+                key={i}
+                type="button"
+                className={`agent-chat__menu-item${it.danger ? ' is-danger' : ''}`}
+                disabled={it.disabled}
+                onClick={() => {
+                  setOpen(false)
+                  it.onClick()
+                }}
+              >
+                {it.icon && <span className="agent-chat__menu-icon">{it.icon}</span>}
+                <span className="agent-chat__menu-label">{it.label}</span>
+              </button>
+            ))}
+          </div>,
+          document.body,
+        )}
     </div>
   )
 }
@@ -743,8 +762,8 @@ function WorkspaceChip({
         </span>
       }
       items={[
-        { label: '更改工作目录', onClick: onChangeDir },
-        { label: '清除绑定（自由对话）', onClick: onClear, danger: true },
+        { label: '更改工作目录', icon: <FolderEdit size={13} />, onClick: onChangeDir },
+        { label: '清除绑定（自由对话）', icon: <Unlink size={13} />, onClick: onClear, danger: true },
       ]}
     />
   )
@@ -772,7 +791,7 @@ function buildSessionTree(
     {
       groupType: 'GLOBAL',
       groupId: 'GLOBAL',
-      projectName: '通用任务 / 自由会话',
+      projectName: '自由会话',
       rootPath: null,
       sessions: global,
     },
@@ -867,7 +886,7 @@ export default function AgentChatPage() {
   const lastTokensRef = useRef<{ input: number; output: number }>({ input: 0, output: 0 })
 
   const session = useAgentSession()
-  const { toolSteps, streamingText, isStreaming, statusText, thoughts, isRunning, pendingApproval, run, submitDecision, reset, cancel } =
+  const { toolSteps, streamingText, isStreaming, statusText, thoughts, isRunning, pendingApproval, run, submitDecision, reset, cancel, lastTaskUsage } =
     session
 
   const lastAgentContent =
@@ -1130,12 +1149,19 @@ export default function AgentChatPage() {
       const durationMs = replyStartRef.current ? completedAt - replyStartRef.current : undefined
       replyStartRef.current = null
       const answer = streamingText || lastAgentContent
-      const inputTokens = estimateTokens(lastPromptRef.current)
-      const outputTokens = estimateTokens(answer)
+      // 真实 token 用量：Tauri 路径下后端已在 run_task 中把本轮 LLM 真实 usage
+      // （跨所有 ReAct 轮累计的 prompt+completion）写回会话表，并经 agent-task-done 事件带出；
+      // 此处优先采用，避免前端「仅首尾文本」估算严重低估。dev/mock 无后端时回退估算。
+      // 但若网关未在流中返回 usage（后端带回 0/0），则视为无效、回退估算，避免出现「消耗 0 tokens」。
+      const rawUsage = isTauri ? lastTaskUsage.current : null
+      const realUsage =
+        rawUsage && (rawUsage.promptTokens > 0 || rawUsage.completionTokens > 0) ? rawUsage : null
+      const inputTokens = realUsage ? realUsage.promptTokens : estimateTokens(lastPromptRef.current)
+      const outputTokens = realUsage ? realUsage.completionTokens : estimateTokens(answer)
       lastTokensRef.current = { input: inputTokens, output: outputTokens }
 
       // 回填历史轮次
-      if (roundIdRef.current) {
+      if (roundIdRef.current && activeSessionId) {
         void updateRound(roundIdRef.current, {
           assistantAnswer: answer,
           thinkingContent: thoughts.join('\n'),
@@ -1151,44 +1177,57 @@ export default function AgentChatPage() {
         })
         roundIdRef.current = null
       }
+
       // 累计 token（提示词 + 对话）并回填会话状态
       if (activeSessionId) {
+        const sid = activeSessionId
         void (async () => {
-          await addSessionTokens(activeSessionId, inputTokens, outputTokens)
-          await updateSession(activeSessionId, {
+          await updateSession(sid, {
             status: statusText ? 'ERROR' : 'COMPLETED',
             endTime: completedAt,
           })
-          // 重新读取会话以刷新环形图占比：
-          //  - Tauri 路径：后端在每轮 run_task 已按当前 MCP/Skill 工具数动态重算并回写 tools_tokens，
-          //    因此中途移除 Skill / 停用 MCP 后，这里读到的 tools_tokens 已自动下调。
-          //  - 浏览器 dev / mock 路径无后端，回退到本地按当前 toolCount+skillCount 估算。
-          const fresh = await getSession(activeSessionId)
+          let fresh = await getSession(sid)
+          // Tauri 路径：后端已在 run_task 累计真实 prompt/completion 到会话表，直接读回；
+          // dev/mock 路径：本地按估算累加（与旧逻辑一致）。
+          let toolsTokens: number | undefined
+          if (!isTauri) {
+            await addSessionTokens(sid, inputTokens, outputTokens)
+            const after = await getSession(sid)
+            if (after) {
+              fresh = after
+              toolsTokens = Math.round(
+                (toolCount -
+                  boundMcps
+                    .filter((m) => removedMcpIds.has(m.mcpId))
+                    .reduce((sum, m) => sum + m.tools.length, 0) -
+                  disabledMcpToolIds.size +
+                  (skillCount - removedSkillIds.size)) *
+                  AVG_TOOL_TOKENS,
+              )
+            }
+          }
+          // 未命名会话（多为「工程 / 项目目录」下新建的子对话）：首轮完成后用第一个问题命名
+          const wasUnnamed = !fresh?.sessionName || fresh.sessionName.trim() === ''
           setSessions((prev) =>
             prev.map((s) => {
-              if (s.id !== activeSessionId) return s
-              if (!fresh) {
-                // 兜底：本地累加（与后端保持一致）
-                return {
-                  ...s,
-                  totalPromptTokens: (s.totalPromptTokens ?? 0) + inputTokens,
-                  totalCompletionTokens: (s.totalCompletionTokens ?? 0) + outputTokens,
-                }
+              if (s.id !== sid) return s
+              const b = fresh ?? s
+              let name = b.sessionName
+              if (wasUnnamed && lastPromptRef.current) {
+                name = lastPromptRef.current.trim().slice(0, 40)
               }
-              const toolsTokens = isTauri
-                ? fresh.toolsTokens
-                : Math.round(
-                    (toolCount -
-                      boundMcps
-                        .filter((m) => removedMcpIds.has(m.mcpId))
-                        .reduce((sum, m) => sum + m.tools.length, 0) -
-                      disabledMcpToolIds.size +
-                      (skillCount - removedSkillIds.size)) *
-                      AVG_TOOL_TOKENS,
-                  )
-              return { ...fresh, toolsTokens: toolsTokens ?? fresh.toolsTokens }
+              return {
+                ...b,
+                sessionName: name || b.sessionName,
+                // Tauri 路径 tools_tokens 由后端动态重算；dev 路径本地估算
+                toolsTokens: isTauri ? b.toolsTokens : (toolsTokens ?? b.toolsTokens),
+              }
             }),
           )
+          // 把首轮命名回写库（仅当原本未命名）
+          if (wasUnnamed && lastPromptRef.current) {
+            await renameSession(sid, lastPromptRef.current.trim().slice(0, 40))
+          }
         })()
       }
 
@@ -1212,7 +1251,7 @@ export default function AgentChatPage() {
       })
     }
     prevIsRunningRef.current = isRunning
-  }, [isRunning, streamingText, thoughts, toolSteps, lastAgentContent, statusText, activeSessionId, removedSkillIds, toolCount, skillCount])
+  }, [isRunning, streamingText, thoughts, toolSteps, lastAgentContent, statusText, activeSessionId, removedSkillIds, removedMcpIds, disabledMcpToolIds, boundMcps, toolCount, skillCount, isTauri, lastTaskUsage])
 
   const handleDecision = useCallback(
     (approved: boolean, reason?: string) => {
@@ -1316,8 +1355,8 @@ export default function AgentChatPage() {
   }, [agent, reset])
 
   const removeSession = useCallback(
-    async (sessionId: string, e: React.MouseEvent) => {
-      e.stopPropagation()
+    async (sessionId: string, e?: React.MouseEvent) => {
+      e?.stopPropagation()
       try {
         await deleteSession(sessionId)
         const list = await listSessions(agent?.identifier ?? '')
@@ -1694,21 +1733,20 @@ export default function AgentChatPage() {
                 <div className="agent-chat__group-head">
                   <Folder size={13} className="agent-chat__group-icon" />
                   <div className="agent-chat__group-info">
-                    <span className="agent-chat__group-name">{group.projectName}</span>
-                    <span className="agent-chat__group-path" title={group.rootPath ?? ''}>
-                      {group.rootPath}
+                    <span className="agent-chat__group-name" title={group.rootPath ?? ''}>
+                      {group.projectName}
                     </span>
                   </div>
                   <DropdownMenu
                     align="right"
                     title="工程操作"
                     items={[
-                      { label: '新增子对话', onClick: () => void startProjectSession(group.groupId) },
-                      { label: '编辑项目记忆', onClick: () => void openMemoEditor(group) },
-                      { label: group.isPinned ? '取消置顶' : '置顶工程', onClick: () => void pinProjectHandler({ id: group.groupId, name: group.projectName, rootPath: group.rootPath ?? '', isPinned: !!group.isPinned, isArchived: false, lastActiveAt: 0, createdAt: 0, updatedAt: 0 } as AgentProject) },
-                      { label: '重命名工程', onClick: () => void renameProjectHandler({ id: group.groupId, name: group.projectName, rootPath: group.rootPath ?? '', isPinned: !!group.isPinned, isArchived: !!group.isArchived, lastActiveAt: 0, createdAt: 0, updatedAt: 0 } as AgentProject) },
-                      { label: group.isArchived ? '取消归档工程' : '归档工程', onClick: () => void archiveProjectHandler({ id: group.groupId, name: group.projectName, rootPath: group.rootPath ?? '', isPinned: !!group.isPinned, isArchived: !!group.isArchived, lastActiveAt: 0, createdAt: 0, updatedAt: 0 } as AgentProject) },
-                      { label: '删除工程（级联）', danger: true, onClick: () => void deleteProjectHandler({ id: group.groupId, name: group.projectName, rootPath: group.rootPath ?? '', isPinned: !!group.isPinned, isArchived: !!group.isArchived, lastActiveAt: 0, createdAt: 0, updatedAt: 0 } as AgentProject) },
+                      { label: '新增子对话', icon: <MessageSquarePlus size={13} />, onClick: () => void startProjectSession(group.groupId) },
+                      { label: '编辑项目记忆', icon: <FilePen size={13} />, onClick: () => void openMemoEditor(group) },
+                      { label: group.isPinned ? '取消置顶' : '置顶工程', icon: group.isPinned ? <PinOff size={13} /> : <Pin size={13} />, onClick: () => void pinProjectHandler({ id: group.groupId, name: group.projectName, rootPath: group.rootPath ?? '', isPinned: !!group.isPinned, isArchived: false, lastActiveAt: 0, createdAt: 0, updatedAt: 0 } as AgentProject) },
+                      { label: '重命名工程', icon: <Pencil size={13} />, onClick: () => void renameProjectHandler({ id: group.groupId, name: group.projectName, rootPath: group.rootPath ?? '', isPinned: !!group.isPinned, isArchived: !!group.isArchived, lastActiveAt: 0, createdAt: 0, updatedAt: 0 } as AgentProject) },
+                      { label: group.isArchived ? '取消归档工程' : '归档工程', icon: group.isArchived ? <ArchiveRestore size={13} /> : <Archive size={13} />, onClick: () => void archiveProjectHandler({ id: group.groupId, name: group.projectName, rootPath: group.rootPath ?? '', isPinned: !!group.isPinned, isArchived: !!group.isArchived, lastActiveAt: 0, createdAt: 0, updatedAt: 0 } as AgentProject) },
+                      { label: '删除工程（级联）', icon: <Trash2 size={13} />, danger: true, onClick: () => void deleteProjectHandler({ id: group.groupId, name: group.projectName, rootPath: group.rootPath ?? '', isPinned: !!group.isPinned, isArchived: !!group.isArchived, lastActiveAt: 0, createdAt: 0, updatedAt: 0 } as AgentProject) },
                     ]}
                     trigger={
                       <span className="agent-chat__group-more" title="工程操作">
@@ -1744,20 +1782,13 @@ export default function AgentChatPage() {
                     </div>
                   </div>
                   <div className="agent-chat__session-ops" onClick={(e) => e.stopPropagation()}>
-                    <button
-                      type="button"
-                      className="agent-chat__session-del"
-                      title="删除会话"
-                      onClick={(e) => removeSession(s.id, e)}
-                    >
-                      <Trash2 size={13} />
-                    </button>
                     <DropdownMenu
                       align="right"
                       items={[
-                        { label: '重命名', onClick: () => void renameSessionHandler({ id: s.id, sessionName: s.sessionName, agentCode: '', status: 'RUNNING', isCollection: false, isTop: false, isArchive: false, fromSite: 'DEBUG_CHAT', createdAt: '', updatedAt: '' }) },
-                        { label: s.isTop ? '取消置顶' : '置顶', onClick: () => void toggleSessionTopHandler({ id: s.id, sessionName: s.sessionName, agentCode: '', status: 'RUNNING', isCollection: false, isTop: false, isArchive: false, fromSite: 'DEBUG_CHAT', createdAt: '', updatedAt: '' }) },
-                        { label: s.isArchived ? '取消归档' : '归档', onClick: () => void archiveSessionHandler({ id: s.id, sessionName: s.sessionName, agentCode: '', status: 'RUNNING', isCollection: false, isTop: false, isArchive: false, fromSite: 'DEBUG_CHAT', createdAt: '', updatedAt: '' }) },
+                        { label: '重命名', icon: <Pencil size={13} />, onClick: () => void renameSessionHandler({ id: s.id, sessionName: s.sessionName, agentCode: '', status: 'RUNNING', isCollection: false, isTop: false, isArchive: false, fromSite: 'DEBUG_CHAT', createdAt: '', updatedAt: '' }) },
+                        { label: s.isTop ? '取消置顶' : '置顶', icon: s.isTop ? <PinOff size={13} /> : <Pin size={13} />, onClick: () => void toggleSessionTopHandler({ id: s.id, sessionName: s.sessionName, agentCode: '', status: 'RUNNING', isCollection: false, isTop: false, isArchive: false, fromSite: 'DEBUG_CHAT', createdAt: '', updatedAt: '' }) },
+                        { label: s.isArchived ? '取消归档' : '归档', icon: s.isArchived ? <ArchiveRestore size={13} /> : <Archive size={13} />, onClick: () => void archiveSessionHandler({ id: s.id, sessionName: s.sessionName, agentCode: '', status: 'RUNNING', isCollection: false, isTop: false, isArchive: false, fromSite: 'DEBUG_CHAT', createdAt: '', updatedAt: '' }) },
+                        { label: '删除会话', icon: <Trash2 size={13} />, danger: true, onClick: () => void removeSession(s.id) },
                       ]}
                       trigger={
                         <span className="agent-chat__session-more" title="更多操作">
@@ -1811,8 +1842,10 @@ export default function AgentChatPage() {
                     {m.role === 'agent' ? (
                       content ? (
                         <MarkdownRenderer content={content} />
-                      ) : (
+                      ) : isStreaming || isRunning ? (
                         <span className="agent-chat__thinking">思考中…</span>
+                      ) : (
+                        <span className="agent-chat__thinking">（智能体未返回文本内容）</span>
                       )
                     ) : (
                       <span className="agent-chat__plain">{m.content}</span>

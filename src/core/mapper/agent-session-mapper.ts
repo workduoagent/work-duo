@@ -489,7 +489,7 @@ function buildTree(sessions: ProjectedSession[]): SessionTreeGroup[] {
     {
       groupType: 'GLOBAL',
       groupId: 'GLOBAL',
-      projectName: '通用任务 / 自由会话',
+      projectName: '自由会话',
       rootPath: null,
       sessions: globalSessions,
     },

@@ -132,9 +132,27 @@ pub fn emit_awaiting_approval(app: &AppHandle, req: &ApprovalRequest) {
     emit(app, EVT_APPROVAL, req);
 }
 
+/// 整轮任务结束载荷：携带本轮真实 token 用量（prompt + completion，跨所有 ReAct 轮累计）。
+///
+/// 后端在 `run_task` 中把本轮 LLM 真实 `usage` 累加后随事件带出，前端据此替代
+/// 前端「仅首尾文本」的粗略估算，正确展示单条消息与会话环形图的 token 消耗。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskDonePayload {
+    pub prompt_tokens: u64,
+    pub completion_tokens: u64,
+}
+
 /// 整轮任务结束。
-pub fn emit_task_done(app: &AppHandle) {
-    emit(app, EVT_TASK_DONE, &());
+pub fn emit_task_done(app: &AppHandle, prompt_tokens: u64, completion_tokens: u64) {
+    emit(
+        app,
+        EVT_TASK_DONE,
+        &TaskDonePayload {
+            prompt_tokens,
+            completion_tokens,
+        },
+    );
 }
 
 /// 整轮任务异常终止。

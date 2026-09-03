@@ -88,9 +88,6 @@
 
     &:hover {
       background: var(--color-background, #fff);
-      .agent-chat__session-del {
-        opacity: 1;
-      }
     }
     &.is-active {
       background: var(--color-background, #fff);
@@ -142,23 +139,6 @@
     font-size: 0.7rem;
     color: var(--color-muted, #999);
     font-family: var(--font-mono, monospace);
-  }
-
-  &__session-del {
-    flex: 0 0 auto;
-    opacity: 0;
-    border: none;
-    background: transparent;
-    color: var(--color-muted, #999);
-    cursor: pointer;
-    padding: 4px;
-    border-radius: 6px;
-    transition: opacity 0.15s ease, color 0.15s ease;
-
-    &:hover {
-      color: var(--color-danger, #ff4d4f);
-      background: var(--color-background-soft, #f0f0f0);
-    }
   }
 
   /* 中间会话区 */
@@ -954,15 +934,6 @@
     text-overflow: ellipsis;
   }
 
-  &__group-path {
-    font-size: 0.66rem;
-    color: var(--color-muted, #999);
-    font-family: var(--font-mono, monospace);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
   &__group-more {
     flex: 0 0 auto;
     display: inline-flex;
@@ -1071,8 +1042,22 @@
     color: var(--color-muted, #999);
   }
 
+  &__menu-icon {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    color: currentColor;
+  }
+
+  &__menu-label {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
   &__menu-item {
-    display: block;
+    display: flex;
+    align-items: center;
+    gap: 8px;
     width: 100%;
     padding: 6px 8px;
     border: none;

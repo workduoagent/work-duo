@@ -14,18 +14,27 @@ use std::path::{Path, PathBuf};
 const WD_MEM_DIR: &str = ".wd_mem";
 const GLOBAL_MEMORY_FILE: &str = "project_memory.md";
 const SESSIONS_DIR: &str = "sessions";
+const SCRIPTS_DIR: &str = "scripts";
+const DATA_DIR: &str = "data";
+const OUTPUTS_DIR: &str = "outputs";
+const README_FILE: &str = "README.md";
 
 /// 返回 `.wd_mem/` 根目录路径（不创建）。
-fn wd_mem_base(project_root: &str) -> PathBuf {
-    Path::new(project_root).join(WD_MEM_DIR)
+fn wd_mem_base(workspace_root: &str) -> PathBuf {
+    Path::new(workspace_root).join(WD_MEM_DIR)
 }
 
-/// 确保 `.wd_mem/` 目录结构与 `project_memory.md` 基础模板就绪（幂等，可重复调用）。
-pub(crate) fn ensure_wd_mem(project_root: &str) -> Result<PathBuf, String> {
-    let base = wd_mem_base(project_root);
-    let sessions = base.join(SESSIONS_DIR);
-    std::fs::create_dir_all(&sessions)
-        .map_err(|e| format!("创建 .wd_mem 目录失败: {}", e))?;
+/// 确保 `.wd_mem/` 目录结构与基础模板就绪（幂等，可重复调用）。
+///
+/// `workspace_root` 为「已规范化」的工作空间绝对根路径——既可是绑定的工程根，
+/// 也可是自由对话设定的工作空间。每次运行（只要设定了工作空间）都会确保该结构存在，
+/// 使运行期产生的可复用脚本 / 中间数据 / 长期记忆有统一归宿，避免散落污染用户目录。
+pub(crate) fn ensure_wd_mem(workspace_root: &str) -> Result<PathBuf, String> {
+    let base = wd_mem_base(workspace_root);
+    for sub in [SCRIPTS_DIR, DATA_DIR, OUTPUTS_DIR, SESSIONS_DIR] {
+        std::fs::create_dir_all(base.join(sub))
+            .map_err(|e| format!("创建 .wd_mem/{} 目录失败: {}", sub, e))?;
+    }
 
     let global = base.join(GLOBAL_MEMORY_FILE);
     if !global.exists() {
@@ -36,7 +45,109 @@ pub(crate) fn ensure_wd_mem(project_root: &str) -> Result<PathBuf, String> {
         std::fs::write(&global, tpl)
             .map_err(|e| format!("写入 project_memory.md 模板失败: {}", e))?;
     }
+
+    let readme = base.join(README_FILE);
+    if !readme.exists() {
+        std::fs::write(&readme, wd_mem_readme())
+            .map_err(|e| format!("写入 .wd_mem/README.md 失败: {}", e))?;
+    }
     Ok(base)
+}
+
+/// `.wd_mem/README.md` 内容：说明目录用途与分类规则（用户/智能体可读，建议提交 Git）。
+fn wd_mem_readme() -> &'static str {
+    "# .wd_mem — Work Duo 运行时记忆与素材区\n\
+\n\
+本目录由智能体在每次运行（只要设定了工作空间）自动创建与维护，用于沉淀运行期产生的\
+可复用素材与长期记忆。建议将其加入版本控制（Git），但**不要**把它当作任务最终交付物——\
+最终交付物应放在工作空间根目录或你指定的位置。\n\
+\n\
+## 目录结构\n\
+- `scripts/`  ：生成的自动化脚本（Python / Shell 等），跨任务可复用。再跑同类任务时优先复用，而非重新生成。\n\
+- `data/`     ：抓取/计算的中间数据（CSV / JSON 等），供脚本复用，避免重复联网获取。\n\
+- `outputs/`  ：最终产物的归档副本（可选），便于回溯历史版本。\n\
+- `sessions/` ：单会话滚动压缩摘要 `{session_id}.summary.md`。\n\
+- `project_memory.md`：项目长期记忆（架构 / 避坑法则 / 用户偏好），大任务后可沉淀，用户可直接编辑。\n\
+\n\
+> 注意：运行产生的临时文件（如 mamba 运行副本）不在此目录；此处只收纳「值得保留」的素材。\n"
+}
+
+/// 扫描 `.wd_mem/scripts/` 与 `.wd_mem/data/` 下已有素材，返回可注入系统提示的复用清单。
+/// 目录为空或无工作空间时返回 None（调用方据此跳过注入）。
+pub(crate) fn scan_reusable_artifacts(workspace_root: &str) -> Option<String> {
+    let base = ensure_wd_mem(workspace_root).ok()?;
+    let scripts = base.join(SCRIPTS_DIR);
+    let data = base.join(DATA_DIR);
+    let mut lines: Vec<String> = Vec::new();
+
+    if let Ok(rd) = std::fs::read_dir(&scripts) {
+        for ent in rd.flatten() {
+            let p = ent.path();
+            if !p.is_file() {
+                continue;
+            }
+            let ext = p
+                .extension()
+                .and_then(|s| s.to_str())
+                .unwrap_or("")
+                .to_lowercase();
+            if !matches!(
+                ext.as_str(),
+                "py" | "sh" | "bat" | "ps1" | "js" | "ts" | "r" | "sql" | "ipynb"
+            ) {
+                continue;
+            }
+            let name = p.file_name().and_then(|s| s.to_str()).unwrap_or("").to_string();
+            let purpose = read_first_comment(&p).unwrap_or_else(|| "（无首行注释）".to_string());
+            lines.push(format!("- `scripts/{}`：{}", name, purpose));
+        }
+    }
+    if let Ok(rd) = std::fs::read_dir(&data) {
+        for ent in rd.flatten() {
+            let p = ent.path();
+            if !p.is_file() {
+                continue;
+            }
+            let name = p.file_name().and_then(|s| s.to_str()).unwrap_or("").to_string();
+            let size = ent.metadata().map(|m| m.len()).unwrap_or(0);
+            lines.push(format!("- `data/{}`（{} 字节）", name, size));
+        }
+    }
+
+    if lines.is_empty() {
+        None
+    } else {
+        Some(lines.join("\n"))
+    }
+}
+
+/// 读取脚本前若干行的首条注释作为用途摘要（支持 # // /// 与 Python docstring 首行）。
+fn read_first_comment(path: &Path) -> Option<String> {
+    let content = std::fs::read_to_string(path).ok()?;
+    for line in content.lines().take(5) {
+        let t = line.trim();
+        if t.is_empty() {
+            continue;
+        }
+        if let Some(rest) = t.strip_prefix("///") {
+            return Some(rest.trim().to_string());
+        }
+        if let Some(rest) = t.strip_prefix("//") {
+            return Some(rest.trim().to_string());
+        }
+        if let Some(rest) = t.strip_prefix('#') {
+            return Some(rest.trim().to_string());
+        }
+        if let Some(rest) = t.strip_prefix("\"\"\"") {
+            let inner = rest.trim();
+            if !inner.is_empty() {
+                return Some(inner.to_string());
+            }
+        }
+        // 前 5 行若出现非注释代码行，停止（避免误抓函数体）
+        break;
+    }
+    None
 }
 
 /// 抓取项目级长期记忆（文件不存在返回 None）。

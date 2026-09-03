@@ -431,15 +431,19 @@ impl AgentTool for RunPythonSandboxTool {
             .get("env_name")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
+        // 传入已校验并归一化的绝对路径，而非模型给的原始 script_path：
+        // 模型可能传相对路径（如 `install_openpyxl.py`），而 Rust 进程 cwd 并非工作空间，
+        // 直接交给 mamba 会因「脚本文件不存在」失败；_abs 已解析为工作空间内绝对路径。
+        let resolved_script = _abs.to_string_lossy().to_string();
 
         println!(
             "[agent] native__run_python_sandbox: 开始 script={} env={}",
-            script_path,
+            resolved_script,
             env_name.as_deref().unwrap_or("default"),
         );
         let started = Instant::now();
         let mgr = self.app.state::<MambaManager>();
-        match run_python_in_sandbox(&self.app, &*mgr, env_name, script_path.to_string()).await {
+        match run_python_in_sandbox(&self.app, &*mgr, env_name, resolved_script).await {
             Ok(out) => {
                 println!(
                     "[agent] native__run_python_sandbox: 成功 result={}字符 耗时={}ms 内容={}",

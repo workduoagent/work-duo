@@ -234,6 +234,46 @@ pub(crate) async fn persist_tools_tokens(
     }
 }
 
+/// 累计写回「会话真实 token 用量」（prompt + completion，跨所有 ReAct 轮）。
+///
+/// 与 `persist_tools_tokens`（覆盖写工具定义占用）不同，这里是**累加**——每次 `run_task`
+/// 把本轮 LLM 真实消耗（取自 OpenAI `usage`，由 `runtime::run_task` 统计）加到会话总数上，
+/// 从而会话环形图与单条消息的「消耗 tokens」展示的是真实用量，而非前端基于「仅首尾文本」的粗略估算。
+pub(crate) async fn persist_session_tokens(
+    app: &AppHandle,
+    session_id: &str,
+    prompt_delta: u64,
+    completion_delta: u64,
+) {
+    let pool = match get_pool(app).await {
+        Ok(p) => p,
+        Err(e) => {
+            println!("[agent] persist_session_tokens: 取池失败：{e}");
+            return;
+        }
+    };
+    println!(
+        "[agent] persist_session_tokens: session={} prompt+={} completion+={}",
+        session_id, prompt_delta, completion_delta
+    );
+    if let Err(e) = sqlx::query(
+        "UPDATE agent_conversation_session \
+         SET total_prompt_tokens = COALESCE(total_prompt_tokens, 0) + ?, \
+             total_completion_tokens = COALESCE(total_completion_tokens, 0) + ?, \
+             updated_at = ? \
+         WHERE id = ?",
+    )
+    .bind(prompt_delta as i64)
+    .bind(completion_delta as i64)
+    .bind(now_ms())
+    .bind(session_id)
+    .execute(&pool)
+    .await
+    {
+        println!("[agent] persist_session_tokens: 写会话 token 失败：{e}");
+    }
+}
+
 /// 后台非阻塞滚动压缩触发器。
 ///
 /// 读取会话 `total_turns` 与 `summary_round_count`，计算未压缩轮数
@@ -473,7 +513,7 @@ Your job is to merge the Existing Summary and the Target Conversation Rounds int
     );
 
     // 复用智能体绑定的 LLM（客户端一律走云端 API；如需更轻量模型可后续配置 summary_model）。
-    let choice = call_llm(cfg, &messages, &[]).await?;
+    let (choice, _usage) = call_llm(cfg, &messages, &[]).await?;
     let summary = choice
         .get("content")
         .and_then(|v| v.as_str())

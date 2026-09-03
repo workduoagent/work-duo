@@ -16,7 +16,7 @@
  *  - 审批挂起时 `pendingApproval` 置位，弹窗由页面渲染；决策回传后 Rust 继续循环，
  *    前端只需清空 `pendingApproval`。
  */
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { invoke } from '@tauri-apps/api/core'
 import { isTauri } from '@/core/config'
@@ -52,6 +52,9 @@ export interface AgentSessionState {
   reset: () => void
   /** 取消正在进行的任务（Tauri 下发 cancel 信号；非 Tauri 下仅清状态）。 */
   cancel: () => void
+  /** 最近一轮任务的真实 token 用量（后端取自 LLM `usage`，经 `agent-task-done` 带出）。
+   *  Tauri 环境由事件填充；dev/mock 无后端时为 null，页面据此回退到估算值。 */
+  lastTaskUsage: MutableRefObject<{ promptTokens: number; completionTokens: number } | null>
 }
 
 function labelOf(toolName: string): string {
@@ -93,8 +96,13 @@ export function useAgentSession(): AgentSessionState {
   const cancelRef = useRef<(() => void) | null>(null)
   // isRunning 的实时镜像，用于 run 入口的竞态拦截（useCallback 闭包里的 isRunning 可能是旧值）。
   const isRunningRef = useRef(false)
-  // 任务超时保险：若后台任务既没发 done 也没发 error，60s 后自动复位，防止 UI 永久卡住。
+  // 任务兜底保险：后端正常情况下一定会通过 `agent-task-done` / `agent-task-error`
+  // 主动复位 UI（多轮智能体任务可能耗时数分钟）。此超时仅用于 Rust 进程异常（panic）
+  // 导致终态事件丢失的极端场景，时长设得足够长（20 分钟），避免把仍在运行的后端误判为「超时」。
   const taskTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // 最近一轮任务的真实 token 用量（后端取自 LLM usage，经 agent-task-done 带出）；
+  // Tauri 环境由事件填充，dev/mock 无后端时为 null，页面据此回退到估算值。
+  const lastTaskUsageRef = useRef<{ promptTokens: number; completionTokens: number } | null>(null)
 
   const setRunning = useCallback((value: boolean) => {
     isRunningRef.current = value
@@ -204,12 +212,13 @@ export function useAgentSession(): AgentSessionState {
 
   const startTaskTimeout = useCallback(() => {
     clearTaskTimeout()
+    // 仅作极端兜底（见 taskTimeoutRef 注释）：正常多轮任务不会触发。
     taskTimeoutRef.current = setTimeout(() => {
-      console.warn('[agent] 任务超时未收到结束事件，自动复位 UI 状态')
+      console.warn('[agent] 任务超过 20 分钟未收到结束事件，疑似后端异常，复位 UI 状态')
       setRunning(false)
       setIsStreaming(false)
-      setStatusText('任务响应超时，请重试')
-    }, 60_000)
+      setStatusText('长时间未收到后端结束信号，任务可能仍在后台运行，可点击「停止」后重新发起')
+    }, 20 * 60_000)
   }, [clearTaskTimeout])
 
   const run = useCallback(
@@ -377,13 +386,18 @@ export function useAgentSession(): AgentSessionState {
           setPendingApproval(ev.payload)
         },
       )
-      const offDone = await listen('agent-task-done', () => {
-        clearTaskTimeout()
-        setRunning(false)
-        setIsStreaming(false)
-        setStatusText('')
-        // 完成后保留思考过程，方便回看智能体做了什么（新一轮 run 时在入口清空）
-      })
+      const offDone = await listen<{ promptTokens: number; completionTokens: number }>(
+        'agent-task-done',
+        (ev) => {
+          // 记录本轮真实 token 用量（后端取自 LLM usage，跨 ReAct 轮累计），供页面展示替代估算。
+          lastTaskUsageRef.current = ev.payload ?? null
+          clearTaskTimeout()
+          setRunning(false)
+          setIsStreaming(false)
+          setStatusText('')
+          // 完成后保留思考过程，方便回看智能体做了什么（新一轮 run 时在入口清空）
+        },
+      )
       const offErr = await listen<string>('agent-task-error', (ev) => {
         clearTaskTimeout()
         setRunning(false)
@@ -421,5 +435,6 @@ export function useAgentSession(): AgentSessionState {
     submitDecision,
     reset,
     cancel,
+    lastTaskUsage: lastTaskUsageRef,
   }
 }

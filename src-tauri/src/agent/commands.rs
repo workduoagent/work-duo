@@ -311,9 +311,70 @@ async fn load_config(
         attachments.as_ref().map(|a| a.len()).unwrap_or(0),
     );
 
+    let mut system_prompt = get_str(&row, "system_prompt");
+    // 把真实工作空间路径注入系统提示：避免 LLM 猜测 `/workspace` 等虚拟路径，
+    // 导致原生工具（写文件 / 跑 Python / 列目录）路径越界。
+    if let Some(ws) = &workspace {
+        if !ws.trim().is_empty() {
+            let ws_trim = ws.trim();
+            system_prompt.push_str(&format!(
+                "\n\n### 工作环境\n你当前的工作空间目录为：{}\n所有文件读写、Python 脚本执行、命令执行都必须在此目录或其子目录内进行。请使用相对于该目录的路径（如 `script.py`）或该目录下的绝对路径来指定文件位置，不要使用 `/workspace` 等虚拟路径。",
+                ws_trim
+            ));
+            // 命令执行环境提示（避免 Unix 语法在 Windows 失效，如日志中 `pip ... | tail` 报错）
+            if cfg!(target_os = "windows") {
+                system_prompt.push_str(
+                    "\n\n### 命令执行环境\n本机为 Windows，命令经 `cmd.exe /C` 执行（**不是** bash/PowerShell）。\
+请勿使用 `tail`/`cat`/`grep`/`head`/`wc` 等 Unix 专用命令，也不要依赖 `|` 管道做文本截取；\
+需要文本处理请用纯 Python 脚本或 PowerShell 语法。安装 Python 依赖用 `pip install <包名>`，不要带 `| tail` 之类后缀。",
+                );
+            } else {
+                system_prompt.push_str(
+                    "\n\n### 命令执行环境\n本机为类 Unix 系统，命令经 `sh -c` 执行，可使用标准 Unix 管道与命令。",
+                );
+            }
+            // .wd_mem 记忆与素材区：确保结构就绪，并注入复用清单与约定。
+            match crate::agent::wd_mem::ensure_wd_mem(ws_trim) {
+                Ok(_) => {
+                    system_prompt.push_str(&format!(
+                        "\n\n### 工作空间记忆区 `.wd_mem/`（已就绪，位于 {}/.wd_mem）\n\
+这是本工作空间的专属记忆与素材库，由你在上次运行中沉淀，本次应优先复用其中的素材、避免重复生成：\n\
+- `scripts/`：可复用的自动化脚本（Python/Shell 等）——**再跑同类任务前，先检查这里是否已有可用脚本，有则直接复用或小幅改写，不要从零重写**。\n\
+- `data/`：抓取/计算的中间数据（CSV/JSON 等）——已有则优先读取复用，避免重复联网获取。\n\
+- `outputs/`：最终产物的归档副本（可选）。\n\
+- `project_memory.md`：项目长期记忆（架构/避坑/用户偏好），大任务后可沉淀，你也可直接读取参考。\n\
+约定：**新生成的、值得保留的脚本请写入 `scripts/`；中间数据写入 `data/`；不要把临时/一次性脚本散落在工作空间根目录**，以免污染用户目录。**最终交付物**仍放在工作空间根目录或用户指定位置。",
+                        ws_trim
+                    ));
+                    // 扫描已有可复用素材，列出供本次参考
+                    if let Some(artifacts) = crate::agent::wd_mem::scan_reusable_artifacts(ws_trim) {
+                        system_prompt.push_str(&format!(
+                            "\n\n### 可复用素材清单（来自上次运行的 `.wd_mem`，本次优先复用）\n{}",
+                            artifacts
+                        ));
+                    }
+                    // 自由对话（无会话）：额外读取项目长期记忆注入提示
+                    if session_id.is_none() {
+                        if let Some(mem) = crate::agent::wd_mem::read_project_memory(ws_trim) {
+                            if !mem.trim().is_empty() {
+                                system_prompt.push_str(&format!(
+                                    "\n\n### 项目长期记忆（project_memory.md）\n{}",
+                                    mem
+                                ));
+                            }
+                        }
+                    }
+                    println!("[agent] load_config: 已确保 .wd_mem 结构并注入复用清单 workspace={}", ws_trim);
+                }
+                Err(e) => {
+                    println!("[agent] load_config: 创建 .wd_mem 失败（降级为不使用记忆区）：{e}");
+                }
+            }
+        }
+    }
     Ok(AgentRuntimeConfig {
         agent_id: agent_id.to_string(),
-        system_prompt: get_str(&row, "system_prompt"),
+        system_prompt,
         llm_base_url,
         llm_api_key,
         llm_model_name,

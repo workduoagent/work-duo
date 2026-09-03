@@ -113,6 +113,8 @@ impl AgentRuntime {
 
         // 4) ReAct 循环
         let mut iteration = 0;
+        // 整轮任务真实 token 用量累计（跨所有 ReAct 轮，每轮 LLM 调用的 prompt+completion）。
+        let mut task_usage: (u64, u64) = (0, 0);
         loop {
             if iteration >= MAX_TOOL_ITERATIONS {
                 println!(
@@ -121,7 +123,15 @@ impl AgentRuntime {
                     MAX_TOOL_ITERATIONS,
                     messages.len(),
                 );
-                events::emit_error(app, "已达最大工具调用次数，任务终止以防死循环");
+                // 熔断时仍推送一条终态文本，避免前端因无正文而长期显示「思考中…」。
+                let msg = format!(
+                    "已达到最大工具调用轮次上限（{} 轮），为防死循环已提前终止本次任务。\n任务可能尚未完成——建议：① 将目标拆分为更小的步骤；② 检查是否陷入重复调用同一工具；③ 如确需更多轮次，可联系开发者调高 MAX_TOOL_ITERATIONS 后重试。",
+                    MAX_TOOL_ITERATIONS
+                );
+                events::emit_error(app, &msg);
+                events::emit_text_chunk(app, &msg, false);
+                events::emit_text_chunk(app, "", true);
+                messages.push(json!({ "role": "assistant", "content": msg }));
                 break;
             }
             iteration += 1;
@@ -154,13 +164,15 @@ impl AgentRuntime {
                     return;
                 }
             };
+            // 本轮 LLM 真实用量（流式路径已写入 outcome.usage；兜底非流式会覆盖此值）。
+            let mut round_usage = outcome.usage;
 
             // 兜底：流式空响应（正文与 tool_calls 皆空）。个别网关不支持流式 tool_calls
             // （模型想调工具但 delta 里不下发），此时回退一次非流式调用拿真实决策。
             if outcome.content.trim().is_empty() && outcome.tool_calls.is_empty() {
                 println!("[agent] run_task: 流式空响应，回退非流式调用兜底");
                 match call_llm(&cfg, &trimmed, &tools).await {
-                    Ok(choice) => {
+                    Ok((choice, usage)) => {
                         outcome = StreamOutcome {
                             content: choice
                                 .get("content")
@@ -178,7 +190,9 @@ impl AgentRuntime {
                                 .and_then(|v| v.as_array())
                                 .cloned()
                                 .unwrap_or_default(),
+                            usage,
                         };
+                        round_usage = usage;
                     }
                     Err(e) => {
                         println!("[agent] run_task: LLM 兜底调用失败：{e}");
@@ -187,6 +201,10 @@ impl AgentRuntime {
                     }
                 }
             }
+
+            // 累计本轮真实 token 用量（流式或兜底非流式取其一，已用 round_usage 取值）。
+            task_usage.0 += round_usage.0;
+            task_usage.1 += round_usage.1;
 
             // LLM 本轮返回摘要（排错核心信息：模型到底决定了什么）
             println!(
@@ -377,7 +395,12 @@ impl AgentRuntime {
             }
         }
 
-        events::emit_task_done(app);
+        events::emit_task_done(app, task_usage.0, task_usage.1);
+
+        // 真实 token 用量累计写回会话表（prompt + completion；tools_tokens 由 persist_tools_tokens 单独维护）。
+        if let Some(sid) = &cfg.session_id {
+            crate::agent::round_compactor::persist_session_tokens(app, sid, task_usage.0, task_usage.1).await;
+        }
 
         // 第 N 轮结束后：回填本轮 raw_messages_json（协议视图），累计轮次，
         // 并派发后台滚动压缩（Tokio 异步、非阻塞，用户下一轮提问零前置等待）。
@@ -413,7 +436,7 @@ pub(crate) async fn call_llm(
     cfg: &AgentRuntimeConfig,
     messages: &[Value],
     tools: &[Value],
-) -> Result<Value, String> {
+) -> Result<(Value, (u64, u64)), String> {
     if cfg.llm_base_url.is_empty() || cfg.llm_model_name.is_empty() {
         return Err("智能体未绑定有效的 LLM（base_url / model_name 为空）".into());
     }
@@ -503,12 +526,31 @@ pub(crate) async fn call_llm(
         data.to_string().chars().count(),
         data.get("choices").and_then(|v| v.as_array()).map(|v| v.len()).unwrap_or(0)
     );
-    data.get("choices")
+    // 提取真实 token 用量（prompt / completion），供会话累计展示，替代前端估算。
+    let usage = data
+        .get("usage")
+        .and_then(|u| u.as_object())
+        .and_then(|u| {
+            let p = u.get("prompt_tokens").and_then(|v| v.as_u64());
+            let c = u.get("completion_tokens").and_then(|v| v.as_u64());
+            match (p, c) {
+                (Some(p), Some(c)) => Some((p, c)),
+                _ => None,
+            }
+        })
+        .unwrap_or((0, 0));
+    println!(
+        "[agent] call_llm: 非流式 usage prompt={} completion={}",
+        usage.0, usage.1
+    );
+    let message = data
+        .get("choices")
         .and_then(|c| c.as_array())
         .and_then(|c| c.first())
         .and_then(|c| c.get("message"))
         .cloned()
-        .ok_or_else(|| "LLM 响应缺少 choices[0].message".into())
+        .ok_or_else(|| "LLM 响应缺少 choices[0].message".to_string())?;
+    Ok((message, usage))
 }
 
 /// 流式调用的聚合结果（一轮 ReAct 的 LLM 输出）。
@@ -519,6 +561,10 @@ struct StreamOutcome {
     reasoning: String,
     /// 标准 OpenAI 格式的 tool_calls（流式增量已按 index 归并完整）。
     tool_calls: Vec<Value>,
+    /// 本轮 LLM 真实 token 用量（prompt / completion），取自 OpenAI 响应的 `usage`。
+    /// 跨所有 ReAct 轮累计即为整轮任务的真实消耗，替代前端基于「仅首尾文本」的估算
+    /// （旧估算会把 system prompt / 工具定义 / 中间工具往返全部漏掉，导致 token 严重低估）。
+    usage: (u64, u64),
 }
 
 /// 流式调用 LLM（SSE）：聚合本轮的正文、推理与 tool_calls，返回给 ReAct 循环决策。
@@ -555,6 +601,9 @@ async fn call_llm_stream(
         "model": cfg.llm_model_name,
         "messages": messages,
         "stream": true,
+        // 显式要求网关在流的最后一个 chunk 返回 usage（OpenAI 风格），
+        // 否则部分网关默认不下发，导致前端拿不到真实 token 用量。
+        "stream_options": { "include_usage": true },
     });
     // 注入智能体私有参数副本
     if let Some(obj) = cfg.llm_config.as_object() {
@@ -635,6 +684,8 @@ async fn call_llm_stream(
     let mut parse_error_count = 0usize;
     // tool_calls 增量归并：index -> (id, name, arguments 片段拼接)
     let mut tc_acc: std::collections::BTreeMap<u64, (String, String, String)> = Default::default();
+    // 真实 token 用量累计（OpenAI 把 usage 放在最后一个 chunk 之前；不同网关位置略有差异，每片都取最新非空值）。
+    let mut usage: (u64, u64) = (0, 0);
     while let Some(chunk_result) = stream.next().await {
         let chunk = chunk_result.map_err(|e| {
             println!("[agent] call_llm_stream: SSE 流读取失败（已耗时={}ms）：{}", request_started.elapsed().as_millis(), e);
@@ -662,6 +713,15 @@ async fn call_llm_stream(
             match serde_json::from_str::<Value>(data) {
                 Ok(json) => {
                     absorb_stream_delta(&json, &mut content, &mut reasoning, &mut tc_acc);
+                    // 累计真实 token 用量（prompt / completion）
+                    if let Some(u) = json.get("usage").and_then(|v| v.as_object()) {
+                        if let (Some(p), Some(c)) = (
+                            u.get("prompt_tokens").and_then(|v| v.as_u64()),
+                            u.get("completion_tokens").and_then(|v| v.as_u64()),
+                        ) {
+                            usage = (p, c);
+                        }
+                    }
                 }
                 Err(e) => {
                     parse_error_count += 1;
@@ -685,6 +745,14 @@ async fn call_llm_stream(
             if data != "[DONE]" {
                 if let Ok(json) = serde_json::from_str::<Value>(data) {
                     absorb_stream_delta(&json, &mut content, &mut reasoning, &mut tc_acc);
+                    if let Some(u) = json.get("usage").and_then(|v| v.as_object()) {
+                        if let (Some(p), Some(c)) = (
+                            u.get("prompt_tokens").and_then(|v| v.as_u64()),
+                            u.get("completion_tokens").and_then(|v| v.as_u64()),
+                        ) {
+                            usage = (p, c);
+                        }
+                    }
                 }
             }
         }
@@ -716,6 +784,7 @@ async fn call_llm_stream(
         content,
         reasoning,
         tool_calls,
+        usage,
     })
 }
 

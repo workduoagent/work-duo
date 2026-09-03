@@ -119,7 +119,12 @@ impl PathGuard {
         let ws_norm = std::fs::canonicalize(ws)
             .unwrap_or_else(|_| ws.clone());
 
-        if normalized != ws_norm && !normalized.starts_with(&ws_norm) {
+        // 比较前统一剥离 Windows 的 `\\?\` 前缀（verbatim 前缀）并（Windows 下）忽略大小写：
+        // 文件存在时 canonicalize 返回带 `\\?\` 前缀的绝对路径，不存在时回退到不带前缀的原样
+        // 路径，二者混用会导致 starts_with 误判「越界」（同在工作空间内却报失败）。
+        let n = normalize_for_guard(&normalized);
+        let w = normalize_for_guard(&ws_norm);
+        if n != w && !n.starts_with(&w) {
             return Err(ToolError::InvalidArgs(format!(
                 "路径越界：{} 不在工作空间 {} 之内",
                 normalized.display(),
@@ -128,5 +133,13 @@ impl PathGuard {
         }
         Ok(normalized)
     }
+}
+
+/// 路径比较前的归一化：剥离 Windows 的 `\\?\` 前缀（verbatim 前缀），Windows 下转小写，
+/// 使「文件存在（带前缀）」与「文件不存在（无前缀）」两种情形下的路径可一致比较。
+fn normalize_for_guard(p: &Path) -> PathBuf {
+    let s = p.to_string_lossy().replace("\\\\?\\", "");
+    let s = if cfg!(windows) { s.to_lowercase() } else { s };
+    PathBuf::from(s)
 }
 
