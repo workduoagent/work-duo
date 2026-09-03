@@ -70,8 +70,36 @@ impl AgentTool for ReadFileTool {
         let path = args.get("path").and_then(|v| v.as_str()).ok_or_else(|| {
             ToolError::InvalidArgs("read_file 缺少 path 参数".into())
         })?;
-        let abs = PathGuard::check(path, ctx)?;
-        std::fs::read_to_string(&abs).map_err(|e| ToolError::ExecutionFailed(format!("读取失败：{e}")))
+        let abs = match PathGuard::check(path, ctx) {
+            Ok(abs) => abs,
+            Err(e) => {
+                println!("[agent] native__read_file: 路径校验失败 path={} error={:?}", path, e);
+                return Err(e);
+            }
+        };
+        println!("[agent] native__read_file: 开始 path={} resolved={}", path, abs.display());
+        let started = Instant::now();
+        match std::fs::read_to_string(&abs) {
+            Ok(content) => {
+                println!(
+                    "[agent] native__read_file: 成功 bytes={} chars={} 耗时={}ms 内容={}",
+                    content.len(),
+                    content.chars().count(),
+                    started.elapsed().as_millis(),
+                    crate::agent::runtime::clip(&content, 500),
+                );
+                Ok(content)
+            }
+            Err(e) => {
+                println!(
+                    "[agent] native__read_file: 失败 path={} 耗时={}ms error={}",
+                    abs.display(),
+                    started.elapsed().as_millis(),
+                    e
+                );
+                Err(ToolError::ExecutionFailed(format!("读取失败：{e}")))
+            }
+        }
     }
 }
 
@@ -103,15 +131,46 @@ impl AgentTool for WriteFileTool {
             ToolError::InvalidArgs("write_file 缺少 path 参数".into())
         })?;
         let content = args.get("content").and_then(|v| v.as_str()).unwrap_or("");
-        let abs = PathGuard::check(path, ctx)?;
+        let abs = match PathGuard::check(path, ctx) {
+            Ok(abs) => abs,
+            Err(e) => {
+                println!("[agent] native__write_file: 路径校验失败 path={} error={:?}", path, e);
+                return Err(e);
+            }
+        };
         if let Some(parent) = abs.parent() {
             std::fs::create_dir_all(parent).map_err(|e| {
                 ToolError::ExecutionFailed(format!("创建父目录失败：{e}"))
             })?;
         }
-        std::fs::write(&abs, content)
-            .map_err(|e| ToolError::ExecutionFailed(format!("写入失败：{e}")))?;
-        Ok(format!("已写入 {} 字节到 {}", content.len(), abs.display()))
+        println!(
+            "[agent] native__write_file: 开始 path={} resolved={} content_bytes={} content_preview={}",
+            path,
+            abs.display(),
+            content.len(),
+            crate::agent::runtime::clip(content, 500),
+        );
+        let started = Instant::now();
+        match std::fs::write(&abs, content) {
+            Ok(()) => {
+                println!(
+                    "[agent] native__write_file: 成功 path={} bytes={} 耗时={}ms",
+                    abs.display(),
+                    content.len(),
+                    started.elapsed().as_millis()
+                );
+                Ok(format!("已写入 {} 字节到 {}", content.len(), abs.display()))
+            }
+            Err(e) => {
+                println!(
+                    "[agent] native__write_file: 失败 path={} 耗时={}ms error={}",
+                    abs.display(),
+                    started.elapsed().as_millis(),
+                    e
+                );
+                Err(ToolError::ExecutionFailed(format!("写入失败：{e}")))
+            }
+        }
     }
 }
 
@@ -149,8 +208,21 @@ impl AgentTool for EditFileTool {
         let new_str = args.get("new_str").and_then(|v| v.as_str()).unwrap_or("");
 
         let abs = PathGuard::check(path, ctx)?;
-        let original = std::fs::read_to_string(&abs)
-            .map_err(|e| ToolError::ExecutionFailed(format!("读取失败：{e}")))?;
+        println!(
+            "[agent] native__edit_file: 开始 path={} resolved={} old_str={} new_str={}",
+            path,
+            abs.display(),
+            crate::agent::runtime::clip(old_str, 300),
+            crate::agent::runtime::clip(new_str, 300),
+        );
+        let started = Instant::now();
+        let original = match std::fs::read_to_string(&abs) {
+            Ok(content) => content,
+            Err(e) => {
+                println!("[agent] native__edit_file: 读取失败 path={} error={}", abs.display(), e);
+                return Err(ToolError::ExecutionFailed(format!("读取失败：{e}")));
+            }
+        };
         let count = original.matches(old_str).count();
         if count == 0 {
             return Err(ToolError::InvalidArgs("old_str 在文件中未找到".into()));
@@ -161,9 +233,28 @@ impl AgentTool for EditFileTool {
             ));
         }
         let updated = original.replace(old_str, new_str);
-        std::fs::write(&abs, updated)
-            .map_err(|e| ToolError::ExecutionFailed(format!("写回失败：{e}")))?;
-        Ok(format!("已在 {} 完成 1 处替换", abs.display()))
+        let updated_bytes = updated.len();
+        match std::fs::write(&abs, &updated) {
+            Ok(()) => {
+                println!(
+                    "[agent] native__edit_file: 成功 path={} 原始bytes={} 新bytes={} 耗时={}ms",
+                    abs.display(),
+                    original.len(),
+                    updated_bytes,
+                    started.elapsed().as_millis()
+                );
+                Ok(format!("已在 {} 完成 1 处替换", abs.display()))
+            }
+            Err(e) => {
+                println!(
+                    "[agent] native__edit_file: 写回失败 path={} 耗时={}ms error={}",
+                    abs.display(),
+                    started.elapsed().as_millis(),
+                    e
+                );
+                Err(ToolError::ExecutionFailed(format!("写回失败：{e}")))
+            }
+        }
     }
 }
 
@@ -191,8 +282,11 @@ impl AgentTool for ListDirectoryTool {
         let path = args.get("path").and_then(|v| v.as_str()).unwrap_or(".");
         let abs = PathGuard::check(path, ctx)?;
         if !abs.is_dir() {
+            println!("[agent] native__list_directory: 目标不是目录 path={}", abs.display());
             return Err(ToolError::InvalidArgs(format!("{} 不是目录", abs.display())));
         }
+        println!("[agent] native__list_directory: 开始 path={} resolved={}", path, abs.display());
+        let started = Instant::now();
         let mut entries: Vec<String> = Vec::new();
         for e in std::fs::read_dir(&abs).map_err(|e| {
             ToolError::ExecutionFailed(format!("读取目录失败：{e}"))
@@ -205,9 +299,15 @@ impl AgentTool for ListDirectoryTool {
                 entries.push(name);
             }
         }
-        Ok(serde_json::to_string(&json!({ "entries": entries }))
-            .unwrap_or_else(|_| "{}".into())
-        )
+        let result = serde_json::to_string(&json!({ "entries": entries }))
+            .unwrap_or_else(|_| "{}".into());
+        println!(
+            "[agent] native__list_directory: 成功 entries={} result={}字符 耗时={}ms",
+            result.matches("\"").count() / 2,
+            result.chars().count(),
+            started.elapsed().as_millis(),
+        );
+        Ok(result)
     }
 }
 
@@ -239,6 +339,11 @@ impl AgentTool for ExecuteCommandTool {
             .workspace
             .clone()
             .or_else(|| std::env::current_dir().ok());
+        println!(
+            "[agent] native__execute_command: 开始 cwd={} command={}",
+            cwd.as_ref().map(|p| p.display().to_string()).unwrap_or_else(|| "<默认>".into()),
+            crate::agent::runtime::clip(command, 500),
+        );
         let start = Instant::now();
         let output = if cfg!(target_os = "windows") {
             std::process::Command::new("cmd")
@@ -254,6 +359,15 @@ impl AgentTool for ExecuteCommandTool {
         let out = output.map_err(|e| ToolError::ExecutionFailed(format!("命令执行失败：{e}")))?;
         let stdout = String::from_utf8_lossy(&out.stdout).to_string();
         let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+        println!(
+            "[agent] native__execute_command: 返回 exit_code={:?} stdout={}字符 stderr={}字符 耗时={}ms stdout_preview={} stderr_preview={}",
+            out.status.code(),
+            stdout.chars().count(),
+            stderr.chars().count(),
+            start.elapsed().as_millis(),
+            crate::agent::runtime::clip(&stdout, 500),
+            crate::agent::runtime::clip(&stderr, 500),
+        );
         Ok(serde_json::to_string_pretty(&json!({
             "exit_code": out.status.code(),
             "stdout": stdout,
@@ -297,7 +411,13 @@ impl AgentTool for RunPythonSandboxTool {
         PermissionLevel::RequireApproval
     }
     async fn execute(&self, args: Value, ctx: &ToolContext) -> Result<String, ToolError> {
+        println!(
+            "[agent] native__run_python_sandbox: 请求 sandbox_enabled={} args={}",
+            ctx.sandbox_enabled,
+            crate::agent::runtime::clip(&args.to_string(), 500),
+        );
         if !ctx.sandbox_enabled {
+            println!("[agent] native__run_python_sandbox: 拒绝，allow_sandbox=false");
             return Err(ToolError::PermissionDenied(
                 "该智能体未开启沙箱权限（allow_sandbox=false），拒绝执行".into(),
             ));
@@ -312,10 +432,31 @@ impl AgentTool for RunPythonSandboxTool {
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
 
+        println!(
+            "[agent] native__run_python_sandbox: 开始 script={} env={}",
+            script_path,
+            env_name.as_deref().unwrap_or("default"),
+        );
+        let started = Instant::now();
         let mgr = self.app.state::<MambaManager>();
         match run_python_in_sandbox(&self.app, &*mgr, env_name, script_path.to_string()).await {
-            Ok(out) => Ok(out),
-            Err(e) => Err(ToolError::ExecutionFailed(e)),
+            Ok(out) => {
+                println!(
+                    "[agent] native__run_python_sandbox: 成功 result={}字符 耗时={}ms 内容={}",
+                    out.chars().count(),
+                    started.elapsed().as_millis(),
+                    crate::agent::runtime::clip(&out, 500),
+                );
+                Ok(out)
+            }
+            Err(e) => {
+                println!(
+                    "[agent] native__run_python_sandbox: 失败 耗时={}ms error={}",
+                    started.elapsed().as_millis(),
+                    e
+                );
+                Err(ToolError::ExecutionFailed(e))
+            }
         }
     }
 }

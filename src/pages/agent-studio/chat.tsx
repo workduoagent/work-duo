@@ -148,7 +148,9 @@ async function resolveWorkspaceDir(agent: AgentInfo): Promise<string | null> {
   return `${base}/${agent.identifier}`
 }
 
-/** 打字机效果：把完整目标文本逐步显示，避免一次性刷出整段内容。 */
+/** 打字机效果：把完整目标文本逐步显示，避免一次性刷出整段内容。
+ *  自适应追赶：落后目标文本较多时按比例加速吐字（终态一次性推送全文时约 0.5s 追平），
+ *  流式小步追加时仍保持 10ms/字符的细腻节奏。 */
 function useTypewriter(text: string, active: boolean, speed = 10) {
   const [displayed, setDisplayed] = useState('')
   const idxRef = useRef(0)
@@ -170,7 +172,9 @@ function useTypewriter(text: string, active: boolean, speed = 10) {
     const step = () => {
       const target = text
       if (idxRef.current >= target.length) return
-      idxRef.current += 1
+      const remaining = target.length - idxRef.current
+      // 落后超过 200 字符时按比例追赶（约 50 步内追平），否则逐字符推进
+      idxRef.current += remaining > 200 ? Math.ceil(remaining / 50) : 1
       setDisplayed(target.slice(0, idxRef.current))
       timerRef.current = setTimeout(step, speed)
     }
@@ -427,12 +431,31 @@ function roundsToMessages(rounds: AgentConversationRound[]): ChatMessage[] {
         createdAt: r.startTime ?? Date.now(),
       })
     }
+    // 工具调用汇总 → ToolStep 卡片（历史回显时思考面板可完整还原工具调用过程）。
+    // 存储格式来自任务结束时的 updateRound：[{ name, status, args, result }]。
+    const toolSteps: ToolStep[] | undefined = Array.isArray(r.toolCallsSummary)
+      ? r.toolCallsSummary.map((t, i) => {
+          const name = typeof t.name === 'string' ? t.name : ''
+          const status = t.status === 'failed' ? 'failed' : 'success'
+          return {
+            callId: `hist-${r.id}-${i}`,
+            toolName: name,
+            toolLabel: name.split('__').pop() || name,
+            status,
+            args: typeof t.args === 'string' ? t.args : undefined,
+            result: typeof t.result === 'string' ? t.result : undefined,
+            sensitive: false,
+            createdAt: r.startTime ?? Date.now(),
+          }
+        })
+      : undefined
     msgs.push({
       id: `a-${r.id}`,
       role: 'agent',
       content: r.assistantAnswer ?? '',
       createdAt: r.endTime ?? Date.now(),
       thought: r.thinkingContent ? r.thinkingContent.split('\n') : undefined,
+      toolSteps: toolSteps?.length ? toolSteps : undefined,
       completedAt: r.endTime,
       durationMs: r.startTime && r.endTime ? r.endTime - r.startTime : undefined,
       tokenCount: (r.inputTokens ?? 0) + (r.outputTokens ?? 0) || estimateTokens(r.assistantAnswer ?? ''),

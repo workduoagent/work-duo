@@ -93,11 +93,15 @@ impl AgentTool for McpRemoteTool {
     ) -> Result<String, ToolError> {
         let arguments = args.get("arguments").cloned().unwrap_or(json!({}));
         println!(
-            "[agent] MCP 工具 {} 调用：endpoint={} protocol={} 是否带 Key={}",
+            "[agent] MCP 工具 {} 调用：endpoint={} protocol={} 是否带 Key={} 参数={}",
             self.original_name,
-            self.endpoint_url,
+            crate::mcp::redact_endpoint(&self.endpoint_url),
             self.protocol_type,
-            self.auth_type.as_deref().unwrap_or("NONE") == "API_KEY"
+            self.auth_type.as_deref().unwrap_or("NONE") == "API_KEY",
+            crate::agent::runtime::clip(
+                &serde_json::to_string(&arguments).unwrap_or_default(),
+                300
+            ),
         );
         // 复用现有 mcp::call_mcp_tool（HTTP/SSE 通路）做透传。
         // 注意：endpoint_url / protocol_type 等取真实连接信息（来自 mcp_info），
@@ -114,9 +118,17 @@ impl AgentTool for McpRemoteTool {
         })
         .await;
         if resp.ok {
+            println!(
+                "[agent] MCP 工具 {} 返回 ok（{}字符）：{}",
+                self.original_name,
+                resp.raw.chars().count(),
+                crate::agent::runtime::clip(&resp.raw, 400),
+            );
             Ok(resp.raw)
         } else {
-            Err(ToolError::ExecutionFailed(resp.error.unwrap_or_else(|| "MCP 调用失败".into())))
+            let err = resp.error.unwrap_or_else(|| "MCP 调用失败".into());
+            println!("[agent] MCP 工具 {} 返回失败：{}", self.original_name, err);
+            Err(ToolError::ExecutionFailed(err))
         }
     }
 }

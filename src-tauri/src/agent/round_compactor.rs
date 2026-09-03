@@ -217,6 +217,10 @@ pub(crate) async fn persist_tools_tokens(
         }
     };
     let tokens = (mcp_count as i64 + skill_count as i64) * AVG_TOOL_TOKENS;
+    println!(
+        "[agent] persist_tools_tokens: session={} mcp工具={} skill={} → tools_tokens={}",
+        session_id, mcp_count, skill_count, tokens
+    );
     if let Err(e) = sqlx::query(
         "UPDATE agent_conversation_session SET tools_tokens = ?, updated_at = ? WHERE id = ?",
     )
@@ -276,12 +280,25 @@ pub(crate) async fn trigger_background_compaction(
     // 每轮触发阈值与滚动步长由 CompactorConfig 默认配置决定（规范：每 5 轮触发、向前合并 2 轮）。
     let compactor = CompactorConfig::default();
     let pending = total_turns.saturating_sub(last_compact);
+    println!(
+        "[Compactor] 触发判定：session={} total_turns={} 已压缩至={} 未压缩={} 阈值={}",
+        session_id, total_turns, last_compact, pending, compactor.trigger_threshold
+    );
     if pending < compactor.trigger_threshold {
         return; // 未达阈值，本次不压缩（零阻塞返回）
     }
 
     let range_start = last_compact + 1;
     let range_end = last_compact + compactor.roll_forward_count;
+    println!(
+        "[Compactor] 达到阈值，派发后台压缩：合并轮次 {}..={}（旧摘要={}）",
+        range_start,
+        range_end,
+        old_summary
+            .as_ref()
+            .map(|s| format!("{}字符", s.chars().count()))
+            .unwrap_or_else(|| "无".into()),
+    );
 
     // 复制到后台 Task 拥有（Send + 'static）。
     let app_bg = app.clone();
@@ -337,6 +354,12 @@ pub(crate) async fn trigger_background_compaction(
 
         match execute_summary_call(&cfg_bg, old_summary.as_deref(), &rounds).await {
             Ok(new_summary) => {
+                println!(
+                    "[Compactor] 压缩调用完成：输入轮次={} 旧摘要={}字符 → 新摘要={}字符",
+                    rounds.len(),
+                    old_summary.as_ref().map(|s| s.chars().count()).unwrap_or(0),
+                    new_summary.chars().count(),
+                );
                 if let Err(e) = sqlx::query(
                     "UPDATE agent_conversation_session \
                      SET summary = ?, summary_round_count = ?, updated_at = ? WHERE id = ?",
@@ -441,6 +464,13 @@ Your job is to merge the Existing Summary and the Target Conversation Rounds int
         json!({ "role": "system", "content": system_compress_rule }),
         json!({ "role": "user", "content": prompt }),
     ];
+    println!(
+        "[Compactor] 准备调用摘要 LLM：轮次={} prompt={}字符 system_rule={}字符 old_summary={}字符",
+        rounds.len(),
+        prompt.chars().count(),
+        system_compress_rule.chars().count(),
+        old_summary.map(|s| s.chars().count()).unwrap_or(0),
+    );
 
     // 复用智能体绑定的 LLM（客户端一律走云端 API；如需更轻量模型可后续配置 summary_model）。
     let choice = call_llm(cfg, &messages, &[]).await?;
@@ -451,7 +481,12 @@ Your job is to merge the Existing Summary and the Target Conversation Rounds int
         .trim()
         .to_string();
     if summary.is_empty() {
+        println!("[Compactor] 摘要 LLM 返回空内容，压缩失败");
         return Err("压缩结果为空".into());
     }
+    println!(
+        "[Compactor] 摘要内容预览（前500字符）：{}",
+        crate::agent::runtime::clip(&summary, 500)
+    );
     Ok(summary)
 }

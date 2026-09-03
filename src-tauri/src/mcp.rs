@@ -54,6 +54,14 @@ const JSON_RPC_HEADERS: &[(&str, &str)] = &[
     ("Accept", "application/json, text/event-stream"),
 ];
 
+/// 日志展示 endpoint 时隐藏 query 参数，避免 URL 内 token 泄露。
+pub(crate) fn redact_endpoint(endpoint: &str) -> String {
+    endpoint
+        .split_once('?')
+        .map(|(base, _)| format!("{base}?<已隐藏query>"))
+        .unwrap_or_else(|| endpoint.to_string())
+}
+
 fn fail_resp(start: Instant, error: String) -> McpSyncResponse {
     McpSyncResponse {
         status: 2,
@@ -101,6 +109,7 @@ async fn notify_initialized(
     url: &str,
     session_id: &Option<String>,
 ) {
+    let started = Instant::now();
     let mut req = client.post(url).json(&serde_json::json!({
         "jsonrpc": "2.0",
         "method": "notifications/initialized"
@@ -108,7 +117,18 @@ async fn notify_initialized(
     if let Some(sid) = session_id {
         req = req.header("Mcp-Session-Id", sid.as_str());
     }
-    let _ = req.send().await;
+    match req.send().await {
+        Ok(resp) => println!(
+            "[agent] mcp.notify_initialized: HTTP {} 耗时={}ms",
+            resp.status(),
+            started.elapsed().as_millis()
+        ),
+        Err(e) => println!(
+            "[agent] mcp.notify_initialized: 发送失败（best-effort，继续后续调用）耗时={}ms error={}",
+            started.elapsed().as_millis(),
+            e
+        ),
+    }
 }
 
 #[tauri::command]
@@ -327,6 +347,17 @@ pub struct McpCallResponse {
 #[tauri::command]
 pub async fn call_mcp_tool(request: McpCallRequest) -> McpCallResponse {
     let start = Instant::now();
+    println!(
+        "[agent] mcp.call: 开始 tool={} endpoint={} protocol={} auth_type={} args={}",
+        request.tool_name,
+        redact_endpoint(&request.endpoint_url),
+        request.protocol_type,
+        request.auth_type.as_deref().unwrap_or("NONE"),
+        crate::agent::runtime::clip(
+            &request.arguments.as_ref().map(|v| v.to_string()).unwrap_or_else(|| "{}".into()),
+            500,
+        ),
+    );
 
     if request.protocol_type.eq_ignore_ascii_case("STDIO") {
         return McpCallResponse {
@@ -417,9 +448,11 @@ pub async fn call_mcp_tool(request: McpCallRequest) -> McpCallResponse {
         }
     });
 
+    println!("[agent] mcp.call: initialize 请求发送 url={}", redact_endpoint(&url));
     let init_res = match client.post(&url).json(&init_body).send().await {
         Ok(r) => r,
         Err(e) => {
+            println!("[agent] mcp.call: initialize 网络失败 耗时={}ms error={}", start.elapsed().as_millis(), e);
             return McpCallResponse {
                 ok: false,
                 error: Some(format!("initialize 请求失败：{e}")),
@@ -428,18 +461,24 @@ pub async fn call_mcp_tool(request: McpCallRequest) -> McpCallResponse {
             }
         }
     };
-
     let session_id = init_res
         .headers()
         .get("mcp-session-id")
         .or_else(|| init_res.headers().get("Mcp-Session-Id"))
         .and_then(|v| v.to_str().ok())
         .map(|s| s.to_string());
+    println!(
+        "[agent] mcp.call: initialize 返回 HTTP {} session_id={} 耗时={}ms",
+        init_res.status(),
+        session_id.as_deref().map(|_| "<存在>").unwrap_or("<无>"),
+        start.elapsed().as_millis()
+    );
 
     if !init_res.status().is_success() {
         let status = init_res.status();
         let text = init_res.text().await.unwrap_or_default();
         let preview: String = text.chars().take(200).collect();
+        println!("[agent] mcp.call: initialize 失败 HTTP {} body={}", status, preview);
         return McpCallResponse {
             ok: false,
             error: Some(format!("initialize 失败：HTTP {} {}", status, preview)),
@@ -449,7 +488,9 @@ pub async fn call_mcp_tool(request: McpCallRequest) -> McpCallResponse {
     }
 
     // 1.5) 发送 notifications/initialized（MCP 规范要求；部分严格服务端会要求）
+    println!("[agent] mcp.call: 发送 notifications/initialized session_id={}", session_id.as_deref().map(|_| "<存在>").unwrap_or("<无>"));
     notify_initialized(&client, &url, &session_id).await;
+    println!("[agent] mcp.call: initialized 通知完成，准备 tools/call");
 
     // 2) tools/call
     let call_body = serde_json::json!({
@@ -467,9 +508,11 @@ pub async fn call_mcp_tool(request: McpCallRequest) -> McpCallResponse {
         call_req = call_req.header("Mcp-Session-Id", sid.as_str());
     }
 
+    println!("[agent] mcp.call: tools/call 请求发送 tool={} session_id={}", request.tool_name, session_id.as_deref().map(|_| "<存在>").unwrap_or("<无>"));
     let call_res = match call_req.send().await {
         Ok(r) => r,
         Err(e) => {
+            println!("[agent] mcp.call: tools/call 网络失败 tool={} 耗时={}ms error={}", request.tool_name, start.elapsed().as_millis(), e);
             return McpCallResponse {
                 ok: false,
                 error: Some(format!("tools/call 请求失败：{e}")),
@@ -493,6 +536,15 @@ pub async fn call_mcp_tool(request: McpCallRequest) -> McpCallResponse {
         let preview: String = raw.chars().take(200).collect();
         Some(format!("tools/call 失败：HTTP {} {}", status, preview))
     };
+    println!(
+        "[agent] mcp.call: tools/call 返回 tool={} HTTP {} ok={} raw={}字符 耗时={}ms result={}",
+        request.tool_name,
+        status,
+        ok,
+        raw.chars().count(),
+        start.elapsed().as_millis(),
+        crate::agent::runtime::clip(&raw, 500),
+    );
 
     McpCallResponse {
         ok,

@@ -54,29 +54,53 @@ impl ApprovalManager {
     /// 返回 (request, rx)：request 用于推前端，rx 用于阻塞等待用户决策。
     pub async fn suspend(&self, request: ApprovalRequest) -> oneshot::Receiver<ApprovalOutcome> {
         let (tx, rx) = oneshot::channel();
+        let approval_id = request.approval_id.clone();
+        let tool_name = request.tool_name.clone();
         self.pending
             .lock()
             .await
-            .insert(request.approval_id.clone(), Pending { tx });
+            .insert(approval_id.clone(), Pending { tx });
+        println!(
+            "[agent] approval: 已挂起 approval_id={} tool={} 当前pending={}个",
+            approval_id,
+            tool_name,
+            self.pending.lock().await.len(),
+        );
         rx
     }
 
     /// 前端回传决策：唤醒对应挂起的任务。无匹配 id 时返回 false（已超时/不存在）。
     pub async fn resolve(&self, decision: ApprovalDecisionInput) -> bool {
-        if let Some(p) = self.pending.lock().await.remove(&decision.approval_id) {
+        let approval_id = decision.approval_id.clone();
+        let approved = decision.approved;
+        let reason = decision.reason.clone();
+        let mut pending = self.pending.lock().await;
+        if let Some(p) = pending.remove(&approval_id) {
             // 通道已关闭（接收方被 drop）则忽略。
-            let _ = p.tx.send(ApprovalOutcome {
-                approved: decision.approved,
-                reason: decision.reason,
-            });
-            true
+            let sent = p.tx.send(ApprovalOutcome {
+                approved,
+                reason,
+            }).is_ok();
+            println!(
+                "[agent] approval: 收到决策 approval_id={} approved={} sent={} 剩余pending={}个",
+                approval_id,
+                approved,
+                sent,
+                pending.len(),
+            );
+            sent
         } else {
+            println!(
+                "[agent] approval: 未找到挂起项 approval_id={} approved={}（可能已超时/取消）",
+                approval_id, approved
+            );
             false
         }
     }
 
     /// 超时/取消时清理挂起项（避免内存泄漏）。
     pub async fn cancel(&self, approval_id: &str) {
-        self.pending.lock().await.remove(approval_id);
+        let removed = self.pending.lock().await.remove(approval_id).is_some();
+        println!("[agent] approval: 清理 approval_id={} removed={}", approval_id, removed);
     }
 }

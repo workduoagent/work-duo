@@ -39,6 +39,19 @@ pub struct ApprovalRequest {
     pub hint: Option<String>,
 }
 
+/// 聊天附件（多模态图片），由前端随 `run_agent_task` 传入，注入当前轮 user 消息。
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AttachmentInput {
+    /// 附件类型（当前仅支持 image）。
+    #[serde(rename = "type")]
+    pub kind: String,
+    /// data URL（`data:image/<ext>;base64,...`）。
+    pub data_url: String,
+    #[serde(default)]
+    pub name: Option<String>,
+}
+
 /// 单个 agent 运行配置（由前端 run_agent_task 传入，或从 agent_info 读取）。
 #[derive(Debug, Clone, Default)]
 pub struct AgentRuntimeConfig {
@@ -55,4 +68,6 @@ pub struct AgentRuntimeConfig {
     pub skill_tools: Vec<SkillToolWrapper>, // 已绑定技能包装
     pub session_id: Option<String>, // 前端建好的会话 id（用于累计 input_token 与上下文压缩）
     pub round_id: Option<String>, // 前端建好的本轮 id（ReAct 循环结束后回填 raw_messages_json）
+    /// 当前轮用户消息附件（多模态图片；仅注入当轮，历史轮由 raw_messages_json 原样保留）。
+    pub attachments: Vec<AttachmentInput>,
 }

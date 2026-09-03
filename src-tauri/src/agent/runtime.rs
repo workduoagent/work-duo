@@ -115,6 +115,12 @@ impl AgentRuntime {
         let mut iteration = 0;
         loop {
             if iteration >= MAX_TOOL_ITERATIONS {
+                println!(
+                    "[agent] run_task: 触发最大工具循环熔断 iteration={} max={} messages={}，任务终止",
+                    iteration,
+                    MAX_TOOL_ITERATIONS,
+                    messages.len(),
+                );
                 events::emit_error(app, "已达最大工具调用次数，任务终止以防死循环");
                 break;
             }
@@ -123,20 +129,25 @@ impl AgentRuntime {
             // 裁剪历史（滑动窗口）
             let trimmed = trim_history(&messages);
 
-            // 调用 LLM
+            // 每轮仅调用一次 LLM（流式）：在 SSE 增量中同时聚合正文与 tool_calls。
+            // 旧架构是「非流式 call_llm 判断 + 流式 call_llm_stream 输出」两次调用同一 messages，
+            // 既浪费 token / 延迟，又因模型非确定性可能出现「第一次判终态、第二次却返回
+            // tool_calls（被流式解析忽略）」导致最终回答为空——历史回显「思考中」即源于此。
             let tools = registry.get_tools_for_llm();
             println!(
-                "[agent] run_task: 第 {} 轮，调用 LLM（模型={} 工具数={}）",
+                "[agent] run_task: 第 {} 轮，流式调用 LLM（模型={} 工具数={} 上下文={}条消息[裁剪前{}条]）",
                 iteration,
                 if cfg.llm_model_name.is_empty() {
                     "<无>"
                 } else {
                     cfg.llm_model_name.as_str()
                 },
-                tools.len()
+                tools.len(),
+                trimmed.len(),
+                messages.len(),
             );
-            let choice = match call_llm(&cfg, &trimmed, &tools).await {
-                Ok(c) => c,
+            let mut outcome = match call_llm_stream(app, &cfg, &trimmed, &tools).await {
+                Ok(o) => o,
                 Err(e) => {
                     println!("[agent] run_task: LLM 调用失败：{e}");
                     events::emit_task_error(app, &format!("LLM 调用失败：{e}"));
@@ -144,48 +155,105 @@ impl AgentRuntime {
                 }
             };
 
-            let content = choice.get("content").and_then(|v| v.as_str()).unwrap_or("");
-            let tool_calls = choice.get("tool_calls").and_then(|v| v.as_array()).cloned();
-
-            // 没有工具调用 → 终态：走真实 SSE 流式输出
-            if tool_calls.is_none() || tool_calls.as_ref().map(|t| t.is_empty()).unwrap_or(true) {
-                println!(
-                    "[agent] run_task: 第 {} 轮无工具调用，走 SSE 流式输出终态文本",
-                    iteration
-                );
-                let full = match call_llm_stream(app, &cfg, &trimmed, &tools).await {
-                    Ok(t) => t,
+            // 兜底：流式空响应（正文与 tool_calls 皆空）。个别网关不支持流式 tool_calls
+            // （模型想调工具但 delta 里不下发），此时回退一次非流式调用拿真实决策。
+            if outcome.content.trim().is_empty() && outcome.tool_calls.is_empty() {
+                println!("[agent] run_task: 流式空响应，回退非流式调用兜底");
+                match call_llm(&cfg, &trimmed, &tools).await {
+                    Ok(choice) => {
+                        outcome = StreamOutcome {
+                            content: choice
+                                .get("content")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("")
+                                .to_string(),
+                            reasoning: choice
+                                .get("reasoning")
+                                .and_then(|v| v.as_str())
+                                .or_else(|| choice.get("reasoning_content").and_then(|v| v.as_str()))
+                                .unwrap_or("")
+                                .to_string(),
+                            tool_calls: choice
+                                .get("tool_calls")
+                                .and_then(|v| v.as_array())
+                                .cloned()
+                                .unwrap_or_default(),
+                        };
+                    }
                     Err(e) => {
-                        println!("[agent] run_task: LLM 流式调用失败：{e}");
+                        println!("[agent] run_task: LLM 兜底调用失败：{e}");
                         events::emit_task_error(app, &format!("LLM 调用失败：{e}"));
                         return;
                     }
-                };
-                messages.push(json!({ "role": "assistant", "content": full }));
+                }
+            }
+
+            // LLM 本轮返回摘要（排错核心信息：模型到底决定了什么）
+            println!(
+                "[agent] run_task: 第 {} 轮 LLM 返回 | 正文={}字符 推理={}字符 tool_calls={}个{}",
+                iteration,
+                outcome.content.chars().count(),
+                outcome.reasoning.chars().count(),
+                outcome.tool_calls.len(),
+                if outcome.tool_calls.is_empty() {
+                    "（终态）".to_string()
+                } else {
+                    format!(
+                        "：[{}]",
+                        outcome
+                            .tool_calls
+                            .iter()
+                            .filter_map(|tc| tc.get("function"))
+                            .filter_map(|f| f.get("name"))
+                            .filter_map(|n| n.as_str())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    )
+                },
+            );
+
+            // 没有工具调用 → 终态：正文一次性推送（前端 useTypewriter 负责打字机呈现）
+            if outcome.tool_calls.is_empty() {
+                println!(
+                    "[agent] run_task: 第 {} 轮无工具调用，输出终态文本（{} 字符）：{}",
+                    iteration,
+                    outcome.content.chars().count(),
+                    clip(outcome.content.trim(), 200),
+                );
+                if !outcome.content.is_empty() {
+                    events::emit_text_chunk(app, &outcome.content, false);
+                }
+                events::emit_text_chunk(app, "", true);
+                messages.push(json!({ "role": "assistant", "content": outcome.content }));
                 break;
             }
 
-            // 有工具调用：逐条执行
-            messages.push(json!({ "role": "assistant", "content": content, "tool_calls": tool_calls }));
-
-            // 把模型在决定调用工具之前的「真实推理/思考」推送给前端，作为思考过程的内容
+            // 有工具调用：把模型在决定调用工具之前的「真实推理/思考」推送给前端
             // （content 多为模型的规划/分析文本；reasoning 为 DeepSeek 等风格的独立思考字段）。
-            // 替换原先硬编码的「正在分析需求…」等步骤口号，让用户看到 LLM 真正的思考。
-            if let Some(r) = choice.get("reasoning").and_then(|v| v.as_str()) {
-                let r = r.trim();
-                if !r.is_empty() {
-                    events::emit_status(app, r);
-                }
+            let reasoning_trim = outcome.reasoning.trim().to_string();
+            if !reasoning_trim.is_empty() {
+                events::emit_status(app, &reasoning_trim);
             }
-            let content_trim = content.trim();
+            let content_trim = outcome.content.trim().to_string();
             if !content_trim.is_empty() {
-                events::emit_status(app, content_trim);
+                events::emit_status(app, &content_trim);
             }
 
-            for tc in tool_calls.unwrap() {
-                let (call_id, tool_name, args) = match parse_tool_call(&tc) {
+            // 有工具调用：逐条执行
+            messages.push(json!({
+                "role": "assistant",
+                "content": outcome.content,
+                "tool_calls": outcome.tool_calls.clone()
+            }));
+
+            for tc in &outcome.tool_calls {
+                let (call_id, tool_name, args) = match parse_tool_call(tc) {
                     Some(x) => x,
                     None => {
+                        println!(
+                            "[agent] run_task: 工具调用格式无法解析，跳过 raw_tool_call={}",
+                            clip(&tc.to_string(), 500),
+                        );
                         events::emit_error(app, "工具调用格式无法解析，跳过");
                         continue;
                     }
@@ -194,10 +262,18 @@ impl AgentRuntime {
                 let tool = match registry.get(&tool_name) {
                     Some(t) => t,
                     None => {
+                        println!("[agent] run_task: 注册表找不到模型请求的工具 name={}", tool_name);
                         events::emit_error(app, &format!("未知工具：{tool_name}"));
                         continue;
                     }
                 };
+
+                println!(
+                    "[agent] run_task: 执行工具 {} (call_id={}) 参数={}",
+                    tool_name,
+                    call_id,
+                    clip(&serde_json::to_string(&args).unwrap_or_default(), 300),
+                );
 
                 // 构造步骤快照（running）
                 let step_id = call_id.clone();
@@ -227,7 +303,7 @@ impl AgentRuntime {
                     };
                     events::emit_awaiting_approval(app, &req);
                     let rx = self.approval.suspend(req).await;
-                    let outcome: ApprovalOutcome = match rx.await {
+                    let approval_outcome: ApprovalOutcome = match rx.await {
                         Ok(o) => o,
                         Err(_) => {
                             // 通道关闭（前端未响应 / 超时）：默认拒绝
@@ -238,8 +314,14 @@ impl AgentRuntime {
                             }
                         }
                     };
-                    if !outcome.approved {
-                        let reason = outcome.reason.unwrap_or_else(|| "用户拒绝".into());
+                    println!(
+                        "[agent] run_task: 审批完成 approval_id={} approved={} reason={}",
+                        approval_id,
+                        approval_outcome.approved,
+                        approval_outcome.reason.as_deref().unwrap_or("<无>"),
+                    );
+                    if !approval_outcome.approved {
+                        let reason = approval_outcome.reason.unwrap_or_else(|| "用户拒绝".into());
                         let finished = ToolStep {
                             call_id: step_id.clone(),
                             tool_name: tool_name.clone(),
@@ -281,9 +363,11 @@ impl AgentRuntime {
                 };
                 events::emit_tool_finished(app, &finished);
                 println!(
-                    "[agent] run_task: 工具 {tool_name} 执行完成 ok={} 耗时 {}ms",
+                    "[agent] run_task: 工具 {} 执行完成 ok={} 耗时={}ms 结果={}",
+                    tool_name,
                     result.is_ok(),
-                    t0.elapsed().as_millis()
+                    t0.elapsed().as_millis(),
+                    clip(&result_text, 400),
                 );
                 messages.push(json!({
                     "role": "tool",
@@ -301,6 +385,12 @@ impl AgentRuntime {
             let round_messages = &messages[round_base..];
             match serde_json::to_string(round_messages) {
                 Ok(raw_json) => {
+                    println!(
+                        "[agent] run_task: 回填 raw_messages_json（round={} 消息={}条 大小={}字符）",
+                        round_id,
+                        round_messages.len(),
+                        raw_json.chars().count(),
+                    );
                     crate::agent::round_compactor::persist_round_raw(app, round_id, &raw_json).await;
                 }
                 Err(e) => {
@@ -311,6 +401,8 @@ impl AgentRuntime {
                 crate::agent::round_compactor::bump_session_turns(app, sid).await;
                 crate::agent::round_compactor::trigger_background_compaction(app, &cfg, sid).await;
             }
+        } else {
+            println!("[agent] run_task: 无 round_id，跳过 raw_messages_json 回填与压缩触发");
         }
     }
 }
@@ -333,6 +425,7 @@ pub(crate) async fn call_llm(
         !cfg.llm_api_key.is_empty()
     );
 
+    let request_started = Instant::now();
     let client = reqwest::Client::new();
     let url = normalize_chat_url(&cfg.llm_base_url);
 
@@ -373,23 +466,43 @@ pub(crate) async fn call_llm(
         }
     }
 
-    let body_json = serde_json::to_string(&body).unwrap_or_default();
-    println!("[agent] call_llm: 请求体 =\n{body_json}");
+    let body_preview = serde_json::to_string(&sanitize_for_log(&body)).unwrap_or_default();
+    println!(
+        "[agent] call_llm: 请求体预览（已脱敏/截断）={} ",
+        clip(&body_preview, 5000)
+    );
 
     let mut req = client.post(&url).json(&body);
     if !cfg.llm_api_key.is_empty() {
         req = req.header("Authorization", format!("Bearer {}", cfg.llm_api_key));
     }
 
-    let resp = req.send().await.map_err(|e| format!("请求失败：{e}"))?;
-    if !resp.status().is_success() {
-        let status = resp.status();
+    let resp = req.send().await.map_err(|e| {
+        println!(
+            "[agent] call_llm: 请求失败（耗时={}ms）：{}",
+            request_started.elapsed().as_millis(),
+            e
+        );
+        format!("请求失败：{e}")
+    })?;
+    let status = resp.status();
+    println!(
+        "[agent] call_llm: 收到 HTTP {}（耗时={}ms）",
+        status,
+        request_started.elapsed().as_millis()
+    );
+    if !status.is_success() {
         let text = resp.text().await.unwrap_or_default();
-        // 完整输出错误体（不再截断），便于定位校验失败的具体字段
-        println!("[agent] call_llm: HTTP {status} 错误体 =\n{text}");
-        return Err(format!("HTTP {status}：{text}"));
+        let safe_text = clip(&sanitize_for_log(&Value::String(text.clone())).to_string(), 5000);
+        println!("[agent] call_llm: HTTP {} 错误体（已脱敏/截断）={}", status, safe_text);
+        return Err(format!("HTTP {}：{}", status, clip(&text, 2000)));
     }
     let data: Value = resp.json().await.map_err(|e| format!("响应解析失败：{e}"))?;
+    println!(
+        "[agent] call_llm: 非流式响应 JSON 大小={}字符 choices={} ",
+        data.to_string().chars().count(),
+        data.get("choices").and_then(|v| v.as_array()).map(|v| v.len()).unwrap_or(0)
+    );
     data.get("choices")
         .and_then(|c| c.as_array())
         .and_then(|c| c.first())
@@ -398,15 +511,31 @@ pub(crate) async fn call_llm(
         .ok_or_else(|| "LLM 响应缺少 choices[0].message".into())
 }
 
-/// 流式调用 LLM（SSE），逐 token 推送给前端并返回完整文本。
+/// 流式调用的聚合结果（一轮 ReAct 的 LLM 输出）。
+struct StreamOutcome {
+    /// 模型输出正文（终态轮为回答；工具轮多为规划/分析短文，可空）。
+    content: String,
+    /// 模型推理字段（DeepSeek 风格 `reasoning` / `reasoning_content`）。
+    reasoning: String,
+    /// 标准 OpenAI 格式的 tool_calls（流式增量已按 index 归并完整）。
+    tool_calls: Vec<Value>,
+}
+
+/// 流式调用 LLM（SSE）：聚合本轮的正文、推理与 tool_calls，返回给 ReAct 循环决策。
 ///
-/// 用于终态文本输出，让前端感受到真实打字机效果；工具判断仍走非流式 `call_llm`。
+/// 每轮仅这一次 HTTP 调用（替代旧架构「非流式判断 + 流式输出」的双调用）：
+///  - 正文 / 推理先缓冲，不边收边 emit —— 因为此时还不确定本轮是「终态回答」
+///    还是「工具轮规划」，二者去向不同（回答气泡 vs 思考面板），由调用方决定；
+///  - `delta.tool_calls` 是增量格式（首 chunk 带 id/name，后续仅带 arguments 片段），
+///    按 `index` 归并为完整的标准 tool_calls；
+///  - 调用方拿到空响应（正文与 tool_calls 皆空）时应回退非流式 `call_llm` 兜底。
 async fn call_llm_stream(
     app: &AppHandle,
     cfg: &AgentRuntimeConfig,
     messages: &[Value],
     tools: &[Value],
-) -> Result<String, String> {
+) -> Result<StreamOutcome, String> {
+    let _ = app; // 事件推送已上移到 ReAct 循环，本函数只做拉流聚合
     if cfg.llm_base_url.is_empty() || cfg.llm_model_name.is_empty() {
         return Err("智能体未绑定有效的 LLM（base_url / model_name 为空）".into());
     }
@@ -418,6 +547,7 @@ async fn call_llm_stream(
         !cfg.llm_api_key.is_empty()
     );
 
+    let request_started = Instant::now();
     let client = reqwest::Client::new();
     let url = normalize_chat_url(&cfg.llm_base_url);
 
@@ -456,6 +586,12 @@ async fn call_llm_stream(
         }
     }
 
+    let body_preview = serde_json::to_string(&sanitize_for_log(&body)).unwrap_or_default();
+    println!(
+        "[agent] call_llm_stream: 请求体预览（已脱敏/截断）={} ",
+        clip(&body_preview, 5000)
+    );
+
     let mut req = client.post(&url).json(&body);
     if !cfg.llm_api_key.is_empty() {
         req = req.header("Authorization", format!("Bearer {}", cfg.llm_api_key));
@@ -463,23 +599,48 @@ async fn call_llm_stream(
     // 部分网关需要显式声明 Accept: text/event-stream
     req = req.header("Accept", "text/event-stream");
 
-    let resp = req.send().await.map_err(|e| format!("请求失败：{e}"))?;
-    if !resp.status().is_success() {
-        let status = resp.status();
+    let resp = req.send().await.map_err(|e| {
+        println!(
+            "[agent] call_llm_stream: 请求失败（耗时={}ms）：{}",
+            request_started.elapsed().as_millis(),
+            e
+        );
+        format!("请求失败：{e}")
+    })?;
+    let status = resp.status();
+    println!(
+        "[agent] call_llm_stream: 收到 HTTP {}（耗时={}ms）",
+        status,
+        request_started.elapsed().as_millis()
+    );
+    if !status.is_success() {
         let text = resp.text().await.unwrap_or_default();
-        println!("[agent] call_llm_stream: HTTP {status} 错误体 =\n{text}");
-        return Err(format!("HTTP {status}：{text}"));
+        let safe_text = clip(&sanitize_for_log(&Value::String(text.clone())).to_string(), 5000);
+        println!(
+            "[agent] call_llm_stream: HTTP {} 错误体（已脱敏/截断）={}",
+            status, safe_text
+        );
+        return Err(format!("HTTP {}：{}", status, clip(&text, 2000)));
     }
 
+    let mut stream = resp.bytes_stream();
     // 跨 chunk 字节缓冲：SSE 的 `data:` 行可能被 TCP 分片切到不同 chunk，
-    // 旧逻辑按 chunk 直接 lines() 会把半截 JSON 拿去解析 → "EOF while parsing" 报错。
     // 这里累积原始字节，仅处理以 `\n` 结尾的完整行；多字节 UTF-8 字符也只在整行
     // 转换时解析，避免被分片截断成乱码（如中文 content 被切坏）。
-    let mut stream = resp.bytes_stream();
     let mut buf: Vec<u8> = Vec::new();
-    let mut full = String::new();
+    let mut content = String::new();
+    let mut reasoning = String::new();
+    let mut chunk_count = 0usize;
+    let mut line_count = 0usize;
+    let mut parse_error_count = 0usize;
+    // tool_calls 增量归并：index -> (id, name, arguments 片段拼接)
+    let mut tc_acc: std::collections::BTreeMap<u64, (String, String, String)> = Default::default();
     while let Some(chunk_result) = stream.next().await {
-        let chunk = chunk_result.map_err(|e| format!("流读取失败：{e}"))?;
+        let chunk = chunk_result.map_err(|e| {
+            println!("[agent] call_llm_stream: SSE 流读取失败（已耗时={}ms）：{}", request_started.elapsed().as_millis(), e);
+            format!("流读取失败：{e}")
+        })?;
+        chunk_count += 1;
         buf.extend_from_slice(&chunk);
         // 处理缓冲区中所有以 \n 结尾的完整行
         while let Some(pos) = buf.iter().position(|&b| b == b'\n') {
@@ -488,6 +649,7 @@ async fn call_llm_stream(
             if line_bytes.last() == Some(&b'\r') {
                 line_bytes.pop(); // 去掉可能的 \r
             }
+            line_count += 1;
             let line = String::from_utf8_lossy(&line_bytes);
             let line = line.trim();
             if line.is_empty() || !line.starts_with("data:") {
@@ -499,16 +661,17 @@ async fn call_llm_stream(
             }
             match serde_json::from_str::<Value>(data) {
                 Ok(json) => {
-                    if let Some(content) = extract_delta_content(&json) {
-                        if !content.is_empty() {
-                            full.push_str(content);
-                            events::emit_text_chunk(app, content, false);
-                        }
-                    }
+                    absorb_stream_delta(&json, &mut content, &mut reasoning, &mut tc_acc);
                 }
                 Err(e) => {
+                    parse_error_count += 1;
                     // 整行已缓冲完整，正常不应再出现半截 JSON；若仍出现仅记录，不中断流。
-                    println!("[agent] call_llm_stream: SSE JSON 解析失败：{e}，data={data}");
+                    println!(
+                        "[agent] call_llm_stream: SSE JSON 解析失败 #{}：{}，data={}",
+                        parse_error_count,
+                        e,
+                        clip(data, 500),
+                    );
                 }
             }
         }
@@ -521,18 +684,82 @@ async fn call_llm_stream(
             let data = line.trim_start_matches("data:").trim();
             if data != "[DONE]" {
                 if let Ok(json) = serde_json::from_str::<Value>(data) {
-                    if let Some(content) = extract_delta_content(&json) {
-                        if !content.is_empty() {
-                            full.push_str(content);
-                            events::emit_text_chunk(app, content, false);
-                        }
-                    }
+                    absorb_stream_delta(&json, &mut content, &mut reasoning, &mut tc_acc);
                 }
             }
         }
     }
-    events::emit_text_chunk(app, "", true);
-    Ok(full)
+
+    // 归并后的增量 tool_calls → 标准 OpenAI 格式（与 parse_tool_call 期望一致）
+    let tool_calls: Vec<Value> = tc_acc
+        .into_iter()
+        .map(|(idx, (id, name, args))| {
+            json!({
+                "id": if id.is_empty() { format!("call_stream_{idx}") } else { id },
+                "type": "function",
+                "function": { "name": name, "arguments": args }
+            })
+        })
+        .collect();
+
+    println!(
+        "[agent] call_llm_stream: SSE 聚合完成 chunks={} lines={} parse_errors={} content={}字符 reasoning={}字符 tool_calls={} 总耗时={}ms",
+        chunk_count,
+        line_count,
+        parse_error_count,
+        content.chars().count(),
+        reasoning.chars().count(),
+        tool_calls.len(),
+        request_started.elapsed().as_millis(),
+    );
+    Ok(StreamOutcome {
+        content,
+        reasoning,
+        tool_calls,
+    })
+}
+
+/// 吸收一个 SSE `chat.completion.chunk`：聚合 `delta.content`、`delta.reasoning`（含
+/// `reasoning_content` 别名）与 `delta.tool_calls` 增量（按 index 归并 id/name/arguments）。
+fn absorb_stream_delta(
+    json: &Value,
+    content: &mut String,
+    reasoning: &mut String,
+    tc_acc: &mut std::collections::BTreeMap<u64, (String, String, String)>,
+) {
+    let delta = json
+        .get("choices")
+        .and_then(|c| c.as_array())
+        .and_then(|c| c.first())
+        .and_then(|c| c.get("delta"));
+    let Some(delta) = delta else { return };
+
+    if let Some(c) = delta.get("content").and_then(|v| v.as_str()) {
+        content.push_str(c);
+    }
+    // DeepSeek 等风格的推理字段（两种命名兼容）
+    for key in ["reasoning", "reasoning_content"] {
+        if let Some(r) = delta.get(key).and_then(|v| v.as_str()) {
+            reasoning.push_str(r);
+        }
+    }
+    if let Some(tcs) = delta.get("tool_calls").and_then(|v| v.as_array()) {
+        for tc in tcs {
+            let idx = tc.get("index").and_then(|v| v.as_u64()).unwrap_or(0);
+            let entry = tc_acc.entry(idx).or_default();
+            if let Some(id) = tc.get("id").and_then(|v| v.as_str()) {
+                entry.0 = id.to_string();
+            }
+            if let Some(f) = tc.get("function") {
+                if let Some(n) = f.get("name").and_then(|v| v.as_str()) {
+                    entry.1.push_str(n);
+                }
+                if let Some(a) = f.get("arguments").and_then(|v| v.as_str()) {
+                    entry.2.push_str(a);
+                }
+            }
+        }
+    }
 }
 
 /// 把 base_url 规整为 `/chat/completions` 端点（兼容用户填 `/v1` 或完整地址）。
@@ -550,16 +777,6 @@ fn normalize_chat_url(base: &str) -> String {
 }
 
 /* ----------------------------- 工具辅助 ----------------------------- */
-
-/// 从 SSE `chat.completion.chunk` 的 JSON 中提取 `choices[0].delta.content` 文本。
-fn extract_delta_content(json: &Value) -> Option<&str> {
-    json.get("choices")
-        .and_then(|c| c.as_array())
-        .and_then(|c| c.first())
-        .and_then(|c| c.get("delta"))
-        .and_then(|d| d.get("content"))
-        .and_then(|c| c.as_str())
-}
 
 fn parse_tool_call(tc: &Value) -> Option<(String, String, Value)> {
     let id = tc.get("id").and_then(|v| v.as_str())?.to_string();
@@ -603,5 +820,61 @@ pub(crate) fn now_ms() -> i64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
         .unwrap_or(0)
+}
+
+/// 递归生成安全日志视图：保留请求结构，但不输出密钥、鉴权信息或图片 base64。
+fn sanitize_for_log(value: &Value) -> Value {
+    match value {
+        Value::Object(map) => {
+            let mut out = serde_json::Map::new();
+            for (key, child) in map {
+                let normalized = key.to_ascii_lowercase().replace('-', "_");
+                let sensitive = matches!(
+                    normalized.as_str(),
+                    "api_key"
+                        | "apikey"
+                        | "api_secret"
+                        | "apisecret"
+                        | "access_token"
+                        | "accesstoken"
+                        | "authorization"
+                        | "cookie"
+                        | "client_secret"
+                        | "clientsecret"
+                ) || normalized == "token"
+                    || normalized.ends_with("_secret")
+                    || normalized.ends_with("_token")
+                    || normalized == "data_url"
+                    || normalized == "dataurl"
+                    || normalized == "image_url"
+                    || child
+                        .as_str()
+                        .map(|s| s.starts_with("data:image/") || s.len() > 20000)
+                        .unwrap_or(false);
+                if sensitive {
+                    let size = child
+                        .as_str()
+                        .map(|s| s.chars().count())
+                        .unwrap_or_else(|| child.to_string().chars().count());
+                    out.insert(key.clone(), json!(format!("<已脱敏，原长度{}字符>", size)));
+                } else {
+                    out.insert(key.clone(), sanitize_for_log(child));
+                }
+            }
+            Value::Object(out)
+        }
+        Value::Array(items) => Value::Array(items.iter().map(sanitize_for_log).collect()),
+        other => other.clone(),
+    }
+}
+
+/// 日志截断：超长内容截取前 `max` 个字符并附原始长度（避免大段工具结果刷屏）。
+pub(crate) fn clip(s: &str, max: usize) -> String {
+    let total = s.chars().count();
+    if total <= max {
+        s.to_string()
+    } else {
+        format!("{}…(共{}字符)", s.chars().take(max).collect::<String>(), total)
+    }
 }
 

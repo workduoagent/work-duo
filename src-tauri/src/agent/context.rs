@@ -15,6 +15,7 @@
 //!  - [Slot 3..M] 活跃窗口轮次（raw_messages_json 原样还原）
 //!  - [Slot M+1] 当前提问
 
+use serde_json::json;
 use serde_json::Value;
 use sqlx::Row;
 use tauri::AppHandle;
@@ -23,7 +24,59 @@ use crate::agent::round_compactor::build_request_messages;
 use crate::agent::round_compactor::get_pool;
 use crate::agent::round_compactor::ConversationRoundRecord;
 use crate::agent::types::AgentRuntimeConfig;
+use crate::agent::types::AttachmentInput;
 use crate::agent::wd_mem;
+
+/// 统计消息序列的总字符数（日志用，粗估上下文体量）。
+fn messages_chars(messages: &[Value]) -> usize {
+    messages
+        .iter()
+        .map(|m| {
+            m.get("content")
+                .map(|c| match c {
+                    Value::String(s) => s.chars().count(),
+                    other => other.to_string().chars().count(),
+                })
+                .unwrap_or(0)
+        })
+        .sum()
+}
+
+/// 把当前轮多模态附件（图片）注入最后一条 user 消息：
+/// content 由纯文本改写为 OpenAI 多模态数组 `[{type:text},{type:image_url}...]`。
+/// 无附件时原样返回（content 保持字符串，兼容纯文本模型）。
+fn inject_attachments(messages: &mut Vec<Value>, attachments: &[AttachmentInput]) {
+    let image_parts: Vec<Value> = attachments
+        .iter()
+        .filter(|a| a.kind == "image" && !a.data_url.is_empty())
+        .map(|a| json!({ "type": "image_url", "image_url": { "url": a.data_url } }))
+        .collect();
+    if image_parts.is_empty() {
+        return;
+    }
+    if let Some(last) = messages.last_mut() {
+        if last.get("role").and_then(|v| v.as_str()) == Some("user") {
+            let text = last
+                .get("content")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let names: Vec<&str> = attachments
+                .iter()
+                .filter(|a| a.kind == "image" && !a.data_url.is_empty())
+                .map(|a| a.name.as_deref().unwrap_or("<未命名>"))
+                .collect();
+            let mut parts = vec![json!({ "type": "text", "text": text })];
+            parts.extend(image_parts);
+            last["content"] = json!(parts);
+            println!(
+                "[agent] context: 已注入 {} 张图片到当前轮 user 消息（多模态）：[{}]",
+                names.len(),
+                names.join(", "),
+            );
+        }
+    }
+}
 
 /// 组装发送给 LLM 的 `messages`（纯读路径；压缩在后台异步进行，不在此阻塞）。
 pub(crate) async fn build_context_messages(
@@ -35,7 +88,10 @@ pub(crate) async fn build_context_messages(
     let sid = match &cfg.session_id {
         Some(s) => s.clone(),
         None => {
-            return Ok(build_request_messages(&cfg.system_prompt, None, None, &[], prompt));
+            println!("[agent] context: 无 session_id，仅装配 [system + 当前提问]（不含历史）");
+            let mut m = build_request_messages(&cfg.system_prompt, None, None, &[], prompt);
+            inject_attachments(&mut m, &cfg.attachments);
+            return Ok(m);
         }
     };
 
@@ -139,11 +195,30 @@ pub(crate) async fn build_context_messages(
         })
         .collect();
 
-    Ok(build_request_messages(
+    let mut messages = build_request_messages(
         &system_prompt,
         project_memory.as_deref(),
         session_summary.as_deref(),
         &records,
         prompt,
-    ))
+    );
+    inject_attachments(&mut messages, &cfg.attachments);
+
+    // 装配链路日志：各 Slot 体量 + 最终规模，便于排错时确认上下文构成。
+    println!(
+        "[agent] context: 装配完成 session={} | Slot0 系统提示={}字符(custom_rules={}) | Slot1 项目记忆={} | Slot2 摘要={} | 活跃轮次={}(起始round_index={}) | 当前提问={}字符 附件={} | 最终 messages={}条/约{}字符",
+        sid,
+        system_prompt.chars().count(),
+        custom_rules.as_ref().map(|r| r.chars().count()).unwrap_or(0),
+        project_memory.as_ref().map(|m| format!("{}字符", m.chars().count())).unwrap_or_else(|| "无".into()),
+        session_summary.as_ref().map(|s| format!("{}字符", s.chars().count())).unwrap_or_else(|| "无".into()),
+        records.len(),
+        last_compact + 1,
+        prompt.chars().count(),
+        cfg.attachments.len(),
+        messages.len(),
+        messages_chars(&messages),
+    );
+
+    Ok(messages)
 }

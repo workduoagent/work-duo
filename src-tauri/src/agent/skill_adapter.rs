@@ -61,11 +61,24 @@ impl AgentTool for SkillToolWrapper {
             .get("task")
             .and_then(|v| v.as_str())
             .unwrap_or("<未提供任务>");
+        println!(
+            "[agent] skill__{}: 开始 skill_name={} task={}",
+            self.skill_id,
+            self.skill_name,
+            crate::agent::runtime::clip(task, 500),
+        );
         // 当前为只读包装：返回技能说明，真实执行后续接入业务核心。
-        Ok(format!(
+        let result = format!(
             "技能『{}』（id={}）已接收任务：{}\n（只读包装模式：真实业务执行待接入）",
             self.skill_name, self.skill_id, task
-        ))
+        );
+        println!(
+            "[agent] skill__{}: 完成 result={}字符 内容={}",
+            self.skill_id,
+            result.chars().count(),
+            crate::agent::runtime::clip(&result, 500),
+        );
+        Ok(result)
     }
 }
 

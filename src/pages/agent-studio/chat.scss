@@ -456,6 +456,15 @@
     line-height: 1.5;
     max-height: 420px;
     overflow: auto;
+    // 滚动限制在面板内部，穿透到底/顶后不连带滚动外层消息流
+    overscroll-behavior: contain;
+
+    // 关键：flex 列容器内子项默认 min-height:auto，但带 overflow 的子项（如 .tool-step
+    // 的 overflow:hidden）按规范计算为 0 → 子项被 flex-shrink 纵向压缩而非溢出，
+    // 内容被裁剪且滚动条不出现。禁止压缩后内容自然溢出，overflow:auto 才会出滚动条。
+    > * {
+      flex-shrink: 0;
+    }
 
     .dark & {
       background: #161616;

@@ -45,6 +45,9 @@ pub struct RunAgentTaskInput {
     /// 本轮临时禁用的单个 MCP 工具 id 列表（仅会话内有效，不写库）。键为 mcp_tool_definition.id。
     #[serde(default)]
     pub disabled_mcp_tool_ids: Option<Vec<String>>,
+    /// 本轮用户消息附件（多模态图片）。前端契约 { type, dataUrl, name? }。
+    #[serde(default)]
+    pub attachments: Option<Vec<crate::agent::types::AttachmentInput>>,
 }
 
 /// 启动一轮智能体任务。
@@ -63,14 +66,16 @@ pub async fn run_agent_task(
         input.disabled_skill_ids.clone(),
         input.disabled_mcp_ids.clone(),
         input.disabled_mcp_tool_ids.clone(),
+        input.attachments.clone(),
     )
     .await?;
 
     println!(
-        "[agent] run_agent_task 收到请求: agent_id={} prompt_len={} workspace={:?}",
+        "[agent] run_agent_task 收到请求: agent_id={} prompt_len={} workspace={:?} 附件数={}",
         input.agent_id,
         input.prompt.chars().count(),
-        input.workspace
+        input.workspace,
+        input.attachments.as_ref().map(|a| a.len()).unwrap_or(0),
     );
 
     let app_clone = app.clone();
@@ -116,6 +121,7 @@ async fn load_config(
     disabled_skill_ids: Option<Vec<String>>,
     disabled_mcp_ids: Option<Vec<String>>,
     disabled_mcp_tool_ids: Option<Vec<String>>,
+    attachments: Option<Vec<crate::agent::types::AttachmentInput>>,
 ) -> Result<AgentRuntimeConfig, String> {
     let instances = app.state::<DbInstances>();
     let guard = instances.0.read().await;
@@ -294,13 +300,15 @@ async fn load_config(
         .collect();
 
     println!(
-        "[agent] load_config 完成: llm_id={} model={} mcp_tools={} skill_tools={} auto_exec={} sandbox={}",
+        "[agent] load_config 完成: llm_id={} model={} mcp_tools={} skill_tools={} auto_exec={} sandbox={} system_prompt={}字符 附件数={}",
         if llm_id.is_empty() { "<无>" } else { llm_id.as_str() },
         if llm_model_name.is_empty() { "<无>" } else { llm_model_name.as_str() },
         mcp_tools.len(),
         skill_tools.len(),
         get_i64(&row, "auto_tool_exec_mode") == 1,
         get_i64(&row, "allow_sandbox") == 1,
+        get_str(&row, "system_prompt").chars().count(),
+        attachments.as_ref().map(|a| a.len()).unwrap_or(0),
     );
 
     Ok(AgentRuntimeConfig {
@@ -317,5 +325,6 @@ async fn load_config(
         skill_tools,
         session_id,
         round_id,
+        attachments: attachments.unwrap_or_default(),
     })
 }
