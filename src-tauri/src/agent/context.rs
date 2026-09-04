@@ -10,8 +10,8 @@
 //!
 //! 分层记忆装配（对应《双轨持久化与分层记忆》上下文流水线）：
 //!  - [Slot 0] 静态系统提示 + 工程 `custom_rules`（若有工程绑定且非空）
-//!  - [Slot 1] 项目长期记忆 `.wd_mem/project_memory.md`（仅工程绑定时注入）
-//!  - [Slot 2] 会话滚动摘要：工程绑定时优先读 `.wd_mem/sessions/{id}.summary.md`，否则回退 DB `summary`
+//!  - [Slot 0] 项目长期记忆 `.wd_mem/MEMORY.md` 已由 `load_config` 全量注入系统提示（仅工程绑定时存在）
+//!  - [Slot 1] 会话滚动摘要：工程绑定时优先读 `.wd_mem/sessions/{id}.summary.md`，否则回退 DB `summary`
 //!  - [Slot 3..M] 活跃窗口轮次（raw_messages_json 原样还原）
 //!  - [Slot M+1] 当前提问
 
@@ -150,13 +150,8 @@ pub(crate) async fn build_context_messages(
         }
     }
 
-    // [Slot 1] 项目长期记忆（首次进入确保 .wd_mem 结构就绪，并读取 project_memory.md）。
-    let project_memory: Option<String> = if let Some(root) = &project_root {
-        let _ = wd_mem::ensure_wd_mem(root);
-        wd_mem::read_project_memory(root)
-    } else {
-        None
-    };
+    // 注：项目长期记忆 MEMORY.md 已在 load_config 注入 Slot 0（系统提示），本读路径不再重复，
+    // 仅负责「会话滚动摘要」+ 活跃窗口轮次，避免重复注入爆上下文。
 
     // [Slot 2] 会话滚动摘要：工程绑定优先读 .wd_mem/sessions/{id}.summary.md，否则回退 DB summary。
     let session_summary: Option<String> = match &project_root {
@@ -197,7 +192,7 @@ pub(crate) async fn build_context_messages(
 
     let mut messages = build_request_messages(
         &system_prompt,
-        project_memory.as_deref(),
+        None,
         session_summary.as_deref(),
         &records,
         prompt,
@@ -210,7 +205,7 @@ pub(crate) async fn build_context_messages(
         sid,
         system_prompt.chars().count(),
         custom_rules.as_ref().map(|r| r.chars().count()).unwrap_or(0),
-        project_memory.as_ref().map(|m| format!("{}字符", m.chars().count())).unwrap_or_else(|| "无".into()),
+        "已并入Slot0(系统提示)".to_string(),
         session_summary.as_ref().map(|s| format!("{}字符", s.chars().count())).unwrap_or_else(|| "无".into()),
         records.len(),
         last_compact + 1,

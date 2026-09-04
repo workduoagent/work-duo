@@ -133,6 +133,58 @@ impl PathGuard {
         }
         Ok(normalized)
     }
+
+    /// TOCTOU 二次确认：文件句柄已打开后，确认其真实物理路径未逃逸出 workspace。
+    ///
+    /// - Unix：基于文件描述符解析 `/proc/self/fd/<fd>` 的真实路径（强保证，可捕获 symlink 替换）；
+    /// - Windows：无 `/proc/self/fd`，退化为对 abs 重新 canonicalize 并与 workspace 比对
+    ///   （仍优于单次 `check` 校验，能捕获 open 前的 symlink 替换窗口）。
+    pub fn verify_opened(
+        abs: &Path,
+        file: &std::fs::File,
+        ctx: &ToolContext,
+    ) -> Result<(), ToolError> {
+        let ws = ctx
+            .workspace
+            .as_ref()
+            .ok_or_else(|| ToolError::PermissionDenied("未设置工作空间，文件操作被拒绝".into()))?;
+        let real = resolve_real_path(abs, file)?;
+        let ws_norm = std::fs::canonicalize(ws).unwrap_or_else(|_| ws.clone());
+        let r = normalize_for_guard(&real);
+        let w = normalize_for_guard(&ws_norm);
+        if r != w && !r.starts_with(&w) {
+            return Err(ToolError::PermissionDenied(format!(
+                "TOCTOU 检测：文件真实路径 {:?} 逃逸工作空间 {:?}",
+                real, ws_norm
+            )));
+        }
+        Ok(())
+    }
+}
+
+/// 解析已打开文件句柄的真实物理路径（平台相关），供 `verify_opened` 做边界比对。
+#[cfg(unix)]
+fn resolve_real_path(abs: &Path, file: &std::fs::File) -> Result<PathBuf, ToolError> {
+    let _ = abs;
+    use std::os::unix::io::AsRawFd;
+    let fd = file.as_raw_fd();
+    std::fs::canonicalize(format!("/proc/self/fd/{}", fd))
+        .map_err(|e| ToolError::PermissionDenied(format!("TOCTOU：无法解析 fd 真实路径：{e}")))
+}
+
+#[cfg(windows)]
+fn resolve_real_path(abs: &Path, _file: &std::fs::File) -> Result<PathBuf, ToolError> {
+    let _ = abs;
+    std::fs::canonicalize(abs)
+        .map_err(|e| ToolError::PermissionDenied(format!("TOCTOU：无法确认文件真实路径：{e}")))
+}
+
+#[cfg(not(any(unix, windows)))]
+fn resolve_real_path(abs: &Path, _file: &std::fs::File) -> Result<PathBuf, ToolError> {
+    let _ = abs;
+    Err(ToolError::PermissionDenied(
+        "当前平台不支持文件描述符级 TOCTOU 校验".into(),
+    ))
 }
 
 /// 路径比较前的归一化：剥离 Windows 的 `\\?\` 前缀（verbatim 前缀），Windows 下转小写，

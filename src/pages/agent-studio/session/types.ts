@@ -60,6 +60,31 @@ export interface ApprovalRequest {
   hint?: string
 }
 
+/** 规划步骤状态（进度条渲染用）。 */
+export type PlanStepStatus = 'pending' | 'running' | 'success' | 'failed'
+
+/** 单个规划步骤（三层流水线：阶段二规划产物的进度条数据源）。 */
+export interface PlanStep {
+  step: number
+  taskId?: string
+  title: string
+  description?: string
+  status: PlanStepStatus
+  /** 步骤产物摘要（step_finished 时回填）。 */
+  summary?: string
+}
+
+/** 规划/步骤视图（plan_generated / step_started / step_finished 事件携带）。 */
+export interface PlanView {
+  goalSummary?: string
+  tasks?: PlanStep[]
+  step?: number
+  total?: number
+  title?: string
+  status?: PlanStepStatus
+  summary?: string
+}
+
 /** `agent-event` 的负载（按 `type` 区分具体事件）。 */
 export interface AgentEvent {
   type:
@@ -69,6 +94,9 @@ export interface AgentEvent {
     | 'text_done' // 模型一段完整回复结束
     | 'status' // 运行状态文本（如「正在规划…」「正在检索知识库」）
     | 'error' // 单步错误（非致命，记入气泡）
+    | 'plan_generated' // 三层流水线：阶段二规划生成（渲染步骤进度条）
+    | 'step_started' // 子任务开始（对应步骤置 running）
+    | 'step_finished' // 子任务结束（对应步骤置 success/failed，带产物摘要）
   /** 工具步骤（tool_started / tool_finished 时使用）。 */
   step?: ToolStep
   /** 文本片段（text_chunk 时使用）。 */
@@ -77,6 +105,8 @@ export interface AgentEvent {
   message?: string
   /** 事件序号（Rust 自增，前端可用于去重/排序，可选）。 */
   seq?: number
+  /** 规划/步骤视图（plan_generated / step_started / step_finished 时使用）。 */
+  plan?: PlanView
 }
 
 /** Tauri 侧的审批结果回传（前端调用 `submit_approval_decision` 时携带）。 */

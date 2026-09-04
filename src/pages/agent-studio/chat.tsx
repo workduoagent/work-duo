@@ -56,9 +56,20 @@ import {
   FilePen,
   FolderEdit,
   Unlink,
+  ListChecks,
+  CheckCircle2,
+  XCircle,
+  Loader2,
+  Circle,
+  File,
+  FileText,
+  FileSpreadsheet,
+  FileCode,
+  FileImage,
 } from 'lucide-react'
 import { createPortal } from 'react-dom'
 import { appDataDir, resourceDir } from '@tauri-apps/api/path'
+import { openPath } from '@tauri-apps/plugin-opener'
 import { open } from '@tauri-apps/plugin-dialog'
 import { Button, Switch, Modal, Input } from '@/components/ui'
 import { Avatar } from '@/components/ui/AvatarGroup'
@@ -99,7 +110,7 @@ import { MarkdownRenderer } from '@/components/markdown/MarkdownRenderer'
 import { useAgentSession } from './session/useAgentSession'
 import { ToolStepCard } from './session/ToolStepCard'
 import { ApprovalNotify } from './session/ApprovalNotify'
-import type { ApprovalDecision, ToolStep, ChatAttachmentInput } from './session/types'
+import type { ApprovalDecision, ToolStep, ChatAttachmentInput, PlanStep } from './session/types'
 import type {
   AgentInfo,
   AgentConversationSession,
@@ -231,6 +242,193 @@ function ThoughtPanel({
           ))}
         </div>
       )}
+    </div>
+  )
+}
+
+/** 三层流水线：任务步骤进度条（阶段二规划生成后展示，运行中实时更新步骤状态）。
+ *  - 每步标题常显；完成/失败后的「结果汇报 / 异常汇报」默认折叠，点击展开，避免任务区被长文本撑开。 */
+function PlanStepsBar({ steps }: { steps: PlanStep[] }) {
+  const [openSteps, setOpenSteps] = useState<Record<number, boolean>>({})
+  if (steps.length === 0) return null
+  const doneCount = steps.filter((s) => s.status === 'success').length
+  return (
+    <div className="agent-chat__plan">
+      <div className="agent-chat__plan-title">
+        <ListChecks size={14} />
+        <span>
+          任务步骤（{doneCount}/{steps.length}）
+        </span>
+      </div>
+      <ol className="agent-chat__plan-list">
+        {steps.map((s) => {
+          const open = !!openSteps[s.step]
+          const hasSummary = !!s.summary
+          return (
+            <li
+              key={s.step}
+              className={`agent-chat__plan-step agent-chat__plan-step--${s.status}${
+                hasSummary ? ' is-expandable' : ''
+              }`}
+            >
+              <span className="agent-chat__plan-icon">
+                {s.status === 'success' ? (
+                  <CheckCircle2 size={14} />
+                ) : s.status === 'failed' ? (
+                  <XCircle size={14} />
+                ) : s.status === 'running' ? (
+                  <Loader2 size={14} className="agent-chat__plan-spin" />
+                ) : (
+                  <Circle size={14} />
+                )}
+              </span>
+              <div className="agent-chat__plan-body">
+                <button
+                  type="button"
+                  className="agent-chat__plan-head"
+                  onClick={() => hasSummary && setOpenSteps((o) => ({ ...o, [s.step]: !open }))}
+                >
+                  <span>
+                    步骤 {s.step}：{s.title}
+                  </span>
+                  {hasSummary && (
+                    <span className="agent-chat__plan-toggle">
+                      {open ? '收起汇报' : s.status === 'failed' ? '查看异常' : '查看汇报'}
+                      <ChevronRight size={12} className={`agent-chat__plan-caret${open ? ' is-open' : ''}`} />
+                    </span>
+                  )}
+                </button>
+                {open && hasSummary && (
+                  <div className="agent-chat__plan-summary">{s.summary}</div>
+                )}
+              </div>
+            </li>
+          )
+        })}
+      </ol>
+    </div>
+  )
+}
+
+/* ------------------------------------------------------------------ *
+ * 对话中的文件路径卡片：自动识别 Agent 回复里的文件路径，以内联卡片展示。
+ * ---------------------------------------------------------------- */
+
+/** 匹配 Windows / Unix / 相对路径（要求带扩展名，避免把 URL 当路径）。 */
+const FILE_PATH_RE =
+  /(?<!:\/\/)(?<![a-zA-Z]:\/\/)\b(?:[A-Za-z]:[\\/](?:[^<>:"|?*\n\r]+[\\/])*[^<>:"|?*\n\r]+\.\w{2,10}|(?:\/|\.{0,2}\/)(?:[^<>\n\r]+\/)*[^<>\n\r]+\.\w{2,10})/g
+
+const FILE_IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico'])
+const FILE_SPREADSHEET_EXTS = new Set(['xlsx', 'xls', 'csv', 'tsv'])
+const FILE_TEXT_EXTS = new Set(['md', 'txt', 'doc', 'docx', 'pdf', 'rtf'])
+const FILE_CODE_EXTS = new Set([
+  'json',
+  'yaml',
+  'yml',
+  'toml',
+  'xml',
+  'py',
+  'js',
+  'ts',
+  'tsx',
+  'jsx',
+  'rs',
+  'go',
+  'java',
+  'c',
+  'cpp',
+  'h',
+  'cs',
+  'php',
+  'rb',
+])
+
+function fileIconAndColor(ext: string): { icon: React.ElementType; color: string } {
+  const e = ext.toLowerCase()
+  if (FILE_SPREADSHEET_EXTS.has(e)) {
+    return { icon: FileSpreadsheet, color: 'var(--color-success)' }
+  }
+  if (FILE_IMAGE_EXTS.has(e)) {
+    return { icon: FileImage, color: 'var(--color-primary)' }
+  }
+  if (FILE_TEXT_EXTS.has(e)) {
+    return { icon: FileText, color: 'var(--color-foreground-muted)' }
+  }
+  if (FILE_CODE_EXTS.has(e)) {
+    return { icon: FileCode, color: 'var(--color-brand-600)' }
+  }
+  return { icon: File, color: 'var(--color-foreground-muted)' }
+}
+
+function extractFilePaths(content: string): string[] {
+  const matches = Array.from(content.matchAll(FILE_PATH_RE))
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const m of matches) {
+    // 去除末尾标点，避免把 markdown 句尾标点纳入路径
+    let raw = m[0].replace(/[.,;:)\}\]>`]+$/, '')
+    if (!raw) continue
+    // 排除 URL 片段：若匹配前紧邻 http(s):// 则跳过
+    const prefix = content.slice(Math.max(0, m.index - 10), m.index)
+    if (/https?:\/\/$/i.test(prefix)) continue
+    // 统一处理 Windows 反斜杠为展示用原始值；仅当确实像路径才保留
+    if (!/[\\/]/.test(raw) && !/^[A-Za-z]:/.test(raw)) continue
+    if (seen.has(raw)) continue
+    seen.add(raw)
+    out.push(raw)
+  }
+  return out
+}
+
+/** 文件路径卡片：显示文件名、扩展名、类型图标，点击用系统默认应用打开。 */
+function FilePathCard({ path }: { path: string }) {
+  const { message } = useNotify()
+  const slashIdx = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'))
+  const fileName = slashIdx >= 0 ? path.slice(slashIdx + 1) : path
+  const extDot = fileName.lastIndexOf('.')
+  const ext = extDot > 0 ? fileName.slice(extDot + 1) : ''
+  const displayName = extDot > 0 ? fileName.slice(0, extDot) : fileName
+  const { icon: Icon, color } = fileIconAndColor(ext)
+
+  const handleOpen = useCallback(async () => {
+    if (!isTauri) {
+      message.info('浏览器环境无法打开本地文件')
+      return
+    }
+    try {
+      await openPath(path)
+    } catch (e) {
+      message.error(`打开文件失败：${e instanceof Error ? e.message : String(e)}`)
+    }
+  }, [path, message])
+
+  return (
+    <button
+      type="button"
+      className="agent-chat__file-card"
+      title={`打开：${path}`}
+      onClick={handleOpen}
+    >
+      <span className="agent-chat__file-icon" style={{ color }}>
+        <Icon size={22} />
+      </span>
+      <span className="agent-chat__file-info">
+        <span className="agent-chat__file-name">{displayName}</span>
+        {ext && <span className="agent-chat__file-ext">.{ext}</span>}
+      </span>
+    </button>
+  )
+}
+
+/** 单条消息的文件卡片列表（仅在存在可识别路径时渲染）。 */
+function FilePathCards({ content }: { content: string }) {
+  const paths = useMemo(() => extractFilePaths(content), [content])
+  if (paths.length === 0) return null
+  return (
+    <div className="agent-chat__file-cards">
+      {paths.map((p) => (
+        <FilePathCard key={p} path={p} />
+      ))}
     </div>
   )
 }
@@ -827,6 +1025,8 @@ export default function AgentChatPage() {
   const [loading, setLoading] = useState(true)
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [input, setInput] = useState('')
+  // 输入框高度（px）：默认 48，用户可从顶部拖拽手柄向上扩展，发送后复位。
+  const [inputHeight, setInputHeight] = useState(48)
   const [toolCount, setToolCount] = useState(0)
   const [skillCount, setSkillCount] = useState(0)
 
@@ -864,7 +1064,7 @@ export default function AgentChatPage() {
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
   const [sessionSearch, setSessionSearch] = useState('')
 
-  // 工程记忆编辑器（.wd_mem/project_memory.md）
+  // 工程记忆编辑器（.wd_mem/MEMORY.md）
   const [memoEditor, setMemoEditor] = useState<{ open: boolean; rootPath: string; name: string } | null>(null)
   const [memoContent, setMemoContent] = useState('')
   const [memoSaving, setMemoSaving] = useState(false)
@@ -886,7 +1086,7 @@ export default function AgentChatPage() {
   const lastTokensRef = useRef<{ input: number; output: number }>({ input: 0, output: 0 })
 
   const session = useAgentSession()
-  const { toolSteps, streamingText, isStreaming, statusText, thoughts, isRunning, pendingApproval, run, submitDecision, reset, cancel, lastTaskUsage } =
+  const { toolSteps, streamingText, isStreaming, statusText, thoughts, planSteps, isRunning, pendingApproval, run, submitDecision, reset, cancel, lastTaskUsage } =
     session
 
   const lastAgentContent =
@@ -1024,8 +1224,8 @@ export default function AgentChatPage() {
 
   /** 持久化一轮：确保有会话 → 追加 round → 记录 roundId / 序号。 */
   const ensureRound = useCallback(
-    async (prompt: string): Promise<void> => {
-      if (!agent) return
+    async (prompt: string): Promise<string | null> => {
+      if (!agent) return null
       let sessionId = activeSessionId
       if (!sessionId) {
         const sess = await createSession(agent.identifier, prompt.slice(0, 40), {
@@ -1054,6 +1254,7 @@ export default function AgentChatPage() {
       })
       roundIdRef.current = round.id
       roundIndexRef.current += 1
+      return sessionId
     },
     [agent, activeSessionId, toolCount, skillCount, removedSkillIds, removedMcpIds, disabledMcpToolIds, boundMcps, pendingProjectId],
   )
@@ -1107,6 +1308,7 @@ export default function AgentChatPage() {
     }
     setMessages((prev) => [...prev, userMsg, agentMsg])
     setInput('')
+    setInputHeight(48)
     setPendingImages([])
     lastPromptRef.current = text
 
@@ -1115,13 +1317,14 @@ export default function AgentChatPage() {
     const disabledSkillIds = [...removedSkillIds]
     const disabledMcpIds = [...removedMcpIds]
     const disabledMcpToolIdsArr = [...disabledMcpToolIds]
-    void ensureRound(text).then(() => {
+    void ensureRound(text).then((sid) => {
       void run({
         agentId: agent.id,
         prompt: text,
         workspace: workspaceDir,
         attachments,
-        sessionId: activeSessionId ?? undefined,
+        // 修复：使用 ensureRound 返回的真实会话 id，避免闭包捕获到尚未更新的 stale activeSessionId（首条消息时为 null）
+        sessionId: sid ?? undefined,
         roundId: roundIdRef.current ?? undefined,
         // 临时移除的技能 / MCP 服务 / MCP 工具：随本轮请求传给 Rust，从智能体工具集中剔除
         disabledSkillIds,
@@ -1186,25 +1389,27 @@ export default function AgentChatPage() {
             status: statusText ? 'ERROR' : 'COMPLETED',
             endTime: completedAt,
           })
+          // 累计 token 并回填会话表：
+          // - dev/mock 始终按本地估算累加；
+          // - Tauri 路径：后端已在 run_task 累计真实 prompt/completion 到会话表，直接读回（realUsage 有效时）；
+          //   若网关未在流中返回 usage（realUsage 为 null，后端带回 0/0），则本地用估算兜底补写，
+          //   避免出现「消耗 0 tokens」导致环形图（上下文总数）恒为 0。
+          const needLocalEstimate = !isTauri || !realUsage
+          if (needLocalEstimate) {
+            await addSessionTokens(sid, inputTokens, outputTokens)
+          }
           let fresh = await getSession(sid)
-          // Tauri 路径：后端已在 run_task 累计真实 prompt/completion 到会话表，直接读回；
-          // dev/mock 路径：本地按估算累加（与旧逻辑一致）。
           let toolsTokens: number | undefined
           if (!isTauri) {
-            await addSessionTokens(sid, inputTokens, outputTokens)
-            const after = await getSession(sid)
-            if (after) {
-              fresh = after
-              toolsTokens = Math.round(
-                (toolCount -
-                  boundMcps
-                    .filter((m) => removedMcpIds.has(m.mcpId))
-                    .reduce((sum, m) => sum + m.tools.length, 0) -
-                  disabledMcpToolIds.size +
-                  (skillCount - removedSkillIds.size)) *
-                  AVG_TOOL_TOKENS,
-              )
-            }
+            toolsTokens = Math.round(
+              (toolCount -
+                boundMcps
+                  .filter((m) => removedMcpIds.has(m.mcpId))
+                  .reduce((sum, m) => sum + m.tools.length, 0) -
+                disabledMcpToolIds.size +
+                (skillCount - removedSkillIds.size)) *
+                AVG_TOOL_TOKENS,
+            )
           }
           // 未命名会话（多为「工程 / 项目目录」下新建的子对话）：首轮完成后用第一个问题命名
           const wasUnnamed = !fresh?.sessionName || fresh.sessionName.trim() === ''
@@ -1253,6 +1458,29 @@ export default function AgentChatPage() {
     prevIsRunningRef.current = isRunning
   }, [isRunning, streamingText, thoughts, toolSteps, lastAgentContent, statusText, activeSessionId, removedSkillIds, removedMcpIds, disabledMcpToolIds, boundMcps, toolCount, skillCount, isTauri, lastTaskUsage])
 
+  // 输入框顶部拖拽手柄：向上拖动增大高度（底部锚定，自然向上扩展），而非原生 resize 只能向下拉。
+  const startInputResize = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    const startY = e.clientY
+    const startH = inputHeight
+    const MIN = 48
+    const MAX = 320
+    const onMove = (ev: MouseEvent) => {
+      const next = Math.max(MIN, Math.min(MAX, startH + (startY - ev.clientY)))
+      setInputHeight(next)
+    }
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+      document.body.style.userSelect = ''
+      document.body.style.cursor = ''
+    }
+    document.body.style.userSelect = 'none'
+    document.body.style.cursor = 'row-resize'
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+  }, [inputHeight])
+
   const handleDecision = useCallback(
     (approved: boolean, reason?: string) => {
       if (!pendingApproval) return
@@ -1291,12 +1519,13 @@ export default function AgentChatPage() {
       const disabledSkillIds = [...removedSkillIds]
       const disabledMcpIds = [...removedMcpIds]
       const disabledMcpToolIdsArr = [...disabledMcpToolIds]
-      void ensureRound(userMsg.content).then(() => {
+      void ensureRound(userMsg.content).then((sid) => {
         void run({
           agentId: agent.id,
           prompt: userMsg.content,
           workspace: workspaceDir,
-          sessionId: activeSessionId ?? undefined,
+          // 修复：使用 ensureRound 返回的真实会话 id
+          sessionId: sid ?? undefined,
           roundId: roundIdRef.current ?? undefined,
           // 临时移除的技能 / MCP 服务 / MCP 工具在本轮同样生效
           disabledSkillIds,
@@ -1698,7 +1927,7 @@ export default function AgentChatPage() {
                 }
               >
                 <div style={{ fontSize: 12, color: 'var(--color-foreground-muted)', marginBottom: 8 }}>
-                  落盘于工程根目录 <code>.wd_mem/project_memory.md</code>，智能体会将其作为长期记忆注入上下文。
+                  落盘于工程根目录 <code>.wd_mem/MEMORY.md</code>，智能体会将其作为长期记忆注入上下文（兼容旧 project_memory.md）。
                 </div>
                 <Input.TextArea
                   value={memoContent}
@@ -1767,9 +1996,8 @@ export default function AgentChatPage() {
                   className={`agent-chat__session${s.id === activeSessionId ? ' is-active' : ''}`}
                   onClick={() => openSession(s.id)}
                 >
-                  <div className="agent-chat__session-main">
-                    <MessageSquare size={15} />
-                    <div className="agent-chat__session-text">
+                <div className="agent-chat__session-main">
+                  <div className="agent-chat__session-text">
                       <div className="agent-chat__session-name">
                         {s.sessionName || '未命名会话'}
                         {s.isTop && <Star size={12} className="agent-chat__session-top" />}
@@ -1851,6 +2079,7 @@ export default function AgentChatPage() {
                       <span className="agent-chat__plain">{m.content}</span>
                     )}
                   </div>
+                  {m.role === 'agent' && <FilePathCards content={m.content} />}
                   {m.role === 'agent' && m.completedAt && (
                     <MessageActions
                       msg={m}
@@ -1863,12 +2092,18 @@ export default function AgentChatPage() {
               </div>
             )
           })}
+          {planSteps.length > 0 && <PlanStepsBar steps={planSteps} />}
           {statusText && <div className="agent-chat__status">{statusText}</div>}
         </div>
 
         {/* 底部输入工具条：仿 WorkBuddy 的大圆角输入框，工具按钮内嵌在框底 */}
         <footer className="agent-chat__input">
           <div className="agent-chat__input-box">
+            <div
+              className="agent-chat__input-resizer"
+              title="向上拖动调整输入框高度"
+              onMouseDown={startInputResize}
+            />
             <textarea
               className="agent-chat__textarea"
               value={input}
@@ -1876,6 +2111,7 @@ export default function AgentChatPage() {
               autoComplete="off"
               rows={2}
               disabled={isRunning}
+              style={{ height: inputHeight }}
               onChange={(e) => setInput(e.target.value)}
               onPaste={onPaste}
               onKeyDown={(e) => {

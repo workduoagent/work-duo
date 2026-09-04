@@ -25,6 +25,9 @@ use tauri::AppHandle;
 use tauri::Manager;
 use tauri_plugin_sql::DbInstances;
 use tauri_plugin_sql::DbPool;
+use tokio::time::sleep;
+use tokio::time::timeout;
+use tokio::time::Duration;
 
 use crate::agent::events;
 use crate::agent::runtime::call_llm;
@@ -98,11 +101,31 @@ pub(crate) async fn get_pool(app: &AppHandle) -> Result<SqlitePool, String> {
     Ok(pool)
 }
 
+/// 后台任务初始化前的就绪闸门：轮询确认 SQLite 连接池可用（bounded 超时 30s）。
+///
+/// 任何后台调度 / 定时任务（滚动压缩、环境预热等）都必须先 `await` 本函数，
+/// 确保核心应用上下文（App Context、DB Pool）完全初始化后再执行，杜绝启动早期
+/// 组件未就绪导致的空指针或数据库连接断裂。
+pub(crate) async fn wait_db_ready(app: &AppHandle) -> Result<(), String> {
+    let probe = async {
+        loop {
+            if get_pool(app).await.is_ok() {
+                return Ok(());
+            }
+            sleep(Duration::from_millis(200)).await;
+        }
+    };
+    match timeout(Duration::from_secs(30), probe).await {
+        Ok(r) => r,
+        Err(_) => Err("等待数据库就绪超时（30s），后台初始化跳过".into()),
+    }
+}
+
 /* ----------------------------- 读路径：上下文装配 ----------------------------- */
 
 /// 装配发往大模型的完整消息序列（纯函数，不做 IO）：
 ///   [Slot 0] 静态 System Prompt（+ 工程专属 custom_rules 已在调用方并入 system_prompt）
-///   [Slot 1] 项目长期记忆（project_memory.md，role=system，仅工程绑定时存在）
+///   [Slot 1] 项目长期记忆（MEMORY.md，已由 load_config 注入 Slot 0 系统提示；此处传 None 不重复）
 ///   [Slot 2] 累积状态快照（当 summary 非空时注入，role=system）
 ///   [Slot 3..M] 活跃窗口轮次无损回填（反序列化 raw_messages_json 原样展开）
 ///   [Slot M+1] 当前新指令（user）
@@ -120,7 +143,7 @@ pub(crate) fn build_request_messages(
     // [Slot 0] 静态系统提示词（已含工程 custom_rules）
     messages.push(json!({ "role": "system", "content": system_prompt }));
 
-    // [Slot 1] 项目长期记忆（第二轨 .wd_mem/project_memory.md）
+    // [Slot 1] 项目长期记忆（第二轨 .wd_mem/MEMORY.md，已由 load_config 注入 Slot 0）
     if let Some(mem) = project_memory {
         if !mem.trim().is_empty() {
             messages.push(json!({

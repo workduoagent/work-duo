@@ -39,6 +39,29 @@ const DEFAULT_ENV: &str = "default";
 /// 默认 Python 版本：调用方未指定 `python_version` 时使用。
 const DEFAULT_PYTHON: &str = "3.11";
 
+/// 允许运行时自动按需安装的常用数据科学库白名单（防止任意 pip 安装失控）。
+/// Agent 脚本因 `ModuleNotFoundError` 失败时，仅当缺失模块命中此表才会自动安装并重试，
+/// 这与 `init_mamba_env`「纯净环境、按需追加依赖」的设计初衷一致（见模块注释）。
+const AUTO_INSTALL_ALLOW: &[&str] = &[
+    "requests",
+    "numpy",
+    "pandas",
+    "openpyxl",
+    "xlsxwriter",
+    "scipy",
+    "statsmodels",
+    "matplotlib",
+    "seaborn",
+    "yfinance",
+    "ccxt",
+    "scikit-learn",
+    "sklearn",
+    "pyyaml",
+    "yaml",
+    "json5",
+    "tqdm",
+];
+
 /// 单个已安装依赖的元信息（供 `list_mamba_packages` 结构化返回）。
 #[derive(Serialize)]
 pub struct PackageInfo {
@@ -442,6 +465,135 @@ fn parse_package_list(stdout: &str) -> Result<Vec<PackageInfo>, String> {
     Ok(pkgs)
 }
 
+/// 把 import 名归一化为可被 micromamba 安装的包名（处理常见别名）。
+fn normalize_pkg(name: &str) -> String {
+    match name {
+        "sklearn" => "scikit-learn",
+        "yaml" => "pyyaml",
+        "crypto" => "pycryptodome",
+        "PIL" => "pillow",
+        _ => name,
+    }
+    .to_string()
+}
+
+/// 从脚本 stderr 中解析 `ModuleNotFoundError: No module named 'X'`，返回命中自动安装
+/// 白名单的顶层模块名集合（如 `sklearn.linear_model` → `sklearn`）。无命中则返回 None。
+fn missing_modules(stderr: &str) -> Option<Vec<String>> {
+    let mut found: std::collections::BTreeSet<String> = Default::default();
+    for line in stderr.lines() {
+        let line = line.trim();
+        let rest = line
+            .strip_prefix("ModuleNotFoundError: No module named")
+            .or_else(|| line.strip_prefix("ImportError: No module named"))
+            .or_else(|| line.strip_prefix("ModuleNotFoundError: No module named '"))
+            .or_else(|| line.strip_prefix("ImportError: cannot import name"));
+        if let Some(rest) = rest {
+            let name = rest
+                .trim()
+                .trim_matches('\'')
+                .trim_matches('"')
+                .trim();
+            // 处理子模块（sklearn.linear_model → sklearn）
+            let top = name.split('.').next().unwrap_or(name).trim();
+            if top.is_empty() {
+                continue;
+            }
+            if AUTO_INSTALL_ALLOW.contains(&top) {
+                found.insert(normalize_pkg(top));
+            }
+        }
+    }
+    if found.is_empty() {
+        None
+    } else {
+        Some(found.into_iter().collect())
+    }
+}
+
+/// 构造 `micromamba run -n <env> python <tmp>` 的参数列表（全局选项前置）。
+fn build_run_args(mamba_root: &Path, rc: &Path, env: &str, tmp_path: &Path) -> Vec<String> {
+    let mut args = global_args(mamba_root, rc);
+    args.extend([
+        "run".into(),
+        "-n".into(),
+        env.to_string(),
+        "python".into(),
+        tmp_path.to_string_lossy().to_string(),
+    ]);
+    args
+}
+
+/// 静默向指定环境安装依赖（复用 micromamba install，不暴露 Tauri 命令通道）。
+async fn install_packages_silent(
+    app: &AppHandle,
+    mgr: &MambaManager,
+    env: &str,
+    packages: &[String],
+) -> Result<String, String> {
+    let (mamba_root, rc) = mgr.setup(app)?;
+    let env_path = mamba_root.join("envs").join(env);
+    if !env_path.exists() {
+        return Err(format!("{env} 环境尚未创建，无法安装依赖。"));
+    }
+    let specs: Vec<String> = packages.iter().map(|p| normalize_pkg(p)).collect();
+    let mut args = global_args(&mamba_root, &rc);
+    args.extend(["install".into(), "-n".into(), env.to_string(), "-y".into()]);
+    for s in &specs {
+        args.push(s.clone());
+    }
+    let (_stdout, stderr, code) = run_sidecar(app, args, None).await?;
+    match code {
+        Some(0) => Ok(specs.join(", ")),
+        Some(c) => Err(format!("依赖安装失败（退出码 {c}）：\n{stderr}")),
+        None => Err(format!("依赖安装进程异常终止，未收到退出码：\n{stderr}")),
+    }
+}
+
+/// 在某环境中执行脚本，并在因缺失白名单内第三方库失败时**自动按需安装并重试一次**。
+///
+/// 这是「纯净环境 + 按需追加依赖」设计的最终闭环：Agent 直接 `import pandas` 即可，
+/// 运行时首次缺失时透明安装（仅限白名单），无需用户或模型手动安装系统包。
+/// 非库缺失类错误（语法错 / 逻辑错 / 网络错）不触发安装，原样返回。
+async fn run_script_with_selfheal(
+    app: &AppHandle,
+    mgr: &MambaManager,
+    mamba_root: &Path,
+    rc: &Path,
+    env: &str,
+    tmp_path: &Path,
+    cwd: Option<&Path>,
+) -> Result<String, String> {
+    let args = build_run_args(mamba_root, rc, env, tmp_path);
+    let (stdout, stderr, code) = run_sidecar(app, args, cwd).await?;
+    if code != Some(0) {
+        if let Some(mods) = missing_modules(&stderr) {
+            println!(
+                "[agent] run_python: 检测到缺失库 {:?}，尝试自动安装后重试一次",
+                mods
+            );
+            match install_packages_silent(app, mgr, env, &mods).await {
+                Ok(specs) => {
+                    println!("[agent] run_python: 已自动安装依赖（{}），重试执行", specs);
+                    let args2 = build_run_args(mamba_root, rc, env, tmp_path);
+                    let (o2, e2, c2) = run_sidecar(app, args2, cwd).await?;
+                    return match c2 {
+                        Some(0) => Ok(o2),
+                        Some(c) => Err(format!("脚本执行失败（退出码 {c}）：\n{e2}")),
+                        None => Err(format!("脚本进程异常终止，未收到退出码：\n{e2}")),
+                    };
+                }
+                Err(e) => println!("[agent] run_python: 自动安装缺失库失败：{e}"),
+            }
+        }
+    }
+    match code {
+        Some(0) => Ok(stdout),
+        Some(c) => Err(format!("脚本执行失败（退出码 {c}）：\n{stderr}")),
+        None => Err(format!("脚本进程异常终止，未收到退出码：\n{stderr}")),
+    }
+}
+
 /// 步骤四：在某环境中调度并执行指定 Python 脚本。
 ///
 /// - `env_name`：目标环境名，**可选**，缺省为 `default`。
@@ -494,27 +646,19 @@ pub async fn run_python_script(
 
     // 关键：全局选项（root-prefix / rc-file）必须位于 `run` 子命令及 `python` 之前，
     // 否则会被当作传给 python 的参数而失效，micromamba 回退到 AppData 默认前缀。
-    let mut args = global_args(&mamba_root, &rc);
-    args.extend([
-        "run".into(),
-        "-n".into(),
-        env.clone(),
-        "python".into(),
-        tmp_path.to_string_lossy().to_string(),
-    ]);
-
-    let (stdout, stderr, code) =
-        run_sidecar(&app, args, original_parent.as_deref()).await?;
-    // 运行结束（无论成败）清理临时脚本，失败忽略。
+    // 执行与缺失库自愈统一走 run_script_with_selfheal（含临时脚本清理）。
+    let result = run_script_with_selfheal(
+        &app,
+        mgr.inner(),
+        &mamba_root,
+        &rc,
+        &env,
+        &tmp_path,
+        original_parent.as_deref(),
+    )
+    .await;
     let _ = std::fs::remove_file(&tmp_path);
-    match code {
-        Some(0) => {
-            // 显式返回脚本 stdout，便于前端直接展示运行结果。
-            Ok(stdout)
-        }
-        Some(c) => Err(format!("脚本执行失败（退出码 {c}）：\n{stderr}")),
-        None => Err(format!("脚本进程异常终止，未收到退出码：\n{stderr}")),
-    }
+    result
 }
 
 /// 供智能体运行时直接调用的沙箱执行入口（**非 Tauri 命令**，供 `agent::native` 模块复用）。
@@ -551,23 +695,19 @@ pub async fn run_python_in_sandbox(
     let tmp_path = run_tmp.join(format!("__sandbox_run_{stamp}.py"));
     std::fs::copy(&script, &tmp_path).map_err(|e| format!("复制脚本到临时文件失败：{e}"))?;
 
-    let mut args = global_args(&mamba_root, &rc);
-    args.extend([
-        "run".into(),
-        "-n".into(),
-        env.clone(),
-        "python".into(),
-        tmp_path.to_string_lossy().to_string(),
-    ]);
-
-    let (stdout, stderr, code) =
-        run_sidecar(app, args, original_parent.as_deref()).await?;
+    // 执行与缺失库自愈统一走 run_script_with_selfheal（含临时脚本清理）。
+    let result = run_script_with_selfheal(
+        app,
+        mgr,
+        &mamba_root,
+        &rc,
+        &env,
+        &tmp_path,
+        original_parent.as_deref(),
+    )
+    .await;
     let _ = std::fs::remove_file(&tmp_path);
-    match code {
-        Some(0) => Ok(stdout),
-        Some(c) => Err(format!("脚本执行失败（退出码 {c}）：\n{stderr}")),
-        None => Err(format!("脚本进程异常终止，未收到退出码：\n{stderr}")),
-    }
+    result
 }
 
 /// 查询单个环境的元信息（是否存在 / Python 版本 / 依赖数）。

@@ -24,6 +24,7 @@ import type {
   AgentEvent,
   ApprovalDecision,
   ApprovalRequest,
+  PlanStep,
   RunAgentTaskInput,
   ToolStep,
 } from './types'
@@ -40,6 +41,8 @@ export interface AgentSessionState {
   statusText: string
   /** 思考过程步骤（可折叠展示）。 */
   thoughts: string[]
+  /** 三层流水线：任务步骤进度条（阶段二规划生成，运行中实时更新状态）。 */
+  planSteps: PlanStep[]
   /** 是否有任务在后台运行（禁用输入框 / 显示停止态）。 */
   isRunning: boolean
   /** 待用户审批的高危操作（非 null 时弹窗）。 */
@@ -87,6 +90,8 @@ export function useAgentSession(): AgentSessionState {
   const [isStreaming, setIsStreaming] = useState(false)
   const [statusText, setStatusText] = useState('')
   const [thoughts, setThoughts] = useState<string[]>([])
+  // 三层流水线：阶段二规划生成的步骤进度条（plan_generated 填充，step_started/finished 更新状态）。
+  const [planSteps, setPlanSteps] = useState<PlanStep[]>([])
   const [isRunning, setIsRunning] = useState(false)
   const [pendingApproval, setPendingApproval] = useState<ApprovalRequest | null>(null)
 
@@ -231,6 +236,7 @@ export function useAgentSession(): AgentSessionState {
       setStreamingText('')
       setIsStreaming(false)
       setThoughts([])
+      setPlanSteps([])
       setPendingApproval(null)
       setStatusText('')
       clearTaskTimeout()
@@ -378,6 +384,32 @@ export function useAgentSession(): AgentSessionState {
           case 'error':
             if (e.message) setStatusText(`错误：${e.message}`)
             break
+          case 'plan_generated':
+            // 阶段二规划生成：渲染步骤进度条（全部 pending）
+            if (e.plan?.tasks) {
+              setPlanSteps(e.plan.tasks)
+            }
+            break
+          case 'step_started':
+            if (typeof e.plan?.step === 'number') {
+              const s = e.plan.step
+              setPlanSteps((prev) =>
+                prev.map((t) => (t.step === s ? { ...t, status: 'running' } : t)),
+              )
+            }
+            break
+          case 'step_finished':
+            if (typeof e.plan?.step === 'number') {
+              const s = e.plan.step
+              const st = e.plan.status ?? 'success'
+              const sum = e.plan.summary
+              setPlanSteps((prev) =>
+                prev.map((t) =>
+                  t.step === s ? { ...t, status: st, summary: sum ?? t.summary } : t,
+                ),
+              )
+            }
+            break
         }
       })
       const offApproval = await listen<ApprovalRequest>(
@@ -429,6 +461,7 @@ export function useAgentSession(): AgentSessionState {
     isStreaming,
     statusText,
     thoughts,
+    planSteps,
     isRunning,
     pendingApproval,
     run,

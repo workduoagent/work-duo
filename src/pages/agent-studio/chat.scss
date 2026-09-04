@@ -11,20 +11,25 @@
     color: var(--color-muted, #888);
   }
 
-  /* 左侧会话列表 */
+  /* 左侧会话列表：对齐系统整体风格（知识库/智能体首页侧栏） */
   &__side {
-    flex: 0 0 248px;
+    position: relative;
+    z-index: 10;
+    flex: 0 0 220px;
     display: flex;
     flex-direction: column;
     gap: 10px;
+    margin: 14px 0 14px 14px;
     padding: 14px 12px;
-    border-right: 1px solid var(--color-border, #e5e5e5);
-    background: var(--color-background-soft, #fafafa);
+    border-radius: var(--radius-card);
+    border: 1px solid var(--color-border);
+    background: var(--color-background-subtle);
+    box-shadow: var(--shadow-sm);
     overflow: hidden;
 
     .dark & {
-      border-color: #2a2a2a;
-      background: #161616;
+      border-color: #2f2f2f;
+      background: #1a1a1a;
     }
   }
 
@@ -38,10 +43,15 @@
     align-items: center;
     gap: 6px;
     padding: 7px 10px;
-    border-radius: 8px;
-    border: 1px solid var(--color-border, #e5e5e5);
-    background: var(--color-background, #fff);
-    color: var(--color-muted, #888);
+    border-radius: 10px;
+    border: 1px solid var(--color-border);
+    background: var(--color-background);
+    color: var(--color-foreground-muted);
+    transition: border-color 0.15s ease;
+
+    &:focus-within {
+      border-color: var(--color-brand-600);
+    }
 
     input {
       flex: 1 1 auto;
@@ -50,7 +60,7 @@
       background: transparent;
       font-family: inherit;
       font-size: 0.8rem;
-      color: var(--color-foreground, #222);
+      color: var(--color-foreground);
     }
     .dark & {
       background: #1f1f1f;
@@ -77,28 +87,53 @@
   }
 
   &__session {
+    position: relative;
     display: flex;
     align-items: center;
     gap: 6px;
     padding: 8px 10px;
-    border-radius: 8px;
+    border-radius: 10px;
     border: 1px solid transparent;
     cursor: pointer;
-    transition: background 0.15s ease, border-color 0.15s ease;
+    transition: background-color 0.2s ease, color 0.2s ease, transform 0.12s ease;
+    color: var(--color-foreground-muted);
 
     &:hover {
-      background: var(--color-background, #fff);
+      color: var(--color-foreground);
+      background: var(--color-background-muted);
+      transform: translateX(2px);
     }
     &.is-active {
-      background: var(--color-background, #fff);
-      border-color: var(--color-primary, #1677ff);
+      color: var(--color-brand-600);
+      background: var(--color-background);
+      font-weight: 600;
+      box-shadow: var(--shadow-sm);
     }
     .dark & {
-      &:hover,
+      &:hover {
+        background: #2a2a2a;
+      }
       &.is-active {
         background: #1f1f1f;
       }
     }
+  }
+
+  &__session::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 50%;
+    width: 3px;
+    height: 0;
+    border-radius: 999px;
+    background-color: var(--color-brand-600);
+    transform: translateY(-50%);
+    transition: height 0.22s ease;
+  }
+
+  &__session.is-active::before {
+    height: 60%;
   }
 
   &__session-main {
@@ -147,12 +182,15 @@
     display: flex;
     flex-direction: column;
     min-width: 0;
+    /* 输入栏改为 fixed 铺满底部，主内容区需预留出被固定输入栏遮挡的高度（默认 ~128px，再留一点余量）。 */
+    padding-bottom: 150px;
   }
 
   &__side-head {
     display: flex;
     align-items: center;
     gap: 8px;
+    flex-shrink: 0;
   }
 
   &__side-nav {
@@ -163,12 +201,18 @@
   }
 
   &__icon-btn {
-    width: 32px;
-    height: 32px;
+    width: 30px;
+    height: 30px;
     padding: 0;
     display: inline-flex;
     align-items: center;
     justify-content: center;
+    color: var(--color-foreground-muted);
+
+    &:hover {
+      color: var(--color-foreground);
+      background: var(--color-background-muted);
+    }
   }
 
   &__status {
@@ -183,6 +227,203 @@
       background: #1f1f1f;
       color: #aaa;
     }
+  }
+
+  /* 三层流水线：任务步骤进度条（运行中展示于消息流底部） */
+  &__plan {
+    align-self: stretch;
+    margin: 2px 0 0;
+    padding: 10px 14px;
+    border: 1px solid var(--color-border, #e5e5e5);
+    border-radius: 10px;
+    background: var(--color-background-soft, #fafafa);
+
+    .dark & {
+      border-color: #2a2a2a;
+      background: #161616;
+    }
+  }
+
+  &__plan-title {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 8px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--color-foreground, #333);
+
+    .dark & {
+      color: #e5e5e5;
+    }
+  }
+
+  &__plan-list {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  &__plan-step {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    font-size: 0.76rem;
+    color: var(--color-muted, #888);
+
+    &--running {
+      color: var(--color-primary, #1677ff);
+    }
+
+    &--success {
+      color: var(--color-success, #16a34a);
+    }
+
+    &--failed {
+      color: var(--color-error, #dc2626);
+    }
+  }
+
+  &__plan-icon {
+    flex: 0 0 auto;
+    display: inline-flex;
+    margin-top: 1px;
+  }
+
+  &__plan-spin {
+    animation: agent-chat-plan-spin 1s linear infinite;
+  }
+
+  &__plan-summary {
+    color: var(--color-muted, #999);
+    font-size: 0.74rem;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+    background: var(--color-background-soft, #f5f5f5);
+    border-radius: 6px;
+    padding: 6px 8px;
+    margin-top: 2px;
+
+    .dark & {
+      background: #1f1f1f;
+    }
+  }
+
+  &__plan-body {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  &__plan-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    width: 100%;
+    padding: 0;
+    border: none;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: default;
+  }
+
+  &__plan-step.is-expandable &__plan-head {
+    cursor: pointer;
+  }
+
+  &__plan-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    flex: 0 0 auto;
+    color: var(--color-primary, #1677ff);
+    font-size: 0.72rem;
+    white-space: nowrap;
+    user-select: none;
+  }
+
+  &__plan-caret {
+    transition: transform 0.15s ease;
+
+    &.is-open {
+      transform: rotate(90deg);
+    }
+  }
+
+  /* 对话中的文件路径卡片 */
+  &__file-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 8px;
+    margin-top: 6px;
+  }
+
+  &__file-card {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    border-radius: 10px;
+    border: 1px solid var(--color-border);
+    background: var(--color-background-subtle);
+    cursor: pointer;
+    text-align: left;
+    transition: background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+
+    &:hover {
+      background: var(--color-background);
+      border-color: var(--color-brand-300, var(--color-brand-600));
+      box-shadow: var(--shadow-sm);
+    }
+
+    .dark & {
+      background: #1a1a1a;
+      border-color: #2f2f2f;
+
+      &:hover {
+        background: #1f1f1f;
+        border-color: #444;
+      }
+    }
+  }
+
+  &__file-icon {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  &__file-info {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    align-items: baseline;
+    gap: 4px;
+  }
+
+  &__file-name {
+    font-size: 0.8rem;
+    color: var(--color-foreground);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  &__file-ext {
+    flex: 0 0 auto;
+    font-size: 0.72rem;
+    color: var(--color-foreground-muted);
+    font-family: var(--font-mono, monospace);
   }
 
   &__avatar {
@@ -474,17 +715,37 @@
     opacity: 0.6;
   }
 
-  /* 底部输入工具条：仿 WorkBuddy 的大圆角输入框，工具按钮内嵌在框底 */
+  /* 底部输入工具条：fixed 铺满窗口底部，内容相对于整个窗口居中（而非仅右侧主内容区）。
+     这样左侧栏存在时输入框依然在屏幕正中，不会视觉偏右。
+     窄屏下为避免输入框被左侧栏遮挡，把容器起点移到侧栏右边缘（~270px）并加宽输入框。 */
   &__input {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 5;
     padding: 12px 20px 16px;
-    border-top: 1px solid var(--color-border, #e5e5e5);
+    background: var(--color-background, #fff);
 
     .dark & {
-      border-color: #2a2a2a;
+      background: #161616;
+    }
+
+    @media (max-width: 1200px) {
+      /* 220px 侧栏 + 14px 左间距 + 24px padding + 2px border + 10px 安全间隙 ≈ 270px */
+      left: 270px;
+    }
+
+    @media (max-width: 700px) {
+      /* 极小窗口放弃避让侧栏，全宽显示避免内容被压得太窄 */
+      left: 0;
     }
   }
 
   &__input-box {
+    width: 50%;
+    max-width: 720px;
+    margin: 0 auto;
     display: flex;
     flex-direction: column;
     gap: 8px;
@@ -501,6 +762,16 @@
       background: #161616;
       border-color: #2f2f2f;
     }
+
+    @media (max-width: 1200px) {
+      width: 85%;
+      max-width: none;
+    }
+
+    @media (max-width: 700px) {
+      width: 95%;
+      max-width: none;
+    }
   }
 
   &__textarea {
@@ -508,6 +779,8 @@
     width: 100%;
     box-sizing: border-box;
     resize: none;
+    min-height: 48px;
+    max-height: 320px;
     padding: 4px 6px;
     border-radius: 8px;
     border: none;
@@ -520,6 +793,42 @@
 
     .dark & {
       color: #e6e6e6;
+    }
+  }
+
+  /* 输入框顶部拖拽手柄：向上拖动增大高度（替代原生只能向下拉的 resize） */
+  &__input-resizer {
+    flex: 0 0 auto;
+    height: 10px;
+    margin: -6px -2px 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: row-resize;
+    border-radius: 14px 14px 0 0;
+    user-select: none;
+    touch-action: none;
+
+    &::after {
+      content: "";
+      width: 36px;
+      height: 3px;
+      border-radius: 3px;
+      background: var(--color-border, #dcdcdc);
+      transition: background-color 0.15s ease;
+    }
+
+    &:hover::after,
+    &:active::after {
+      background: var(--color-primary, #1677ff);
+    }
+
+    .dark &::after {
+      background: #3a3a3a;
+    }
+    .dark &:hover::after,
+    .dark &:active::after {
+      background: var(--color-primary, #1677ff);
     }
   }
 
@@ -897,21 +1206,19 @@
     gap: 6px;
     padding: 6px 8px;
     border-radius: 8px;
-    background: var(--color-background-soft, #f0f0f0);
-    color: var(--color-foreground, #333);
+    color: var(--color-foreground-muted);
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
 
     .dark & {
-      background: #1f1f1f;
-      color: #ddd;
+      color: #888;
     }
   }
 
   &__group-head--global {
-    background: transparent;
     padding-left: 2px;
-    .dark & {
-      background: transparent;
-    }
   }
 
   &__group-icon {
@@ -927,8 +1234,8 @@
   }
 
   &__group-name {
-    font-size: 0.78rem;
-    font-weight: 600;
+    font-size: inherit;
+    font-weight: inherit;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -939,15 +1246,17 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    padding: 2px;
+    width: 22px;
+    height: 22px;
+    padding: 0;
     border-radius: 6px;
-    color: var(--color-muted, #888);
+    color: var(--color-foreground-muted);
     cursor: pointer;
     transition: background 0.15s ease, color 0.15s ease;
 
     &:hover {
-      background: var(--color-background, #fff);
-      color: var(--color-foreground, #333);
+      background: var(--color-background-muted);
+      color: var(--color-foreground);
     }
     .dark & {
       &:hover {
@@ -959,9 +1268,9 @@
 
   // 工程分组下的会话缩进 + 左侧引导线，体现层级关系
   &__group--project &__session {
-    padding-left: 22px;
-    margin-left: 10px;
-    border-left: 1px solid var(--color-border, #eee);
+    padding-left: 18px;
+    margin-left: 8px;
+    border-left: 1px solid var(--color-border);
 
     .dark & {
       border-left-color: #2a2a2a;
@@ -1238,5 +1547,15 @@
     &__value {
       color: #d0d0d0;
     }
+  }
+}
+
+/* 三层流水线：步骤进度条 running 图标的旋转动画 */
+@keyframes agent-chat-plan-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
   }
 }

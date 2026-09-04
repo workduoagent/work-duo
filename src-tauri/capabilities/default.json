@@ -22,6 +22,14 @@
     "dialog:default",
     "dialog:allow-save",
     "opener:default",
+    {
+      "identifier": "opener:allow-open-path",
+      "allow": [
+        {
+          "path": "**"
+        }
+      ]
+    },
     "shell:default",
     {
       "identifier": "shell:allow-execute",

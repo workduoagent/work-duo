@@ -33,10 +33,10 @@ use crate::agent::types::AgentRuntimeConfig;
 use crate::agent::types::ApprovalRequest;
 use crate::agent::types::ToolStep;
 
-/// 单轮任务最大工具调用次数（熔断）。
-const MAX_TOOL_ITERATIONS: usize = 16;
 /// 历史消息保留轮次（滑动窗口）。
 const MAX_HISTORY_TURNS: usize = 24;
+/// 工具返回结果物理截断阈值（字符）。防止超大输出撑爆上下文、无谓消耗 Token。
+const MAX_TOOL_OUTPUT_LENGTH: usize = 15000;
 
 /// 运行时共享状态（托管于 Tauri State，供命令访问）。
 #[derive(Clone)]
@@ -54,6 +54,7 @@ impl AgentRuntime {
     }
 
     /// 启动一轮任务（被 `run_agent_task` 命令调用，后台 spawn）。
+    #[allow(unreachable_code)]
     pub async fn run_task(&self, app: &AppHandle, cfg: AgentRuntimeConfig, prompt: String) {
         // 0) 动态重算并回写 tools_tokens：按当前已解析的 MCP/Skill 工具数覆盖写入会话表，
         //    中途移除 Skill / 停用（解绑）MCP 后，下一轮会自动下调；重新绑定则上调。
@@ -69,7 +70,8 @@ impl AgentRuntime {
 
         // 1) 组装工具注册表（基础原生 + 绑定的 Skill/MCP 工具）
         let mut base = self.native.lock().await.clone();
-        native::register_native_tools(&mut base, app);
+        // 沙箱模式下不注册 execute_command（宿主 shell），能力层与提示层保持一致
+        native::register_native_tools(&mut base, app, cfg.allow_sandbox);
         // 技能：直接注册进本轮本地注册表（AgentTool 只读包装，真实执行待接入业务核心）
         crate::agent::skill_adapter::register_skills_into(&mut base, cfg.skill_tools.clone());
         // MCP：按 mcp_id 分组，逐 server 注册（复用现有 mcp::call_mcp_tool 透传）
@@ -95,338 +97,340 @@ impl AgentRuntime {
             sandbox_enabled: cfg.allow_sandbox,
         };
 
-        // 3) 组装发送给 LLM 的 messages（含滑动窗口压缩 / 历史摘要）。
-        //    上下文封装抽离在 `context` 模块：system + 压缩摘要 + 最近 N 轮 verbatim + 当前 prompt；
-        //    工具定义不经此注入（由 ReAct 循环作为顶层 tools 参数传入，保 prompt-cache 命中）。
-        let mut messages = match crate::agent::context::build_context_messages(app, &cfg, &prompt).await {
-            Ok(m) => m,
-            Err(e) => {
-                println!("[agent] run_task: 上下文组装失败：{e}");
-                events::emit_task_error(app, &format!("上下文组装失败：{e}"));
-                return;
-            }
-        };
+        // ────────────────────────────────────────────────────────────────────
+        // 三层流水线调度（新架构）：意图分流 → DAG 规划 → 微 ReAct 流水线执行。
+        // 下方旧的全局大 ReAct 循环已废弃（if false 留档，验证后删除）。
+        // ────────────────────────────────────────────────────────────────────
 
-        // 记录当前轮提问在 messages 中的下标；ReAct 循环结束后据此截取
-        // 「本轮产生的完整消息序列」用于 raw_messages_json 回填（协议视图，无损）。
-        let round_base = messages.len().saturating_sub(1);
+        // 阶段一：意图分流（规则短路优先，灰色地带走轻量 LLM 分类）。
+        let intent = crate::agent::intent::classify_intent(&cfg, &prompt).await;
+        println!(
+            "[agent] run_task: 意图判定 = {} reason={}",
+            intent.intent_type,
+            clip(&intent.reason, 200),
+        );
 
-        // 4) ReAct 循环
-        let mut iteration = 0;
-        // 整轮任务真实 token 用量累计（跨所有 ReAct 轮，每轮 LLM 调用的 prompt+completion）。
-        let mut task_usage: (u64, u64) = (0, 0);
-        loop {
-            if iteration >= MAX_TOOL_ITERATIONS {
-                println!(
-                    "[agent] run_task: 触发最大工具循环熔断 iteration={} max={} messages={}，任务终止",
-                    iteration,
-                    MAX_TOOL_ITERATIONS,
-                    messages.len(),
-                );
-                // 熔断时仍推送一条终态文本，避免前端因无正文而长期显示「思考中…」。
-                let msg = format!(
-                    "已达到最大工具调用轮次上限（{} 轮），为防死循环已提前终止本次任务。\n任务可能尚未完成——建议：① 将目标拆分为更小的步骤；② 检查是否陷入重复调用同一工具；③ 如确需更多轮次，可联系开发者调高 MAX_TOOL_ITERATIONS 后重试。",
-                    MAX_TOOL_ITERATIONS
-                );
-                events::emit_error(app, &msg);
-                events::emit_text_chunk(app, &msg, false);
-                events::emit_text_chunk(app, "", true);
-                messages.push(json!({ "role": "assistant", "content": msg }));
-                break;
-            }
-            iteration += 1;
-
-            // 裁剪历史（滑动窗口）
-            let trimmed = trim_history(&messages);
-
-            // 每轮仅调用一次 LLM（流式）：在 SSE 增量中同时聚合正文与 tool_calls。
-            // 旧架构是「非流式 call_llm 判断 + 流式 call_llm_stream 输出」两次调用同一 messages，
-            // 既浪费 token / 延迟，又因模型非确定性可能出现「第一次判终态、第二次却返回
-            // tool_calls（被流式解析忽略）」导致最终回答为空——历史回显「思考中」即源于此。
-            let tools = registry.get_tools_for_llm();
-            println!(
-                "[agent] run_task: 第 {} 轮，流式调用 LLM（模型={} 工具数={} 上下文={}条消息[裁剪前{}条]）",
-                iteration,
-                if cfg.llm_model_name.is_empty() {
-                    "<无>"
-                } else {
-                    cfg.llm_model_name.as_str()
-                },
-                tools.len(),
-                trimmed.len(),
-                messages.len(),
-            );
-            let mut outcome = match call_llm_stream(app, &cfg, &trimmed, &tools).await {
-                Ok(o) => o,
-                Err(e) => {
-                    println!("[agent] run_task: LLM 调用失败：{e}");
-                    events::emit_task_error(app, &format!("LLM 调用失败：{e}"));
-                    return;
-                }
-            };
-            // 本轮 LLM 真实用量（流式路径已写入 outcome.usage；兜底非流式会覆盖此值）。
-            let mut round_usage = outcome.usage;
-
-            // 兜底：流式空响应（正文与 tool_calls 皆空）。个别网关不支持流式 tool_calls
-            // （模型想调工具但 delta 里不下发），此时回退一次非流式调用拿真实决策。
-            if outcome.content.trim().is_empty() && outcome.tool_calls.is_empty() {
-                println!("[agent] run_task: 流式空响应，回退非流式调用兜底");
-                match call_llm(&cfg, &trimmed, &tools).await {
-                    Ok((choice, usage)) => {
-                        outcome = StreamOutcome {
-                            content: choice
-                                .get("content")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("")
-                                .to_string(),
-                            reasoning: choice
-                                .get("reasoning")
-                                .and_then(|v| v.as_str())
-                                .or_else(|| choice.get("reasoning_content").and_then(|v| v.as_str()))
-                                .unwrap_or("")
-                                .to_string(),
-                            tool_calls: choice
-                                .get("tool_calls")
-                                .and_then(|v| v.as_array())
-                                .cloned()
-                                .unwrap_or_default(),
-                            usage,
-                        };
-                        round_usage = usage;
-                    }
-                    Err(e) => {
-                        println!("[agent] run_task: LLM 兜底调用失败：{e}");
-                        events::emit_task_error(app, &format!("LLM 调用失败：{e}"));
-                        return;
-                    }
-                }
-            }
-
-            // 累计本轮真实 token 用量（流式或兜底非流式取其一，已用 round_usage 取值）。
-            task_usage.0 += round_usage.0;
-            task_usage.1 += round_usage.1;
-
-            // LLM 本轮返回摘要（排错核心信息：模型到底决定了什么）
-            println!(
-                "[agent] run_task: 第 {} 轮 LLM 返回 | 正文={}字符 推理={}字符 tool_calls={}个{}",
-                iteration,
-                outcome.content.chars().count(),
-                outcome.reasoning.chars().count(),
-                outcome.tool_calls.len(),
-                if outcome.tool_calls.is_empty() {
-                    "（终态）".to_string()
-                } else {
-                    format!(
-                        "：[{}]",
-                        outcome
-                            .tool_calls
-                            .iter()
-                            .filter_map(|tc| tc.get("function"))
-                            .filter_map(|f| f.get("name"))
-                            .filter_map(|n| n.as_str())
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    )
-                },
-            );
-
-            // 没有工具调用 → 终态：正文一次性推送（前端 useTypewriter 负责打字机呈现）
-            if outcome.tool_calls.is_empty() {
-                println!(
-                    "[agent] run_task: 第 {} 轮无工具调用，输出终态文本（{} 字符）：{}",
-                    iteration,
-                    outcome.content.chars().count(),
-                    clip(outcome.content.trim(), 200),
-                );
-                if !outcome.content.is_empty() {
-                    events::emit_text_chunk(app, &outcome.content, false);
-                }
-                events::emit_text_chunk(app, "", true);
-                messages.push(json!({ "role": "assistant", "content": outcome.content }));
-                break;
-            }
-
-            // 有工具调用：把模型在决定调用工具之前的「真实推理/思考」推送给前端
-            // （content 多为模型的规划/分析文本；reasoning 为 DeepSeek 等风格的独立思考字段）。
-            let reasoning_trim = outcome.reasoning.trim().to_string();
-            if !reasoning_trim.is_empty() {
-                events::emit_status(app, &reasoning_trim);
-            }
-            let content_trim = outcome.content.trim().to_string();
-            if !content_trim.is_empty() {
-                events::emit_status(app, &content_trim);
-            }
-
-            // 有工具调用：逐条执行
-            messages.push(json!({
-                "role": "assistant",
-                "content": outcome.content,
-                "tool_calls": outcome.tool_calls.clone()
-            }));
-
-            for tc in &outcome.tool_calls {
-                let (call_id, tool_name, args) = match parse_tool_call(tc) {
-                    Some(x) => x,
-                    None => {
-                        println!(
-                            "[agent] run_task: 工具调用格式无法解析，跳过 raw_tool_call={}",
-                            clip(&tc.to_string(), 500),
-                        );
-                        events::emit_error(app, "工具调用格式无法解析，跳过");
-                        continue;
-                    }
-                };
-
-                let tool = match registry.get(&tool_name) {
-                    Some(t) => t,
-                    None => {
-                        println!("[agent] run_task: 注册表找不到模型请求的工具 name={}", tool_name);
-                        events::emit_error(app, &format!("未知工具：{tool_name}"));
-                        continue;
-                    }
-                };
-
-                println!(
-                    "[agent] run_task: 执行工具 {} (call_id={}) 参数={}",
-                    tool_name,
-                    call_id,
-                    clip(&serde_json::to_string(&args).unwrap_or_default(), 300),
-                );
-
-                // 构造步骤快照（running）
-                let step_id = call_id.clone();
-                let sensitive = tool.check_permission(&args) == PermissionLevel::RequireApproval;
-                let started = ToolStep {
-                    call_id: step_id.clone(),
-                    tool_name: tool_name.clone(),
-                    status: "running".into(),
-                    sensitive,
-                    args: Some(serde_json::to_string(&args).unwrap_or_default()),
-                    result: None,
-                    duration_ms: None,
-                    created_at: now_ms(),
-                };
-                events::emit_tool_started(app, &started);
-
-                // 敏感工具：审批挂起（auto_tool_exec_mode 时跳过逐次确认）
-                if sensitive && !cfg.auto_tool_exec_mode {
-                    let approval_id = format!("ap-{}-{}", cfg.agent_id, step_id);
-                    let req = ApprovalRequest {
-                        approval_id: approval_id.clone(),
-                        tool_name: tool_name.clone(),
-                        description: format!("智能体请求执行敏感操作：{}", tool_name),
-                        args: serde_json::to_string(&args).unwrap_or_default(),
-                        kind: detect_kind(&tool_name, &args),
-                        hint: Some("请在弹窗中允许或拒绝（拒绝可填写原因引导纠偏）".into()),
-                    };
-                    events::emit_awaiting_approval(app, &req);
-                    let rx = self.approval.suspend(req).await;
-                    let approval_outcome: ApprovalOutcome = match rx.await {
-                        Ok(o) => o,
-                        Err(_) => {
-                            // 通道关闭（前端未响应 / 超时）：默认拒绝
-                            self.approval.cancel(&approval_id).await;
-                            ApprovalOutcome {
-                                approved: false,
-                                reason: Some("审批超时，已自动拒绝".into()),
-                            }
-                        }
-                    };
-                    println!(
-                        "[agent] run_task: 审批完成 approval_id={} approved={} reason={}",
-                        approval_id,
-                        approval_outcome.approved,
-                        approval_outcome.reason.as_deref().unwrap_or("<无>"),
-                    );
-                    if !approval_outcome.approved {
-                        let reason = approval_outcome.reason.unwrap_or_else(|| "用户拒绝".into());
-                        let finished = ToolStep {
-                            call_id: step_id.clone(),
-                            tool_name: tool_name.clone(),
-                            status: "failed".into(),
-                            sensitive,
-                            args: Some(serde_json::to_string(&args).unwrap_or_default()),
-                            result: Some(format!("已拒绝：{reason}")),
-                            duration_ms: None,
-                            created_at: now_ms(),
-                        };
-                        events::emit_tool_finished(app, &finished);
-                        messages.push(json!({
-                            "role": "tool",
-                            "tool_call_id": call_id,
-                            "content": format!("用户拒绝执行：{reason}")
-                        }));
-                        continue;
-                    }
-                }
-
-                // 执行工具
-                let t0 = Instant::now();
-                let result = tool.execute(args.clone(), &ctx).await;
-                let (status, result_text) = match &result {
-                    Ok(s) => ("success".into(), s.clone()),
-                    Err(ToolError::InvalidArgs(m))
-                    | Err(ToolError::ExecutionFailed(m))
-                    | Err(ToolError::PermissionDenied(m)) => ("failed".into(), m.clone()),
-                };
-                let finished = ToolStep {
-                    call_id: step_id.clone(),
-                    tool_name: tool_name.clone(),
-                    status,
-                    sensitive,
-                    args: Some(serde_json::to_string(&args).unwrap_or_default()),
-                    result: Some(result_text.clone()),
-                    duration_ms: Some(t0.elapsed().as_millis() as u64),
-                    created_at: now_ms(),
-                };
-                events::emit_tool_finished(app, &finished);
-                println!(
-                    "[agent] run_task: 工具 {} 执行完成 ok={} 耗时={}ms 结果={}",
-                    tool_name,
-                    result.is_ok(),
-                    t0.elapsed().as_millis(),
-                    clip(&result_text, 400),
-                );
-                messages.push(json!({
-                    "role": "tool",
-                    "tool_call_id": call_id,
-                    "content": result_text
-                }));
-            }
+        // 分支 A：简单对话 → 单次流式输出，0 工具介入，终态即结束。
+        if intent.is_simple_chat() {
+            self.run_simple_chat(app, &cfg, &prompt).await;
+            return;
         }
 
-        events::emit_task_done(app, task_usage.0, task_usage.1);
+        // 分支 B：复合任务 → 阶段二任务拆解规划。
+        events::emit_status(app, "正在规划任务步骤…");
+        let (plan, plan_usage) =
+            crate::agent::planner::build_plan(&cfg, &prompt, cfg.workspace.as_deref()).await;
+        events::emit_plan_generated(app, &plan);
 
-        // 真实 token 用量累计写回会话表（prompt + completion；tools_tokens 由 persist_tools_tokens 单独维护）。
+        // 阶段三：流水线隔离执行（子任务独立上下文、产物管道、失败重试 3 次）。
+        let result = crate::agent::pipeline::run_pipeline(
+            app,
+            &cfg,
+            &registry,
+            &ctx,
+            &self.approval,
+            &plan,
+        )
+        .await;
+
+        // 阶段四：合并全局执行视图，一次性推送终态文本（前端打字机渲染）。
+        events::emit_text_chunk(app, &result.final_text, false);
+        events::emit_text_chunk(app, "", true);
+
+        // token 用量 = 规划 + 各子任务累计，写回会话表并随事件带出。
+        let task_usage = (plan_usage.0 + result.usage.0, plan_usage.1 + result.usage.1);
+        events::emit_task_done(app, task_usage.0, task_usage.1);
         if let Some(sid) = &cfg.session_id {
             crate::agent::round_compactor::persist_session_tokens(app, sid, task_usage.0, task_usage.1).await;
         }
 
-        // 第 N 轮结束后：回填本轮 raw_messages_json（协议视图），累计轮次，
-        // 并派发后台滚动压缩（Tokio 异步、非阻塞，用户下一轮提问零前置等待）。
+        // 持久化精简协议日志（宏观意图 + 步骤规划 + 最终交付），入库前自检防孤儿消息。
         if let Some(round_id) = &cfg.round_id {
-            let round_messages = &messages[round_base..];
-            match serde_json::to_string(round_messages) {
+            let mut compact_round = vec![
+                json!({ "role": "user", "content": prompt.clone() }),
+                json!({
+                    "role": "assistant",
+                    "content": format!(
+                        "[任务规划：{}（{} 步）]\n{}",
+                        plan.goal_summary,
+                        plan.tasks.len(),
+                        plan.tasks.iter().map(|t| format!("步骤{}：{}", t.step, t.title)).collect::<Vec<_>>().join("；")
+                    )
+                }),
+                json!({ "role": "assistant", "content": result.final_text.clone() }),
+            ];
+            sanitize_message_sequence(&mut compact_round);
+            match serde_json::to_string(&compact_round) {
                 Ok(raw_json) => {
                     println!(
-                        "[agent] run_task: 回填 raw_messages_json（round={} 消息={}条 大小={}字符）",
+                        "[agent] run_task: 回填精简 raw_messages_json（round={} 大小={}字符）",
                         round_id,
-                        round_messages.len(),
                         raw_json.chars().count(),
                     );
                     crate::agent::round_compactor::persist_round_raw(app, round_id, &raw_json).await;
                 }
-                Err(e) => {
-                    println!("[agent] run_task: 序列化 raw_messages_json 失败：{e}");
-                }
+                Err(e) => println!("[agent] run_task: 序列化精简 raw_messages_json 失败：{e}"),
             }
             if let Some(sid) = &cfg.session_id {
                 crate::agent::round_compactor::bump_session_turns(app, sid).await;
                 crate::agent::round_compactor::trigger_background_compaction(app, &cfg, sid).await;
             }
         } else {
-            println!("[agent] run_task: 无 round_id，跳过 raw_messages_json 回填与压缩触发");
+            println!("[agent] run_task: 无 round_id，跳过精简 raw_messages_json 回填");
         }
+        return;
+
+    }
+
+    /// 分支 A（SIMPLE_CHAT）：单次流式输出，0 工具介入，毫秒级终态推送。
+    /// 简单对话需要延续会话上下文（含历史轮次与滚动摘要），因此走 build_context_messages；
+    /// 但 tools 传空，模型只能直出文本，不会产生工具调用。
+    async fn run_simple_chat(&self, app: &AppHandle, cfg: &AgentRuntimeConfig, prompt: &str) {
+        let mut messages = match crate::agent::context::build_context_messages(app, cfg, prompt).await {
+            Ok(m) => m,
+            Err(e) => {
+                println!("[agent] run_simple_chat: 上下文组装失败：{e}");
+                events::emit_task_error(app, &format!("上下文组装失败：{e}"));
+                return;
+            }
+        };
+        let round_base = messages.len().saturating_sub(1);
+        let mut task_usage: (u64, u64) = (0, 0);
+
+        // 裁剪 + 配对自检（历史轮次可能很长）。
+        let mut trimmed = trim_history(&messages);
+        sanitize_message_sequence(&mut trimmed);
+
+        println!(
+            "[agent] run_simple_chat: 单次流式调用（上下文={}条消息[裁剪前{}条]）",
+            trimmed.len(),
+            messages.len(),
+        );
+        match call_llm_stream(app, cfg, &trimmed, &[]).await {
+            Ok(outcome) => {
+                task_usage.0 += outcome.usage.0;
+                task_usage.1 += outcome.usage.1;
+                let content = outcome.content;
+                println!(
+                    "[agent] run_simple_chat: 终态文本 {} 字符：{}",
+                    content.chars().count(),
+                    clip(content.trim(), 200),
+                );
+                if !content.is_empty() {
+                    events::emit_text_chunk(app, &content, false);
+                }
+                events::emit_text_chunk(app, "", true);
+                messages.push(json!({ "role": "assistant", "content": content }));
+            }
+            Err(e) => {
+                println!("[agent] run_simple_chat: LLM 调用失败：{e}");
+                events::emit_task_error(app, &format!("LLM 调用失败：{e}"));
+                return;
+            }
+        }
+
+        events::emit_task_done(app, task_usage.0, task_usage.1);
+        if let Some(sid) = &cfg.session_id {
+            crate::agent::round_compactor::persist_session_tokens(app, sid, task_usage.0, task_usage.1).await;
+        }
+        if let Some(round_id) = &cfg.round_id {
+            let round_messages = &messages[round_base..];
+            match serde_json::to_string(round_messages) {
+                Ok(raw_json) => {
+                    crate::agent::round_compactor::persist_round_raw(app, round_id, &raw_json).await;
+                }
+                Err(e) => println!("[agent] run_simple_chat: 序列化 raw_messages_json 失败：{e}"),
+            }
+            if let Some(sid) = &cfg.session_id {
+                crate::agent::round_compactor::bump_session_turns(app, sid).await;
+                crate::agent::round_compactor::trigger_background_compaction(app, cfg, sid).await;
+            }
+        }
+    }
+}
+
+/// 单轮工具执行结果统计（供连续错误熔断判定）。
+pub(crate) struct ToolRoundStats {
+    pub had_success: bool,
+    pub had_error: bool,
+}
+
+/// 执行一轮 LLM 返回的全部 tool_calls：把 assistant 消息与所有工具结果按序压入 messages。
+/// `run_task`（遗留全局循环）与 `pipeline`（微 ReAct 子任务）共用，避免两份逻辑漂移。
+///
+/// 固定环节：参数 JSON 自愈回灌（ParseError）→ 注册表查找 → 敏感工具审批挂起
+/// → 执行 → `truncate_tool_output(15000)` 物理截断 → 推送 tool_started/finished 事件。
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn run_tool_calls_round(
+    app: &AppHandle,
+    registry: &ToolRegistry,
+    ctx: &ToolContext,
+    approval: &ApprovalManager,
+    cfg: &AgentRuntimeConfig,
+    messages: &mut Vec<Value>,
+    outcome: &StreamOutcome,
+) -> ToolRoundStats {
+    messages.push(json!({
+        "role": "assistant",
+        "content": outcome.content,
+        "tool_calls": outcome.tool_calls.clone()
+    }));
+
+    let mut iter_had_error = false;
+    let mut iter_had_success = false;
+
+    for tc in &outcome.tool_calls {
+        let (call_id, tool_name, args) = match parse_tool_call(tc) {
+            ParseOutcome::Ready { call_id, name, args } => (call_id, name, args),
+            ParseOutcome::ParseError { call_id, name, error } => {
+                // 幻觉自愈：把 JSON 解析错误作为 ToolResult 回传，强制模型下一轮纠错。
+                println!(
+                    "[agent] tool_round: 工具参数 JSON 解析失败 name={} err={}",
+                    name,
+                    clip(&error, 300),
+                );
+                iter_had_error = true;
+                events::emit_error(app, &format!("工具参数 JSON 解析失败：{name}"));
+                messages.push(json!({
+                    "role": "tool",
+                    "tool_call_id": call_id,
+                    "content": format!("JSON parse error: {error}. Please strictly check your escape characters and output valid JSON arguments.")
+                }));
+                continue;
+            }
+            ParseOutcome::Skip => {
+                println!(
+                    "[agent] tool_round: 工具调用字段缺失，跳过 raw_tool_call={}",
+                    clip(&tc.to_string(), 500),
+                );
+                events::emit_error(app, "工具调用字段缺失，跳过");
+                continue;
+            }
+        };
+
+        let tool = match registry.get(&tool_name) {
+            Some(t) => t,
+            None => {
+                println!("[agent] tool_round: 注册表找不到模型请求的工具 name={}", tool_name);
+                events::emit_error(app, &format!("未知工具：{tool_name}"));
+                continue;
+            }
+        };
+
+        println!(
+            "[agent] tool_round: 执行工具 {} (call_id={}) 参数={}",
+            tool_name,
+            call_id,
+            clip(&serde_json::to_string(&args).unwrap_or_default(), 300),
+        );
+
+        let step_id = call_id.clone();
+        let sensitive = tool.check_permission(&args) == PermissionLevel::RequireApproval;
+        events::emit_tool_started(app, &ToolStep {
+            call_id: step_id.clone(),
+            tool_name: tool_name.clone(),
+            status: "running".into(),
+            sensitive,
+            args: Some(serde_json::to_string(&args).unwrap_or_default()),
+            result: None,
+            duration_ms: None,
+            created_at: now_ms(),
+        });
+
+        // 敏感工具：审批挂起（auto_tool_exec_mode 时跳过逐次确认）
+        if sensitive && !cfg.auto_tool_exec_mode {
+            let approval_id = format!("ap-{}-{}", cfg.agent_id, step_id);
+            let req = ApprovalRequest {
+                approval_id: approval_id.clone(),
+                tool_name: tool_name.clone(),
+                description: format!("智能体请求执行敏感操作：{}", tool_name),
+                args: serde_json::to_string(&args).unwrap_or_default(),
+                kind: detect_kind(&tool_name, &args),
+                hint: Some("请在弹窗中允许或拒绝（拒绝可填写原因引导纠偏）".into()),
+            };
+            events::emit_awaiting_approval(app, &req);
+            let rx = approval.suspend(req).await;
+            let approval_outcome: ApprovalOutcome = match rx.await {
+                Ok(o) => o,
+                Err(_) => {
+                    approval.cancel(&approval_id).await;
+                    ApprovalOutcome {
+                        approved: false,
+                        reason: Some("审批超时，已自动拒绝".into()),
+                    }
+                }
+            };
+            println!(
+                "[agent] tool_round: 审批完成 approval_id={} approved={} reason={}",
+                approval_id,
+                approval_outcome.approved,
+                approval_outcome.reason.as_deref().unwrap_or("<无>"),
+            );
+            if !approval_outcome.approved {
+                let reason = approval_outcome.reason.unwrap_or_else(|| "用户拒绝".into());
+                events::emit_tool_finished(app, &ToolStep {
+                    call_id: step_id.clone(),
+                    tool_name: tool_name.clone(),
+                    status: "failed".into(),
+                    sensitive,
+                    args: Some(serde_json::to_string(&args).unwrap_or_default()),
+                    result: Some(format!("已拒绝：{reason}")),
+                    duration_ms: None,
+                    created_at: now_ms(),
+                });
+                messages.push(json!({
+                    "role": "tool",
+                    "tool_call_id": call_id,
+                    "content": format!("用户拒绝执行：{reason}")
+                }));
+                continue;
+            }
+        }
+
+        // 执行工具
+        let t0 = Instant::now();
+        let result = tool.execute(args.clone(), ctx).await;
+        let (status, result_text) = match &result {
+            Ok(s) => {
+                iter_had_success = true;
+                ("success".into(), truncate_tool_output(s.as_str()))
+            }
+            Err(ToolError::InvalidArgs(m)) => {
+                // InvalidArgs 计入连续错误序列（死循环高风险）。
+                iter_had_error = true;
+                ("failed".into(), truncate_tool_output(m.as_str()))
+            }
+            Err(ToolError::ExecutionFailed(m)) | Err(ToolError::PermissionDenied(m)) => {
+                ("failed".into(), truncate_tool_output(m.as_str()))
+            }
+        };
+        events::emit_tool_finished(app, &ToolStep {
+            call_id: step_id.clone(),
+            tool_name: tool_name.clone(),
+            status,
+            sensitive,
+            args: Some(serde_json::to_string(&args).unwrap_or_default()),
+            result: Some(result_text.clone()),
+            duration_ms: Some(t0.elapsed().as_millis() as u64),
+            created_at: now_ms(),
+        });
+        println!(
+            "[agent] tool_round: 工具 {} 执行完成 ok={} 耗时={}ms 结果={}",
+            tool_name,
+            result.is_ok(),
+            t0.elapsed().as_millis(),
+            clip(&result_text, 400),
+        );
+        messages.push(json!({
+            "role": "tool",
+            "tool_call_id": call_id,
+            "content": result_text
+        }));
+    }
+
+    ToolRoundStats {
+        had_success: iter_had_success,
+        had_error: iter_had_error,
     }
 }
 
@@ -492,7 +496,7 @@ pub(crate) async fn call_llm(
     let body_preview = serde_json::to_string(&sanitize_for_log(&body)).unwrap_or_default();
     println!(
         "[agent] call_llm: 请求体预览（已脱敏/截断）={} ",
-        clip(&body_preview, 5000)
+        clip(&body_preview, 1000)
     );
 
     let mut req = client.post(&url).json(&body);
@@ -554,17 +558,17 @@ pub(crate) async fn call_llm(
 }
 
 /// 流式调用的聚合结果（一轮 ReAct 的 LLM 输出）。
-struct StreamOutcome {
+pub(crate) struct StreamOutcome {
     /// 模型输出正文（终态轮为回答；工具轮多为规划/分析短文，可空）。
-    content: String,
+    pub(crate) content: String,
     /// 模型推理字段（DeepSeek 风格 `reasoning` / `reasoning_content`）。
-    reasoning: String,
+    pub(crate) reasoning: String,
     /// 标准 OpenAI 格式的 tool_calls（流式增量已按 index 归并完整）。
-    tool_calls: Vec<Value>,
+    pub(crate) tool_calls: Vec<Value>,
     /// 本轮 LLM 真实 token 用量（prompt / completion），取自 OpenAI 响应的 `usage`。
     /// 跨所有 ReAct 轮累计即为整轮任务的真实消耗，替代前端基于「仅首尾文本」的估算
     /// （旧估算会把 system prompt / 工具定义 / 中间工具往返全部漏掉，导致 token 严重低估）。
-    usage: (u64, u64),
+    pub(crate) usage: (u64, u64),
 }
 
 /// 流式调用 LLM（SSE）：聚合本轮的正文、推理与 tool_calls，返回给 ReAct 循环决策。
@@ -575,7 +579,7 @@ struct StreamOutcome {
 ///  - `delta.tool_calls` 是增量格式（首 chunk 带 id/name，后续仅带 arguments 片段），
 ///    按 `index` 归并为完整的标准 tool_calls；
 ///  - 调用方拿到空响应（正文与 tool_calls 皆空）时应回退非流式 `call_llm` 兜底。
-async fn call_llm_stream(
+pub(crate) async fn call_llm_stream(
     app: &AppHandle,
     cfg: &AgentRuntimeConfig,
     messages: &[Value],
@@ -638,7 +642,7 @@ async fn call_llm_stream(
     let body_preview = serde_json::to_string(&sanitize_for_log(&body)).unwrap_or_default();
     println!(
         "[agent] call_llm_stream: 请求体预览（已脱敏/截断）={} ",
-        clip(&body_preview, 5000)
+        clip(&body_preview, 1000)
     );
 
     let mut req = client.post(&url).json(&body);
@@ -847,13 +851,63 @@ fn normalize_chat_url(base: &str) -> String {
 
 /* ----------------------------- 工具辅助 ----------------------------- */
 
-fn parse_tool_call(tc: &Value) -> Option<(String, String, Value)> {
-    let id = tc.get("id").and_then(|v| v.as_str())?.to_string();
-    let func = tc.get("function")?;
-    let name = func.get("name").and_then(|v| v.as_str())?.to_string();
+/// 工具调用解析结果。
+enum ParseOutcome {
+    /// 字段缺失（无 id / 无 function / 无 name）：无法回传 ToolResult，直接跳过。
+    Skip,
+    /// 字段齐全但 `arguments` 不是合法 JSON：把解析错误作为 ToolResult 回传，强制模型自我纠错。
+    ParseError {
+        call_id: String,
+        name: String,
+        error: String,
+    },
+    /// 正常解析。
+    Ready {
+        call_id: String,
+        name: String,
+        args: Value,
+    },
+}
+
+fn parse_tool_call(tc: &Value) -> ParseOutcome {
+    let id = match tc.get("id").and_then(|v| v.as_str()) {
+        Some(s) => s.to_string(),
+        None => return ParseOutcome::Skip,
+    };
+    let func = match tc.get("function") {
+        Some(f) => f,
+        None => return ParseOutcome::Skip,
+    };
+    let name = match func.get("name").and_then(|v| v.as_str()) {
+        Some(s) => s.to_string(),
+        None => return ParseOutcome::Skip,
+    };
     let args_str = func.get("arguments").and_then(|v| v.as_str()).unwrap_or("{}");
-    let args: Value = serde_json::from_str(args_str).unwrap_or(json!({}));
-    Some((id, name, args))
+    match serde_json::from_str::<Value>(args_str) {
+        Ok(args) => ParseOutcome::Ready {
+            call_id: id,
+            name,
+            args,
+        },
+        Err(e) => ParseOutcome::ParseError {
+            call_id: id,
+            name,
+            error: e.to_string(),
+        },
+    }
+}
+
+/// 工具返回结果物理硬截断：超出 `MAX_TOOL_OUTPUT_LENGTH` 字符时截断并追加系统后缀，
+/// 防止超大输出撑爆上下文、无谓消耗 Token。
+fn truncate_tool_output(s: &str) -> String {
+    if s.chars().count() <= MAX_TOOL_OUTPUT_LENGTH {
+        return s.to_string();
+    }
+    let mut t: String = s.chars().take(MAX_TOOL_OUTPUT_LENGTH).collect();
+    t.push_str(
+        "...[Output Truncated: Exceeded 15000 characters. Please use tools like 'grep' or 'head' to filter specific information]",
+    );
+    t
 }
 
 fn detect_kind(tool_name: &str, args: &Value) -> String {
@@ -868,20 +922,203 @@ fn detect_kind(tool_name: &str, args: &Value) -> String {
     }
 }
 
+/// 裁剪历史（滑动窗口）：保留 system + 最近若干条消息。
+///
+/// **关键不变量**：绝不允许切开 `tool_calls ↔ tool result` 的配对。
+/// 一旦被保留的 assistant(tool_calls) 丢失了它的任一 tool 结果（或保留了
+/// tool 结果却丢掉发出它的 assistant），网关会直接拒绝整个请求：
+/// `invalid params, tool result's tool id(...) not found`（HTTP 400 / code 2013）。
+/// 因此切点必须从"按条数算出的理想位置"逐条向前（更早）推进，
+/// 直到落在一个配对安全的边界上——宁可多丢一点历史，也不能产生半截配对。
+/// 消息序列自检 + 自愈：确保发给 LLM（以及落库）的 messages 满足工具配对不变量。
+///
+/// 覆盖：
+/// - I2：每个含 `tool_calls` 的 assistant，其**全部** `tool_call.id` 都必须有对应 tool 结果；
+/// - I3：每条 tool 消息的 `tool_call_id` 必须能追溯到发起它的 assistant（否则为孤儿，直接丢弃）；
+/// - I5：序列末尾不得是悬空的 assistant(tool_calls)。
+///
+/// 为什么必须在发送前做：并行工具调用会产生「1 条 assistant + N 条 tool 结果」，
+/// 只要其中任意一条结果缺失（被裁剪切掉、工具被跳过、任务取消、熔断 break），
+/// 网关就会拒绝整个请求：
+/// `invalid params, tool result's tool id(...) not found`（HTTP 400 / code 2013）。
+/// 补一条占位结果远优于让整个任务崩溃——模型读到占位后会自行改道，而不是反复重试。
+pub(crate) fn sanitize_message_sequence(messages: &mut Vec<Value>) {
+    // ① 收集每个 assistant 声明的 tool_call id
+    let mut declared: Vec<(usize, Vec<String>)> = Vec::new();
+    let mut all_declared: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for (i, m) in messages.iter().enumerate() {
+        if m.get("role").and_then(|v| v.as_str()) != Some("assistant") {
+            continue;
+        }
+        if let Some(calls) = m.get("tool_calls").and_then(|v| v.as_array()) {
+            let ids: Vec<String> = calls
+                .iter()
+                .filter_map(|c| c.get("id").and_then(|v| v.as_str()).map(|s| s.to_string()))
+                .collect();
+            for id in &ids {
+                all_declared.insert(id.clone());
+            }
+            if !ids.is_empty() {
+                declared.push((i, ids));
+            }
+        }
+    }
+
+    // ② 已存在结果的 tool_call_id
+    let mut answered: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for m in messages.iter() {
+        if m.get("role").and_then(|v| v.as_str()) == Some("tool") {
+            if let Some(id) = m.get("tool_call_id").and_then(|v| v.as_str()) {
+                answered.insert(id.to_string());
+            }
+        }
+    }
+
+    // ③ 为缺失结果的 tool_call 补占位（紧随其 assistant 之后）
+    let mut patches: Vec<(usize, Value)> = Vec::new();
+    for (ai, ids) in &declared {
+        let mut offset = 1usize;
+        for id in ids {
+            if !answered.contains(id) {
+                patches.push((
+                    ai + offset,
+                    json!({
+                        "role": "tool",
+                        "tool_call_id": id,
+                        "content": "[Tool result missing] This tool call has no recorded result \
+(it may have been interrupted, cancelled, or dropped while trimming history). \
+Do NOT blindly retry the same call — re-evaluate your plan and either try a different \
+approach or report the situation to the user."
+                    }),
+                ));
+                offset += 1;
+            }
+        }
+    }
+    // 倒序插入，避免下标偏移
+    patches.sort_by(|a, b| b.0.cmp(&a.0));
+    let patched = patches.len();
+    for (pos, msg) in patches {
+        let at = pos.min(messages.len());
+        messages.insert(at, msg);
+    }
+    if patched > 0 {
+        println!(
+            "[agent] sanitize_message_sequence: 补齐 {} 条缺失的 tool 结果占位（防止 tool_call 悬空触发 HTTP 400）",
+            patched
+        );
+    }
+
+    // ④ 丢弃孤儿 tool 消息（找不到发起它的 assistant）
+    let before = messages.len();
+    messages.retain(|m| {
+        if m.get("role").and_then(|v| v.as_str()) != Some("tool") {
+            return true;
+        }
+        match m.get("tool_call_id").and_then(|v| v.as_str()) {
+            Some(id) => all_declared.contains(id),
+            None => false, // 连 id 都没有的 tool 消息必然是脏数据
+        }
+    });
+    let dropped = before - messages.len();
+    if dropped > 0 {
+        println!(
+            "[agent] sanitize_message_sequence: 丢弃 {} 条孤儿 tool 结果（其发起者 assistant 已不在上下文中）",
+            dropped
+        );
+    }
+}
+
 fn trim_history(messages: &[Value]) -> Vec<Value> {
-    // 保留 system，裁剪早期 user/assistant/tool 轮次至最近 N 轮
-    if messages.len() <= MAX_HISTORY_TURNS * 2 + 1 {
+    let budget = MAX_HISTORY_TURNS * 2; // 不含 system 的保留额度
+    if messages.len() <= budget + 1 {
         return messages.to_vec();
     }
     let system = messages.first().cloned();
     let rest = &messages[1..];
-    let keep = rest.len().saturating_sub(MAX_HISTORY_TURNS * 2);
+
+    // 理想起点（纯按条数），随后向前推进直到配对安全
+    let mut start = rest.len().saturating_sub(budget);
+    while start < rest.len() {
+        if is_safe_start(rest, start) && !has_orphan_tool_result(&rest[start..]) {
+            break;
+        }
+        start += 1;
+    }
+    // 兜底：极端情况下所有候选切点都不安全（例如历史几乎全是被打断的破碎配对），
+    // 绝不能退化成「只剩 system、一条 user/tool 都不剩」——那会让本次调用失去用户输入。
+    // 此时回退到「最后一条非 tool 消息」作为起点：宁可超出预算，也要保证上下文可用。
+    if start >= rest.len() {
+        start = rest
+            .iter()
+            .rposition(|m| m.get("role").and_then(|v| v.as_str()) != Some("tool"))
+            .unwrap_or(0);
+        println!(
+            "[agent] trim_history: 所有候选切点均不安全，退化保留最后一条非 tool 消息（start={}）",
+            start
+        );
+    }
+
     let mut out = Vec::new();
     if let Some(s) = system {
         out.push(s);
     }
-    out.extend_from_slice(&rest[keep..]);
+    out.extend_from_slice(&rest[start..]);
     out
+}
+
+/// 切点自身不得破坏配对：
+/// ① 切点不能是 tool 结果本身（否则发出它的 assistant 被留在了前一段）；
+/// ② 切点若是带 tool_calls 的 assistant，则它**全部** tool_call 的结果都必须落在本段内
+///    （并行工具调用时一轮会产生多条 tool 结果，只留一半必然 400）。
+fn is_safe_start(rest: &[Value], start: usize) -> bool {
+    let Some(first) = rest.get(start) else {
+        return true;
+    };
+    let role = first.get("role").and_then(|v| v.as_str()).unwrap_or("");
+    if role == "tool" {
+        return false;
+    }
+    if role == "assistant" {
+        if let Some(calls) = first.get("tool_calls").and_then(|v| v.as_array()) {
+            for c in calls {
+                let Some(id) = c.get("id").and_then(|v| v.as_str()) else {
+                    continue;
+                };
+                let result_in_segment = rest[start + 1..].iter().any(|m| {
+                    m.get("role").and_then(|v| v.as_str()) == Some("tool")
+                        && m.get("tool_call_id").and_then(|v| v.as_str()) == Some(id)
+                });
+                if !result_in_segment {
+                    return false;
+                }
+            }
+        }
+    }
+    true
+}
+
+/// 段内不得存在"孤儿 tool 结果"：某条 tool 消息的 tool_call_id，
+/// 在本段内找不到任何发出它的 assistant。
+fn has_orphan_tool_result(seg: &[Value]) -> bool {
+    seg.iter().any(|m| {
+        if m.get("role").and_then(|v| v.as_str()) != Some("tool") {
+            return false;
+        }
+        let Some(id) = m.get("tool_call_id").and_then(|v| v.as_str()) else {
+            return true;
+        };
+        !seg.iter().any(|a| {
+            a.get("role").and_then(|v| v.as_str()) == Some("assistant")
+                && a.get("tool_calls")
+                    .and_then(|v| v.as_array())
+                    .map(|arr| {
+                        arr.iter()
+                            .any(|c| c.get("id").and_then(|v| v.as_str()) == Some(id))
+                    })
+                    .unwrap_or(false)
+        })
+    })
 }
 
 pub(crate) fn now_ms() -> i64 {

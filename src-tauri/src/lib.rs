@@ -20,8 +20,13 @@ pub fn run() {
         .manage(agent::runtime::AgentRuntime::new())
         .setup(|app| -> Result<(), Box<dyn std::error::Error>> {
             // 后台静默确保 Agent 默认环境（default）存在；失败仅日志，不阻塞启动。
+            // 严格延后：先 await DB 连接池就绪闸门，杜绝启动早期组件未就绪导致的空指针 / 连接断裂。
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
+                if let Err(e) = agent::round_compactor::wait_db_ready(&handle).await {
+                    eprintln!("[startup] DB 就绪等待失败，后台初始化跳过：{e}");
+                    return;
+                }
                 if let Err(e) = mamba_manager::ensure_default_env(&handle).await {
                     eprintln!("[mamba] 默认环境初始化失败：{e}");
                 }

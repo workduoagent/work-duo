@@ -32,6 +32,9 @@ pub struct AgentEventPayload {
     pub message: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub seq: Option<u64>,
+    /// 规划/步骤视图（plan_generated / step_started / step_finished 事件携带）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub plan: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -60,6 +63,7 @@ pub fn emit_tool_started(app: &AppHandle, step: &ToolStep) {
             chunk: None,
             message: None,
             seq: None,
+            plan: None,
         },
     );
 }
@@ -75,6 +79,7 @@ pub fn emit_tool_finished(app: &AppHandle, step: &ToolStep) {
             chunk: None,
             message: None,
             seq: None,
+            plan: None,
         },
     );
 }
@@ -93,6 +98,7 @@ pub fn emit_text_chunk(app: &AppHandle, text: &str, done: bool) {
             }),
             message: None,
             seq: None,
+            plan: None,
         },
     );
 }
@@ -108,6 +114,7 @@ pub fn emit_status(app: &AppHandle, message: &str) {
             chunk: None,
             message: Some(message.into()),
             seq: None,
+            plan: None,
         },
     );
 }
@@ -123,6 +130,7 @@ pub fn emit_error(app: &AppHandle, message: &str) {
             chunk: None,
             message: Some(message.into()),
             seq: None,
+            plan: None,
         },
     );
 }
@@ -158,4 +166,90 @@ pub fn emit_task_done(app: &AppHandle, prompt_tokens: u64, completion_tokens: u6
 /// 整轮任务异常终止。
 pub fn emit_task_error(app: &AppHandle, message: &str) {
     emit(app, EVT_TASK_ERROR, &message);
+}
+
+/// 阶段二规划生成：推送任务步骤清单，前端渲染步骤进度条。
+pub fn emit_plan_generated(app: &AppHandle, plan: &crate::agent::types::PlanDAG) {
+    let tasks: Vec<serde_json::Value> = plan
+        .tasks
+        .iter()
+        .map(|t| {
+            serde_json::json!({
+                "step": t.step,
+                "taskId": t.task_id,
+                "title": t.title,
+                "description": t.description,
+                "status": "pending",
+            })
+        })
+        .collect();
+    emit(
+        app,
+        EVT_AGENT_EVENT,
+        &AgentEventPayload {
+            event_type: "plan_generated".into(),
+            step: None,
+            chunk: None,
+            message: None,
+            seq: None,
+            plan: Some(serde_json::json!({
+                "goalSummary": plan.goal_summary,
+                "tasks": tasks,
+            })),
+        },
+    );
+}
+
+/// 子任务开始：进度条对应步骤置为 running。
+pub fn emit_step_started(app: &AppHandle, step: usize, total: usize, title: &str) {
+    emit(
+        app,
+        EVT_AGENT_EVENT,
+        &AgentEventPayload {
+            event_type: "step_started".into(),
+            step: None,
+            chunk: None,
+            message: Some(format!("步骤 {step}/{total}：{title}")),
+            seq: None,
+            plan: Some(serde_json::json!({
+                "step": step,
+                "total": total,
+                "title": title,
+                "status": "running",
+            })),
+        },
+    );
+}
+
+/// 子任务结束：进度条对应步骤置为 success / failed，并携带产物摘要。
+pub fn emit_step_finished(
+    app: &AppHandle,
+    step: usize,
+    total: usize,
+    title: &str,
+    ok: bool,
+    summary: &str,
+) {
+    emit(
+        app,
+        EVT_AGENT_EVENT,
+        &AgentEventPayload {
+            event_type: "step_finished".into(),
+            step: None,
+            chunk: None,
+            message: Some(format!(
+                "步骤 {step}/{total}：{} {}",
+                title,
+                if ok { "完成" } else { "失败" }
+            )),
+            seq: None,
+            plan: Some(serde_json::json!({
+                "step": step,
+                "total": total,
+                "title": title,
+                "status": if ok { "success" } else { "failed" },
+                "summary": summary,
+            })),
+        },
+    );
 }

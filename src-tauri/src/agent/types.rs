@@ -71,3 +71,48 @@ pub struct AgentRuntimeConfig {
     /// 当前轮用户消息附件（多模态图片；仅注入当轮，历史轮由 raw_messages_json 原样保留）。
     pub attachments: Vec<AttachmentInput>,
 }
+
+/* ================= 三层流水线架构（意图分流 → DAG 规划 → 微 ReAct 执行） ================= */
+
+/// 阶段一产物：意图分类结果（由 `intent.rs` 解析 LLM 返回的 JSON）。
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct IntentProfile {
+    /// "SIMPLE_CHAT" | "COMPOSITE_TASK"
+    pub intent_type: String,
+    #[serde(default)]
+    pub reason: String,
+}
+
+impl IntentProfile {
+    pub fn is_simple_chat(&self) -> bool {
+        self.intent_type.eq_ignore_ascii_case("SIMPLE_CHAT")
+    }
+}
+
+/// 阶段二产物：单个原子子任务（DAG 节点；当前按 step 顺序串行执行）。
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+pub struct PlanSubTask {
+    pub step: usize,
+    pub task_id: String,
+    pub title: String,
+    pub description: String,
+}
+
+/// 阶段二产物：任务拆解规划（宏观目标 + 有序子任务列表）。
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+pub struct PlanDAG {
+    pub goal_summary: String,
+    pub tasks: Vec<PlanSubTask>,
+}
+
+/// 阶段三产物：单个子任务的结算输出。
+/// 投入「产物管道」，作为后续子任务的**唯一**前置输入；
+/// 子任务内部几万字的工具报文与报错重试记录全部物理销毁，绝不流入下一环。
+#[derive(Debug, Clone)]
+pub struct SubTaskOutput {
+    pub step: usize,
+    pub title: String,
+    /// 纯文本产物摘要，如："已拉取 SOL 近 7 天数据共 168 条，写入 .wd_mem/data/sol_raw.json"
+    pub summary: String,
+    pub success: bool,
+}

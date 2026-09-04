@@ -299,6 +299,11 @@ async fn load_config(
         })
         .collect();
 
+    // 沙箱开关：同一个真值源同时决定「能力层注册哪些工具」与「提示层声明哪些能力」。
+    // 二者必须同源——否则提示里写「不暴露 execute_command」而工具表里照样注册，
+    // 模型以工具表为准，试探后必然绕过沙箱（实测会去找系统 python 甚至 winget 安装）。
+    let allow_sandbox = get_i64(&row, "allow_sandbox") == 1;
+
     println!(
         "[agent] load_config 完成: llm_id={} model={} mcp_tools={} skill_tools={} auto_exec={} sandbox={} system_prompt={}字符 附件数={}",
         if llm_id.is_empty() { "<无>" } else { llm_id.as_str() },
@@ -306,7 +311,7 @@ async fn load_config(
         mcp_tools.len(),
         skill_tools.len(),
         get_i64(&row, "auto_tool_exec_mode") == 1,
-        get_i64(&row, "allow_sandbox") == 1,
+        allow_sandbox,
         get_str(&row, "system_prompt").chars().count(),
         attachments.as_ref().map(|a| a.len()).unwrap_or(0),
     );
@@ -321,8 +326,23 @@ async fn load_config(
                 "\n\n### 工作环境\n你当前的工作空间目录为：{}\n所有文件读写、Python 脚本执行、命令执行都必须在此目录或其子目录内进行。请使用相对于该目录的路径（如 `script.py`）或该目录下的绝对路径来指定文件位置，不要使用 `/workspace` 等虚拟路径。",
                 ws_trim
             ));
-            // 命令执行环境提示（避免 Unix 语法在 Windows 失效，如日志中 `pip ... | tail` 报错）
-            if cfg!(target_os = "windows") {
+            // 执行环境提示必须与「能力层实际注册的工具」保持一致（同源）：
+            // - 沙箱开启：execute_command 未注册，只能走 native__run_python_sandbox；
+            //   此时若仍教模型 cmd/sh 语法，等于诱导它去调一个根本不存在的工具，
+            //   模型转而自寻出路（实测：找系统 python、winget 安装 Python）脱离沙箱。
+            // - 沙箱关闭：才注入宿主 shell 的语法约定。
+            if allow_sandbox {
+                system_prompt.push_str(
+                    "\n\n### 执行环境（沙箱模式）\n本任务运行在**隔离沙箱**中，宿主 shell 命令工具（execute_command）未对你开放。\
+\n运行任何 Python 代码的唯一正确方式：\
+\n1. 先用 `native__write_file` 把 .py 脚本写入工作空间（建议放 `.wd_mem/scripts/`，便于复用）；\
+\n2. 再调用 `native__run_python_sandbox` 并传入该脚本的绝对路径执行（默认环境 `default`）。\
+\n**严禁**：\
+\n- 不要尝试调用系统 `python` / `python3`，不要用 `where python`、`python --version` 探测本机 Python；\
+\n- 绝对禁止用 winget / choco / brew / apt 安装系统级 Python 或任何系统软件——这会脱离沙箱并污染用户本机环境；\
+\n- 沙箱缺少第三方库时先 import 确认，确实缺失则如实告知用户，切勿自行安装系统级包。",
+                );
+            } else if cfg!(target_os = "windows") {
                 system_prompt.push_str(
                     "\n\n### 命令执行环境\n本机为 Windows，命令经 `cmd.exe /C` 执行（**不是** bash/PowerShell）。\
 请勿使用 `tail`/`cat`/`grep`/`head`/`wc` 等 Unix 专用命令，也不要依赖 `|` 管道做文本截取；\
@@ -341,29 +361,32 @@ async fn load_config(
 这是本工作空间的专属记忆与素材库，由你在上次运行中沉淀，本次应优先复用其中的素材、避免重复生成：\n\
 - `scripts/`：可复用的自动化脚本（Python/Shell 等）——**再跑同类任务前，先检查这里是否已有可用脚本，有则直接复用或小幅改写，不要从零重写**。\n\
 - `data/`：抓取/计算的中间数据（CSV/JSON 等）——已有则优先读取复用，避免重复联网获取。\n\
-- `outputs/`：最终产物的归档副本（可选）。\n\
-- `project_memory.md`：项目长期记忆（架构/避坑/用户偏好），大任务后可沉淀，你也可直接读取参考。\n\
+                    - `outputs/`：最终产物的归档副本（可选）。\n\
+- `MEMORY.md`：项目长期全局记忆（架构/避坑/用户偏好），全量注入系统提示，你可直接读取/编辑。\n\
+- `artifacts/`：你完成复杂任务后主动沉淀的设计蓝图（用 `native__archive_artifact` 写入）。\n\
 约定：**新生成的、值得保留的脚本请写入 `scripts/`；中间数据写入 `data/`；不要把临时/一次性脚本散落在工作空间根目录**，以免污染用户目录。**最终交付物**仍放在工作空间根目录或用户指定位置。",
                         ws_trim
                     ));
-                    // 扫描已有可复用素材，列出供本次参考
-                    if let Some(artifacts) = crate::agent::wd_mem::scan_reusable_artifacts(ws_trim) {
+                    // [双轨记忆 Slot 0] 树状索引（artifacts/sessions/scripts/data，仅首行标题，绝不读正文）+ 自主发现指令。
+                    if let Some(index) = crate::agent::wd_mem::build_tree_index(ws_trim) {
                         system_prompt.push_str(&format!(
-                            "\n\n### 可复用素材清单（来自上次运行的 `.wd_mem`，本次优先复用）\n{}",
-                            artifacts
+                            "\n\n{}\n\n> The `artifacts/`, `sessions/` and `scripts/` directories under `.wd_mem/` contain historical designs and bug-fixing records. You MUST use the `native__read_file` tool to inspect specific files before proceeding if the user's request relates to these modules.",
+                            index
                         ));
                     }
-                    // 自由对话（无会话）：额外读取项目长期记忆注入提示
-                    if session_id.is_none() {
-                        if let Some(mem) = crate::agent::wd_mem::read_project_memory(ws_trim) {
-                            if !mem.trim().is_empty() {
-                                system_prompt.push_str(&format!(
-                                    "\n\n### 项目长期记忆（project_memory.md）\n{}",
-                                    mem
-                                ));
-                            }
+                    // [双轨记忆 Slot 0] 长期全局记忆 MEMORY.md（规范命名；兼容旧 project_memory.md 回退）。
+                    if let Some(mem) = crate::agent::wd_mem::read_project_memory(ws_trim) {
+                        if !mem.trim().is_empty() {
+                            system_prompt.push_str(&format!(
+                                "\n\n### 项目长期记忆（.wd_mem/MEMORY.md）\n{}",
+                                mem
+                            ));
                         }
                     }
+                    // [固化闭环] 长期记忆主动沉淀指令：完成实质性任务后主动归档 artifacts/。
+                    system_prompt.push_str("\n\n### 长期记忆固化闭环（Long-term Memory Consolidation）\n\
+完成一个实质性的功能模块开发或深度 Bug 修复后，若本次任务沉淀了值得长期复用的「设计蓝图 / 架构约定 / 避坑法则」，请主动调用 `native__archive_artifact` 将其写入 `.wd_mem/artifacts/`（文件名用 kebab-case，如 `auth-flow.md`）。\
+若你不确定是否值得归档，请直接向用户提问：「本次任务涉及的核心设计是否需要提炼并归档至 `.wd_mem/artifacts/` 作为永久知识资产？」——得到确认后再写入。日常闲聊或微小改动无需归档。");
                     println!("[agent] load_config: 已确保 .wd_mem 结构并注入复用清单 workspace={}", ws_trim);
                 }
                 Err(e) => {
