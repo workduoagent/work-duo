@@ -10,6 +10,8 @@
 
 use serde_json::json;
 use serde_json::Value;
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use tauri::AppHandle;
 
 use crate::agent::approval::ApprovalManager;
@@ -37,6 +39,9 @@ pub struct PipelineResult {
     pub usage: (u64, u64),
     #[allow(dead_code)]
     pub success: bool,
+    /// 是否被用户中途取消（cancel_agent_task 触发）：取消时流水线提前整体收尾，
+    /// run_task 据此跳过正常 round 持久化并推送取消提示。
+    pub cancelled: bool,
 }
 
 /// 顺序调度 PlanDAG 中的全部原子子任务。
@@ -47,6 +52,7 @@ pub async fn run_pipeline(
     ctx: &ToolContext,
     approval: &ApprovalManager,
     plan: &PlanDAG,
+    cancel: &Arc<AtomicBool>,
 ) -> PipelineResult {
     let total = plan.tasks.len();
     let mut pipeline_context_summary = String::new();
@@ -54,6 +60,19 @@ pub async fn run_pipeline(
     let mut outputs: Vec<SubTaskOutput> = Vec::new();
 
     for task in &plan.tasks {
+        // 子任务开始前检查取消：已取消则中止后续所有步骤，提前整体收尾。
+        if cancel.load(std::sync::atomic::Ordering::SeqCst) {
+            println!(
+                "[agent] pipeline: 步骤 {}/{} 开始前检测到取消信号，中止流水线",
+                task.step, total,
+            );
+            return PipelineResult {
+                final_text: "任务已被用户取消。".to_string(),
+                usage: total_usage,
+                success: false,
+                cancelled: true,
+            };
+        }
         events::emit_step_started(app, task.step, total, &task.title);
 
         // 子任务失败重试：最多 MAX_SUBTASK_RETRIES 次。
@@ -68,11 +87,25 @@ pub async fn run_pipeline(
                 task,
                 total,
                 &pipeline_context_summary,
+                cancel,
             )
             .await;
             total_usage.0 += usage.0;
             total_usage.1 += usage.1;
             let ok = out.success;
+            // 子任务被取消：立即整体收尾，绝不进入失败重试（否则会把取消误判为失败并重试 3 次）。
+            if out.cancelled {
+                println!(
+                    "[agent] pipeline: 步骤 {}/{} 被用户取消，整体中止流水线",
+                    task.step, total,
+                );
+                return PipelineResult {
+                    final_text: "任务已被用户取消。".to_string(),
+                    usage: total_usage,
+                    success: false,
+                    cancelled: true,
+                };
+            }
             if !ok {
                 println!(
                     "[agent] pipeline: 步骤 {}/{} 第 {} 次尝试未闭环：{}",
@@ -123,6 +156,7 @@ pub async fn run_pipeline(
                 final_text: report,
                 usage: total_usage,
                 success: false,
+                cancelled: false,
             };
         }
 
@@ -153,6 +187,7 @@ pub async fn run_pipeline(
         final_text,
         usage: total_usage,
         success: true,
+        cancelled: false,
     }
 }
 
@@ -168,6 +203,7 @@ async fn run_subtask(
     task: &PlanSubTask,
     total: usize,
     pipeline_context_summary: &str,
+    cancel: &Arc<AtomicBool>,
 ) -> (SubTaskOutput, (u64, u64)) {
     // 认知上下文绝对隔离：崭新的 messages，0 历史包袱。
     let prior = if pipeline_context_summary.trim().is_empty() {
@@ -202,11 +238,29 @@ async fn run_subtask(
     let mut tool_iterations = 0usize; // 工具轮次（计入预算；终态汇报轮不计入）
 
     loop {
+        // 每轮开始前检查取消：用户点击「停止」后，下一轮边界立即终止本子任务，
+        // 不再发起新的 LLM 调用（正在进行的流会在 call_llm_stream 内部断流）。
+        if cancel.load(std::sync::atomic::Ordering::SeqCst) {
+            println!(
+                "[agent] pipeline: 子任务 step={} 第 {} 轮前检测到取消信号，终止",
+                task.step, round,
+            );
+            return (
+                SubTaskOutput {
+                    step: task.step,
+                    title: task.title.clone(),
+                    summary: "任务已被用户取消".to_string(),
+                    success: false,
+                    cancelled: true,
+                },
+                usage,
+            );
+        }
         round += 1;
         // 协议安全过滤：每次调用前无条件执行配对自检（彻底防 400）。
         runtime::sanitize_message_sequence(&mut messages);
 
-        let mut outcome = match runtime::call_llm_stream(app, cfg, &messages, &tools).await {
+        let mut outcome = match runtime::call_llm_stream(app, cfg, &messages, &tools, cancel).await {
             Ok(o) => o,
             Err(e) => {
                 println!(
@@ -219,6 +273,7 @@ async fn run_subtask(
                         title: task.title.clone(),
                         summary: format!("LLM 调用失败：{e}"),
                         success: false,
+                        cancelled: false,
                     },
                     usage,
                 );
@@ -254,11 +309,30 @@ async fn run_subtask(
                             title: task.title.clone(),
                             summary: format!("LLM 兜底调用失败：{e}"),
                             success: false,
+                            cancelled: false,
                         },
                         usage,
                     );
                 }
             }
+        }
+        // 本轮回合期间用户点击了取消（call_llm_stream 内部已断流，返回部分内容）：
+        // 立即终止子任务并标记取消，绝不把断流得到的空/残内容误判为「终态汇报」闭环。
+        if cancel.load(std::sync::atomic::Ordering::SeqCst) {
+            println!(
+                "[agent] pipeline: 子任务 step={} 流式返回后检测到取消信号，终止",
+                task.step,
+            );
+            return (
+                SubTaskOutput {
+                    step: task.step,
+                    title: task.title.clone(),
+                    summary: "任务已被用户取消".to_string(),
+                    success: false,
+                    cancelled: true,
+                },
+                usage,
+            );
         }
         usage.0 += outcome.usage.0;
         usage.1 += outcome.usage.1;
@@ -294,6 +368,7 @@ async fn run_subtask(
                         summary
                     },
                     success,
+                    cancelled: false,
                 },
                 usage,
             );
@@ -313,6 +388,7 @@ async fn run_subtask(
                     title: task.title.clone(),
                     summary: format!("子任务超过 {} 轮工具调用仍未闭环", MAX_SUBTASK_ITERATIONS),
                     success: false,
+                    cancelled: false,
                 },
                 usage,
             );
@@ -358,6 +434,7 @@ async fn run_subtask(
                     title: task.title.clone(),
                     summary: format!("连续 {} 轮工具调用全部失败，子任务受阻", consecutive_errors),
                     success: false,
+                    cancelled: false,
                 },
                 usage,
             );

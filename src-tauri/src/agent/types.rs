@@ -115,4 +115,7 @@ pub struct SubTaskOutput {
     /// 纯文本产物摘要，如："已拉取 SOL 近 7 天数据共 168 条，写入 .wd_mem/data/sol_raw.json"
     pub summary: String,
     pub success: bool,
+    /// 是否被用户中途取消（cancel_agent_task 触发）：取消的子任务不计入失败重试，
+    /// 流水线据此提前整体收尾。
+    pub cancelled: bool,
 }

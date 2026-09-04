@@ -13,6 +13,7 @@
 //!  - 客户端一律走云端 API（与项目架构定调一致）。
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
 use futures_util::StreamExt;
@@ -43,6 +44,9 @@ const MAX_TOOL_OUTPUT_LENGTH: usize = 15000;
 pub struct AgentRuntime {
     pub approval: Arc<ApprovalManager>,
     pub native: Arc<Mutex<ToolRegistry>>,
+    /// 任务取消标志（用户点击「停止」时由 `cancel_agent_task` 置 true）。
+    /// 以 `Arc<AtomicBool>` 形式在命令与后台任务间共享，无需额外句柄即可感知取消。
+    pub cancel_flag: Arc<AtomicBool>,
 }
 
 impl AgentRuntime {
@@ -50,13 +54,18 @@ impl AgentRuntime {
         Self {
             approval: Arc::new(ApprovalManager::new()),
             native: Arc::new(Mutex::new(ToolRegistry::new())),
+            cancel_flag: Arc::new(AtomicBool::new(false)),
         }
     }
 
     /// 启动一轮任务（被 `run_agent_task` 命令调用，后台 spawn）。
     #[allow(unreachable_code)]
     pub async fn run_task(&self, app: &AppHandle, cfg: AgentRuntimeConfig, prompt: String) {
-        // 0) 动态重算并回写 tools_tokens：按当前已解析的 MCP/Skill 工具数覆盖写入会话表，
+        // 0) 新一轮任务开始：清除上一轮可能残留的取消标志（cancel_agent_task 已无副作用），
+        //    同时保证"上一次取消未生效就立刻发起新任务"不会误杀新任务。
+        self.cancel_flag.store(false, Ordering::SeqCst);
+
+        // 0.1) 动态重算并回写 tools_tokens：按当前已解析的 MCP/Skill 工具数覆盖写入会话表，
         //    中途移除 Skill / 停用（解绑）MCP 后，下一轮会自动下调；重新绑定则上调。
         if let Some(sid) = &cfg.session_id {
             crate::agent::round_compactor::persist_tools_tokens(
@@ -112,7 +121,7 @@ impl AgentRuntime {
 
         // 分支 A：简单对话 → 单次流式输出，0 工具介入，终态即结束。
         if intent.is_simple_chat() {
-            self.run_simple_chat(app, &cfg, &prompt).await;
+            self.run_simple_chat(app, &cfg, &prompt, &self.cancel_flag).await;
             return;
         }
 
@@ -120,6 +129,14 @@ impl AgentRuntime {
         events::emit_status(app, "正在规划任务步骤…");
         let (plan, plan_usage) =
             crate::agent::planner::build_plan(&cfg, &prompt, cfg.workspace.as_deref()).await;
+
+        // 规划期间用户可能已点击取消：规划完成后立即检查，避免拉起无意义的流水线。
+        if self.cancel_flag.load(Ordering::SeqCst) {
+            println!("[agent] run_task: 规划完成后检测到取消信号，终止任务");
+            events::emit_status(app, "⛔ 任务已被用户取消");
+            events::emit_task_done(app, plan_usage.0, plan_usage.1);
+            return;
+        }
         events::emit_plan_generated(app, &plan);
 
         // 阶段三：流水线隔离执行（子任务独立上下文、产物管道、失败重试 3 次）。
@@ -130,8 +147,18 @@ impl AgentRuntime {
             &ctx,
             &self.approval,
             &plan,
+            &self.cancel_flag,
         )
         .await;
+
+        // 用户中途取消：跳过正常收尾（不持久化半成品 round），仅做取消提示并收尾。
+        if result.cancelled {
+            println!("[agent] run_task: 流水线检测到取消信号，已提前收尾");
+            let task_usage = (plan_usage.0 + result.usage.0, plan_usage.1 + result.usage.1);
+            events::emit_status(app, "⛔ 任务已被用户取消");
+            events::emit_task_done(app, task_usage.0, task_usage.1);
+            return;
+        }
 
         // 阶段四：合并全局执行视图，一次性推送终态文本（前端打字机渲染）。
         events::emit_text_chunk(app, &result.final_text, false);
@@ -185,7 +212,13 @@ impl AgentRuntime {
     /// 分支 A（SIMPLE_CHAT）：单次流式输出，0 工具介入，毫秒级终态推送。
     /// 简单对话需要延续会话上下文（含历史轮次与滚动摘要），因此走 build_context_messages；
     /// 但 tools 传空，模型只能直出文本，不会产生工具调用。
-    async fn run_simple_chat(&self, app: &AppHandle, cfg: &AgentRuntimeConfig, prompt: &str) {
+    async fn run_simple_chat(
+        &self,
+        app: &AppHandle,
+        cfg: &AgentRuntimeConfig,
+        prompt: &str,
+        cancel: &Arc<AtomicBool>,
+    ) {
         let mut messages = match crate::agent::context::build_context_messages(app, cfg, prompt).await {
             Ok(m) => m,
             Err(e) => {
@@ -206,10 +239,17 @@ impl AgentRuntime {
             trimmed.len(),
             messages.len(),
         );
-        match call_llm_stream(app, cfg, &trimmed, &[]).await {
+        match call_llm_stream(app, cfg, &trimmed, &[], cancel).await {
             Ok(outcome) => {
                 task_usage.0 += outcome.usage.0;
                 task_usage.1 += outcome.usage.1;
+                // 流式过程中用户可能已点击取消：生成内容作废，仅做取消提示。
+                if cancel.load(Ordering::SeqCst) {
+                    println!("[agent] run_simple_chat: 流式返回后检测到取消信号，终止任务");
+                    events::emit_status(app, "⛔ 任务已被用户取消");
+                    events::emit_task_done(app, task_usage.0, task_usage.1);
+                    return;
+                }
                 let content = outcome.content;
                 println!(
                     "[agent] run_simple_chat: 终态文本 {} 字符：{}",
@@ -584,6 +624,7 @@ pub(crate) async fn call_llm_stream(
     cfg: &AgentRuntimeConfig,
     messages: &[Value],
     tools: &[Value],
+    cancel: &Arc<AtomicBool>,
 ) -> Result<StreamOutcome, String> {
     let _ = app; // 事件推送已上移到 ReAct 循环，本函数只做拉流聚合
     if cfg.llm_base_url.is_empty() || cfg.llm_model_name.is_empty() {
@@ -691,6 +732,15 @@ pub(crate) async fn call_llm_stream(
     // 真实 token 用量累计（OpenAI 把 usage 放在最后一个 chunk 之前；不同网关位置略有差异，每片都取最新非空值）。
     let mut usage: (u64, u64) = (0, 0);
     while let Some(chunk_result) = stream.next().await {
+        // 用户中途取消：立即终止拉流（连接随函数返回被丢弃），让本轮回合在
+        // 调用方处检测到取消标志后提前结束。这是"停止按钮即时生效"的核心断流点。
+        if cancel.load(Ordering::SeqCst) {
+            println!(
+                "[agent] call_llm_stream: 检测到取消信号，立即断流（已耗时={}ms）",
+                request_started.elapsed().as_millis()
+            );
+            break;
+        }
         let chunk = chunk_result.map_err(|e| {
             println!("[agent] call_llm_stream: SSE 流读取失败（已耗时={}ms）：{}", request_started.elapsed().as_millis(), e);
             format!("流读取失败：{e}")

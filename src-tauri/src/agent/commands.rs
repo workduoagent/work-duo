@@ -98,11 +98,14 @@ pub async fn submit_approval_decision(
     Ok(runtime.approval.resolve(decision).await)
 }
 
-/// 取消当前任务（best-effort：仅清理挂起的审批，循环会因通道关闭自然结束）。
+/// 取消当前任务（最佳努力）：置位共享取消标志，后台 run_task 流水线与流式拉取循环
+/// 会在下一轮边界 / 下一个 SSE chunk 处感知并立即终止，无需额外的任务句柄。
 #[tauri::command]
 pub async fn cancel_agent_task(runtime: State<'_, AgentRuntime>) -> Result<(), String> {
-    // 无正在运行的显式句柄，审批挂起项超时机制会自然释放；此处置为成功。
-    let _ = runtime;
+    runtime
+        .cancel_flag
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    println!("[agent] cancel_agent_task: 已置位取消标志，后台任务将尽快终止");
     Ok(())
 }
 
