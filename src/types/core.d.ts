@@ -213,9 +213,14 @@ export interface AgentInfo {
   isActive: boolean
   autoToolExecMode: boolean
   allowSandbox: boolean
+  /** 记忆模式：off=关闭 / active=主动 / forced=强制每次任务末沉淀 */
+  memoryMode: MemoryMode
   createdAt: string
   updatedAt: string
 }
+
+/** 智能体记忆模式（对应 agent_info.memory_mode）。 */
+export type MemoryMode = 'off' | 'active' | 'forced'
 
 /**
  * 智能体绑定的 MCP 工具（对应 agent_mcp_ref 表）。
@@ -271,6 +276,8 @@ export interface AgentUpsertInput {
   autoToolExecMode?: boolean
   /** 是否允许该智能体使用沙箱环境 */
   allowSandbox?: boolean
+  /** 记忆模式：off=关闭 / active=主动 / forced=强制每次任务末沉淀 */
+  memoryMode?: MemoryMode
   /** 绑定的 MCP 工具（最小单元 = toolId；mcpId 为冗余分组信息） */
   mcpTools: Array<{ mcpId: string; toolId: string }>
   /** 编排的技能 id */
@@ -373,12 +380,16 @@ export interface AgentConversationRound {
   thinkingContent?: string
   assistantAnswer?: string
   toolCallsSummary?: Record<string, unknown>[]
+  /** 规划步骤结构（标题/状态/产物摘要），与 toolCallsSummary 对称落库；历史回看时重建「步骤 → 工具」嵌套视图。 */
+  planStepsSummary?: Record<string, unknown>[]
   inputTokens?: number
   outputTokens?: number
   startTime?: number
   endTime?: number
   createdAt: string
   updatedAt: string
+  /** 原始消息序列 JSON（含多模态图片 dataUrl），历史回显附件卡片用。 */
+  rawMessagesJson?: string
 }
 
 /** 用户消息中的附件（图片等）。前端以 base64 data URL 形式携带。 */
@@ -395,4 +406,143 @@ export interface AppendRoundInput {
   roundIndex: number
   userQuestion?: string
   startTime?: number
+}
+
+/* ============================ 小分队（Squad）协作 ============================ */
+
+/** 协作模式：编排式 / 流水线 / 群聊。 */
+export type SquadMode = 'orchestrator' | 'pipeline' | 'chat'
+
+/** 运行策略执行方式。 */
+export type SquadExecutionMode = 'manual' | 'schedule' | 'api'
+
+/** 小分队运行策略（JSON 存于 agent_squad.run_strategy）。 */
+export interface SquadRunStrategy {
+  executionMode: SquadExecutionMode
+  scheduleCron?: string | null
+  retryCount: number
+  /** 定时 / API 模式触发时使用的默认任务指令。 */
+  schedulePrompt?: string | null
+}
+
+/** 群聊专属配置（agent_squad_chat_config）。 */
+export interface SquadChatConfig {
+  maxRounds: number
+  summarizerAgentId?: string | null
+}
+
+/** 小分队 API 触发服务配置（存于 app_config：squad_api_enabled / squad_api_port / squad_api_token）。 */
+export interface SquadApiConfig {
+  enabled: boolean
+  port: number
+  token: string
+}
+
+/** 成员任职输入（新建 / 更新时提交）。 */
+export interface SquadMemberInput {
+  agentId: string
+  role: string
+  personaOverride?: string
+  pipelineOrder?: number | null
+  /** 流水线 DAG 依赖：上游成员 agentId 列表（空 = 按 pipelineOrder 线性串流）。 */
+  dependsOn?: string[]
+  isLeader: boolean
+}
+
+/** 新建 / 更新小分队的入参。 */
+export interface SquadUpsertInput {
+  id?: string
+  name: string
+  logo?: string | null
+  description?: string | null
+  uniqueId?: string | null
+  mode: SquadMode
+  leaderAgentId?: string | null
+  globalMcpIds?: string[]
+  supportsFileInput?: boolean | null
+  runStrategy: SquadRunStrategy
+  members: SquadMemberInput[]
+  chatConfig: SquadChatConfig
+}
+
+/** 已落库的小分队成员任职。 */
+export interface SquadMember extends SquadMemberInput {
+  id: string
+  squadId: string
+  createdAt: string
+}
+
+/** 小分队完整领域模型（列表 / 详情通用）。 */
+export interface SquadInfo {
+  id: string
+  name: string
+  logo?: string | null
+  description?: string | null
+  mode: SquadMode
+  leaderAgentId?: string | null
+  uniqueId?: string | null
+  globalMcpIds: string[]
+  supportsFileInput?: boolean | null
+  runStrategy: SquadRunStrategy
+  members: SquadMember[]
+  chatConfig: SquadChatConfig
+  createdAt: string
+  updatedAt: string
+}
+
+/** 协作运行会话。 */
+export interface SquadSession {
+  id: string
+  squadId: string
+  title?: string | null
+  mode: SquadMode
+  status: string
+  snapshot?: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+/** 协作轮次（讨论黑板的一条发言 / 子任务交付 / 汇总）。 */
+export type SquadRoundKind =
+  | 'delegation'
+  | 'subtask'
+  | 'message'
+  | 'summary'
+  | 'system'
+
+export interface SquadRound {
+  id?: string
+  squadId: string
+  sessionId: string
+  speakerAgentId?: string | null
+  role: string
+  kind: SquadRoundKind
+  content: string
+  createdAt?: string
+}
+
+/** 小分队记忆分类（与后端 MEMORY_CATEGORIES 对齐，并兼容 squad 默认 general）。 */
+export type SquadMemoryCategory =
+  | 'decision'
+  | 'code_pattern'
+  | 'user_pref'
+  | 'architecture'
+  | 'fix'
+  | 'general'
+  | 'other'
+
+/** 小分队记忆（团队黑板的一条知识点，对应 agent_squad_memory 行）。 */
+export interface SquadMemory {
+  id: string
+  squadId: string
+  agentId?: string | null
+  sessionId?: string | null
+  key: string
+  content: string
+  category: SquadMemoryCategory
+  refCount: number
+  anchored: boolean
+  lastRecalledAt?: number | null
+  createdAt: number
+  updatedAt: number
 }

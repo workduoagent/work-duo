@@ -104,6 +104,7 @@ export interface AgentInfoRow {
   is_active: number // SQLite 布尔：0 / 1
   auto_tool_exec_mode: number // SQLite 布尔：0 / 1
   allow_sandbox: number // SQLite 布尔：0 / 1
+  memory_mode: string // 记忆模式：off / active / forced
   created_at: number
   updated_at: number
 }
@@ -134,15 +135,103 @@ export interface AgentSkillRefRow {
   updated_at: number
 }
 
-/** 小分队表（squads）行映射（预留，尚未接入 mapper）。
- * member_ids 为成员 id 数组的 JSON 文本。
+/** 小分队定义表（agent_squad）行映射。
+ * - logo：团队头像 Base64 字符串（可空）；
+ * - mode：协作模式 orchestrator / pipeline / chat；
+ * - leader_agent_id：编排式主管 / 群聊汇总主笔默认（引用 agent_info.id，可空）；
+ * - global_mcp_ids：全局挂载 MCP 服务 id 数组（JSON 文本，可空）；
+ * - run_strategy：运行策略 JSON（{ execution_mode, schedule_cron?, retry_count? }，可空）；
+ * - created_at / updated_at：epoch 毫秒。
  */
-export interface SquadRow {
+export interface AgentSquadRow {
   id: string
   name: string
+  logo: string | null
   description: string | null
-  member_ids: string // JSON 数组存储为文本
+  mode: string
+  leader_agent_id: string | null
+  unique_id: string | null
+  global_mcp_ids: string | null // JSON 数组文本
+  run_strategy: string | null // JSON 文本
+  supports_file_input: number // 0 / 1
   created_at: number
+  updated_at: number
+}
+
+/** 小分队成员任职表（agent_squad_member）行映射。
+ * - role：承担角色；persona_override：人设定制（拼到成员 system_prompt 末尾）；
+ * - pipeline_order：流水线工序序号（pipeline 模式用，其余 NULL）；
+ * - is_leader：编排式主管标记（0/1）。
+ */
+export interface AgentSquadMemberRow {
+  id: string
+  squad_id: string
+  agent_id: string
+  role: string | null
+  persona_override: string | null
+  pipeline_order: number | null
+  depends_on: string | null // JSON 数组：上游成员 agent_id 列表（流水线 DAG 依赖）
+  is_leader: number // SQLite 布尔：0 / 1
+  created_at: number
+}
+
+/** 小分队群聊配置表（agent_squad_chat_config）行映射。
+ * - max_rounds：发言轮次上限（默认 8）；
+ * - summarizer_agent_id：汇总主笔（最终产物结论负责人，可空）。
+ */
+export interface AgentSquadChatConfigRow {
+  squad_id: string
+  max_rounds: number
+  summarizer_agent_id: string | null
+}
+
+/** 小分队协作运行表（agent_squad_session）行映射。
+ * - squad_id：所属团队；mode：协作模式快照；status：运行状态；
+ * - snapshot：运行态快照（JSON，可空）。
+ */
+export interface AgentSquadSessionRow {
+  id: string
+  squad_id: string
+  title: string | null
+  mode: string
+  status: string
+  snapshot: string | null
+  created_at: number
+  updated_at: number
+}
+
+/** 小分队协作轮次表（agent_squad_round）行映射（讨论黑板）。
+ * - speaker_agent_id：发言者智能体（系统消息为 NULL）；role：发言者角色；
+ * - content：正文；kind：类型（user/assistant/summary/system…）。
+ */
+export interface AgentSquadRoundRow {
+  id: string
+  squad_id: string
+  session_id: string
+  speaker_agent_id: string | null
+  role: string | null
+  content: string
+  kind: string | null
+  created_at: number
+}
+
+/** 小分队记忆表（agent_squad_memory）行映射。
+ * 结构照搬 AgentMemoryRow，归属维度换 squad_id + 可选 agent_id
+ * （agent_id 为 NULL = 团队共享记忆，非 NULL = 某成员个人记忆）。
+ */
+export interface AgentSquadMemoryRow {
+  id: string
+  squad_id: string
+  agent_id: string | null
+  session_id: string | null
+  key: string
+  content: string
+  category: string
+  ref_count: number // SQLite 整型
+  anchored: number // SQLite 布尔：0 / 1
+  last_recalled: number | null
+  created_at: number
+  updated_at: number
 }
 
 /** 技能能力单元表（skill_info）行映射。
@@ -249,12 +338,15 @@ export interface AgentConversationRoundRow {
   thinking_content: string | null
   assistant_answer: string | null
   tool_calls_summary: string | null
+  plan_steps: string | null
   input_tokens: number | null
   output_tokens: number | null
   start_time: number | null
   end_time: number | null
   created_at: number
   updated_at: number
+  /** 原始消息序列（含多模态图片 dataUrl），历史回显附件卡片用。 */
+  raw_messages_json: string | null
 }
 
 /** MCP 工具定义表（mcp_tool_definition）行映射。
@@ -280,4 +372,43 @@ export interface McpToolDefinitionRow {
   test_params: string | null // JSON 对象文本
   created_at: number
   updated_at: number
+}
+
+/** 记忆宫殿主表（agent_memories）行映射（§3.3 记忆宫殿）。
+ * - id：本地 UUID（文本主键）；
+ * - agent_id：关联智能体（可空，空代表全局共享记忆）；
+ * - session_id：触发锚定的会话（可空）；
+ * - key：短标题 / 关键词（同一 agent_id 下唯一锚定键，重复锚定则更新内容）；
+ * - content：记忆正文；
+ * - category：分类（decision / code_pattern / user_pref / architecture / fix / other）；
+ * - ref_count：引用次数（召回埋点累计）；
+ * - anchored：是否显式锚定（1 刻意沉淀，0 自动沉淀）；
+ * - last_recalled：最近一次召回时间（epoch 毫秒，可空）；
+ * - created_at / updated_at：epoch 毫秒。
+ */
+export interface AgentMemoryRow {
+  id: string
+  agent_id: string | null
+  session_id: string | null
+  key: string
+  content: string
+  category: string
+  ref_count: number
+  anchored: number // SQLite 布尔：0 / 1
+  last_recalled: number | null
+  created_at: number
+  updated_at: number
+}
+
+/** 记忆事件日志表（agent_memory_events）行映射。
+ * - id：自增主键；
+ * - memory_id：外键，引用 agent_memories.id（级联删除）；
+ * - event_type：'recall' | 'anchor' | 'compact'；
+ * - created_at：epoch 毫秒；按日聚合驱动热力图。
+ */
+export interface AgentMemoryEventRow {
+  id: number
+  memory_id: string
+  event_type: string
+  created_at: number
 }

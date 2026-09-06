@@ -71,10 +71,12 @@ function rowToRound(r: AgentConversationRoundRow): AgentConversationRound {
     thinkingContent: r.thinking_content ?? undefined,
     assistantAnswer: r.assistant_answer ?? undefined,
     toolCallsSummary: safeParse<Record<string, unknown>[]>(r.tool_calls_summary, []),
+    planStepsSummary: safeParse<Record<string, unknown>[]>(r.plan_steps, []),
     inputTokens: r.input_tokens ?? undefined,
     outputTokens: r.output_tokens ?? undefined,
     startTime: r.start_time ?? undefined,
     endTime: r.end_time ?? undefined,
+    rawMessagesJson: r.raw_messages_json ?? undefined,
     createdAt: new Date(r.created_at).toISOString(),
     updatedAt: new Date(r.updated_at).toISOString(),
   }
@@ -552,6 +554,7 @@ export async function appendRound(input: AppendRoundInput): Promise<AgentConvers
     userQuestion: input.userQuestion,
     startTime: input.startTime ?? now,
     toolCallsSummary: [],
+    planStepsSummary: [],
     createdAt: new Date(now).toISOString(),
     updatedAt: new Date(now).toISOString(),
   }
@@ -567,14 +570,15 @@ export async function appendRound(input: AppendRoundInput): Promise<AgentConvers
   await db.execute(
     `INSERT INTO agent_conversation_round
        (id, session_id, llm_code, round_index, user_question, thinking_content, assistant_answer,
-        tool_calls_summary, input_tokens, output_tokens, start_time, end_time, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        tool_calls_summary, plan_steps, input_tokens, output_tokens, start_time, end_time, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       id,
       input.sessionId,
       input.llmCode ?? null,
       input.roundIndex,
       input.userQuestion ?? null,
+      null,
       null,
       null,
       null,
@@ -613,6 +617,7 @@ export async function updateRound(
       | 'thinkingContent'
       | 'assistantAnswer'
       | 'toolCallsSummary'
+      | 'planStepsSummary'
       | 'inputTokens'
       | 'outputTokens'
       | 'endTime'
@@ -628,6 +633,7 @@ export async function updateRound(
             thinkingContent: patch.thinkingContent ?? r.thinkingContent,
             assistantAnswer: patch.assistantAnswer ?? r.assistantAnswer,
             toolCallsSummary: patch.toolCallsSummary ?? r.toolCallsSummary,
+            planStepsSummary: patch.planStepsSummary ?? r.planStepsSummary,
             inputTokens: patch.inputTokens ?? r.inputTokens,
             outputTokens: patch.outputTokens ?? r.outputTokens,
             endTime: patch.endTime ?? r.endTime,
@@ -644,6 +650,7 @@ export async function updateRound(
         thinking_content = COALESCE(?, thinking_content),
         assistant_answer = COALESCE(?, assistant_answer),
         tool_calls_summary = COALESCE(?, tool_calls_summary),
+        plan_steps = COALESCE(?, plan_steps),
         input_tokens = COALESCE(?, input_tokens),
         output_tokens = COALESCE(?, output_tokens),
         end_time = COALESCE(?, end_time),
@@ -653,6 +660,7 @@ export async function updateRound(
       patch.thinkingContent ?? null,
       patch.assistantAnswer ?? null,
       patch.toolCallsSummary ? JSON.stringify(patch.toolCallsSummary) : null,
+      patch.planStepsSummary ? JSON.stringify(patch.planStepsSummary) : null,
       patch.inputTokens ?? null,
       patch.outputTokens ?? null,
       patch.endTime ?? null,

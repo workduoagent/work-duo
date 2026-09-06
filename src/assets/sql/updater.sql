@@ -44,6 +44,8 @@ ALTER TABLE knowledge_base ADD COLUMN file_size INTEGER NOT NULL DEFAULT 0;
 -- 新建/更新智能体时 INSERT 含 allow_sandbox 会报 "table agent_info has no column named allow_sandbox"。
 -- 存量库通过本语句补齐；重复执行会被 updateTables 安全跳过（duplicate column name）。
 ALTER TABLE agent_info ADD COLUMN allow_sandbox INTEGER NOT NULL DEFAULT 0;
+-- 记忆模式开关：off=关闭 / active=主动 / forced=强制。默认 off，兼容存量智能体（老数据无记忆能力）。
+ALTER TABLE agent_info ADD COLUMN memory_mode TEXT NOT NULL DEFAULT 'off';
 
 -- ---------- v8：新增智能体会话表与对话轮次表 ----------
 -- 对应 Web 端 PostgreSQL 设计转本地 SQLite，用于在单个智能体调试页持久化会话/轮次。
@@ -149,4 +151,173 @@ CREATE INDEX IF NOT EXISTS idx_agent_project_active ON agent_project(is_pinned D
 
 ALTER TABLE agent_conversation_session ADD COLUMN project_id TEXT;
 CREATE INDEX IF NOT EXISTS idx_agent_session_lookup ON agent_conversation_session(project_id, is_top DESC, updated_at DESC);
+
+-- ---------- v14：对话轮次表新增规划步骤结构（plan_steps） ----------
+-- 与 tool_calls_summary 对称：任务步骤（标题/状态/产物摘要）随轮次落库，
+-- 历史回看时可完整重建「步骤 → 工具」嵌套视图，无需依赖运行时状态。
+-- 存量库（建表时无该列）通过本语句补齐；重复执行会被 updateTables 安全跳过（duplicate column name）。
+ALTER TABLE agent_conversation_round ADD COLUMN plan_steps TEXT;
+
+-- ---------- v15：产物注册表（artifacts） ----------
+-- 子任务成功闭环后登记本次任务生成的文件产物，供前端「产物画廊」浏览/打开/定位。
+-- 全新表用 CREATE TABLE IF NOT EXISTS，存量库（仅有 agent_conversation_round 无 artifacts）执行本语句补齐；
+-- 重复执行幂等无副作用。新装库在 init.sql 建表时即包含本表，此处再补一次保证存量库在仅走 updater 的路径下也能拿到。
+CREATE TABLE IF NOT EXISTS artifacts
+(
+    id            TEXT    PRIMARY KEY,
+    session_id    TEXT,
+    round_id      TEXT,
+    task_id       TEXT,
+    step          INTEGER NOT NULL DEFAULT 0,
+    artifact_type TEXT,
+    path          TEXT    NOT NULL,
+    mime_type     TEXT,
+    description   TEXT,
+    version       INTEGER NOT NULL DEFAULT 1,
+    checksum      TEXT,
+    size          INTEGER NOT NULL DEFAULT 0,
+    created_at    INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_artifacts_round ON artifacts(round_id, step);
+CREATE INDEX IF NOT EXISTS idx_artifacts_session ON artifacts(session_id);
+
+-- ---------- v16：记忆宫殿表（agent_memories + agent_memory_events） ----------
+-- §3.3 记忆宫殿：智能体长期可召回记忆单元 + 召回/锚定/压缩事件日志（驱动热力图与引用计数）。
+-- 全新表用 CREATE TABLE IF NOT EXISTS；重复执行幂等无副作用。新装库在 init.sql 建表时即包含本表，
+-- 此处再补一次保证存量库在仅走 updater 的路径下也能拿到。
+CREATE TABLE IF NOT EXISTS agent_memories
+(
+    id            TEXT    PRIMARY KEY,
+    agent_id      TEXT,
+    session_id    TEXT,
+    key           TEXT    NOT NULL,
+    content       TEXT    NOT NULL,
+    category      TEXT    NOT NULL DEFAULT 'general',
+    ref_count     INTEGER NOT NULL DEFAULT 0,
+    anchored      INTEGER NOT NULL DEFAULT 0,
+    last_recalled INTEGER,
+    created_at    INTEGER NOT NULL,
+    updated_at    INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_memories_agent ON agent_memories(agent_id, category);
+CREATE INDEX IF NOT EXISTS idx_memories_ref ON agent_memories(agent_id, ref_count DESC);
+
+CREATE TABLE IF NOT EXISTS agent_memory_events
+(
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    memory_id   TEXT    NOT NULL,
+    event_type  TEXT    NOT NULL,
+    created_at  INTEGER NOT NULL,
+    CONSTRAINT fk_memory_event FOREIGN KEY(memory_id) REFERENCES agent_memories(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_memory_events_mem ON agent_memory_events(memory_id, created_at);
+
+-- ---------- v17：小分队（Squad）协作六表 ----------
+-- 一群「人」(Agent) 按协作模式（编排/流水线/群聊）处理同一事务的团队能力。
+-- 全新表用 CREATE TABLE IF NOT EXISTS，重复执行幂等无副作用；
+-- 新装库在 init.sql 建表时即包含本批表，此处再补一次保证存量库在仅走 updater 的路径下也能拿到。
+CREATE TABLE IF NOT EXISTS agent_squad
+(
+    id              TEXT    PRIMARY KEY,
+    name            TEXT    NOT NULL,
+    logo            TEXT,
+    description     TEXT,
+    mode            TEXT    NOT NULL DEFAULT 'orchestrator',
+    leader_agent_id TEXT,
+    global_mcp_ids  TEXT,
+    run_strategy    TEXT,
+    created_at      INTEGER NOT NULL,
+    updated_at      INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_squad_mode ON agent_squad(mode);
+
+CREATE TABLE IF NOT EXISTS agent_squad_member
+(
+    id              TEXT    PRIMARY KEY,
+    squad_id        TEXT    NOT NULL,
+    agent_id        TEXT    NOT NULL,
+    role            TEXT,
+    persona_override TEXT,
+    pipeline_order  INTEGER,
+    is_leader       INTEGER NOT NULL DEFAULT 0,
+    created_at      INTEGER NOT NULL,
+    CONSTRAINT uk_squad_member UNIQUE (squad_id, agent_id),
+    FOREIGN KEY(squad_id) REFERENCES agent_squad(id) ON DELETE CASCADE,
+    FOREIGN KEY(agent_id) REFERENCES agent_info(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_squad_member_squad ON agent_squad_member(squad_id, pipeline_order);
+
+CREATE TABLE IF NOT EXISTS agent_squad_chat_config
+(
+    squad_id          TEXT    PRIMARY KEY,
+    max_rounds        INTEGER NOT NULL DEFAULT 8,
+    summarizer_agent_id TEXT,
+    FOREIGN KEY(squad_id) REFERENCES agent_squad(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS agent_squad_session
+(
+    id          TEXT    PRIMARY KEY,
+    squad_id    TEXT    NOT NULL,
+    title       TEXT,
+    mode        TEXT    NOT NULL,
+    status      TEXT    NOT NULL DEFAULT 'RUNNING',
+    snapshot    TEXT,
+    created_at  INTEGER NOT NULL,
+    updated_at  INTEGER NOT NULL,
+    FOREIGN KEY(squad_id) REFERENCES agent_squad(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_squad_session_squad ON agent_squad_session(squad_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS agent_squad_round
+(
+    id              TEXT    PRIMARY KEY,
+    squad_id        TEXT    NOT NULL,
+    session_id      TEXT    NOT NULL,
+    speaker_agent_id TEXT,
+    role            TEXT,
+    content         TEXT    NOT NULL,
+    kind            TEXT,
+    created_at      INTEGER NOT NULL,
+    FOREIGN KEY(squad_id) REFERENCES agent_squad(id) ON DELETE CASCADE,
+    FOREIGN KEY(session_id) REFERENCES agent_squad_session(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_squad_round_session ON agent_squad_round(session_id, created_at);
+
+CREATE TABLE IF NOT EXISTS agent_squad_memory
+(
+    id            TEXT    PRIMARY KEY,
+    squad_id      TEXT    NOT NULL,
+    agent_id      TEXT,
+    session_id    TEXT,
+    key           TEXT    NOT NULL,
+    content       TEXT    NOT NULL,
+    category      TEXT    NOT NULL DEFAULT 'general',
+    ref_count     INTEGER NOT NULL DEFAULT 0,
+    anchored      INTEGER NOT NULL DEFAULT 0,
+    last_recalled INTEGER,
+    created_at    INTEGER NOT NULL,
+    updated_at    INTEGER NOT NULL,
+    FOREIGN KEY(squad_id) REFERENCES agent_squad(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_squad_memories_squad ON agent_squad_memory(squad_id, category);
+CREATE INDEX IF NOT EXISTS idx_squad_memories_ref ON agent_squad_memory(squad_id, ref_count DESC);
+
+-- ---------- v8：小分队调度与 DAG 编排字段 ----------
+-- 定时模式上次触发时刻（防分钟内重复触发）；存量库（建表时无该列）通过本语句补齐，
+-- 重复执行会被 updateTables 安全跳过（duplicate column name）。
+ALTER TABLE agent_squad ADD COLUMN last_scheduled_at INTEGER;
+-- 流水线 DAG 依赖（JSON 数组，存上游成员 agent_id；空=按 pipeline_order 线性）；
+-- 存量库（建表时无该列）通过本语句补齐；重复执行会被安全跳过。
+ALTER TABLE agent_squad_member ADD COLUMN depends_on TEXT;
+
+-- ---------- v18：小分队唯一标识（unique_id） ----------
+-- 供外部系统按唯一标识触发 / 引用小分队（API 触发既可用内部 id，也可用 unique_id）。
+-- 存量库（建表时无该列）通过本语句补齐；重复执行会被 updateTables 安全跳过（duplicate column name）。
+ALTER TABLE agent_squad ADD COLUMN unique_id TEXT;
+
+-- ---------- v19：小分队「是否支持文件输入」开关 ----------
+-- 控制运行该小分队时是否允许附带文件输入（如流水线的起始输入节点可挂载文件）。
+-- 存量库（建表时无该列）通过本语句补齐；重复执行会被 updateTables 安全跳过（duplicate column name）。
+ALTER TABLE agent_squad ADD COLUMN supports_file_input INTEGER NOT NULL DEFAULT 0;
 -- ============================================================

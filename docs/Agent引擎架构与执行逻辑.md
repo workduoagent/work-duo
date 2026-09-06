@@ -344,7 +344,9 @@ const offEvent = await listen<AgentEvent>('agent-event', (ev) => {
 })
 ```
 
-**前端入参（RunAgentTaskInput，types.ts:128）：** `agentId` `prompt` `workspace?` `sessionId?` `roundId?` `attachments?` `disabledSkillIds?` `disabledMcpIds?` `disabledMcpToolIds?`
+**前端入参（RunAgentTaskInput，types.ts:128）：** `agentId` `prompt` `workspace?` `sessionId?` `roundId?` `attachments?` `disabledSkillIds?` `disabledMcpIds?` `disabledMcpToolIds?` `enabledSkillIds?` `enabledMcpIds?`
+
+> `@` 提及 = 本轮"临时硬包含"：前端把 `mentionTags` 解析为 `enabledSkillIds`/`enabledMcpIds` 传入；Rust `load_config` 据此把**智能体未绑定**的技能/MCP 临时并入工具集（与 `disabled*` 对称的反向开关），受 `MAX_SKILLS=3`/`MAX_MCP_SERVERS=3` 兜底。`enabled` 优先于 `disabled`（本轮显式 @ 启用即覆盖临时移除）。
 
 > 注意：Tauri 命令 `run_agent_task` 的入参是名为 `input` 的结构体，`submit_approval_decision` 是 `decision`——前端 invoke 必须包这层键（useAgentSession.ts:252/285）。
 

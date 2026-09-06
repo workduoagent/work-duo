@@ -13,6 +13,7 @@ import type {
   AgentMcpToolRef,
   AgentSkillRef,
   AgentUpsertInput,
+  MemoryMode,
 } from '@/types/core'
 
 /** 智能体配置上限（新建 / 编辑统一校验，选择时实时拦截 + 保存时硬校验共用） */
@@ -41,6 +42,8 @@ export interface AgentDraft {
   autoToolExecMode: boolean
   /** 是否允许该智能体使用沙箱环境 */
   allowSandbox: boolean
+  /** 记忆模式：off=关闭 / active=主动 / forced=强制每次任务末沉淀（默认 off，兼容旧数据） */
+  memoryMode: MemoryMode
   /** 已勾选的 MCP 工具（最小单元 = toolId，mcpId 仅作分组冗余） */
   mcpTools: Array<{ mcpId: string; toolId: string }>
   /** 已编排的技能 id */
@@ -55,6 +58,7 @@ export function createEmptyDraft(identifier: string): AgentDraft {
     isActive: true,
     autoToolExecMode: false,
     allowSandbox: true,
+    memoryMode: 'off',
     mcpTools: [],
     skillIds: [],
   }
@@ -83,6 +87,7 @@ export function draftFromAgent(
     isActive: agent.isActive,
     autoToolExecMode: agent.autoToolExecMode,
     allowSandbox: agent.allowSandbox,
+    memoryMode: agent.memoryMode ?? 'off',
     mcpTools: mcpRefs.map((r) => ({ mcpId: r.mcpId, toolId: r.toolId })),
     skillIds: skillRefs.map((r) => r.skillId),
   }

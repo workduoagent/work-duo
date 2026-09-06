@@ -340,6 +340,78 @@ impl AgentTool for ArchiveArtifactTool {
     }
 }
 
+/* ----------------------------- anchor_memory（记忆宫殿 · 无感自动学习） ----------------------------- */
+
+/// 记忆沉淀工具：把对话中确认的可跨会话复用信息（用户偏好 / 已决策架构约定 / 踩坑法则 / 可复用代码模式）
+/// 写入 `agent_memories`（按 (agent_id, key) 去重），构成记忆宫殿的「无感自动学习」闭环。
+/// 与手动「锚定」按钮不同，本工具只做沉淀（anchored=false，参与 ref_count 排序但不钉）；
+/// 纯写库、无文件系统 / Shell 副作用，且不会自我触发新的锚定，故归属 ReadSafe（不弹审批）。
+pub struct AnchorMemoryTool {
+    app: AppHandle,
+}
+
+#[async_trait]
+impl AgentTool for AnchorMemoryTool {
+    fn name(&self) -> String {
+        "native__anchor_memory".into()
+    }
+    fn tool_definition(&self) -> Value {
+        def(
+            "native__anchor_memory",
+            "将对话中确认的可跨会话复用的稳定信息沉淀为长期记忆，使未来会话能自动召回：① 用户明确表达的偏好；② 已确认的技术决策/架构约定；③ 踩过的坑与规避方式；④ 可复用代码模式。按 (agent_id, key) 去重，重复调用只更新内容，可放心沉淀。请勿锚定一次性任务步骤、临时草稿或当轮琐碎状态。",
+            json!({
+                "key": { "type": "string", "description": "记忆关键词/标题（同 (agent_id, key) 重复调用会更新既有记忆内容）" },
+                "content": { "type": "string", "description": "记忆正文（具体约定、决策背景、适用场景与规避方式）" },
+                "category": { "type": "string", "description": "分类：decision(决策) / code_pattern(代码模式) / user_pref(用户偏好) / architecture(架构) / fix(避坑) / other(其他)，缺省 other" }
+            }),
+            &["key", "content"],
+        )
+    }
+    fn check_permission(&self, _args: &Value) -> PermissionLevel {
+        PermissionLevel::ReadSafe
+    }
+    async fn execute(&self, args: Value, ctx: &ToolContext) -> Result<String, ToolError> {
+        let key = args
+            .get("key")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| ToolError::InvalidArgs("anchor_memory 缺少 key 参数".into()))?;
+        let content = args
+            .get("content")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        if content.trim().is_empty() {
+            return Err(ToolError::InvalidArgs("anchor_memory 的 content 为空".into()));
+        }
+        let category = args
+            .get("category")
+            .and_then(|v| v.as_str())
+            .unwrap_or("other")
+            .to_string();
+        match crate::agent::memory::anchor_memory(
+            &self.app,
+            if ctx.agent_id.is_empty() {
+                None
+            } else {
+                Some(&ctx.agent_id)
+            },
+            ctx.session_id.as_deref(),
+            key,
+            &content,
+            &category,
+            false,
+        )
+        .await
+        {
+            Ok(item) => Ok(format!(
+                "已沉淀记忆（key={}，分类={}，引用数={}）",
+                item.key, item.category, item.ref_count
+            )),
+            Err(e) => Err(ToolError::ExecutionFailed(format!("锚定记忆失败：{e}"))),
+        }
+    }
+}
+
 /* ----------------------------- edit_file ----------------------------- */
 
 pub struct EditFileTool;
@@ -729,10 +801,15 @@ impl AgentTool for RunPythonSandboxTool {
 /// 仅靠 system_prompt 写一句「你没有 execute_command」是无效约束——模型以工具表为准，
 /// 试探后必然直接使用宿主命令（实测会去系统里找 python，甚至 winget 安装系统级 Python，
 /// 彻底脱离沙箱并污染用户本机环境）。因此这里必须在**能力层**收敛，让提示与能力一致。
-pub fn register_native_tools(registry: &mut ToolRegistry, app: &AppHandle, sandbox_enabled: bool) {
+pub fn register_native_tools(registry: &mut ToolRegistry, app: &AppHandle, sandbox_enabled: bool, memory_mode: &str) {
     registry.register(Arc::new(ReadFileTool));
     registry.register(Arc::new(WriteFileTool));
     registry.register(Arc::new(ArchiveArtifactTool));
+    // 记忆锚定工具仅在记忆模式非 off 时注册：off 模式既不放提示引导、也不注册工具，
+    // 与能力层单一事实源原则一致（提示与能力必须同源，否则模型会绕过）。
+    if memory_mode != "off" {
+        registry.register(Arc::new(AnchorMemoryTool { app: app.clone() }));
+    }
     registry.register(Arc::new(EditFileTool));
     registry.register(Arc::new(ListDirectoryTool));
     if !sandbox_enabled {

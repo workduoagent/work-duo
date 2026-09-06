@@ -1,31 +1,845 @@
 .squads {
-  max-width: 896px;
-  margin: 0 auto;
+  width: 100%;
+  height: 100%;
+  overflow-y: auto;
+  padding: 20px 24px 32px;
+  box-sizing: border-box;
+
+  &__head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 18px;
+  }
+
+  &__title {
+    margin: 0;
+    font-size: 20px;
+    font-weight: 600;
+    color: var(--color-foreground-intense);
+  }
+
+  &__lead {
+    margin: 4px 0 0;
+    font-size: 13px;
+    color: var(--color-foreground-muted);
+    max-width: 640px;
+  }
+
+  &__actions {
+    flex: none;
+  }
+
+  &__grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 16px;
+  }
+
+  &__card {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+
+    &-head {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    &-avatar {
+      width: 40px;
+      height: 40px;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--color-background-subtle);
+      color: var(--color-brand-600);
+      flex: none;
+      overflow: hidden;
+    }
+
+    &-logo {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    &-titles {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+    }
+
+    &-title {
+      margin: 0;
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--color-foreground-intense);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    &-desc {
+      margin: 0;
+      font-size: 13px;
+      color: var(--color-foreground-muted);
+      line-height: 1.5;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+      min-height: 38px;
+    }
+
+    &-members {
+      display: flex;
+      align-items: flex-start;
+      gap: 6px;
+      font-size: 12px;
+      color: var(--color-foreground-muted);
+      line-height: 1.5;
+    }
+
+    &-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 2px;
+    }
+
+    &-del:hover {
+      color: var(--color-danger);
+    }
+  }
+
+  &__empty {
+    padding: 64px 0;
+  }
+}
+
+/* ---------------- 编辑器 ---------------- */
+.squad-editor {
   display: flex;
   flex-direction: column;
   gap: 16px;
+
+  &__row {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 0;
+  }
+
+  /* 基础信息 2×2 网格：名称 / 头像 / 唯一标识 / 协作模式，描述整宽 */
+  &__basic {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px 20px;
+    align-items: start;
+  }
+
+  &__span2 {
+    grid-column: 1 / -1;
+  }
+
+  &__mode {
+    align-self: flex-start;
+  }
+
+  &__mode-desc {
+    margin: 6px 0 0;
+    font-size: 12px;
+    color: var(--color-foreground-muted);
+  }
+
+  &__members {
+    border: 1px solid var(--color-border);
+    border-radius: 10px;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  &__members-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--color-foreground-intense);
+  }
+
+  &__members-empty {
+    font-size: 12px;
+    color: var(--color-foreground-muted);
+    padding: 8px 0;
+  }
+
+  &__member {
+    border: 1px solid var(--color-border-muted);
+    border-radius: 8px;
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  &__member-line {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  &__member-agent {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+
+  &__member-role {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+
+  &__member-lead {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 12px;
+    color: var(--color-foreground-muted);
+    white-space: nowrap;
+  }
+
+  &__member-order {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    color: var(--color-foreground-muted);
+  }
+
+  &__member-order-hint {
+    color: var(--color-foreground-muted);
+    opacity: 0.8;
+  }
+
+  &__strategy {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    border-top: 1px dashed var(--color-border-muted);
+    padding-top: 12px;
+  }
+
+  &__strategy-line {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+
+  &__retry {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    color: var(--color-foreground-muted);
+  }
+
+  &__summarizer {
+    margin-top: 8px;
+    max-width: 320px;
+  }
 }
 
-.squads__head {
+/* ---------------- 运行控制台 ---------------- */
+.squad-console {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+
+  &__input {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  &__board {
+    border: 1px solid var(--color-border);
+    border-radius: 10px;
+    padding: 12px;
+    min-height: 240px;
+    max-height: 56vh;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    background: var(--color-background-muted);
+  }
+
+  &__empty {
+    margin: auto;
+    font-size: 13px;
+    color: var(--color-foreground-muted);
+  }
+}
+
+.squad-round {
+  border: 1px solid var(--color-border-muted);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: var(--color-background);
+
+  &__head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+  }
+
+  &__role {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--color-foreground-intense);
+  }
+
+  &__content {
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--color-foreground);
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  &--summary {
+    border-color: var(--color-brand-600);
+  }
+
+  &--final {
+    background: var(--color-background-subtle);
+  }
+}
+
+/* 团队记忆面板 */
+.squad-mem {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+
+  &__add {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 14px;
+    border: 1px solid var(--color-border);
+    border-radius: 10px;
+    background: var(--color-background-subtle);
+  }
+
+  &__add-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+  }
+
+  &__cat {
+    min-width: 116px;
+  }
+
+  &__agent {
+    min-width: 160px;
+  }
+
+  &__pipeline-preview {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 4px;
+  }
+
+  &__pipeline-node {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border: 1px solid var(--color-border);
+    border-radius: 999px;
+    background: var(--color-background-subtle);
+    font-size: 12px;
+    color: var(--color-foreground);
+  }
+
+  &__pipeline-idx {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--color-brand-600);
+    color: var(--color-background);
+    font-style: normal;
+    font-size: 11px;
+  }
+
+  &__pipeline-arrow {
+    font-style: normal;
+    margin-left: 4px;
+    color: var(--color-foreground-muted);
+  }
+
+  &__list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    max-height: 360px;
+    overflow-y: auto;
+  }
+
+  &__item {
+    border: 1px solid var(--color-border);
+    border-radius: 10px;
+    padding: 10px 12px;
+    background: var(--color-background);
+  }
+
+  &__item-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  &__key {
+    font-weight: 600;
+    color: var(--color-foreground-intense);
+  }
+
+  &__ref {
+    margin-left: auto;
+    font-size: 12px;
+    color: var(--color-foreground-muted);
+  }
+
+  &__content {
+    margin-top: 6px;
+    font-size: 13px;
+    color: var(--color-foreground);
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+}
+
+/* 运行历史面板 */
+.squad-hist {
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  gap: 16px;
+  min-height: 420px;
+
+  &__list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    border-right: 1px solid var(--color-border);
+    padding-right: 12px;
+    max-height: 480px;
+    overflow-y: auto;
+  }
+
+  &__item {
+    text-align: left;
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+    padding: 8px 10px;
+    background: var(--color-background);
+    cursor: pointer;
+    font: inherit;
+    color: inherit;
+
+    &:hover {
+      border-color: var(--color-brand-500);
+    }
+
+    &.is-active {
+      border-color: var(--color-brand-600);
+      background: var(--color-background-subtle);
+    }
+  }
+
+  &__item-title {
+    font-weight: 600;
+    color: var(--color-foreground-intense);
+  }
+
+  &__item-meta {
+    margin-top: 2px;
+    font-size: 12px;
+    color: var(--color-foreground-muted);
+  }
+
+  &__board {
+    max-height: 480px;
+    overflow-y: auto;
+  }
+
+  &__hint {
+    margin: 6px 0 0;
+    font-size: 12px;
+    line-height: 1.6;
+    color: var(--color-foreground-muted);
+
+    code {
+      padding: 1px 5px;
+      border-radius: 4px;
+      background: var(--color-background-subtle);
+      color: var(--color-foreground-intense);
+      font-size: 12px;
+    }
+  }
+
+  &__cron,
+  &__cron-prompt {
+    margin-top: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  &__api {
+    margin-top: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+
+    .squad-editor__hint {
+      margin-top: 0;
+    }
+  }
+
+  &__curl {
+    margin: 0;
+    padding: 10px 12px;
+    border-radius: 8px;
+    background: var(--color-background-subtle);
+    border: 1px solid var(--color-border-muted);
+    color: var(--color-foreground-intense);
+    font-size: 12px;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+
+  &__dag {
+    margin-top: 8px;
+    height: 320px;
+    border: 1px solid var(--color-border-muted);
+    border-radius: 10px;
+    overflow: hidden;
+    background: var(--color-background-subtle);
+  }
+
+  &__node {
+    position: relative;
+    min-width: 120px;
+    padding: 8px 14px;
+    border-radius: 10px;
+    background: var(--color-background-base);
+    border: 1px solid var(--color-brand-600);
+    color: var(--color-foreground-intense);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+
+    &-role {
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    &-agent {
+      margin-top: 2px;
+      font-size: 11px;
+      color: var(--color-foreground-muted);
+    }
+
+    &-lead {
+      position: absolute;
+      top: -8px;
+      right: -6px;
+      padding: 0 6px;
+      border-radius: 8px;
+      font-size: 10px;
+      line-height: 16px;
+      background: var(--color-brand-600);
+      color: #fff;
+    }
+  }
+
+  &__api-modal {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+}
+
+.squad-api {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+
+  &__row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  &__hint {
+    margin: 0;
+    font-size: 12px;
+    line-height: 1.7;
+    color: var(--color-foreground-muted);
+
+    code {
+      padding: 1px 5px;
+      border-radius: 4px;
+      background: var(--color-background-subtle);
+      color: var(--color-foreground-intense);
+      font-size: 12px;
+    }
+  }
+}
+
+/* ReactFlow DAG 容器（组件使用顶层 .squad-dag / .squad-dag__node，必须有显式宽高） */
+.squad-dag {
+  margin-top: 8px;
+  width: 100%;
+  height: 340px;
+  border: 1px solid var(--color-border-muted);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--color-background-subtle);
+}
+
+.squad-dag__node {
+  position: relative;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-}
-
-.squads__lead {
-  color: var(--color-foreground-muted);
-  font-size: 0.875rem;
-}
-
-.squads__card-title {
-  font-size: 1rem;
-  font-weight: 600;
+  gap: 10px;
+  min-width: 150px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: var(--color-background-base);
+  border: 1px solid var(--color-border);
   color: var(--color-foreground-intense);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.1);
+
+  &--input {
+    flex-direction: column;
+    gap: 4px;
+    min-width: 120px;
+    border-style: dashed;
+    border-color: var(--color-brand-600);
+    background: var(--color-background-subtle);
+  }
+
+  &--leader {
+    border-color: var(--color-brand-600);
+  }
+
+  &--member.is-leader {
+    border-color: var(--color-brand-600);
+  }
+
+  &-avatar {
+    width: 36px;
+    height: 36px;
+    border-radius: 9px;
+    overflow: hidden;
+    flex: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--color-background-subtle);
+    color: var(--color-brand-600);
+
+    img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+  }
+
+  &-body {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+
+  &-name {
+    font-size: 13px;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  &-role {
+    margin-top: 1px;
+    font-size: 11px;
+    color: var(--color-foreground-muted);
+  }
+
+  &-ico {
+    color: var(--color-brand-600);
+    display: flex;
+  }
+
+  &-title {
+    font-size: 13px;
+    font-weight: 700;
+  }
+
+  &-sub {
+    font-size: 11px;
+    color: var(--color-foreground-muted);
+  }
+
+  &-badge {
+    position: absolute;
+    top: -9px;
+    right: -8px;
+    padding: 0 7px;
+    border-radius: 8px;
+    font-size: 10px;
+    line-height: 16px;
+    background: var(--color-brand-600);
+    color: #fff;
+  }
 }
 
-.squads__card-desc {
-  margin-top: 4px;
-  font-size: 0.875rem;
-  color: var(--color-foreground-muted);
-  line-height: 1.5;
+/* 下拉选项：名字 + Logo（与创建 Agent 一致） */
+.squad-agent-opt {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+
+  &__logo {
+    width: 22px;
+    height: 22px;
+    border-radius: 6px;
+    overflow: hidden;
+    flex: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--color-background-subtle);
+    color: var(--color-brand-600);
+
+    img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    &--empty {
+      border: 1px solid var(--color-border-muted);
+    }
+  }
+
+  &__name {
+    font-weight: 600;
+    color: var(--color-foreground-intense);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  &__id {
+    font-size: 12px;
+    color: var(--color-foreground-muted);
+  }
+}
+
+.squad-editor {
+  &__add-member {
+    min-width: 220px;
+  }
+
+  &__file-input {
+    margin-top: 2px;
+  }
+
+  &__file-input-line {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 14px;
+    color: var(--color-foreground-intense);
+  }
+}
+
+/* 编辑器：头像 / 唯一标识 / MCP / 主管 / 流水线自动角色 */
+.squad-editor {
+  &__logo {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  &__logo-preview {
+    width: 56px;
+    height: 56px;
+    border-radius: 10px;
+    overflow: hidden;
+    border: 1px solid var(--color-border-muted);
+    background: var(--color-background-subtle);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex: none;
+
+    img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+  }
+
+  &__logo-empty {
+    font-size: 12px;
+    color: var(--color-foreground-muted);
+  }
+
+  &__logo-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  &__uid {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  &__mcp {
+    width: 100%;
+  }
+
+  &__leader {
+    max-width: 360px;
+  }
+
+  &__member-role-auto {
+    flex: 1 1 0;
+    min-width: 0;
+    font-size: 13px;
+    color: var(--color-foreground-muted);
+    padding: 0 4px;
+  }
 }

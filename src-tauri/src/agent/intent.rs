@@ -21,6 +21,14 @@ const COMPOSITE_HINTS: &[&str] = &[
     "fetch", "download", "generate", "predict", "analy", "install", "error", "fix",
 ];
 
+/// 高风险信号关键词（命中即视为 HIGH 风险，强制走人工审批，哪怕开启自动执行）。
+const RISK_HINTS: &[&str] = &[
+    "删除", "移除", "卸载", "清空", "格式化", "重启", "kill", "杀进程", "改名", "覆盖",
+    "授权", "提权", "改密码", "部署", "上线", "发布", "付款", "转账", "删除文件", "格式化磁盘",
+    "delete", "remove", "uninstall", "purge", "format", "drop", "truncate", "rm -rf",
+    "reboot", "shutdown", "deploy", "publish", "payment", "transfer",
+];
+
 /// 意图分类入口：规则短路优先，灰色地带走 LLM 轻量分类。
 pub async fn classify_intent(cfg: &AgentRuntimeConfig, prompt: &str) -> IntentProfile {
     let trimmed = prompt.trim();
@@ -31,26 +39,23 @@ pub async fn classify_intent(cfg: &AgentRuntimeConfig, prompt: &str) -> IntentPr
     // 短路 1：短消息且无复杂信号 → 明显闲聊，0 成本直接判。
     if len <= 20 && !has_hint {
         println!("[agent] intent: 规则短路 → SIMPLE_CHAT（len={len} 无复杂信号）");
-        return IntentProfile {
-            intent_type: "SIMPLE_CHAT".into(),
-            reason: "规则短路：短消息且无复杂关键词".into(),
-        };
+        return profile("SIMPLE_CHAT", "规则短路：短消息且无复杂关键词", prompt);
     }
     // 短路 2：命中复杂信号且描述较长 → 明显复合任务，直接判。
     if has_hint && len >= 30 {
         println!("[agent] intent: 规则短路 → COMPOSITE_TASK（命中复杂关键词）");
-        return IntentProfile {
-            intent_type: "COMPOSITE_TASK".into(),
-            reason: "规则短路：命中复杂任务关键词".into(),
-        };
+        return profile("COMPOSITE_TASK", "规则短路：命中复杂任务关键词", prompt);
     }
 
     // 灰色地带 → LLM 轻量分类（非流式、0 工具）。
     let sys = "你是一个意图分类器。评估用户输入的任务复杂度。\
 若属于日常打招呼、单一常识问答、简单文本润色，判定为 SIMPLE_CHAT；\
 若涉及文件操作、数据抓取、代码执行、环境检查或多步骤业务，判定为 COMPOSITE_TASK。\
+同时评估执行策略：requires_planning（是否需拆解规划）、requires_tool（是否需调用工具）、\
+risk_level（low/medium/high/critical，涉及删除/安装/执行/改系统/部署等为 high）、requires_approval（是否必须人工审批）、requires_artifact（是否产出文件）。\
 只输出一行 JSON，不要任何多余文本：\
-{\"intent_type\":\"SIMPLE_CHAT 或 COMPOSITE_TASK\",\"reason\":\"一句话理由\"}";
+{\"intent_type\":\"SIMPLE_CHAT 或 COMPOSITE_TASK\",\"reason\":\"一句话理由\",\
+\"requires_planning\":true,\"requires_tool\":true,\"risk_level\":\"medium\",\"requires_approval\":false,\"requires_artifact\":true}";
     let messages = vec![
         json!({ "role": "system", "content": sys }),
         json!({ "role": "user", "content": trimmed }),
@@ -61,12 +66,15 @@ pub async fn classify_intent(cfg: &AgentRuntimeConfig, prompt: &str) -> IntentPr
         Ok((resp, _usage)) => {
             let content = extract_content(&resp);
             match parse_intent_json(&content) {
-                Some(p) => {
+                Some(mut p) => {
+                    enrich(&mut p, prompt);
                     println!(
-                        "[agent] intent: LLM 分类 → {}（{}ms）reason={}",
+                        "[agent] intent: LLM 分类 → {}（{}ms）reason={} risk={} approval={}",
                         p.intent_type,
                         started.elapsed().as_millis(),
                         runtime::clip(&p.reason, 200),
+                        p.risk_level,
+                        p.requires_approval,
                     );
                     p
                 }
@@ -75,23 +83,77 @@ pub async fn classify_intent(cfg: &AgentRuntimeConfig, prompt: &str) -> IntentPr
                         "[agent] intent: 分类结果解析失败，降级 COMPOSITE_TASK content={}",
                         runtime::clip(&content, 300),
                     );
-                    fallback("分类结果解析失败")
+                    fallback("分类结果解析失败", prompt)
                 }
             }
         }
         Err(e) => {
             println!("[agent] intent: 分类调用失败：{e}，降级 COMPOSITE_TASK");
-            fallback("分类调用失败")
+            fallback("分类调用失败", prompt)
         }
     }
 }
 
-fn fallback(reason: &str) -> IntentProfile {
-    // 宁可多规划（多耗一点 Token），不可把复杂任务误判成闲聊而直接裸答。
+/// 规则短路 / 降级时直接构造一份「执行策略」一致的意图档案：
+/// - SIMPLE_CHAT：无需规划、无需工具、低风险、无需审批、无产物；
+/// - COMPOSITE_TASK：需规划、需工具、中等风险（命中高风险信号则 high）、命中高风险强制审批、需产物。
+fn profile(intent_type: &str, reason: &str, prompt: &str) -> IntentProfile {
+    let simple = intent_type.eq_ignore_ascii_case("SIMPLE_CHAT");
+    let high = has_risk_hint(prompt);
+    let risk = if simple {
+        "low"
+    } else if high {
+        "high"
+    } else {
+        "medium"
+    };
     IntentProfile {
-        intent_type: "COMPOSITE_TASK".into(),
+        intent_type: if simple { "SIMPLE_CHAT" } else { "COMPOSITE_TASK" }.into(),
         reason: reason.into(),
+        requires_planning: !simple,
+        requires_tool: !simple,
+        risk_level: risk.into(),
+        requires_approval: !simple && high,
+        requires_artifact: !simple,
     }
+}
+
+/// LLM 解析结果补全：保证意图与策略自洽（不让 Planner 自己重新判断权限/风险）。
+/// - 复合任务强制 requires_planning/requires_tool/requires_artifact；
+/// - 风险等级缺失时按 prompt 高风险信号推导；
+/// - 高风险的任务一律 requires_approval（即便 LLM 未显式要求）。
+fn enrich(p: &mut IntentProfile, prompt: &str) {
+    if p.is_simple_chat() {
+        p.requires_planning = false;
+        p.requires_tool = false;
+        p.requires_artifact = false;
+        if p.risk_level.trim().is_empty() {
+            p.risk_level = "low".into();
+        }
+    } else {
+        p.requires_planning = true;
+        p.requires_tool = true;
+        p.requires_artifact = true;
+        if p.risk_level.trim().is_empty() {
+            p.risk_level = if has_risk_hint(prompt) {
+                "high"
+            } else {
+                "medium"
+            }
+            .into();
+        }
+    }
+    p.requires_approval = p.requires_approval || p.is_high_risk();
+}
+
+fn has_risk_hint(prompt: &str) -> bool {
+    let lower = prompt.to_lowercase();
+    RISK_HINTS.iter().any(|k| lower.contains(&k.to_lowercase()))
+}
+
+fn fallback(reason: &str, prompt: &str) -> IntentProfile {
+    // 宁可多规划（多耗一点 Token），不可把复杂任务误判成闲聊而直接裸答。
+    profile("COMPOSITE_TASK", reason, prompt)
 }
 
 /// 从完整 chat.completion JSON 中提取 choices[0].message.content。

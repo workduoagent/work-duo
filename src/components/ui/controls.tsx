@@ -5,6 +5,7 @@
 export { Select } from 'antd'
 export { AutoComplete } from 'antd'
 export { Slider } from 'antd'
+export { Segmented } from 'antd'
 export { Switch } from 'antd'
 export { InputNumber } from 'antd'
 export { Radio } from 'antd'

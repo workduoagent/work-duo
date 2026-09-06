@@ -27,6 +27,9 @@ pub fn run() {
                     eprintln!("[startup] DB 就绪等待失败，后台初始化跳过：{e}");
                     return;
                 }
+                // 拉起小分队定时调度器与 API 触发服务（二者均依赖数据库就绪）。
+                agent::squad_scheduler::start_scheduler(handle.clone());
+                agent::squad_api_server::start_api_server(handle.clone());
                 if let Err(e) = mamba_manager::ensure_default_env(&handle).await {
                     eprintln!("[mamba] 默认环境初始化失败：{e}");
                 }
@@ -45,8 +48,29 @@ pub fn run() {
             mamba_manager::delete_mamba_env,
             mamba_manager::run_python_script,
             agent::commands::run_agent_task,
+            agent::commands::run_squad_task,
+            agent::commands::anchor_squad_memory,
+            agent::commands::list_squad_memories,
+            agent::commands::delete_squad_memory,
+            agent::commands::get_squad_api_config,
+            agent::commands::set_squad_api_config,
             agent::commands::submit_approval_decision,
             agent::commands::cancel_agent_task,
+            agent::commands::retry_subtask,
+            agent::commands::skip_subtask,
+            agent::commands::resolve_subtask,
+            agent::commands::begin_stage_attachment,
+            agent::commands::append_stage_chunk,
+            agent::commands::commit_stage_attachment,
+            agent::commands::abort_stage_attachment,
+            agent::commands::read_artifact,
+            agent::commands::branch_from_step,
+            agent::commands::list_memories,
+            agent::commands::get_memory_heatmap,
+            agent::commands::anchor_memory,
+            agent::commands::update_memory,
+            agent::commands::delete_memory,
+            agent::commands::recall_memory,
             agent::wd_mem::wd_mem_read_project_memory,
             agent::wd_mem::wd_mem_write_project_memory,
             fs_helper::canonicalize_path

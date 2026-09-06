@@ -1,0 +1,450 @@
+/* ============================================================
+ * pages/memory-palace — 记忆宫殿（§3.3）
+ * 卡片网格 + 召回热力图 + 侧栏压缩事件。
+ * 设计令牌严格使用 var(--color-*)，不写 hex / px 字面量。
+ * 布局两栏：主区(卡片网格) | 侧栏(热力图/压缩列表)。
+ * 整体对齐 skill-hub 的卡片 / 侧栏 / 工具栏风格。
+ * ============================================================ */
+
+.memory-palace {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  height: 100%;
+  overflow: hidden;
+  background: var(--color-background);
+}
+
+/* ---------------- 顶部 Header ---------------- */
+.mp__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.mp__title {
+  margin: 0 0 6px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--color-foreground-intense);
+
+  svg {
+    color: var(--color-brand-600);
+  }
+}
+
+.mp__lead {
+  margin: 0;
+  max-width: 640px;
+  color: var(--color-foreground-muted);
+  font-size: 0.875rem;
+  line-height: 1.6;
+}
+
+.mp__actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 0 auto;
+}
+
+/* ---------------- 主区 + 侧栏 两栏 ---------------- */
+.mp__layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: 20px;
+  flex: 1;
+  min-height: 0;
+  align-items: stretch;
+}
+
+/* ---------------- 左侧主区：工具栏 + 卡片网格 ---------------- */
+.mp__main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.mp__toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+.mp__seg {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+.mp__spin {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border) transparent;
+}
+
+/* ---------------- 卡片网格 ---------------- */
+.mp-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 14px;
+  align-content: start;
+  padding: 4px 4px 16px 4px;
+}
+
+.mp-grid-item {
+  position: relative;
+  height: 100%;
+  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+  cursor: pointer;
+}
+
+.app-card.mp-grid-item .ant-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  height: 100%;
+  padding: 16px;
+}
+
+.mp-grid-item:hover {
+  transform: translateY(-3px);
+  border-color: var(--color-brand-300, var(--color-brand-600));
+  box-shadow: var(--shadow-md);
+}
+
+.mp-grid-item__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.mp-grid-item__pin {
+  flex: 0 0 auto;
+  color: var(--color-brand-600);
+}
+
+.mp-grid-item__pin--soft {
+  color: var(--color-foreground-muted);
+}
+
+.mp-grid-item__title {
+  margin: 0;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--color-foreground-intense);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mp-grid-item__content {
+  margin: 0;
+  font-size: 0.8125rem;
+  line-height: 1.6;
+  color: var(--color-foreground-muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.mp-grid-item__footer {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: auto;
+  padding-top: 4px;
+}
+
+.mp-grid-item__stat {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.75rem;
+  color: var(--color-foreground-muted);
+  font-variant-numeric: tabular-nums;
+
+  svg {
+    color: var(--color-warning, var(--color-foreground-muted));
+  }
+}
+
+.mp-grid-item__actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding-top: 10px;
+  margin-top: 4px;
+  border-top: 1px solid var(--color-border);
+}
+
+.mp-grid-item__del:hover {
+  color: var(--color-danger) !important;
+}
+
+.mp-grid-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 320px;
+}
+
+/* ---------------- 右侧侧栏 ---------------- */
+.mp__sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border) transparent;
+}
+
+.mp-side-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  border-radius: var(--radius-card);
+  background-color: var(--color-background-subtle);
+  border: 1px solid var(--color-border);
+  box-shadow: var(--shadow-sm);
+}
+
+.mp-side-card__title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--color-foreground-intense);
+
+  svg {
+    color: var(--color-brand-600);
+  }
+}
+
+.mp-side-card__sub {
+  margin-left: auto;
+  font-size: 0.6875rem;
+  font-weight: 400;
+  color: var(--color-foreground-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.mp-side-empty {
+  margin: 0;
+  font-size: 0.8125rem;
+  line-height: 1.6;
+  color: var(--color-foreground-muted);
+}
+
+/* ---------------- 召回热力图 ---------------- */
+.mp-heatmap {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.mp-heatmap__grid {
+  display: flex;
+  flex-direction: row-reverse;
+  gap: 3px;
+  overflow-x: auto;
+  scrollbar-width: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+.mp-heatmap__week {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.mp-heatmap__cell {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  background-color: var(--color-background-muted);
+  transition: transform 0.12s ease;
+
+  &:hover {
+    transform: scale(1.25);
+  }
+}
+
+/* 5 级色阶（少 → 多），全部基于品牌色令牌，不写固定色值 */
+.mp-heatmap__cell.is-l0 {
+  background-color: var(--color-background-muted);
+}
+
+.mp-heatmap__cell.is-l1 {
+  background-color: var(--color-brand-100, var(--color-brand-600));
+}
+
+.mp-heatmap__cell.is-l2 {
+  background-color: var(--color-brand-300, var(--color-brand-600));
+}
+
+.mp-heatmap__cell.is-l3 {
+  background-color: var(--color-brand-500, var(--color-brand-600));
+}
+
+.mp-heatmap__cell.is-l4 {
+  background-color: var(--color-brand-700, var(--color-brand-600));
+}
+
+.mp-heatmap__legend {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.6875rem;
+  color: var(--color-foreground-muted);
+
+  .mp-heatmap__cell {
+    width: 10px;
+    height: 10px;
+  }
+}
+
+/* ---------------- 上下文压缩事件列表 ---------------- */
+.mp-compact-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.mp-compact-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background-color: var(--color-background);
+  border: 1px solid var(--color-border);
+  font-size: 0.75rem;
+  color: var(--color-foreground-muted);
+  font-variant-numeric: tabular-nums;
+
+  svg {
+    flex: 0 0 auto;
+    color: var(--color-brand-600);
+  }
+}
+
+/* ---------------- 表单（锚定弹窗 / 详情抽屉共用） ---------------- */
+.mp-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.mp-form__label {
+  margin-top: 10px;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--color-foreground);
+
+  &:first-child {
+    margin-top: 0;
+  }
+}
+
+.mp-form__footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+/* ---------------- 详情抽屉 ---------------- */
+.mp-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.mp-detail__meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.mp-detail__anchored {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 9px;
+  border-radius: 999px;
+  font-size: 0.6875rem;
+  color: var(--color-brand-600);
+  background-color: var(--color-brand-50, var(--color-background-muted));
+  border: 1px solid var(--color-border);
+}
+
+.mp-detail__stat {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.75rem;
+  color: var(--color-foreground-muted);
+  font-variant-numeric: tabular-nums;
+
+  svg {
+    color: var(--color-warning, var(--color-foreground-muted));
+  }
+}
+
+.mp-detail__actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+/* ---------------- 响应式 ---------------- */
+@media (max-width: 880px) {
+  .mp__layout {
+    grid-template-columns: 1fr;
+    gap: 14px;
+  }
+  .mp__sidebar {
+    flex-direction: row;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    gap: 10px;
+    scrollbar-width: none;
+  }
+  .mp__sidebar::-webkit-scrollbar {
+    display: none;
+  }
+  .mp-side-card {
+    flex: 0 0 auto;
+    min-width: 240px;
+  }
+}

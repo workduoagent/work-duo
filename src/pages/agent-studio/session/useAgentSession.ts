@@ -24,8 +24,13 @@ import type {
   AgentEvent,
   ApprovalDecision,
   ApprovalRequest,
+  ArtifactRef,
+  IntentClassified,
+  PlanBranchGenerated,
   PlanStep,
+  RecoveryRequest,
   RunAgentTaskInput,
+  ThinkingChunk,
   ToolStep,
 } from './types'
 
@@ -54,10 +59,28 @@ export interface AgentSessionState {
   /** 清空当前会话的所有步骤与文本（新建会话 / 切换智能体时）。 */
   reset: () => void
   /** 取消正在进行的任务（Tauri 下发 cancel 信号；非 Tauri 下仅清状态）。 */
-  cancel: () => void
+    cancel: () => void
   /** 最近一轮任务的真实 token 用量（后端取自 LLM `usage`，经 `agent-task-done` 带出）。
    *  Tauri 环境由事件填充；dev/mock 无后端时为 null，页面据此回退到估算值。 */
   lastTaskUsage: MutableRefObject<{ promptTokens: number; completionTokens: number } | null>
+  /** 本次任务的实时 token 用量（后端经 `agent-token-update` 增量推送，运行中累计）。
+   *  响应式状态，驱动顶栏计数卡实时跳数；无任务运行（或 dev/mock）时为 null。 */
+  liveTokenUsage: {
+    promptTokens: number
+    completionTokens: number
+  } | null
+  /** 最近一轮任务的异常信息（由 `agent-task-error` 写入），供页面渲染「错误诊断面板」（展示+复制；重试/跳过留 Phase 2）。 */
+  taskError: { message: string; at: number } | null
+  /** 本次任务产生的文件产物（各子任务成功闭环后由 `agent-artifact-created` 累计推送），驱动「产物画廊」。 */
+  artifacts: ArtifactRef[]
+  /** 轨迹视图聚合数据：意图分类 + 分层思考（plan/exec/selfcheck）。与已有 planSteps/toolSteps 组合成完整轨迹。 */
+  trace: { intent?: IntentClassified; thinking: ThinkingChunk[] }
+  /** §3.2 分支重规划结果（双分支对比横幅 + 应用按钮）。非 null 时画布渲染对比视图。 */
+  planBranch: PlanBranchGenerated | null
+  /** 步骤级恢复：子任务自动重试耗尽仍失败时挂起，等待用户决策（重试/跳过/接管）；非 null 时渲染恢复面板。 */
+  recovery: RecoveryRequest | null
+  /** 回传步骤级恢复决策（retry / skip / takeover；takeover 时携带补充指示）。 */
+  resolveRecovery: (decision: 'retry' | 'skip' | 'takeover', guidance?: string) => Promise<void>
 }
 
 function labelOf(toolName: string): string {
@@ -94,6 +117,25 @@ export function useAgentSession(): AgentSessionState {
   const [planSteps, setPlanSteps] = useState<PlanStep[]>([])
   const [isRunning, setIsRunning] = useState(false)
   const [pendingApproval, setPendingApproval] = useState<ApprovalRequest | null>(null)
+  // 本次任务的实时 token 用量（后端经 `agent-token-update` 增量推送，运行中累计）；
+  // 响应式状态，驱动顶栏计数卡实时跳数。任务开始/reset 时清空，完成时由 `agent-task-done` 终值同步。
+  const [liveTokenUsage, setLiveTokenUsage] = useState<{
+    promptTokens: number
+    completionTokens: number
+  } | null>(null)
+
+  // 最近一轮任务的异常信息（由 `agent-task-error` 写入），供页面渲染「错误诊断面板」。
+  // 仅承载展示用数据，重试/跳过等恢复操作留到 Phase 2。
+  const [taskError, setTaskError] = useState<{ message: string; at: number } | null>(null)
+  // 本次任务产生的文件产物（子任务成功闭环后由 `agent-artifact-created` 累计推送），驱动「产物画廊」。
+  const [artifacts, setArtifacts] = useState<ArtifactRef[]>([])
+  // 轨迹视图：意图分类结果（intent_classified）与分层思考片段（thinking_chunk）。
+  const [traceIntent, setTraceIntent] = useState<IntentClassified | undefined>(undefined)
+  const [traceThinking, setTraceThinking] = useState<ThinkingChunk[]>([])
+  // §3.2 分支重规划结果（plan_branch_generated 事件携带，驱动画布对比横幅 + 应用按钮）。
+  const [planBranch, setPlanBranch] = useState<PlanBranchGenerated | null>(null)
+  // 步骤级恢复：子任务自动重试耗尽仍失败时挂起，等待用户决策（重试/跳过/接管）。
+  const [recovery, setRecovery] = useState<RecoveryRequest | null>(null)
 
   // 用 ref 持有最新状态，供 Tauri 事件回调里更新（避免闭包陈旧）。
   const stepsRef = useRef<Map<string, ToolStep>>(new Map())
@@ -108,6 +150,9 @@ export function useAgentSession(): AgentSessionState {
   // 最近一轮任务的真实 token 用量（后端取自 LLM usage，经 agent-task-done 带出）；
   // Tauri 环境由事件填充，dev/mock 无后端时为 null，页面据此回退到估算值。
   const lastTaskUsageRef = useRef<{ promptTokens: number; completionTokens: number } | null>(null)
+  // 当前活跃子任务序号（按 step_started/finished 维护）：用于给 tool_started/finished
+  // 打 `step` 标签，前端把工具按所属步骤归组渲染成「步骤 → 工具」嵌套视图。
+  const currentStepRef = useRef<number | null>(null)
 
   const setRunning = useCallback((value: boolean) => {
     isRunningRef.current = value
@@ -125,6 +170,36 @@ export function useAgentSession(): AgentSessionState {
     },
     [flushSteps],
   )
+
+  // 终态清扫：任务结束（done/error/兜底超时）时，把仍停留在 running 的步骤收敛为 failed，
+  // 避免后端在 429 等异常路径上漏发 step_finished/tool_finished 时，UI 永久显示「转圈 loading」。
+  // 这是前端状态机对 UI 一致性的兜底责任——即便后端事件流有缺口，也不应卡死。
+  const finalizeStuckSteps = useCallback(() => {
+    let toolChanged = false
+    stepsRef.current.forEach((step, key) => {
+      if (step.status === 'running') {
+        stepsRef.current.set(key, {
+          ...step,
+          status: 'failed',
+          result: step.result ?? '（任务已结束，但未收到该工具步骤的完成信号，已自动标记为失败）',
+        })
+        toolChanged = true
+      }
+    })
+    if (toolChanged) flushSteps()
+    setPlanSteps((prev) => {
+      if (!prev.some((t) => t.status === 'running')) return prev
+      return prev.map((t) =>
+        t.status === 'running'
+          ? {
+              ...t,
+              status: 'failed',
+              summary: t.summary ?? '（任务已结束，但该规划步骤未收到完成信号，已自动标记为失败）',
+            }
+          : t,
+      )
+    })
+  }, [flushSteps])
 
   // 非 Tauri：模拟一轮任务（含两个工具步骤 + 流式回复），用于浏览器 dev 演示 UI。
   const mockRun = useCallback(async (input: RunAgentTaskInput) => {
@@ -223,8 +298,10 @@ export function useAgentSession(): AgentSessionState {
       setRunning(false)
       setIsStreaming(false)
       setStatusText('长时间未收到后端结束信号，任务可能仍在后台运行，可点击「停止」后重新发起')
+      // 兜底收敛残留的 running 步骤，避免永久 loading
+      finalizeStuckSteps()
     }, 20 * 60_000)
-  }, [clearTaskTimeout])
+  }, [clearTaskTimeout, finalizeStuckSteps])
 
   const run = useCallback(
     async (input: RunAgentTaskInput) => {
@@ -233,12 +310,22 @@ export function useAgentSession(): AgentSessionState {
       // 新一轮：清空上一轮的工具步骤、流式文本与思考过程，但保留历史气泡（气泡由页面维护）。
       stepsRef.current.clear()
       flushSteps()
+      currentStepRef.current = null
       setStreamingText('')
       setIsStreaming(false)
       setThoughts([])
       setPlanSteps([])
       setPendingApproval(null)
       setStatusText('')
+      setLiveTokenUsage(null)
+      setTaskError(null)
+      setArtifacts([])
+      // 每轮任务重置轨迹（意图 + 分层思考）：避免上一题的轨迹泄漏/混进本轮。
+      // 与 planSteps/artifacts 同批清空；reset() 在切/新建会话时也清这两份。
+      setTraceIntent(undefined)
+      setTraceThinking([])
+      setPlanBranch(null)
+      setRecovery(null)
       clearTaskTimeout()
 
       if (!isTauri) {
@@ -265,6 +352,13 @@ export function useAgentSession(): AgentSessionState {
             // 临时移除的 MCP 服务 / 其下单个工具（会话内有效，不写库）
             disabledMcpIds: input.disabledMcpIds ?? [],
             disabledMcpToolIds: input.disabledMcpToolIds ?? [],
+            // 临时启用的技能 / MCP 服务（`@` 提及触发）；Rust load_config 据此把未绑定能力临时并入工具集
+            enabledSkillIds: input.enabledSkillIds ?? [],
+            enabledMcpIds: input.enabledMcpIds ?? [],
+            // §3.2 分支重跑：直接采用前端计划（跳过 LLM 规划），并标记 head 预完成 + 初始上下文。
+            planOverride: input.planOverride ?? undefined,
+            preCompleted: input.preCompleted ?? [],
+            initialContext: input.initialContext ?? '',
           },
         })
       } catch (e) {
@@ -304,6 +398,13 @@ export function useAgentSession(): AgentSessionState {
     setStatusText('')
     setThoughts([])
     setPendingApproval(null)
+    setLiveTokenUsage(null)
+    setTaskError(null)
+    setArtifacts([])
+    setTraceIntent(undefined)
+    setTraceThinking([])
+    setPlanBranch(null)
+    setRecovery(null)
     clearTaskTimeout()
     setRunning(false)
   }, [flushSteps, clearTaskTimeout])
@@ -319,6 +420,27 @@ export function useAgentSession(): AgentSessionState {
     setIsStreaming(false)
   }, [isTauri, clearTaskTimeout])
 
+  // 步骤级恢复：回传决策（retry / skip / takeover）给后台挂起的流水线。
+  // 不在下发时乐观收起面板——后端接到决策后会 emit step_started（retry/takeover）
+  // 或 step_finished（skip），或本轮以 agent-task-done/error 结束，这些事件统一清面板；
+  // 若网络异常未复位，面板保留、后端仍在挂起等待，用户可再次点击，避免死锁。
+  const resolveRecovery = useCallback(
+    async (decision: 'retry' | 'skip' | 'takeover', guidance?: string) => {
+      if (!isTauri) return
+      try {
+        await invoke('resolve_subtask', {
+          input: {
+            decision,
+            guidance: guidance ?? null,
+          },
+        })
+      } catch (e) {
+        console.error('[agent] resolve_subtask failed', e)
+      }
+    },
+    [isTauri],
+  )
+
   // 挂载：注册 Tauri 事件监听（仅 Tauri 环境）。
   useEffect(() => {
     if (!isTauri) return
@@ -330,7 +452,7 @@ export function useAgentSession(): AgentSessionState {
         switch (e.type) {
           case 'tool_started':
             if (e.step) {
-              const step = { ...e.step, toolLabel: labelOf(e.step.toolName) }
+              const step = { ...e.step, toolLabel: labelOf(e.step.toolName), step: currentStepRef.current ?? undefined }
               upsertStep(step)
               // 把「决定调用哪个工具 + 参数」作为思考过程的一条记录（而非独立卡片）
               setThoughts((prev) => [
@@ -341,7 +463,7 @@ export function useAgentSession(): AgentSessionState {
             break
           case 'tool_finished':
             if (e.step) {
-              const step = { ...e.step, toolLabel: labelOf(e.step.toolName) }
+              const step = { ...e.step, toolLabel: labelOf(e.step.toolName), step: currentStepRef.current ?? undefined }
               upsertStep(step)
               const ok = step.status === 'success'
               const dur =
@@ -393,22 +515,46 @@ export function useAgentSession(): AgentSessionState {
           case 'step_started':
             if (typeof e.plan?.step === 'number') {
               const s = e.plan.step
-              setPlanSteps((prev) =>
-                prev.map((t) => (t.step === s ? { ...t, status: 'running' } : t)),
-              )
-            }
-            break
+              currentStepRef.current = s
+            setPlanSteps((prev) =>
+              prev.map((t) => (t.step === s ? { ...t, status: 'running' } : t)),
+            )
+            // 重试/接管分支：后端先复位该步骤为 running 再重跑，这里收起恢复面板。
+            setRecovery((prev) => (prev && prev.step === s ? null : prev))
+          }
+          break
           case 'step_finished':
             if (typeof e.plan?.step === 'number') {
               const s = e.plan.step
               const st = e.plan.status ?? 'success'
               const sum = e.plan.summary
+              if (currentStepRef.current === s) currentStepRef.current = null
               setPlanSteps((prev) =>
                 prev.map((t) =>
                   t.step === s ? { ...t, status: st, summary: sum ?? t.summary } : t,
                 ),
               )
+              // 跳过分支：被跳过的步骤不会再 emit step_started，这里直接收起恢复面板。
+              setRecovery((prev) => (prev && prev.step === s ? null : prev))
             }
+            break
+          case 'intent_classified':
+            if (e.intent) setTraceIntent(e.intent)
+            break
+          case 'thinking_chunk':
+            if (e.chunk) {
+              setTraceThinking((prev) => [
+                ...prev,
+                {
+                  layer: (e.chunk?.layer as ThinkingChunk['layer']) ?? 'exec',
+                  text: e.chunk!.text,
+                  done: e.chunk!.done,
+                },
+              ])
+            }
+            break
+          case 'plan_branch_generated':
+            if (e.branch) setPlanBranch(e.branch)
             break
         }
       })
@@ -423,10 +569,15 @@ export function useAgentSession(): AgentSessionState {
         (ev) => {
           // 记录本轮真实 token 用量（后端取自 LLM usage，跨 ReAct 轮累计），供页面展示替代估算。
           lastTaskUsageRef.current = ev.payload ?? null
+          // 终值同步到实时计数卡（simple_chat 等不推送 token_update 的路径也能拿到终值）。
+          setLiveTokenUsage(ev.payload ?? null)
           clearTaskTimeout()
           setRunning(false)
           setIsStreaming(false)
           setStatusText('')
+          setRecovery(null)
+          // 终态清扫：收敛残留的 running 步骤（见 finalizeStuckSteps 注释）
+          finalizeStuckSteps()
           // 完成后保留思考过程，方便回看智能体做了什么（新一轮 run 时在入口清空）
         },
       )
@@ -435,16 +586,59 @@ export function useAgentSession(): AgentSessionState {
         setRunning(false)
         setIsStreaming(false)
         setStatusText(`任务异常：${ev.payload}`)
+        setRecovery(null)
+        // 终态清扫：异常结束时同样收敛残留的 running 步骤
+        finalizeStuckSteps()
         // 异常时也保留已产生的思考过程，便于排查失败原因
+        // 把错误写入响应式状态，驱动页面「错误诊断面板」展示（含复制）。
+        setTaskError({ message: ev.payload, at: Date.now() })
       })
+      // 步骤级恢复：子任务自动重试耗尽仍失败，挂起等待用户决策（重试/跳过/接管）。
+      const offRecovery = await listen<RecoveryRequest>(
+        'agent-recovery-needed',
+        (ev) => {
+          setRecovery(ev.payload)
+        },
+      )
+      // 实时 token 用量增量（运行中累计推送，驱动顶栏计数卡跳数）。
+      const offToken = await listen<{ promptTokens: number; completionTokens: number }>(
+        'agent-token-update',
+        (ev) => {
+          if (ev.payload) setLiveTokenUsage(ev.payload)
+        },
+      )
+      // 子任务产物登记（成功闭环并写库后推送），累计进「产物画廊」。
+      const offArtifact = await listen<{ step: number; artifacts: ArtifactRef[] }>(
+        'agent-artifact-created',
+        (ev) => {
+          if (ev.payload?.artifacts?.length) {
+            setArtifacts((prev) => {
+              // 去重（同 artifact_id 不重复 append），其余追加。
+              const seen = new Set(prev.map((a) => a.artifactId))
+              return [...prev, ...ev.payload.artifacts.filter((a) => !seen.has(a.artifactId))]
+            })
+          }
+        },
+      )
+      // §3.2 分支重规划结果（branch_from_step 命令完成后推送），驱动画布对比横幅 + 应用按钮。
+      const offPlanBranch = await listen<PlanBranchGenerated>(
+        'agent-plan-branch',
+        (ev) => {
+          if (ev.payload) setPlanBranch(ev.payload)
+        },
+      )
       if (!mounted) {
         offEvent()
         offApproval()
         offDone()
         offErr()
+        offToken()
+        offArtifact()
+        offRecovery()
+        offPlanBranch()
         return
       }
-      unlistenRef.current = [offEvent, offApproval, offDone, offErr]
+      unlistenRef.current = [offEvent, offApproval, offDone, offErr, offToken, offArtifact, offRecovery, offPlanBranch]
     }
 
     void reg()
@@ -469,5 +663,12 @@ export function useAgentSession(): AgentSessionState {
     reset,
     cancel,
     lastTaskUsage: lastTaskUsageRef,
+    liveTokenUsage,
+    taskError,
+    artifacts,
+    recovery,
+    resolveRecovery,
+    trace: { intent: traceIntent, thinking: traceThinking },
+    planBranch,
   }
 }

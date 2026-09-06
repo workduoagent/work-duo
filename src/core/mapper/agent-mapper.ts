@@ -22,6 +22,7 @@ import type {
   AgentRefCounts,
   AgentSkillRef,
   AgentUpsertInput,
+  MemoryMode,
 } from '@/types/core'
 import type {
   AgentInfoRow,
@@ -67,6 +68,7 @@ function rowToAgent(r: AgentInfoRow): AgentInfo {
     isActive: r.is_active === 1,
     autoToolExecMode: r.auto_tool_exec_mode === 1,
     allowSandbox: r.allow_sandbox === 1,
+    memoryMode: (r.memory_mode as MemoryMode) ?? 'off',
     createdAt: new Date(r.created_at).toISOString(),
     updatedAt: new Date(r.updated_at).toISOString(),
   }
@@ -256,6 +258,7 @@ export async function upsertAgent(input: AgentUpsertInput): Promise<AgentInfo[]>
       isActive: input.isActive ?? true,
       autoToolExecMode: input.autoToolExecMode ?? false,
       allowSandbox: input.allowSandbox ?? false,
+      memoryMode: input.memoryMode ?? 'off',
       createdAt: isUpdate
         ? list.find((a) => a.id === id)?.createdAt ?? new Date(now).toISOString()
         : new Date(now).toISOString(),
@@ -338,6 +341,7 @@ export async function upsertAgent(input: AgentUpsertInput): Promise<AgentInfo[]>
       (input.isActive ?? true) ? 1 : 0,
       (input.autoToolExecMode ?? false) ? 1 : 0,
       (input.allowSandbox ?? false) ? 1 : 0,
+      input.memoryMode ?? 'off',
       now,
       now,
     ],

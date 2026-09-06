@@ -13,7 +13,8 @@
  */
 import { useRef } from 'react'
 import { ImagePlus, RefreshCw, Trash2 } from 'lucide-react'
-import { Button, Field, FieldLabel, Input, Switch } from '@/components/ui'
+import { Button, Field, FieldLabel, Input, Segmented, Switch } from '@/components/ui'
+import type { MemoryMode } from '@/types/core'
 import { ScenarioSelect } from '@/components/scenario'
 import { MarkdownEditor } from '@/components/markdown/MarkdownEditor'
 import { generateAgentIdentifier } from '@/core/mapper/agent-mapper'
@@ -176,6 +177,22 @@ export function StepBasic({ draft, patch, errors, clearError }: StepBasicProps) 
                 开启后，该智能体在对话中可调用沙箱环境运行代码 / 脚本（默认开启）
               </em>
             </span>
+          </label>
+          <label className="agent-wizard__switch-row">
+            <span className="agent-wizard__switch-label">记忆模式</span>
+            <Segmented
+              size="small"
+              value={draft.memoryMode}
+              onChange={(v) => patch({ memoryMode: v as MemoryMode })}
+              options={[
+                { label: '关闭', value: 'off' },
+                { label: '主动', value: 'active' },
+                { label: '强制', value: 'forced' },
+              ]}
+            />
+            <em className="agent-wizard__hint">
+              关闭=不记忆；主动=模型在对话中自主沉淀可复用信息；强制=每次任务结束引擎必沉淀（确定性，不依赖模型是否主动调用工具）
+            </em>
           </label>
         </div>
 

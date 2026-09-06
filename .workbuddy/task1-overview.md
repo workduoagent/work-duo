@@ -1,30 +1,66 @@
-# 任务一 · 场景分类统一管理（scenario_category 字典）— 已完成
+基于 `phase3-implementation-plan.md`（含 §7 全部执行记录）和本轮对话实际落地情况，给你一份完整盘点。
 
-## 目标
-用 `scenario_category` 字典表统一替代 LLM / MCP / Skill 三处前端硬编码枚举，支持：
-- 搜索下拉 + **回车新建**分类（value 由 label 自动 slug，冲突追加 `-N`）
-- **行内改名**（仅改 `label`，不改 `value`/`scope`）
-- **删除**（按 `scope` 置空业务引用：`skill_info.scenario` / `mcp_info.scenario` → NULL，`models.category` → 空串）
+## 一、已完成（✅）
 
-## 本次完成（LLM 模块接入 —— 任务一最后一块）
-- `src/pages/model-settings/index.tsx`：左侧 `CategoryTabs` 改从 `scenario_category(scope=LLM)` 加载 `options`+`counts`；分类 state 由 `ModelCategory` 改为 `string`；保存/导入后 `void loadScenarios()` 刷新左栏（新建自定义分类即时出现）。
-- `src/pages/model-settings/components/ModelFormModal.tsx`：分类 `Radio.Group`(`MODEL_CATEGORY_OPTIONS`) → `<ScenarioSelect scope="LLM" />`；`changeCategory(next: string)`；移除 `Radio` 导入。
-- `src/pages/model-settings/components/ModelList.tsx`：`categoryLabel` 改用 `getModelCategoryLabel`（DB 未命中兜底）；移除 `MODEL_CATEGORY_OPTIONS` 导入。
-- `src/core/file/model-file.ts`：删除 `MODEL_CATEGORY_OPTIONS` 导出，新增 `getModelCategoryLabel`；`createEmptyModel` 补 `default: return base`（修复原 `switch` 无 default 导致**自定义分类返回 undefined 的崩溃隐患**）。
-- `src/pages/model-settings/components/paramFields.ts`：`getParamFields` 补 `default: return []`（自定义分类参数区兜底为空，符合计划）。
+### §3.1 执行轨迹视图 — 100% 落地
+| 子项 | 状态 |
+|---|---|
+| 后端 `intent_classified` 事件 | ✅ |
+| 后端 `thinking_chunk` 分层推送（plan / exec / selfcheck 三态全贯通） | ✅ |
+| 前端 `TracePanel`（意图节点 + 分层思考 + 规划步骤 + 工具时间轴） | ✅ |
+| 右栏 Tab 承载（替代原底部面板） | ✅ |
+| `run()` 每轮重置轨迹（修之前的"泄漏/一次性"bug） | ✅ |
+| 任务结束 `finalizeStuckSteps` 兜底（修 429/取消后卡 loading） | ✅ |
+| `step_finished(true)` 成功分支补发（修"步骤误判失败"） | ✅ |
 
-## 顺带修复的隐含类型错误（全量 `typecheck` 暴露）
-- `ScenarioCategory` 类型应来自 `@/types/core`（mcp / skill-hub / model-settings/index.tsx + ScenarioSelect 四处理应修正的导入路径）。
-- `ModelConfig as Record<string,unknown>` 直转触发 TS2352 → 改 `as unknown as`（model-file.ts / model-mapper.ts / ModelFormModal.tsx）。
-- `ScenarioSelect` 的 `ref={editRef as Ref<HTMLInputElement>}` 类型不匹配 → 改 `ref={editRef}` 并移除多余 `Ref` 导入。
-- `ModelFormModal` 用 `string` 索引 `ModelConfig` 触发 TS7053 → 先 `as unknown as Record<string, unknown>` 再索引。
+### §3.2 产物画布 — 起步切片完成（约 60%）
+| 子项 | 状态 |
+|---|---|
+| 后端 `plan_generated` 补 `dependsOn`（DAG 连边数据） | ✅ |
+| 前端 `CanvasPanel`（hand-roll SVG，节点+依赖+产物标记，纵向） | ✅ |
+| 右栏第三 Tab「画布」+ 拖拽调宽 | ✅ |
+| 画布 XY 滚动条消除（改 viewBox 自适应） | ✅ |
+| **分支重规划 `branch_from_step` 命令** | ❌ 未做 |
+| **产物内容读取 `read_artifact` 预览（图片放大/表格/代码）** | ❌ 未做 |
 
-## 强警告
-`ScenarioSelect` 删除 **LLM** 分类且引用数 > 0 时，提示「将置空 N 个模型的分类（参数结构保留，但模型变为未分类，需手动重新指定分类）」，避免误删丢失分类归口。
+### §3.3 记忆宫殿 — 0%（完全未启动）
+全部 4+ 后端缺口均未补（`memory_recalled` / `context_compacted` / `anchor_memory` / `list_memories` + `ref_count`），前端 `MemoryPalace` 全家桶未建。
 
-## 校验
-- `npm run typecheck` EXIT 0（铁律：**未跑 `vite build`**，仅 `npm run tauri` 调试）。
+### Agent 引擎四项优化 + 1 个 skill — 100% 落地
+| 优化 | 状态 | 真机验证 |
+|---|---|---|
+| ① verifier 多关键词容错 | ✅ | ✅ 生效（SUI 重试风暴消失） |
+| ② ReAct 上下文压缩 | ✅ | ✅ 部分生效 |
+| ③ 取消信号优先 | ✅ | ✅ 生效 |
+| ④ 零输出快速重试 | ✅ | ⏳ 待复测（预期再省 ~15%） |
+| 对齐 skill（6 类模式） | ✅ | — 给我自己用 |
 
-## 状态
-- 任务一（LLM / MCP / Skill 三模块统一）全量完成。旧数据 `value` 不变，删除字典仅置空引用。
-- 任务二（知识库：菜单更名 + `knowledge_base`/`knowledge_asset` 表 + 首页/详情页 + MultiFileViewer + 依赖安装）待启动。
+### Scope 决策
+- **历史回看轨迹**：🚫 明确不做（右栏 Tab 是运行时内存态，刷新即空；气泡内轨迹才是持久化真相源，保留）
+
+---
+
+## 二、下一步（⏳ 待做）
+
+**1. §3.2 画布后半段（真功能）**
+- 后端：`commands.rs` + `lib.rs` 新增 `branch_from_step`（从步骤 N 重规划，双分支对比）
+- 后端：`read_artifact`（按扩展名返回预览内容，路径过 PathGuard）
+- 前端：`ArtifactCanvas` 全家桶（拖拽/缩放/连线、点击预览、右键分支菜单）
+
+**2. §3.3 记忆宫殿（完整新模块，工作量最大）**
+- 后端：`wd_mem.rs` + `round_compactor.rs` + `events.rs` 埋 4+ 事件/命令 + 引用计数
+- 前端：`MemoryPalace` 卡片网格 + 热力图 + 搜索过滤 + 锚定/删除
+
+**3. 真机复测验证**
+- 优化④ ROI 对照（跑同 SUI 任务，对比 38.53 → 预期 ~24 积分）
+- 顺带验证：步骤是否全绿、画布缩放、气泡/右栏并存行为
+
+---
+
+## 三、一句话总览
+
+> 计划里的 **§3.1 已完整做完**；**§3.2 只做了"规划 DAG 可视化"起步版，分支重规划+产物预览还没做**；**§3.3 记忆宫殿完全没动**（这是真正的最大后端缺口）；另外**顺带把 Agent 引擎的 4 个计费/正确性优化 + 1 个诊断 skill 全做完了**。
+
+建议下一步二选一：要么把 §3.2 画布补全成真功能（分支重规划 + 预览），要么开 §3.3 记忆宫殿（后端缺口大、独立工作）。你要先推哪个？
+
+是否需要我把这份"完成度盘点"单独写成一个 `phase3-status.md` 方便你随时对照？还是就记在 §7 里即可？（文档本身已通过 §7 记录，不强制额外文件）

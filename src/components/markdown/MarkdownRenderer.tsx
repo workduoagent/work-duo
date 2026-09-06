@@ -143,7 +143,13 @@ export function MarkdownRenderer({ content, className, resolveImageUrl }: Markdo
     <div className={`md-body ${className ?? ''}`}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkMath]}
-        rehypePlugins={[rehypeKatex, rehypeHighlight]}
+        // 放宽 KaTeX 严格模式：模型输出常在 $...$ 数学块里夹带中文 / en-dash 等「非严格 LaTeX」字符，
+        // 默认 strict:'warn' 会刷大量 console.warn；strict:false 让其按文本静默回退渲染、不再告警。
+        // throwOnError:false 保证即便有真语法错也只渲染成红色，而不会让整段 Markdown 渲染抛错崩掉。
+        rehypePlugins={[
+          [rehypeKatex, { throwOnError: false, katexOptions: { strict: false } }],
+          rehypeHighlight,
+        ]}
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         components={mdComponents as any}
       >

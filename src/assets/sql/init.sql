@@ -86,13 +86,9 @@ INSERT OR IGNORE INTO app_config (key, value) VALUES ('network_proxy', '{"mode":
 INSERT OR IGNORE INTO app_config (key, value) VALUES ('workspace_path', '$APPDATA/.workspace');
 -- 客户端通知开关，默认开启。
 INSERT OR IGNORE INTO app_config (key, value) VALUES ('client_notify', 'true');
--- 生成对话记忆开关，默认关闭。
-INSERT OR IGNORE INTO app_config (key, value) VALUES ('memory_enabled', 'false');
 -- 会话管理：超过设定小时数未对话自动开启新会话（开关 + 小时数）。
 INSERT OR IGNORE INTO app_config (key, value) VALUES ('session_auto_new', 'false');
 INSERT OR IGNORE INTO app_config (key, value) VALUES ('session_idle_hours', '24');
--- 导入的记忆列表（JSON 数组，见 ImportedMemory）。
-INSERT OR IGNORE INTO app_config (key, value) VALUES ('imported_memories', '[]');
 -- 知识库存储根路径（默认 $APPDATA/.knowledge_base，可在「设置」页修改）。
 INSERT OR IGNORE INTO app_config (key, value) VALUES ('knowledge_base_path', '$APPDATA/.knowledge_base');
 
@@ -206,6 +202,7 @@ CREATE TABLE IF NOT EXISTS agent_info
     is_active           INTEGER NOT NULL DEFAULT 1,
     auto_tool_exec_mode INTEGER NOT NULL DEFAULT 0,
     allow_sandbox       INTEGER NOT NULL DEFAULT 0,
+    memory_mode         TEXT    NOT NULL DEFAULT 'off',  -- 记忆模式：off=关闭 / active=主动 / forced=强制每次任务末沉淀
     created_at          INTEGER NOT NULL,
     updated_at          INTEGER NOT NULL,
     CONSTRAINT uk_agent_identifier UNIQUE (identifier)
@@ -398,6 +395,7 @@ CREATE TABLE IF NOT EXISTS agent_conversation_round
     thinking_content   TEXT,
     assistant_answer    TEXT,
     tool_calls_summary TEXT,
+    plan_steps         TEXT,
     raw_messages_json  TEXT NOT NULL DEFAULT '',
     input_tokens       INTEGER,
     output_tokens      INTEGER,
@@ -408,3 +406,199 @@ CREATE TABLE IF NOT EXISTS agent_conversation_round
     FOREIGN KEY(session_id) REFERENCES agent_conversation_session(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_agent_round_session ON agent_conversation_round(session_id, round_index);
+
+-- ============ 产物注册表（artifacts） ============
+-- 子任务成功闭环后，把本次任务生成的文件产物登记进此表，形成「任务 → 产物」索引，
+-- 支持前端「产物画廊」按步骤浏览、打开/定位/复制路径。产物是「逻辑实体」，文件只是其一种实现。
+-- 同一（task_id, path）再次出现时以 version 自增覆盖，不以 path 做唯一约束（允许重跑覆盖）。
+CREATE TABLE IF NOT EXISTS artifacts
+(
+    id            TEXT    PRIMARY KEY,        -- 产物唯一标识（art_<epochMs>_<step>_<idx>）
+    session_id    TEXT,                       -- 所属会话（agent_conversation_session.id）
+    round_id      TEXT,                       -- 所属轮次（agent_conversation_round.id）
+    task_id       TEXT,                       -- 产生该产物的子任务 id（PlanSubTask.task_id）
+    step          INTEGER NOT NULL DEFAULT 0,-- 子任务序号（1-based）
+    artifact_type TEXT,                       -- 产物类型：file/image/document/spreadsheet/code/json/report/directory…
+    path          TEXT    NOT NULL,           -- 产物绝对路径（已规范化、落于工作空间内）
+    mime_type     TEXT,                       -- MIME 类型（由扩展名推导）
+    description   TEXT,                       -- 产物描述（文件名或摘要片段）
+    version       INTEGER NOT NULL DEFAULT 1, -- 同路径覆盖版本号（每次重跑自增）
+    checksum      TEXT,                       -- 摘要校验（可选，当前留空，预留）
+    size          INTEGER NOT NULL DEFAULT 0, -- 字节大小
+    created_at    INTEGER NOT NULL DEFAULT 0  -- epoch 毫秒
+);
+CREATE INDEX IF NOT EXISTS idx_artifacts_round ON artifacts(round_id, step);
+CREATE INDEX IF NOT EXISTS idx_artifacts_session ON artifacts(session_id);
+
+-- ============ 记忆宫殿表（agent_memories） ============
+-- 智能体的长期可召回记忆单元（§3.3 记忆宫殿）。既可由用户/智能体显式「锚定」，
+-- 也可在每次任务运行时由 runtime 自动召回 top-K 注入系统提示，召回即累计 ref_count（引用计数）。
+--   id            本地 UUID（文本主键）；
+--   agent_id      关联智能体（可空，空代表全局共享记忆）；
+--   session_id    触发锚定的会话（可空）；
+--   key           短标题 / 关键词（同一 agent_id 下唯一锚定键，重复锚定则更新内容）；
+--   content       记忆正文；
+--   category      分类：decision / code_pattern / user_pref / architecture / fix / other；
+--   ref_count     引用次数（召回埋点累计，驱动热力图与权重排序）；
+--   anchored      是否显式锚定（1 用户/智能体刻意沉淀，0 自动沉淀/历史）；
+--   last_recalled 最近一次召回时间（epoch 毫秒，可空）；
+--   created_at / updated_at：epoch 毫秒。
+CREATE TABLE IF NOT EXISTS agent_memories
+(
+    id            TEXT    PRIMARY KEY,
+    agent_id      TEXT,
+    session_id    TEXT,
+    key           TEXT    NOT NULL,
+    content       TEXT    NOT NULL,
+    category      TEXT    NOT NULL DEFAULT 'general',
+    ref_count     INTEGER NOT NULL DEFAULT 0,
+    anchored      INTEGER NOT NULL DEFAULT 0,
+    last_recalled INTEGER,
+    created_at    INTEGER NOT NULL,
+    updated_at    INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_memories_agent ON agent_memories(agent_id, category);
+CREATE INDEX IF NOT EXISTS idx_memories_ref ON agent_memories(agent_id, ref_count DESC);
+
+-- ============ 记忆事件日志表（agent_memory_events） ============
+-- 每次召回（recall）/ 锚定（anchor）/ 压缩（compact）写一行，按日聚合驱动「记忆热力图」。
+-- 由 memory.rs 的 recall_memory / anchor_memory 与 round_compactor 的压缩完成钩子写入。
+CREATE TABLE IF NOT EXISTS agent_memory_events
+(
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    memory_id   TEXT    NOT NULL,
+    event_type  TEXT    NOT NULL,   -- 'recall' | 'anchor' | 'compact'
+    created_at  INTEGER NOT NULL,
+    CONSTRAINT fk_memory_event FOREIGN KEY(memory_id) REFERENCES agent_memories(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_memory_events_mem ON agent_memory_events(memory_id, created_at);
+
+-- ============ 小分队定义表（agent_squad） ============
+-- 一群「人」(Agent) 按协作模式处理同一事务（项目/任务）的团队定义。
+--   id             本地 UUID（文本主键）；
+--   name           团队名；logo 团队头像（Base64 字符串，可空）；description 简介；
+--   mode           协作模式：orchestrator（编排）/ pipeline（流水线）/ chat（群聊协商）；
+--   leader_agent_id 编排式主管 / 群聊汇总主笔默认（引用 agent_info.id，可空）；
+--   global_mcp_ids 全局挂载的 MCP 服务 id 数组（JSON 文本，成员运行时强制并入工具集，可空）；
+--   run_strategy   运行策略 JSON：{ execution_mode: 'manual'|'schedule'|'api',
+--                   schedule_cron?: string, retry_count?: number }（可空，默认 manual/重试 3）；
+--   created_at / updated_at：epoch 毫秒。
+CREATE TABLE IF NOT EXISTS agent_squad
+(
+    id              TEXT    PRIMARY KEY,
+    name            TEXT    NOT NULL,
+    logo            TEXT,
+    description     TEXT,
+    mode            TEXT    NOT NULL DEFAULT 'orchestrator',
+    leader_agent_id TEXT,
+    unique_id       TEXT,
+    global_mcp_ids  TEXT,
+    run_strategy    TEXT,
+    supports_file_input INTEGER NOT NULL DEFAULT 0,
+    created_at      INTEGER NOT NULL,
+    updated_at      INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_squad_mode ON agent_squad(mode);
+
+-- ============ 小分队成员任职表（agent_squad_member） ============
+-- 承载「成员智能体 + 在此团队中的定制」：角色、人设定制、流水线工序序号。
+--   squad_id / agent_id：FK（级联清理）；同一 squad 内 agent 唯一；
+--   role           承担角色（如「后端开发」「UI 设计」）；
+--   persona_override 人设定制（拼到该成员 system_prompt 末尾，不污染 base agent）；
+--   pipeline_order 流水线工序序号（pipeline 模式用，其余为 NULL）；
+--   is_leader     编排式主管标记（0/1，默认 0）；
+--   depends_on    流水线 DAG 依赖（JSON 数组，存上游成员 agent_id；空=按 pipeline_order 线性）。
+CREATE TABLE IF NOT EXISTS agent_squad_member
+(
+    id              TEXT    PRIMARY KEY,
+    squad_id        TEXT    NOT NULL,
+    agent_id        TEXT    NOT NULL,
+    role            TEXT,
+    persona_override TEXT,
+    pipeline_order  INTEGER,
+    is_leader       INTEGER NOT NULL DEFAULT 0,
+    depends_on      TEXT,
+    created_at      INTEGER NOT NULL,
+    CONSTRAINT uk_squad_member UNIQUE (squad_id, agent_id),
+    FOREIGN KEY(squad_id) REFERENCES agent_squad(id) ON DELETE CASCADE,
+    FOREIGN KEY(agent_id) REFERENCES agent_info(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_squad_member_squad ON agent_squad_member(squad_id, pipeline_order);
+
+-- ============ 小分队群聊配置表（agent_squad_chat_config） ============
+-- 仅 chat（群聊协商）模式使用的专属配置：
+--   max_rounds        发言轮次上限（默认 8，达到后由 summarizer 收口）；
+--   summarizer_agent_id 汇总主笔（最终产物结论负责人，可 = leader_agent_id 或单独指定，可空）。
+CREATE TABLE IF NOT EXISTS agent_squad_chat_config
+(
+    squad_id          TEXT    PRIMARY KEY,
+    max_rounds        INTEGER NOT NULL DEFAULT 8,
+    summarizer_agent_id TEXT,
+    FOREIGN KEY(squad_id) REFERENCES agent_squad(id) ON DELETE CASCADE
+);
+
+-- ============ 小分队协作运行表（agent_squad_session） ============
+-- 一次协作运行的实例（点击「启动协作」生成）：
+--   squad_id 所属团队；title 运行标题；mode 协作模式快照；status 运行状态；
+--   snapshot 运行态快照（JSON，可空）；created_at / updated_at：epoch 毫秒。
+CREATE TABLE IF NOT EXISTS agent_squad_session
+(
+    id          TEXT    PRIMARY KEY,
+    squad_id    TEXT    NOT NULL,
+    title       TEXT,
+    mode        TEXT    NOT NULL,
+    status      TEXT    NOT NULL DEFAULT 'RUNNING',
+    snapshot    TEXT,
+    created_at  INTEGER NOT NULL,
+    updated_at  INTEGER NOT NULL,
+    FOREIGN KEY(squad_id) REFERENCES agent_squad(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_squad_session_squad ON agent_squad_session(squad_id, created_at DESC);
+
+-- ============ 小分队协作轮次表（agent_squad_round） ============
+-- 协作过程中每一条发言/产物（讨论黑板）：
+--   squad_id / session_id：FK（级联清理）；
+--   speaker_agent_id 发言者智能体（可空，系统消息为 NULL）；
+--   role           发言者角色（可空）；content 正文；kind 类型（user/assistant/summary/system…）；
+--   created_at     epoch 毫秒。
+CREATE TABLE IF NOT EXISTS agent_squad_round
+(
+    id              TEXT    PRIMARY KEY,
+    squad_id        TEXT    NOT NULL,
+    session_id      TEXT    NOT NULL,
+    speaker_agent_id TEXT,
+    role            TEXT,
+    content         TEXT    NOT NULL,
+    kind            TEXT,
+    created_at      INTEGER NOT NULL,
+    FOREIGN KEY(squad_id) REFERENCES agent_squad(id) ON DELETE CASCADE,
+    FOREIGN KEY(session_id) REFERENCES agent_squad_session(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_squad_round_session ON agent_squad_round(session_id, created_at);
+
+-- ============ 小分队记忆表（agent_squad_memory） ============
+-- 团队黑板 / 共享记忆（结构照搬 agent_memories，归属维度换 squad_id + 可选 agent_id）。
+--   squad_id        所属团队（必填）；
+--   agent_id        可空：NULL = 团队共享记忆，非 NULL = 某成员个人记忆；
+--   session_id      触发锚定的协作运行（可空）；
+--   key / content / category / ref_count / anchored / last_recalled / created_at / updated_at
+--   语义与 agent_memories 一致（§3.3）。
+CREATE TABLE IF NOT EXISTS agent_squad_memory
+(
+    id            TEXT    PRIMARY KEY,
+    squad_id      TEXT    NOT NULL,
+    agent_id      TEXT,
+    session_id    TEXT,
+    key           TEXT    NOT NULL,
+    content       TEXT    NOT NULL,
+    category      TEXT    NOT NULL DEFAULT 'general',
+    ref_count     INTEGER NOT NULL DEFAULT 0,
+    anchored      INTEGER NOT NULL DEFAULT 0,
+    last_recalled INTEGER,
+    created_at    INTEGER NOT NULL,
+    updated_at    INTEGER NOT NULL,
+    FOREIGN KEY(squad_id) REFERENCES agent_squad(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_squad_memories_squad ON agent_squad_memory(squad_id, category);
+CREATE INDEX IF NOT EXISTS idx_squad_memories_ref ON agent_squad_memory(squad_id, ref_count DESC);
+

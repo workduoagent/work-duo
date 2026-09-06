@@ -8,6 +8,9 @@
 //! 不依赖前端重复传参（前端仅传 agentId + prompt + workspace）。
 
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+
+use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 
 use tauri::AppHandle;
 use tauri::Manager;
@@ -16,11 +19,26 @@ use tauri::State;
 use sqlx::Row;
 use tauri_plugin_sql::{DbInstances, DbPool};
 
+/// 运行时单轮能力上限（与前端 draft.ts 创建约束一致）：技能数、MCP 服务数。
+/// `@` 临时启用的能力并入后同样受此上限兜底，超出部分按"先绑定后启用"顺序截断。
+const MAX_SKILLS: usize = 3;
+const MAX_MCP_SERVERS: usize = 3;
+
 use crate::agent::approval::ApprovalDecisionInput;
 use crate::agent::mcp_adapter::MountedMcpTool;
+use crate::agent::recovery::RecoveryDecision;
 use crate::agent::runtime::AgentRuntime;
 use crate::agent::skill_adapter::SkillToolWrapper;
+use crate::agent::tools::{PathGuard, ToolContext};
 use crate::agent::types::AgentRuntimeConfig;
+use crate::agent::types::BranchStep;
+use crate::agent::types::PlanBranchGenerated;
+use crate::agent::types::PlanDAG;
+use crate::agent::types::ReadArtifactResult;
+use crate::agent::memory::{self, HeatmapPoint, MemoryItem};
+use crate::agent::types::{
+    SquadChatConfig, SquadMemberConfig, SquadRunStrategy, SquadRuntimeConfig,
+};
 
 /// 前端入参（run_agent_task）。
 #[derive(serde::Deserialize)]
@@ -45,9 +63,27 @@ pub struct RunAgentTaskInput {
     /// 本轮临时禁用的单个 MCP 工具 id 列表（仅会话内有效，不写库）。键为 mcp_tool_definition.id。
     #[serde(default)]
     pub disabled_mcp_tool_ids: Option<Vec<String>>,
+    /// 本轮临时启用的技能 id 列表（`@` 提及触发，仅会话内有效，不写库）。
+    /// 可包含「智能体未绑定」的技能——load_config 据此把其临时并入工具集（受 MAX_SKILLS 兜底）。
+    #[serde(default)]
+    pub enabled_skill_ids: Option<Vec<String>>,
+    /// 本轮临时启用的 MCP 服务 id 列表（`@` 提及触发，仅会话内有效，不写库）。
+    /// 可包含「智能体未绑定」的 MCP 服务——load_config 据此把其全部工具临时并入工具集。
+    #[serde(default)]
+    pub enabled_mcp_ids: Option<Vec<String>>,
     /// 本轮用户消息附件（多模态图片）。前端契约 { type, dataUrl, name? }。
     #[serde(default)]
     pub attachments: Option<Vec<crate::agent::types::AttachmentInput>>,
+    /// §3.2 分支重跑：前端直接提供完整计划（head + 新分支 tail），跳过 LLM 规划阶段，
+    /// 流水线仅执行 tail 新分支（head 由 `pre_completed` 标记为已完成、跳过执行）。
+    #[serde(default)]
+    pub plan_override: Option<PlanDAG>,
+    /// 分支起点之前的已完成 head 步骤 task_id 列表（流水线跳过执行，仅沿用其结果）。
+    #[serde(default)]
+    pub pre_completed: Option<Vec<String>>,
+    /// 产物管道初始上下文（head 步骤的已完成摘要），供 tail 步骤续接。
+    #[serde(default)]
+    pub initial_context: Option<String>,
 }
 
 /// 启动一轮智能体任务。
@@ -66,6 +102,8 @@ pub async fn run_agent_task(
         input.disabled_skill_ids.clone(),
         input.disabled_mcp_ids.clone(),
         input.disabled_mcp_tool_ids.clone(),
+        input.enabled_skill_ids.clone(),
+        input.enabled_mcp_ids.clone(),
         input.attachments.clone(),
     )
     .await?;
@@ -81,9 +119,15 @@ pub async fn run_agent_task(
     let app_clone = app.clone();
     let rt = runtime.inner().clone();
     let prompt = input.prompt.clone();
+    // §3.2 分支重跑：把前端传入的计划覆盖 / 预完成步骤 / 初始上下文透传给 run_task。
+    let plan_override = input.plan_override.clone();
+    let pre_completed: std::collections::HashSet<String> =
+        input.pre_completed.clone().unwrap_or_default().into_iter().collect();
+    let initial_context = input.initial_context.clone().unwrap_or_default();
     tauri::async_runtime::spawn(async move {
         println!("[agent] run_agent_task 后台任务已 spawn，开始 run_task");
-        rt.run_task(&app_clone, cfg, prompt).await;
+        rt.run_task(&app_clone, cfg, prompt, plan_override, pre_completed, initial_context)
+            .await;
         println!("[agent] run_agent_task 后台任务 run_task 结束");
     });
     Ok(())
@@ -105,8 +149,499 @@ pub async fn cancel_agent_task(runtime: State<'_, AgentRuntime>) -> Result<(), S
     runtime
         .cancel_flag
         .store(true, std::sync::atomic::Ordering::SeqCst);
+    // 若后台流水线正挂在恢复等待上，同步唤醒（否则取消信号无法跳出 wait 挂起）。
+    runtime.recovery.cancel();
     println!("[agent] cancel_agent_task: 已置位取消标志，后台任务将尽快终止");
     Ok(())
+}
+
+/// 通用恢复决策入参（resolve_subtask 使用）。
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResolveSubtaskInput {
+    /// 决策：retry | skip | takeover。
+    pub decision: String,
+    /// 接管时用户的补充指示（可空；空等价于 retry）。
+    #[serde(default)]
+    pub guidance: Option<String>,
+}
+
+/// 重试当前受阻子任务（步骤级恢复按钮之一）。
+#[tauri::command]
+pub async fn retry_subtask(runtime: State<'_, AgentRuntime>) -> Result<bool, String> {
+    if !runtime.recovery.is_blocked() {
+        return Ok(false); // 当前没有子任务在等待恢复
+    }
+    runtime.recovery.resolve(RecoveryDecision::Retry);
+    Ok(true)
+}
+
+/// 跳过当前受阻子任务，标记为已跳过并继续后续步骤（步骤级恢复按钮之一）。
+#[tauri::command]
+pub async fn skip_subtask(runtime: State<'_, AgentRuntime>) -> Result<bool, String> {
+    if !runtime.recovery.is_blocked() {
+        return Ok(false);
+    }
+    runtime.recovery.resolve(RecoveryDecision::Skip);
+    Ok(true)
+}
+
+/// 通用恢复决策入口：decision ∈ {retry, skip, takeover}，takeover 时携带 guidance。
+/// 前端恢复面板三按钮统一经此下发（retry/skip 也可改用专用命令）。
+#[tauri::command]
+pub async fn resolve_subtask(
+    runtime: State<'_, AgentRuntime>,
+    input: ResolveSubtaskInput,
+) -> Result<bool, String> {
+    if !runtime.recovery.is_blocked() {
+        return Ok(false);
+    }
+    let decision = match input.decision.to_lowercase().as_str() {
+        "retry" => RecoveryDecision::Retry,
+        "skip" => RecoveryDecision::Skip,
+        "takeover" => RecoveryDecision::Takeover(input.guidance.unwrap_or_default()),
+        other => return Err(format!("未知恢复决策：{other}（应为 retry/skip/takeover）")),
+    };
+    runtime.recovery.resolve(decision);
+    Ok(true)
+}
+
+/// 开始附件分片暂存会话（前端分块上传超大文件，避免在 `run_agent_task` IPC 中内联 base64）。
+#[tauri::command]
+pub async fn begin_stage_attachment(name: String, mime: String) -> Result<String, String> {
+    Ok(crate::agent::context::stage_begin(name, mime))
+}
+
+/// 追加一个分片（来自前端 `Uint8Array`，经 Tauri 二进制 IPC 传输）。
+#[tauri::command]
+pub async fn append_stage_chunk(stage_id: String, data: Vec<u8>) -> Result<(), String> {
+    crate::agent::context::stage_append(&stage_id, &data)
+}
+
+/// 提交分片暂存：落盘到 `workspace/.attachments/` 并返回最终路径，清理缓冲。
+#[tauri::command]
+pub async fn commit_stage_attachment(
+    stage_id: String,
+    workspace: Option<String>,
+) -> Result<String, String> {
+    crate::agent::context::stage_commit(&stage_id, &workspace)
+}
+
+/// 取消分片暂存（前端上传失败 / 超时清理）。
+#[tauri::command]
+pub async fn abort_stage_attachment(stage_id: String) -> Result<(), String> {
+    crate::agent::context::stage_abort(&stage_id);
+    Ok(())
+}
+
+/// 读取产物预览内容（画布点击产物调用）。路径经 `PathGuard::check` 校验仍位于 workspace 内，
+/// 防止越界读取宿主文件。按扩展名返回不同载荷：文本（截断）/ 图片 base64 / 目录列表 / 二进制不可预览。
+#[tauri::command]
+pub async fn read_artifact(
+    path: String,
+    workspace: Option<String>,
+    max_bytes: Option<u64>,
+) -> Result<ReadArtifactResult, String> {
+    let ws = workspace.ok_or_else(|| "read_artifact 需要 workspace 参数".to_string())?;
+    let ctx = ToolContext {
+        workspace: Some(PathBuf::from(&ws)),
+        sandbox_enabled: false,
+        agent_id: String::new(),
+        session_id: None,
+    };
+    let abs = match PathGuard::check(&path, &ctx) {
+        Ok(p) => p,
+        Err(e) => {
+            let name = file_name(&path);
+            return Ok(ReadArtifactResult {
+                path,
+                name,
+                kind: "error".into(),
+                size: 0,
+                content: Some(format!("路径校验失败：{e:?}")),
+                data_url: None,
+                mime: None,
+                entries: None,
+                truncated: false,
+            });
+        }
+    };
+    let name = abs
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("未知文件")
+        .to_string();
+
+    let meta = match std::fs::metadata(&abs) {
+        Ok(m) => m,
+        Err(e) => {
+            let kind = if e.kind() == std::io::ErrorKind::NotFound {
+                "not_found"
+            } else {
+                "error"
+            };
+            return Ok(ReadArtifactResult {
+                path: abs.to_string_lossy().into(),
+                name,
+                kind: kind.into(),
+                size: 0,
+                content: Some(format!("读取失败：{e}")),
+                data_url: None,
+                mime: None,
+                entries: None,
+                truncated: false,
+            });
+        }
+    };
+
+    // 目录：返回子项名称列表。
+    if meta.is_dir() {
+        let entries = std::fs::read_dir(&abs)
+            .map(|rd| {
+                rd.filter_map(|e| e.ok())
+                    .map(|e| e.file_name().to_string_lossy().into_owned())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        return Ok(ReadArtifactResult {
+            path: abs.to_string_lossy().into(),
+            name,
+            kind: "directory".into(),
+            size: meta.len(),
+            content: None,
+            data_url: None,
+            mime: None,
+            entries: Some(entries),
+            truncated: false,
+        });
+    }
+
+    let ext = abs
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+    let mime = guess_mime(&ext);
+    let is_image = matches!(
+        ext.as_str(),
+        "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" | "svg"
+    );
+
+    // 图片：读取字节编码为 data URL，前端直接 <img> 渲染。
+    if is_image {
+        return match std::fs::read(&abs) {
+            Ok(bytes) => {
+                let b64 = BASE64_STANDARD.encode(&bytes);
+                Ok(ReadArtifactResult {
+                    path: abs.to_string_lossy().into(),
+                    name,
+                    kind: "image".into(),
+                    size: meta.len(),
+                    content: None,
+                    data_url: Some(format!("data:{};base64,{}", mime, b64)),
+                    mime: Some(mime),
+                    entries: None,
+                    truncated: false,
+                })
+            }
+            Err(e) => Ok(ReadArtifactResult {
+                path: abs.to_string_lossy().into(),
+                name,
+                kind: "error".into(),
+                size: meta.len(),
+                content: Some(format!("读取失败：{e}")),
+                data_url: None,
+                mime: None,
+                entries: None,
+                truncated: false,
+            }),
+        };
+    }
+
+    // 文本 / 二进制：先尝试按 UTF-8 文本读取（超长截断），失败则视为 binary。
+    let limit = max_bytes.unwrap_or(200_000).min(1_000_000);
+    let bytes = match std::fs::read(&abs) {
+        Ok(b) => b,
+        Err(e) => {
+            return Ok(ReadArtifactResult {
+                path: abs.to_string_lossy().into(),
+                name,
+                kind: "error".into(),
+                size: meta.len(),
+                content: Some(format!("读取失败：{e}")),
+                data_url: None,
+                mime: None,
+                entries: None,
+                truncated: false,
+            });
+        }
+    };
+    match String::from_utf8(bytes) {
+        Ok(text) => {
+            let truncated = text.len() > limit as usize;
+            let preview = if truncated {
+                text.chars().take(limit as usize).collect::<String>()
+            } else {
+                text
+            };
+            Ok(ReadArtifactResult {
+                path: abs.to_string_lossy().into(),
+                name,
+                kind: "text".into(),
+                size: meta.len(),
+                content: Some(preview),
+                data_url: None,
+                mime: Some(mime),
+                entries: None,
+                truncated,
+            })
+        }
+        Err(_) => Ok(ReadArtifactResult {
+            path: abs.to_string_lossy().into(),
+            name,
+            kind: "binary".into(),
+            size: meta.len(),
+            content: Some(format!(
+                "该文件为二进制（{}），暂不支持内联预览；完整路径：{}",
+                mime,
+                abs.display()
+            )),
+            data_url: None,
+            mime: Some(mime),
+            entries: None,
+            truncated: false,
+        }),
+    }
+}
+
+/// 分支重规划入参（画布右键「从此步骤分支」触发）。
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BranchFromStepInput {
+    pub agent_id: String,
+    #[serde(default)]
+    pub workspace: Option<String>,
+    /// 分支起点步骤序号（从该步骤之后重新规划）。
+    pub from_step: usize,
+    /// 用户触发分支时的目标 / 原因摘要。
+    pub goal_summary: String,
+    /// 已完成前序步骤的上下文摘要（可选，供规划器复用）。
+    #[serde(default)]
+    pub prior_context: Option<String>,
+    /// 原方案尾部步骤（step > from_step），由前端传回以便对比展示（后端不持运行期规划状态）。
+    #[serde(default)]
+    pub original_tail: Option<Vec<BranchStep>>,
+    /// 额外补充指示（可选）。
+    #[serde(default)]
+    pub guidance: Option<String>,
+}
+
+/// 分支重规划：基于已完成上下文，从 `from_step` 之后重新生成后续步骤 DAG，
+/// 与原尾段做双分支对比，经 `agent-plan-branch` 事件推前端画布渲染对比横幅 + 应用按钮。
+#[tauri::command]
+pub async fn branch_from_step(app: AppHandle, input: BranchFromStepInput) -> Result<(), String> {
+    let cfg = load_config(
+        &app,
+        &input.agent_id,
+        input.workspace.clone(),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None, // attachments：分支规划阶段不携带附件
+    )
+    .await?;
+
+    let prior = input.prior_context.clone().unwrap_or_default();
+    let guidance = input.guidance.clone().unwrap_or_default();
+    let prompt = format!(
+        "请重新规划任务「从步骤 {} 起」的后续步骤（分支重规划）。\n\n\
+        【已完成的前序步骤（step ≤ {}）上下文】：\n{}\n\n\
+        【需要重新规划的原因 / 目标】：\n{}{}\n\n\
+        请基于上述已完成上下文，产出从步骤 {} 开始的后续步骤 DAG（JSON）。\
+        步骤须能独立执行、产出可核验文件；不要重复前序已完成步骤；\
+        新步骤的 step 字段从 {} 开始连续编号；保持与原方案一致的拆分粒度。",
+        input.from_step + 1,
+        input.from_step,
+        if prior.is_empty() {
+            "（无，或上下文由对话历史提供）"
+        } else {
+            &prior
+        },
+        input.goal_summary,
+        if guidance.is_empty() {
+            String::new()
+        } else {
+            format!(" 补充指示：{guidance}")
+        },
+        input.from_step + 1,
+        input.from_step + 1,
+    );
+
+    let (plan, _, _) =
+        crate::agent::planner::build_plan(&cfg, &prompt, cfg.workspace.as_deref()).await;
+
+    // 重编号新分支步骤，续接原步骤序号（from_step+1 起）。
+    let base = input.from_step;
+    let branch_tasks: Vec<BranchStep> = plan
+        .tasks
+        .into_iter()
+        .enumerate()
+        .map(|(i, t)| BranchStep {
+            step: base + i + 1,
+            task_id: t.task_id,
+            title: t.title,
+            description: t.description,
+            depends_on: t.depends_on,
+        })
+        .collect();
+
+    let branch = PlanBranchGenerated {
+        from_step: input.from_step,
+        original_tail: input.original_tail.unwrap_or_default(),
+        branch_tasks,
+        goal_summary: input.goal_summary.clone(),
+    };
+    crate::agent::events::emit_plan_branch(&app, &branch);
+    println!(
+        "[agent] branch_from_step: 已生成分支（from_step={} 共 {} 步新分支）",
+        input.from_step,
+        branch.branch_tasks.len()
+    );
+    Ok(())
+}
+
+/// 列举记忆宫殿记忆（对应前端卡片网格）。可选 agent_id / 分类 / 关键词过滤。
+#[tauri::command]
+pub async fn list_memories(
+    app: AppHandle,
+    agent_id: Option<String>,
+    category: Option<String>,
+    query: Option<String>,
+) -> Result<Vec<MemoryItem>, String> {
+    memory::list_memories(&app, agent_id.as_deref(), category.as_deref(), query.as_deref()).await
+}
+
+/// 记忆热力图数据：按日聚合的召回次数（驱动 GitHub 式日历热力图）。
+#[tauri::command]
+pub async fn get_memory_heatmap(
+    app: AppHandle,
+    agent_id: Option<String>,
+) -> Result<Vec<HeatmapPoint>, String> {
+    memory::get_memory_heatmap(&app, agent_id.as_deref()).await
+}
+
+/// 锚定记忆入参（anchor_memory 命令）。
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AnchorMemoryInput {
+    #[serde(default)]
+    pub agent_id: Option<String>,
+    #[serde(default)]
+    pub session_id: Option<String>,
+    pub key: String,
+    pub content: String,
+    #[serde(default)]
+    pub category: Option<String>,
+    /// true=手动锚定（钉住，anchored=1）；省略或 false=仅沉淀（anchored=0，参与 ref_count 排序但不钉）。
+    /// 原生工具 native__anchor_memory 经此传 false，手动 UI 锚定按钮传 true。
+    #[serde(default)]
+    pub anchored: Option<bool>,
+}
+
+/// 锚定（新建/更新）一条记忆：同一 (agent_id, key) 已存在则更新内容，否则插入新记忆。
+/// anchored 默认 true（手动「锚定」动作语义为钉住）；原生自动沉淀工具显式传 false 仅做沉淀。
+#[tauri::command]
+pub async fn anchor_memory(app: AppHandle, input: AnchorMemoryInput) -> Result<MemoryItem, String> {
+    memory::anchor_memory(
+        &app,
+        input.agent_id.as_deref(),
+        input.session_id.as_deref(),
+        &input.key,
+        &input.content,
+        input.category.as_deref().unwrap_or("other"),
+        input.anchored.unwrap_or(true),
+    )
+    .await
+}
+
+/// 更新记忆入参（update_memory 命令）。
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateMemoryInput {
+    pub id: String,
+    #[serde(default)]
+    pub key: Option<String>,
+    #[serde(default)]
+    pub content: Option<String>,
+    #[serde(default)]
+    pub category: Option<String>,
+}
+
+/// 更新一条记忆的部分字段（仅更新提供的非空字段）。
+#[tauri::command]
+pub async fn update_memory(app: AppHandle, input: UpdateMemoryInput) -> Result<MemoryItem, String> {
+    memory::update_memory(
+        &app,
+        &input.id,
+        input.key.as_deref(),
+        input.content.as_deref(),
+        input.category.as_deref(),
+    )
+    .await
+}
+
+/// 删除一条记忆（级联清理其事件日志）。
+#[tauri::command]
+pub async fn delete_memory(app: AppHandle, id: String) -> Result<(), String> {
+    memory::delete_memory(&app, &id).await
+}
+
+/// 显式召回一条记忆（引用计数 +1，触发 memory_recalled 事件），用于前端「引用一次」手动埋点。
+#[tauri::command]
+pub async fn recall_memory(app: AppHandle, id: String) -> Result<MemoryItem, String> {
+    memory::recall_memory(&app, &id).await
+}
+
+/// 取路径末段文件名（用于错误载荷的 name 字段）。
+fn file_name(p: &str) -> String {
+    Path::new(p)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("未知文件")
+        .to_string()
+}
+
+/// 由扩展名推导 MIME 类型（项目未引入 mime 库，手写覆盖常用类型）。
+fn guess_mime(ext: &str) -> String {
+    match ext {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "bmp" => "image/bmp",
+        "svg" => "image/svg+xml",
+        "pdf" => "application/pdf",
+        "md" | "markdown" => "text/markdown",
+        "json" => "application/json",
+        "csv" => "text/csv",
+        "txt" | "log" => "text/plain",
+        "html" | "htm" => "text/html",
+        "xml" => "application/xml",
+        "py" | "rs" | "js" | "ts" | "tsx" | "jsx" | "go" | "java" | "c" | "cpp" | "h" => "text/plain",
+        "xlsx" | "xls" => {
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        }
+        "docx" | "doc" => {
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        }
+        "zip" => "application/zip",
+        _ => "application/octet-stream",
+    }
+    .to_string()
 }
 
 /// 从 SQLite 读取智能体配置（agent_info + 关联表），组装运行配置。
@@ -124,6 +659,8 @@ async fn load_config(
     disabled_skill_ids: Option<Vec<String>>,
     disabled_mcp_ids: Option<Vec<String>>,
     disabled_mcp_tool_ids: Option<Vec<String>>,
+    enabled_skill_ids: Option<Vec<String>>,
+    enabled_mcp_ids: Option<Vec<String>>,
     attachments: Option<Vec<crate::agent::types::AttachmentInput>>,
 ) -> Result<AgentRuntimeConfig, String> {
     let instances = app.state::<DbInstances>();
@@ -199,7 +736,7 @@ async fn load_config(
         disabled_mcp_ids.unwrap_or_default().into_iter().collect();
     let disabled_mcp_tool: std::collections::HashSet<String> =
         disabled_mcp_tool_ids.unwrap_or_default().into_iter().collect();
-    let mcp_tools: Vec<MountedMcpTool> = mcp_rows
+    let mut mcp_tools: Vec<MountedMcpTool> = mcp_rows
         .iter()
         .filter_map(|r| {
             let tool_def_id = r.try_get::<Option<String>, _>("tool_def_id").ok().flatten()?;
@@ -249,6 +786,71 @@ async fn load_config(
         })
         .collect();
 
+    // 临时启用（`@` 提及触发）：把「智能体未绑定」的 MCP 服务整体并入工具集。
+    // 受 MAX_MCP_SERVERS 兜底；已绑定（mcp_tools 已含）或本轮回禁用的服务/工具跳过。
+    if let Some(enabled_mcp) = &enabled_mcp_ids {
+        let en_set: std::collections::HashSet<String> = enabled_mcp.iter().cloned().collect();
+        if !en_set.is_empty() {
+            let ph = en_set.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+            let q = format!(
+                "SELECT m.id AS tool_def_id, m.mcp_id AS mcp_id, m.tool_code AS tool_code, m.description AS description, \
+                        i.endpoint_url AS endpoint_url, i.protocol_type AS protocol_type, \
+                        i.headers AS headers, i.auth_type AS auth_type, i.auth_config AS auth_config \
+                 FROM mcp_tool_definition m JOIN mcp_info i ON i.id = m.mcp_id \
+                 WHERE m.mcp_id IN ({})",
+                ph
+            );
+            let mut qb = sqlx::query(&q);
+            for id in &en_set {
+                qb = qb.bind(id);
+            }
+            if let Ok(rows) = qb.fetch_all(&pool).await {
+                let mut servers: std::collections::HashSet<String> =
+                    mcp_tools.iter().map(|t| t.mcp_id.clone()).collect();
+                for r in rows {
+                    let tool_def_id = r.try_get::<Option<String>, _>("tool_def_id").ok().flatten();
+                    let mcp_id = r.try_get::<Option<String>, _>("mcp_id").ok().flatten();
+                    let (Some(tool_def_id), Some(mcp_id)) = (tool_def_id, mcp_id) else {
+                        continue;
+                    };
+                    // 整服务被临时移除、单个工具被临时关闭、或该工具已由绑定服务纳入 → 跳过
+                    if disabled_mcp.contains(&mcp_id) || disabled_mcp_tool.contains(&tool_def_id) {
+                        continue;
+                    }
+                    if mcp_tools.iter().any(|t| t.mcp_id == mcp_id && t.tool_name == tool_def_id) {
+                        continue;
+                    }
+                    if !servers.contains(&mcp_id) {
+                        if servers.len() >= MAX_MCP_SERVERS {
+                            continue; // 已达 MCP 服务上限，不再并入新服务
+                        }
+                        servers.insert(mcp_id.clone());
+                    }
+                    let tool_code = r.try_get::<Option<String>, _>("tool_code").ok().flatten().unwrap_or_default();
+                    if tool_code.is_empty() {
+                        continue;
+                    }
+                    let description = r.try_get::<Option<String>, _>("description").ok().flatten().unwrap_or_default();
+                    let endpoint_url = r.try_get::<Option<String>, _>("endpoint_url").ok().flatten().unwrap_or_default();
+                    let protocol_type = r.try_get::<Option<String>, _>("protocol_type").ok().flatten().unwrap_or_else(|| "HTTP".to_string());
+                    let headers = r.try_get::<Option<String>, _>("headers").ok().flatten().and_then(|s| serde_json::from_str::<HashMap<String, String>>(&s).ok());
+                    let auth_type = r.try_get::<Option<String>, _>("auth_type").ok().flatten();
+                    let auth_config = r.try_get::<Option<String>, _>("auth_config").ok().flatten().and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok());
+                    mcp_tools.push(MountedMcpTool {
+                        mcp_id,
+                        tool_name: tool_code,
+                        description,
+                        endpoint_url,
+                        protocol_type,
+                        headers,
+                        auth_type,
+                        auth_config,
+                    });
+                }
+            }
+        }
+    }
+
     let skill_rows = sqlx::query(
         "SELECT s.id AS skill_id, s.name AS name, s.description AS description, s.instruction AS instruction \
          FROM skill_info s JOIN agent_skill_ref r ON r.skill_id = s.id \
@@ -263,7 +865,7 @@ async fn load_config(
         .unwrap_or_default()
         .into_iter()
         .collect();
-    let skill_tools: Vec<SkillToolWrapper> = skill_rows
+    let mut skill_tools: Vec<SkillToolWrapper> = skill_rows
         .iter()
         .filter(|r| {
             let skill_id = r
@@ -302,10 +904,59 @@ async fn load_config(
         })
         .collect();
 
+    // 临时启用（`@` 提及触发）：把「智能体未绑定」的技能临时并入工具集。
+    // enabled 优先于 disabled（本轮显式 @ 启用即覆盖临时移除）；受 MAX_SKILLS 兜底。
+    if let Some(enabled_skill) = &enabled_skill_ids {
+        let en_set: std::collections::HashSet<String> = enabled_skill.iter().cloned().collect();
+        if !en_set.is_empty() {
+            let ph = en_set.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+            let q = format!(
+                "SELECT id, name, description, instruction FROM skill_info WHERE id IN ({})",
+                ph
+            );
+            let mut qb = sqlx::query(&q);
+            for id in &en_set {
+                qb = qb.bind(id);
+            }
+            if let Ok(rows) = qb.fetch_all(&pool).await {
+                for r in rows {
+                    let sid = r.try_get::<Option<String>, _>("id").ok().flatten().unwrap_or_default();
+                    if sid.is_empty() {
+                        continue;
+                    }
+                    // 已绑定（skill_tools 已含）的技能跳过；enabled 覆盖 disabled，故不判 disabled
+                    if skill_tools.iter().any(|s| s.skill_id == sid) {
+                        continue;
+                    }
+                    if skill_tools.len() >= MAX_SKILLS {
+                        break; // 已达技能上限，不再并入
+                    }
+                    let name = r.try_get::<Option<String>, _>("name").ok().flatten().unwrap_or_default();
+                    let desc = r.try_get::<Option<String>, _>("description").ok().flatten().unwrap_or_default();
+                    let instruction = r.try_get::<Option<String>, _>("instruction").ok().flatten().unwrap_or_default();
+                    skill_tools.push(SkillToolWrapper {
+                        skill_id: sid.clone(),
+                        skill_name: if name.is_empty() { sid } else { name },
+                        skill_description: if desc.is_empty() { instruction } else { desc },
+                    });
+                }
+            }
+        }
+    }
+
     // 沙箱开关：同一个真值源同时决定「能力层注册哪些工具」与「提示层声明哪些能力」。
     // 二者必须同源——否则提示里写「不暴露 execute_command」而工具表里照样注册，
     // 模型以工具表为准，试探后必然绕过沙箱（实测会去找系统 python 甚至 winget 安装）。
     let allow_sandbox = get_i64(&row, "allow_sandbox") == 1;
+    // 记忆模式：off=关闭 / active=主动 / forced=强制。存量智能体列缺省回落 off（兼容老数据）。
+    let memory_mode = {
+        let m = get_str(&row, "memory_mode");
+        if m.is_empty() {
+            "off".to_string()
+        } else {
+            m
+        }
+    };
 
     println!(
         "[agent] load_config 完成: llm_id={} model={} mcp_tools={} skill_tools={} auto_exec={} sandbox={} system_prompt={}字符 附件数={}",
@@ -398,6 +1049,34 @@ async fn load_config(
             }
         }
     }
+
+    // 记忆宫殿：自动召回 top-K 记忆注入系统提示（引用计数随运行累计，驱动热力图）。
+    // 仅在真实任务运行（有 session_id）且记忆模式非 off 时召回；off 模式不读记忆库。
+    if session_id.is_some() && memory_mode != "off" {
+        let (recalled, block) = memory::recall_top_memories(app, Some(agent_id), memory::recall_top()).await;
+        if !block.is_empty() {
+            system_prompt.push_str("\n\n");
+            system_prompt.push_str(&block);
+            println!(
+                "[agent] load_config: 已自动召回 {} 条记忆注入系统提示",
+                recalled.len()
+            );
+        }
+
+        // 主动 / 强制模式：在 system_prompt 注入「记忆沉淀引导」，提示模型用原生工具 native__anchor_memory
+        // 沉淀可跨会话复用的信息。off 模式不注入（且 anchor 工具未注册），记忆能力整体关闭。
+        // 注意：这只是提示层引导，强制档的确定性沉淀由 pipeline 末置步骤引擎级落地（见 runtime.rs）。
+        if memory_mode == "active" || memory_mode == "forced" {
+            system_prompt.push_str(
+                "\n\n### 长期记忆锚定（原生工具 native__anchor_memory）\n\
+你拥有原生工具 `native__anchor_memory(key, content, category)`。当本次对话涌现**可跨会话复用**的稳定信息时，主动调用它沉淀为长期记忆，使未来同智能体会话能自动召回：\n\
+① 用户明确表达的偏好或约束；② 已确认的技术决策 / 架构约定；③ 踩过的坑与规避方式；④ 可复用代码 / 脚本模式。\n\
+请勿锚定：一次性任务步骤、临时草稿、当轮琐碎状态。记忆按 (agent_id, key) 去重，可放心重复沉淀。\n\
+category 取值：decision（决策）/ code_pattern（代码模式）/ user_pref（用户偏好）/ architecture（架构）/ fix（避坑）/ other（其他）。",
+            );
+        }
+    }
+
     Ok(AgentRuntimeConfig {
         agent_id: agent_id.to_string(),
         system_prompt,
@@ -407,6 +1086,7 @@ async fn load_config(
         llm_config,
         auto_tool_exec_mode: get_i64(&row, "auto_tool_exec_mode") == 1,
         allow_sandbox: get_i64(&row, "allow_sandbox") == 1,
+        memory_mode,
         workspace,
         mcp_tools,
         skill_tools,
@@ -414,4 +1094,406 @@ async fn load_config(
         round_id,
         attachments: attachments.unwrap_or_default(),
     })
+}
+
+/// 加载一个小分队的完整运行配置：读取 squad 定义 + 成员任职 + 群聊配置，
+/// 对每个成员调用 `load_config` 组装 base AgentRuntimeConfig（复用全部现有能力层装配），
+/// 再把 `persona_override` 追加到该成员的 `system_prompt` 末尾（人设注入，不污染 base agent 库），
+/// 并由 `global_mcp_ids` 强制并入成员的 MCP 工具集。
+///
+/// 返回的 `SquadRuntimeConfig` 供 Phase 3-5 的协作引擎（orchestrator / pipeline / chat）消费。
+/// 注意：成员的实际私有 workspace 由运行期派生（.wd_mem/squads/{squad_id}/{agent_id}/）后覆盖，
+/// 此处 workspace 传 None，load_config 据此跳过工作空间注入、运行期再装配。
+pub async fn load_squad(app: &AppHandle, squad_id: &str) -> Result<SquadRuntimeConfig, String> {
+    let instances = app.state::<DbInstances>();
+    let guard = instances.0.read().await;
+    let db_pool = guard
+        .get("sqlite:workduo.db")
+        .ok_or_else(|| "数据库未连接（sqlite:workduo.db），请先在前端 load".to_string())?;
+    let pool = match db_pool {
+        DbPool::Sqlite(p) => p.clone(),
+    };
+    drop(guard);
+
+    let squad = sqlx::query("SELECT * FROM agent_squad WHERE id = ?")
+        .bind(squad_id)
+        .fetch_optional(&pool)
+        .await
+        .map_err(|e| format!("查询小分队失败：{e}"))?
+        .ok_or_else(|| format!("小分队不存在：{squad_id}"))?;
+
+    let get_str = |row: &sqlx::sqlite::SqliteRow, col: &str| -> String {
+        row.try_get::<Option<String>, _>(col).ok().flatten().unwrap_or_default()
+    };
+    let get_i64 = |row: &sqlx::sqlite::SqliteRow, col: &str| -> i64 {
+        row.try_get::<Option<i64>, _>(col).ok().flatten().unwrap_or(0)
+    };
+
+    let name = get_str(&squad, "name");
+    let mode = get_str(&squad, "mode");
+    let leader_agent_id = {
+        let l = get_str(&squad, "leader_agent_id");
+        if l.is_empty() {
+            None
+        } else {
+            Some(l)
+        }
+    };
+    let global_mcp_ids: Vec<String> =
+        serde_json::from_str(&get_str(&squad, "global_mcp_ids")).unwrap_or_default();
+    let run_strategy: SquadRunStrategy = serde_json::from_str(&get_str(&squad, "run_strategy"))
+        .unwrap_or_else(|_| SquadRunStrategy {
+            execution_mode: "manual".to_string(),
+            schedule_cron: None,
+            retry_count: 3,
+            schedule_prompt: None,
+        });
+
+    // 成员任职：按 pipeline_order 升序（无序号者排前），保证流水线模式工序顺序稳定。
+    let member_rows = sqlx::query(
+        "SELECT * FROM agent_squad_member WHERE squad_id = ? ORDER BY \
+         CASE WHEN pipeline_order IS NULL THEN 0 ELSE 1 END, pipeline_order ASC, created_at ASC",
+    )
+    .bind(squad_id)
+    .fetch_all(&pool)
+    .await
+    .map_err(|e| format!("查询小分队成员失败：{e}"))?;
+
+    let mut members: Vec<SquadMemberConfig> = Vec::new();
+    for m in &member_rows {
+        let agent_id = get_str(m, "agent_id");
+        if agent_id.is_empty() {
+            continue;
+        }
+        // 复用 load_config 组装 base AgentRuntimeConfig（全局 MCP 强制并入成员工具集）。
+        let mut base = load_config(
+            app,
+            &agent_id,
+            None, // workspace：运行期派生私有 workspace 后覆盖
+            None, // session_id
+            None, // round_id
+            None, // disabled_skill_ids
+            None, // disabled_mcp_ids
+            None, // disabled_mcp_tool_ids
+            None, // enabled_skill_ids
+            if global_mcp_ids.is_empty() {
+                None
+            } else {
+                Some(global_mcp_ids.clone())
+            },
+            None, // attachments
+        )
+        .await?;
+
+        // 人设注入：追加到 system_prompt 末尾（不污染 base agent 库）。
+        let persona_override = get_str(m, "persona_override");
+        if !persona_override.trim().is_empty() {
+            base.system_prompt
+                .push_str("\n\n### 你的角色设定（Squad 定制）\n");
+            base.system_prompt.push_str(persona_override.trim());
+        }
+
+        // 团队黑板记忆召回：注入本小分队共享 + 该成员个人的历史记忆（top-K，按引用热度）。
+        let mem_block = load_squad_memory_block(&pool, squad_id, &agent_id).await;
+        if !mem_block.is_empty() {
+            base.system_prompt.push_str("\n\n");
+            base.system_prompt.push_str(&mem_block);
+        }
+
+        let role = get_str(m, "role");
+        let is_leader = get_i64(m, "is_leader") == 1;
+        let pipeline_order = {
+            let po = get_i64(m, "pipeline_order");
+            if po <= 0 {
+                None
+            } else {
+                Some(po as usize)
+            }
+        };
+        let depends_on: Vec<String> = serde_json::from_str(&get_str(m, "depends_on"))
+            .unwrap_or_default();
+        members.push(SquadMemberConfig {
+            agent: base,
+            role,
+            persona_override,
+            pipeline_order,
+            depends_on,
+            is_leader,
+        });
+    }
+
+    if members.is_empty() {
+        return Err(format!("小分队 {squad_id} 未配置任何成员智能体"));
+    }
+
+    // 群聊配置（可选；缺省 max_rounds=8、无单独汇总主笔）。
+    let chat_config =
+        match sqlx::query("SELECT * FROM agent_squad_chat_config WHERE squad_id = ?")
+            .bind(squad_id)
+            .fetch_optional(&pool)
+            .await
+        {
+            Ok(Some(c)) => SquadChatConfig {
+                max_rounds: {
+                    let n = get_i64(&c, "max_rounds");
+                    if n <= 0 {
+                        8
+                    } else {
+                        n as usize
+                    }
+                },
+                summarizer_agent_id: {
+                    let s = get_str(&c, "summarizer_agent_id");
+                    if s.is_empty() {
+                        None
+                    } else {
+                        Some(s)
+                    }
+                },
+            },
+            _ => SquadChatConfig {
+                max_rounds: 8,
+                summarizer_agent_id: None,
+            },
+        };
+
+    println!(
+        "[agent] load_squad: 已加载小分队 {} 模式={} 成员数={} 全局MCP={}",
+        squad_id,
+        mode,
+        members.len(),
+        global_mcp_ids.len()
+    );
+
+    Ok(SquadRuntimeConfig {
+        squad_id: squad_id.to_string(),
+        name,
+        mode,
+        leader_agent_id,
+        global_mcp_ids,
+        run_strategy,
+        members,
+        chat_config,
+        workspace: None,
+    })
+}
+
+/// 召回小分队级共享记忆（agent_squad_memory 中 agent_id IS NULL）与指定成员个人记忆
+/// （agent_id = 该成员），拼成系统提示注入块；同时累加 ref_count + 更新 last_recalled
+/// （驱动记忆热力图）。无记忆时返回空串（调用方据此跳过注入）。
+async fn load_squad_memory_block(
+    pool: &sqlx::SqlitePool,
+    squad_id: &str,
+    agent_id: &str,
+) -> String {
+    let rows = sqlx::query(
+        "SELECT id, key, content, category FROM agent_squad_memory \
+         WHERE squad_id = ? AND (agent_id IS NULL OR agent_id = ?) \
+         ORDER BY ref_count DESC LIMIT 5",
+    )
+    .bind(squad_id)
+    .bind(agent_id)
+    .fetch_all(pool)
+    .await;
+
+    let rows = match rows {
+        Ok(r) => r,
+        Err(e) => {
+            println!("[agent] load_squad_memory_block: 查询失败：{e}");
+            return String::new();
+        }
+    };
+    if rows.is_empty() {
+        return String::new();
+    }
+
+    let mut lines: Vec<String> = Vec::new();
+    let mut ids: Vec<String> = Vec::new();
+    for r in &rows {
+        let key: String = r.try_get("key").unwrap_or_default();
+        let content: String = r.try_get("content").unwrap_or_default();
+        let category: String = r.try_get("category").unwrap_or_default();
+        let id: String = r.try_get("id").unwrap_or_default();
+        lines.push(format!("- [{}] {}: {}", category, key, content));
+        ids.push(id);
+    }
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0);
+    for id in &ids {
+        let _ = sqlx::query(
+            "UPDATE agent_squad_memory SET ref_count = ref_count + 1, last_recalled = ? WHERE id = ?",
+        )
+        .bind(now)
+        .bind(id)
+        .execute(pool)
+        .await;
+    }
+
+    format!(
+        "## 团队记忆（Squad 黑板召回）\n以下是本小分队共享及你的个人历史记忆，供你参考：\n{}\n",
+        lines.join("\n")
+    )
+}
+
+/// 小分队协作任务入参：指定小分队与用户任务描述。
+#[derive(serde::Deserialize)]
+pub struct RunSquadTaskInput {
+    pub squad_id: String,
+    pub prompt: String,
+}
+
+/// 启动一次小分队协作任务（编排式 / 流水线 / 群聊 共用入口）。
+///
+/// 先 `load_squad` 组装 `SquadRuntimeConfig`（含成员人设注入 + 全局 MCP 并入），
+/// 再 spawn 后台任务交给 `squad_orchestrator::run_squad_task` 执行（成员各自独立运行、互不共享文件系统）。
+#[tauri::command]
+pub async fn run_squad_task(app: AppHandle, input: RunSquadTaskInput) -> Result<(), String> {
+    let squad = load_squad(&app, &input.squad_id).await?;
+    let app_clone = app.clone();
+    let prompt = input.prompt.clone();
+    tauri::async_runtime::spawn(async move {
+        crate::agent::squad_orchestrator::run_squad_task(&app_clone, squad, prompt).await;
+    });
+    Ok(())
+}
+
+/* ------------------------------------------------------------------ *
+ * 小分队 API 触发服务配置（存于 app_config）
+ * ------------------------------------------------------------------ */
+
+async fn get_api_pool(app: &AppHandle) -> Result<sqlx::SqlitePool, String> {
+    let instances = app.state::<DbInstances>();
+    let guard = instances.0.read().await;
+    let db_pool = guard
+        .get("sqlite:workduo.db")
+        .ok_or_else(|| "数据库未连接（sqlite:workduo.db）".to_string())?;
+    match db_pool {
+        DbPool::Sqlite(p) => Ok(p.clone()),
+    }
+}
+
+async fn api_read_cfg(pool: &sqlx::SqlitePool, key: &str) -> Option<String> {
+    let row = sqlx::query("SELECT value FROM app_config WHERE key = ?")
+        .bind(key)
+        .fetch_optional(pool)
+        .await
+        .ok()
+        .flatten()?;
+    row.try_get::<Option<String>, _>("value").ok().flatten()
+}
+
+async fn api_upsert_cfg(pool: &sqlx::SqlitePool, key: &str, value: &str) -> Result<(), String> {
+    sqlx::query(
+        "INSERT INTO app_config (key, value) VALUES (?, ?) \
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+    )
+    .bind(key)
+    .bind(value)
+    .execute(pool)
+    .await
+    .map_err(|e| format!("写入配置失败：{e}"))?;
+    Ok(())
+}
+
+/// 读取小分队 API 触发服务的当前配置（enabled / port / token）。
+#[tauri::command]
+pub async fn get_squad_api_config(app: AppHandle) -> Result<SquadApiConfigView, String> {
+    let pool = get_api_pool(&app).await?;
+    let enabled = api_read_cfg(&pool, "squad_api_enabled").await.as_deref() == Some("true");
+    let port = api_read_cfg(&pool, "squad_api_port")
+        .await
+        .and_then(|s| s.parse::<u16>().ok())
+        .unwrap_or(3939);
+    let token = api_read_cfg(&pool, "squad_api_token").await.unwrap_or_default();
+    Ok(SquadApiConfigView {
+        enabled,
+        port,
+        token,
+    })
+}
+
+/// 更新小分队 API 触发服务的配置（仅传入的字段生效）。
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SquadApiConfigInput {
+    #[serde(default)]
+    pub enabled: Option<bool>,
+    #[serde(default)]
+    pub port: Option<u16>,
+    #[serde(default)]
+    pub token: Option<String>,
+}
+
+#[tauri::command]
+pub async fn set_squad_api_config(
+    app: AppHandle,
+    input: SquadApiConfigInput,
+) -> Result<SquadApiConfigView, String> {
+    let pool = get_api_pool(&app).await?;
+    if let Some(e) = input.enabled {
+        api_upsert_cfg(&pool, "squad_api_enabled", if e { "true" } else { "false" }).await?;
+    }
+    if let Some(p) = input.port {
+        api_upsert_cfg(&pool, "squad_api_port", &p.to_string()).await?;
+    }
+    if let Some(t) = input.token {
+        api_upsert_cfg(&pool, "squad_api_token", &t).await?;
+    }
+    get_squad_api_config(app).await
+}
+
+/// 小分队 API 触发服务配置视图。
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SquadApiConfigView {
+    pub enabled: bool,
+    pub port: u16,
+    pub token: String,
+}
+
+/// 小分队记忆锚定入参（camelCase 自动反序列化）。
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AnchorSquadMemoryInput {
+    pub squad_id: String,
+    pub agent_id: Option<String>,
+    pub session_id: Option<String>,
+    pub key: String,
+    pub content: String,
+    pub category: Option<String>,
+}
+
+/// 锚定一条小分队记忆（团队黑板写入路径）。命中同 squad_id+agent_id+key 则强化计数，否则新建。
+/// 详见 `memory::anchor_squad_memory`。
+#[tauri::command]
+pub async fn anchor_squad_memory(app: AppHandle, input: AnchorSquadMemoryInput) -> Result<crate::agent::memory::SquadMemoryItem, String> {
+    crate::agent::memory::anchor_squad_memory(
+        &app,
+        &input.squad_id,
+        input.agent_id.as_deref(),
+        input.session_id.as_deref(),
+        &input.key,
+        &input.content,
+        input.category.as_deref().unwrap_or("general"),
+        true,
+    )
+    .await
+}
+
+/// 列出某小分队的全部记忆（团队共享 + 成员个人）。
+#[tauri::command]
+pub async fn list_squad_memories(
+    app: AppHandle,
+    squad_id: String,
+) -> Result<Vec<crate::agent::memory::SquadMemoryItem>, String> {
+    crate::agent::memory::list_squad_memories(&app, &squad_id).await
+}
+
+/// 删除一条小分队记忆。
+#[tauri::command]
+pub async fn delete_squad_memory(app: AppHandle, id: String) -> Result<(), String> {
+    crate::agent::memory::delete_squad_memory(&app, &id).await
 }

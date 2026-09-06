@@ -1,6 +1,6 @@
 /**
  * 路由页面「设置」：一级菜单，点击直接跳转。
- * - 左侧栏：四个分区（系统设置 / 记忆存储 / 安全中心 / 关于我们）；
+ * - 左侧栏：四个分区（系统设置 / 记忆宫殿 / 安全中心 / 关于我们）；
  *           分组「沙箱环境」下含子菜单「Python」（内嵌沙箱 Python 运行时管理界面）。
  * - 右侧主内容：当前分区 / 子菜单对应的面板；
  * - 所有配置经 src/core/file/settings-file.ts 落库到 app_config 表。
@@ -10,13 +10,13 @@ import { SlidersHorizontal, Brain, ShieldCheck, Info } from 'lucide-react'
 import { Spin } from 'antd'
 import { PythonLogo } from '@/components/icons/PythonLogo'
 import SandboxPythonPage from '@/pages/sandbox/python'
+import MemoryPalace from '@/pages/memory-palace/MemoryPalace'
 import {
   loadSettings,
   saveSettings,
   type AppSettings,
 } from '@/core/file/settings-file'
 import { SystemSettingsPanel } from './components/SystemSettingsPanel'
-import { MemoryPanel } from './components/MemoryPanel'
 import { SecurityPanel } from './components/SecurityPanel'
 import { AboutPanel } from './components/AboutPanel'
 import './index.scss'
@@ -36,7 +36,7 @@ interface NavGroup {
 
 const SECTIONS: FlatNavItem[] = [
   { id: 'system', label: '系统设置', icon: <SlidersHorizontal size={18} /> },
-  { id: 'memory', label: '记忆存储', icon: <Brain size={18} /> },
+  { id: 'memory', label: '记忆宫殿', icon: <Brain size={18} /> },
   { id: 'security', label: '安全中心', icon: <ShieldCheck size={18} /> },
   { id: 'about', label: '关于我们', icon: <Info size={18} /> },
 ]
@@ -115,7 +115,7 @@ export default function SettingsPage() {
         {active === 'system' && (
           <SystemSettingsPanel settings={settings} onChange={commit} />
         )}
-        {active === 'memory' && <MemoryPanel settings={settings} onChange={commit} />}
+        {active === 'memory' && <MemoryPalace />}
         {active === 'security' && (
           <SecurityPanel settings={settings} onChange={commit} />
         )}

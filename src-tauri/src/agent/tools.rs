@@ -28,6 +28,10 @@ pub struct ToolContext {
     pub workspace: Option<PathBuf>,
     /// 是否允许该智能体使用沙箱环境（agent.allow_sandbox）。
     pub sandbox_enabled: bool,
+    /// 当前智能体 ID（原生工具据此把产出归属到具体智能体，如记忆沉淀）。
+    pub agent_id: String,
+    /// 当前会话 ID（原生工具据此把跨会话记忆归属到会话；空闲/非运行态为 None）。
+    pub session_id: Option<String>,
 }
 
 /// 工具执行错误。

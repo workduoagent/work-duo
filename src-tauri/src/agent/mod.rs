@@ -16,17 +16,24 @@
 //!  3. 沙箱执行（Python）复用 `mamba_manager` 的 micromamba sidecar，不新建运行时。
 
 pub mod approval;
+pub mod artifacts;
 pub mod commands;
 pub mod context;
 pub mod round_compactor;
 pub mod events;
 pub mod intent;
+pub mod memory;
 pub mod native;
 pub mod pipeline;
 pub mod planner;
+pub mod recovery;
 pub mod runtime;
+pub mod squad_api_server;
+pub mod squad_orchestrator;
+pub mod squad_scheduler;
 pub mod skill_adapter;
 pub mod mcp_adapter;
 pub mod tools;
 pub mod types;
+pub mod verifier;
 pub mod wd_mem;

@@ -32,6 +32,7 @@ use crate::agent::tools::ToolError;
 use crate::agent::tools::ToolRegistry;
 use crate::agent::types::AgentRuntimeConfig;
 use crate::agent::types::ApprovalRequest;
+use crate::agent::types::PlanDAG;
 use crate::agent::types::ToolStep;
 
 /// 历史消息保留轮次（滑动窗口）。
@@ -47,6 +48,8 @@ pub struct AgentRuntime {
     /// 任务取消标志（用户点击「停止」时由 `cancel_agent_task` 置 true）。
     /// 以 `Arc<AtomicBool>` 形式在命令与后台任务间共享，无需额外句柄即可感知取消。
     pub cancel_flag: Arc<AtomicBool>,
+    /// 步骤级恢复挂起中枢（子任务自动重试耗尽后等待用户决策：重试 / 跳过 / 接管）。
+    pub recovery: Arc<crate::agent::recovery::RecoveryHub>,
 }
 
 impl AgentRuntime {
@@ -55,15 +58,26 @@ impl AgentRuntime {
             approval: Arc::new(ApprovalManager::new()),
             native: Arc::new(Mutex::new(ToolRegistry::new())),
             cancel_flag: Arc::new(AtomicBool::new(false)),
+            recovery: crate::agent::recovery::RecoveryHub::new(),
         }
     }
 
     /// 启动一轮任务（被 `run_agent_task` 命令调用，后台 spawn）。
     #[allow(unreachable_code)]
-    pub async fn run_task(&self, app: &AppHandle, cfg: AgentRuntimeConfig, prompt: String) {
+    pub async fn run_task(
+        &self,
+        app: &AppHandle,
+        cfg: AgentRuntimeConfig,
+        prompt: String,
+        plan_override: Option<PlanDAG>,
+        pre_completed: std::collections::HashSet<String>,
+        initial_context: String,
+    ) {
         // 0) 新一轮任务开始：清除上一轮可能残留的取消标志（cancel_agent_task 已无副作用），
         //    同时保证"上一次取消未生效就立刻发起新任务"不会误杀新任务。
         self.cancel_flag.store(false, Ordering::SeqCst);
+        // 新一轮开始：清空前一轮可能残留的恢复挂起态（避免上轮 cancel 残留误导前端面板）。
+        self.recovery.reset();
 
         // 0.1) 动态重算并回写 tools_tokens：按当前已解析的 MCP/Skill 工具数覆盖写入会话表，
         //    中途移除 Skill / 停用（解绑）MCP 后，下一轮会自动下调；重新绑定则上调。
@@ -80,7 +94,7 @@ impl AgentRuntime {
         // 1) 组装工具注册表（基础原生 + 绑定的 Skill/MCP 工具）
         let mut base = self.native.lock().await.clone();
         // 沙箱模式下不注册 execute_command（宿主 shell），能力层与提示层保持一致
-        native::register_native_tools(&mut base, app, cfg.allow_sandbox);
+        native::register_native_tools(&mut base, app, cfg.allow_sandbox, &cfg.memory_mode);
         // 技能：直接注册进本轮本地注册表（AgentTool 只读包装，真实执行待接入业务核心）
         crate::agent::skill_adapter::register_skills_into(&mut base, cfg.skill_tools.clone());
         // MCP：按 mcp_id 分组，逐 server 注册（复用现有 mcp::call_mcp_tool 透传）
@@ -104,6 +118,8 @@ impl AgentRuntime {
         let ctx = ToolContext {
             workspace: ws,
             sandbox_enabled: cfg.allow_sandbox,
+            agent_id: cfg.agent_id.clone(),
+            session_id: cfg.session_id.clone(),
         };
 
         // ────────────────────────────────────────────────────────────────────
@@ -113,22 +129,63 @@ impl AgentRuntime {
 
         // 阶段一：意图分流（规则短路优先，灰色地带走轻量 LLM 分类）。
         let intent = crate::agent::intent::classify_intent(&cfg, &prompt).await;
+        events::emit_intent_classified(app, &intent);
         println!(
-            "[agent] run_task: 意图判定 = {} reason={}",
+            "[agent] run_task: 意图判定 = {} reason={} risk={} 需规划={} 需工具={} 需审批={}",
             intent.intent_type,
             clip(&intent.reason, 200),
+            intent.risk_level,
+            intent.requires_planning,
+            intent.requires_tool,
+            intent.requires_approval,
         );
 
+        // Intent→Policy：把风险等级映射为审批策略，驱动审批而非让 Planner 自判权限/风险。
+        // 高风险任务即便开启 auto_tool_exec_mode 也强制走人工审批（RequireApproval）；
+        // 低风险复合任务沿用用户配置（自动执行或逐次审批）。
+        let effective_auto_exec =
+            cfg.auto_tool_exec_mode && !intent.requires_approval && !intent.is_high_risk();
+        if !effective_auto_exec && cfg.auto_tool_exec_mode {
+            println!(
+                "[agent] run_task: 风险等级 {} 触发强制人工审批（覆盖 auto_tool_exec_mode）",
+                intent.risk_level
+            );
+        }
+        events::emit_status(
+            app,
+            &format!(
+                "意图：{}（风险 {}，需规划={}，需工具={}）",
+                intent.intent_type,
+                intent.risk_level.to_uppercase(),
+                intent.requires_planning,
+                intent.requires_tool,
+            ),
+        );
+        // 将审批策略固化进配置：流水线执行工具轮时据此决定是否挂起审批。
+        let mut cfg = cfg;
+        cfg.auto_tool_exec_mode = effective_auto_exec;
+
         // 分支 A：简单对话 → 单次流式输出，0 工具介入，终态即结束。
-        if intent.is_simple_chat() {
+        // 注意：分支重跑（plan_override 存在）时即便意图被分为 simple_chat 也强制走复合路径，
+        // 因为用户已显式给出待执行的 DAG，必须进入流水线。
+        if intent.is_simple_chat() && plan_override.is_none() {
             self.run_simple_chat(app, &cfg, &prompt, &self.cancel_flag).await;
             return;
         }
 
         // 分支 B：复合任务 → 阶段二任务拆解规划。
+        // §3.2 分支重跑：若前端已提供 plan_override，直接采用（跳过 LLM 规划，token 计 0）。
         events::emit_status(app, "正在规划任务步骤…");
-        let (plan, plan_usage) =
-            crate::agent::planner::build_plan(&cfg, &prompt, cfg.workspace.as_deref()).await;
+        let (plan, plan_usage, plan_raw) = if let Some(po) = plan_override {
+            println!(
+                "[agent] run_task: 采用前端分支计划（共 {} 步，其中 {} 步预完成跳过），跳过 LLM 规划",
+                po.tasks.len(),
+                pre_completed.len()
+            );
+            (po, (0u64, 0u64), String::new())
+        } else {
+            crate::agent::planner::build_plan(&cfg, &prompt, cfg.workspace.as_deref()).await
+        };
 
         // 规划期间用户可能已点击取消：规划完成后立即检查，避免拉起无意义的流水线。
         if self.cancel_flag.load(Ordering::SeqCst) {
@@ -138,6 +195,12 @@ impl AgentRuntime {
             return;
         }
         events::emit_plan_generated(app, &plan);
+        // 规划阶段模型原始输出作为 plan 层思考推送给轨迹视图（与执行期 exec / 收尾 selfcheck 分层区分）。
+        if !plan_raw.trim().is_empty() {
+            events::emit_thinking_chunk(app, &clip(&plan_raw, 2000), true, "plan");
+        }
+        // 规划阶段已产生 token 消耗，立即推送一次实时用量（后续各子任务完成再累加推送）。
+        events::emit_token_update(app, plan_usage.0, plan_usage.1);
 
         // 阶段三：流水线隔离执行（子任务独立上下文、产物管道、失败重试 3 次）。
         let result = crate::agent::pipeline::run_pipeline(
@@ -148,6 +211,9 @@ impl AgentRuntime {
             &self.approval,
             &plan,
             &self.cancel_flag,
+            &self.recovery,
+            &pre_completed,
+            &initial_context,
         )
         .await;
 
@@ -158,6 +224,11 @@ impl AgentRuntime {
             events::emit_status(app, "⛔ 任务已被用户取消");
             events::emit_task_done(app, task_usage.0, task_usage.1);
             return;
+        }
+
+        // 强制记忆模式：流水线成功收尾后，引擎级确定性沉淀（不依赖模型是否主动调工具）。
+        if cfg.memory_mode == "forced" && result.success {
+            Self::forced_memory_settle(app, &cfg, &plan.goal_summary, &result.final_text).await;
         }
 
         // 阶段四：合并全局执行视图，一次性推送终态文本（前端打字机渲染）。
@@ -207,6 +278,78 @@ impl AgentRuntime {
         }
         return;
 
+    }
+
+    /// 强制记忆模式的引擎级确定性沉淀：流水线成功收尾后，引擎自己调 LLM 总结本次任务可复用的长期记忆，
+    /// 直接落库 `agent_memories`（anchored=false，仅沉淀、参与 ref_count 排序），不依赖模型是否主动调工具。
+    /// 这是「强制」档与「主动」档的本质区别——前者是能力层后置步骤，必然发生；后者仅靠提示引导，模型自主决定。
+    async fn forced_memory_settle(
+        app: &AppHandle,
+        cfg: &AgentRuntimeConfig,
+        goal_summary: &str,
+        final_text: &str,
+    ) {
+        let sys = "你是智能体的长期记忆提炼器。你的任务是把一次完成的任务中**可跨会话复用**的稳定知识，提炼成若干条长期记忆。\
+只沉淀真正值得长期保留的：用户明确表达的偏好/约束、已确认的技术决策/架构约定、踩过的坑与规避方式、可复用代码/脚本模式。\
+不要沉淀一次性任务步骤、临时草稿、当轮琐碎状态。";
+        let user = format!(
+            "本次任务目标：\n{}\n\n最终交付内容：\n{}\n\n请提炼可跨会话复用的长期记忆。\n\
+若没有值得长期沉淀的内容，只回复一个字「无」。\n\
+否则按每行一条输出，格式严格为：关键词 | 分类 | 记忆内容\n\
+其中分类取 decision（决策）/ code_pattern（代码模式）/ user_pref（用户偏好）/ architecture（架构）/ fix（避坑）/ other（其他）之一。",
+            goal_summary, final_text
+        );
+        let messages = vec![
+            serde_json::json!({ "role": "system", "content": sys }),
+            serde_json::json!({ "role": "user", "content": user }),
+        ];
+        match call_llm(cfg, &messages, &[]).await {
+            Ok((resp, _usage)) => {
+                let content = resp
+                    .get("choices")
+                    .and_then(|c| c.get(0))
+                    .and_then(|c| c.get("message"))
+                    .and_then(|m| m.get("content"))
+                    .and_then(|c| c.as_str())
+                    .unwrap_or("")
+                    .trim()
+                    .to_string();
+                if content == "无" || content.is_empty() {
+                    println!("[agent] forced_memory_settle: 模型判定无可沉淀记忆");
+                    return;
+                }
+                let mut count = 0usize;
+                for line in content.lines() {
+                    let line = line.trim();
+                    if line.is_empty() {
+                        continue;
+                    }
+                    let parts: Vec<&str> = line.splitn(3, '|').map(|s| s.trim()).collect();
+                    if parts.len() < 3 || parts[0].is_empty() || parts[2].is_empty() {
+                        continue;
+                    }
+                    let key = parts[0];
+                    let category = parts[1];
+                    let body = parts[2];
+                    match crate::agent::memory::anchor_memory(
+                        app,
+                        Some(&cfg.agent_id),
+                        cfg.session_id.as_deref(),
+                        key,
+                        body,
+                        category,
+                        false,
+                    )
+                    .await
+                    {
+                        Ok(_) => count += 1,
+                        Err(e) => println!("[agent] forced_memory_settle: 锚定失败（key={}）：{e}", key),
+                    }
+                }
+                println!("[agent] forced_memory_settle: 强制沉淀 {} 条记忆", count);
+            }
+            Err(e) => println!("[agent] forced_memory_settle: 总结 LLM 调用失败：{e}"),
+        }
     }
 
     /// 分支 A（SIMPLE_CHAT）：单次流式输出，0 工具介入，毫秒级终态推送。
@@ -620,13 +763,66 @@ pub(crate) struct StreamOutcome {
 ///    按 `index` 归并为完整的标准 tool_calls；
 ///  - 调用方拿到空响应（正文与 tool_calls 皆空）时应回退非流式 `call_llm` 兜底。
 pub(crate) async fn call_llm_stream(
-    app: &AppHandle,
+    _app: &AppHandle,
     cfg: &AgentRuntimeConfig,
     messages: &[Value],
     tools: &[Value],
     cancel: &Arc<AtomicBool>,
 ) -> Result<StreamOutcome, String> {
-    let _ = app; // 事件推送已上移到 ReAct 循环，本函数只做拉流聚合
+    const MAX_RETRY: usize = 1;
+    let mut last: Option<Result<StreamOutcome, String>> = None;
+    for attempt in 0..=MAX_RETRY {
+        let outcome = call_llm_stream_once(_app, cfg, messages, tools, cancel).await;
+        match outcome {
+            // 用户主动取消：绝不重试，直接透传错误（「停止 / 接管」路径依赖此行为）。
+            Err(e) if e.contains("取消") => return Err(e),
+            // 网络 / HTTP 错误：重试一次，到上限则透传。
+            Err(e) => {
+                println!(
+                    "[agent] call_llm_stream: 第{}次请求失败，{}",
+                    attempt + 1,
+                    if attempt < MAX_RETRY { "重试一次" } else { "已达上限" }
+                );
+                last = Some(Err(e));
+                if attempt < MAX_RETRY {
+                    continue;
+                }
+                return last.unwrap();
+            }
+            Ok(o) => {
+                // 零输出（正文与 tool_calls 皆空）且非取消：疑似网关流式断流，
+                // 重试一次避免浪费已喂的 prompt 却拿不到任何 token。
+                let is_empty = o.content.trim().is_empty() && o.tool_calls.is_empty();
+                if is_empty {
+                    println!(
+                        "[agent] call_llm_stream: 第{}次流式返回空响应（疑似网关断流），{}",
+                        attempt + 1,
+                        if attempt < MAX_RETRY { "重试一次" } else { "已达上限，按空响应返回" }
+                    );
+                    last = Some(Ok(o));
+                    if attempt < MAX_RETRY {
+                        continue;
+                    }
+                    return last.unwrap();
+                }
+                return Ok(o);
+            }
+        }
+    }
+    last.unwrap_or(Err("流式调用失败".into()))
+}
+
+/// 单次流式请求 + SSE 聚合（不含重试）。空响应以 `Ok(空 StreamOutcome)` 返回，
+/// 由 `call_llm_stream` 判断是否需要重试；用户取消以 `Err("任务已被用户取消")`
+/// 返回，保证重试包装层不会对其重试。
+async fn call_llm_stream_once(
+    _app: &AppHandle,
+    cfg: &AgentRuntimeConfig,
+    messages: &[Value],
+    tools: &[Value],
+    cancel: &Arc<AtomicBool>,
+) -> Result<StreamOutcome, String> {
+    let _ = _app; // 事件推送已上移到 ReAct 循环，本函数只做拉流聚合
     if cfg.llm_base_url.is_empty() || cfg.llm_model_name.is_empty() {
         return Err("智能体未绑定有效的 LLM（base_url / model_name 为空）".into());
     }
@@ -693,6 +889,13 @@ pub(crate) async fn call_llm_stream(
     // 部分网关需要显式声明 Accept: text/event-stream
     req = req.header("Accept", "text/event-stream");
 
+    // 取消优先（请求级兜底）：若已收到取消信号，绝不发起本次 HTTP 请求——
+    // 否则会把整段 prompt 发给网关计费后立刻作废。轮次级取消检查见 run_subtask 主循环。
+    if cancel.load(Ordering::SeqCst) {
+        println!("[agent] call_llm_stream: 取消信号已置位，跳过 HTTP 请求（不重复计费）");
+        return Err("任务已被用户取消".into());
+    }
+
     let resp = req.send().await.map_err(|e| {
         println!(
             "[agent] call_llm_stream: 请求失败（耗时={}ms）：{}",
@@ -736,10 +939,10 @@ pub(crate) async fn call_llm_stream(
         // 调用方处检测到取消标志后提前结束。这是"停止按钮即时生效"的核心断流点。
         if cancel.load(Ordering::SeqCst) {
             println!(
-                "[agent] call_llm_stream: 检测到取消信号，立即断流（已耗时={}ms）",
+                "[agent] call_llm_stream_once: 检测到取消信号，立即断流（已耗时={}ms）",
                 request_started.elapsed().as_millis()
             );
-            break;
+            return Err("任务已被用户取消".into());
         }
         let chunk = chunk_result.map_err(|e| {
             println!("[agent] call_llm_stream: SSE 流读取失败（已耗时={}ms）：{}", request_started.elapsed().as_millis(), e);

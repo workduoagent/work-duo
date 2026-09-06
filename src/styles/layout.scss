@@ -120,20 +120,17 @@
   border-bottom: 1px solid var(--color-border-muted);
 }
 
-/* 4. 顶栏胶囊菜单（app-nav-pills） */
+/* 4. 顶栏导航（app-nav-pills）— 稳定一级标签栏 + 分组下拉 */
 .app-nav-pills {
   position: relative;
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  /* 固定轨道宽度：钻取展开二级菜单时不因子项多少改变胶囊宽度（窄窗口自适应收缩） */
-  width: min(660px, 100%);
-  max-width: 100%;
+  /* 宽度随内容自适应，不再固定 660px；窄窗口整体收缩而非撑开 */
   padding: 4px;
   border-radius: 999px;
   background-color: var(--color-border-muted);
   border: 1px solid var(--color-border);
   box-shadow: inset 0 1px 2px rgb(0 0 0 / 0.06);
-  overflow: hidden;
 }
 
 .dark .app-nav-pills {
@@ -143,26 +140,10 @@
 .app-nav-pills__list {
   display: flex;
   align-items: center;
-  justify-content: space-evenly;
   gap: 2px;
   position: relative;
   z-index: 1;
-  flex: 1;
   min-width: 0;
-  overflow-x: auto;
-  scrollbar-width: none;
-  -ms-overflow-style: none;
-  scroll-behavior: smooth;
-}
-
-/* 钻取态：二级菜单保持之前的紧凑/左对齐样子，不随胶囊宽度增加而被 space-evenly 拉开。
-   一级菜单仍用上面的均匀分布；二级菜单内容整体向左靠近。 */
-.app-nav-pills[data-mode='drilled'] .app-nav-pills__list {
-  justify-content: flex-start;
-}
-
-.app-nav-pills__list::-webkit-scrollbar {
-  display: none;
 }
 
 .app-nav-pills__thumb {
@@ -189,9 +170,9 @@
     background-color 0.2s ease;
 }
 
-/* 钻取切换期间逐帧测量滑块：关闭过渡避免拖影，由 JS 实时驱动 */
-.app-nav-pills[data-tracking='true'] .app-nav-pills__thumb {
-  transition: opacity 0.2s ease, background-color 0.2s ease;
+/* 下拉展开时隐藏滑块，避免与分组高亮视觉冲突 */
+.app-nav-pills[data-open='true'] .app-nav-pills__thumb {
+  opacity: 0;
 }
 
 @supports (color: color-mix(in srgb, red, transparent)) {
@@ -218,7 +199,7 @@
   font-family: inherit;
   line-height: 1;
   color: var(--color-foreground-muted);
-  transition: color 0.25s ease;
+  transition: color 0.25s ease, background-color 0.2s ease;
   -webkit-tap-highlight-color: transparent;
 }
 
@@ -226,15 +207,34 @@
   color: var(--color-foreground);
 }
 
+/* 选中态：背景品牌色 + 文字用反向前景色令牌（明暗主题均清晰，不写死 #fff） */
 .app-nav-pills__item--active {
-  color: #ffffff;
+  color: var(--color-foreground-inverse);
   cursor: default;
+}
+
+/* 分组展开态：轻量底色提示，不占用滑块 */
+.app-nav-pills__item--open {
+  color: var(--color-foreground);
+  background-color: color-mix(in srgb, var(--color-foreground) 8%, transparent);
 }
 
 .app-nav-pills__icon {
   flex-shrink: 0;
   width: 16px;
   height: 16px;
+}
+
+.app-nav-pills__caret {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  opacity: 0.7;
+  transition: transform 0.2s ease;
+}
+
+.app-nav-pills__item--open .app-nav-pills__caret {
+  transform: rotate(180deg);
 }
 
 .app-nav-pills__label {
@@ -246,136 +246,75 @@
   outline-offset: 2px;
 }
 
-/* 一级菜单占位槽：钻取态下非活动项收起（宽度 + 透明 + 缩放过渡）。
-   flex-shrink:0 关键 —— 防止一级菜单项在胶囊宽度不足时被压缩（出现「半边菜单」），
-   改为溢出后由轨道横向滚动 + 左右箭头处理。 */
-.app-nav-pills__slot {
+/* 分组容器（承载下拉卡片，相对定位使其绝对定位在下方） */
+.app-nav-pills__group {
+  position: relative;
   display: inline-flex;
   flex-shrink: 0;
-  max-width: 240px;
-  transition:
-    max-width 0.32s cubic-bezier(0.32, 0.72, 0, 1),
-    opacity 0.3s ease,
-    transform 0.32s cubic-bezier(0.32, 0.72, 0, 1);
 }
 
-.app-nav-pills__slot[data-collapsed='true'] {
-  max-width: 0;
-  opacity: 0;
-  transform: scale(0.85);
-  overflow: hidden;
-  pointer-events: none;
+/* 分组下拉卡片 */
+.app-nav-pills__pop {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px;
+  min-width: 160px;
+  border-radius: 12px;
+  background-color: var(--color-background);
+  border: 1px solid var(--color-border);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 0.16);
+  transform-origin: top left;
+  animation: navPopIn 0.18s cubic-bezier(0.32, 0.72, 0, 1) both;
 }
 
-/* 父容器项：提示可下钻 */
-.app-nav-pills__item--parent {
-  font-weight: 600;
+@keyframes navPopIn {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 
-/* 钻取态下已锚定在最左侧的父容器：点击无响应（返回上级只走左侧返回按钮） */
-.app-nav-pills[data-mode='drilled'] .app-nav-pills__item--parent.app-nav-pills__item--active {
-  cursor: default;
-}
-
-/* 返回按钮 / 右移箭头（固定在轨道两端，不随滚动移动） */
-.app-nav-pills__back,
-.app-nav-pills__scroll {
-  display: inline-flex;
+.app-nav-pills__pop-item {
+  display: flex;
   align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  width: 32px;
-  height: 32px;
-  margin: 0 2px;
-  padding: 0;
+  gap: 8px;
+  padding: 9px 10px;
   border: none;
-  border-radius: 999px;
-  background: transparent;
-  color: var(--color-foreground-muted);
+  border-radius: 8px;
+  background: none;
   cursor: pointer;
-  overflow: hidden;
-  transition:
-    background-color 0.2s ease,
-    color 0.2s ease,
-    transform 0.2s ease,
-    width 0.32s cubic-bezier(0.32, 0.72, 0, 1),
-    margin 0.32s cubic-bezier(0.32, 0.72, 0, 1),
-    opacity 0.3s ease;
-  -webkit-tap-highlight-color: transparent;
-}
-
-.app-nav-pills__back:hover,
-.app-nav-pills__scroll:hover {
-  background-color: color-mix(in srgb, var(--color-foreground) 10%, transparent);
-  color: var(--color-foreground);
-}
-
-.app-nav-pills__back:active,
-.app-nav-pills__scroll:active {
-  transform: scale(0.92);
-}
-
-.app-nav-pills__back:focus-visible,
-.app-nav-pills__scroll:focus-visible {
-  outline: 2px solid var(--color-brand-500);
-  outline-offset: 2px;
-}
-
-/* 返回按钮：始终挂载，靠 data-hidden 平滑收起宽度。
-   返回上级时它由可见态过渡到 width:0，列表随之平滑变宽、菜单内容平滑左移，
-   避免直接卸载导致布局瞬间左跳（闪动）。 */
-.app-nav-pills__back[data-hidden='true'] {
-  width: 0;
-  margin: 0;
-  opacity: 0;
-  pointer-events: none;
-  transform: scale(0.85);
-}
-
-/* 二级菜单：进场「从左往右依次铺开」（宽度展开 + 淡入 + 左侧滑入） */
-.app-nav-pills__item--child {
-  flex-shrink: 0;
-  overflow: hidden;
-  /* 二级项紧凑布局：百宝箱现含 3 个子项（LLM / MCP / Skill），
-     覆盖父级 .app-nav-pills__item 的 padding:8px 14px; gap:6px; 14px 为紧凑版，
-     使子项在常见窗口宽度下一字排开、不再触发右移箭头。 */
-  padding: 8px 10px;
-  gap: 5px;
   font-size: 13px;
+  font-weight: 500;
+  font-family: inherit;
+  line-height: 1;
+  text-align: left;
+  color: var(--color-foreground);
+  transition: background-color 0.15s ease;
 }
 
-.app-nav-pills__item--child[data-phase='enter'] {
-  animation: pillChildIn 0.32s cubic-bezier(0.32, 0.72, 0, 1) backwards;
+.app-nav-pills__pop-item:hover {
+  background-color: var(--color-background-subtle);
 }
 
-/* 退场「从右往左依次收起」：由 JS 反序写入 animation-delay */
-.app-nav-pills__item--child[data-phase='exit'] {
-  pointer-events: none;
-  animation: pillChildOut 0.32s cubic-bezier(0.32, 0.72, 0, 1) forwards;
+.app-nav-pills__pop-item--active {
+  color: var(--color-brand-600);
 }
 
-/* 仅用 opacity + transform（合成层，不触发重排），避免钻取动画卡顿；
-   二级项宽度由 flex 自然排布，靠 stagger 实现「从左往右依次出现」。 */
-@keyframes pillChildIn {
-  from {
-    opacity: 0;
-    transform: translateX(-10px) scale(0.96);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(0) scale(1);
-  }
+.app-nav-pills__pop-item .app-nav-pills__icon {
+  color: var(--color-foreground-muted);
 }
 
-@keyframes pillChildOut {
-  from {
-    opacity: 1;
-    transform: translateX(0) scale(1);
-  }
-  to {
-    opacity: 0;
-    transform: translateX(-10px) scale(0.96);
-  }
+.app-nav-pills__pop-item--active .app-nav-pills__icon {
+  color: var(--color-brand-600);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -383,17 +322,12 @@
     transition: none;
   }
 
-  .app-nav-pills__item--child[data-phase='enter'],
-  .app-nav-pills__item--child[data-phase='exit'] {
+  .app-nav-pills__pop {
     animation: none;
   }
 
-  .app-nav-pills__back {
+  .app-nav-pills__caret {
     transition: none;
-  }
-
-  .app-nav-pills__item--child[data-phase='exit'] {
-    visibility: hidden;
   }
 }
 

@@ -15,9 +15,16 @@
 //!  - [Slot 3..M] 活跃窗口轮次（raw_messages_json 原样还原）
 //!  - [Slot M+1] 当前提问
 
+use base64::Engine;
 use serde_json::json;
 use serde_json::Value;
 use sqlx::Row;
+use std::collections::HashMap;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
+use std::sync::Mutex;
+use std::sync::OnceLock;
+use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::AppHandle;
 
 use crate::agent::round_compactor::build_request_messages;
@@ -42,39 +49,250 @@ fn messages_chars(messages: &[Value]) -> usize {
         .sum()
 }
 
-/// 把当前轮多模态附件（图片）注入最后一条 user 消息：
-/// content 由纯文本改写为 OpenAI 多模态数组 `[{type:text},{type:image_url}...]`。
-/// 无附件时原样返回（content 保持字符串，兼容纯文本模型）。
-fn inject_attachments(messages: &mut Vec<Value>, attachments: &[AttachmentInput]) {
-    let image_parts: Vec<Value> = attachments
-        .iter()
-        .filter(|a| a.kind == "image" && !a.data_url.is_empty())
-        .map(|a| json!({ "type": "image_url", "image_url": { "url": a.data_url } }))
-        .collect();
-    if image_parts.is_empty() {
+/// 去掉文件名中的路径分隔符与控制字符，只保留安全字符（字母数字 / . _ - 空格）。
+fn sanitize_filename(name: &str) -> String {
+    let mut out = String::with_capacity(name.len());
+    for c in name.chars() {
+        if c.is_alphanumeric() || c == '.' || c == '_' || c == '-' || c == ' ' {
+            out.push(c);
+        }
+    }
+    let trimmed = out.trim();
+    if trimmed.is_empty() {
+        "file".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+/// 附件分片暂存缓冲：前端 `begin/append/commit_stage_attachment` 命令按块写入，
+/// commit 时由 `persist_bytes` 落盘到 `workspace/.attachments/`，避免超大文件经 IPC base64 膨胀。
+struct StagedFile {
+    name: String,
+    mime: String,
+    data: Vec<u8>,
+}
+static STAGING: OnceLock<Mutex<HashMap<String, StagedFile>>> = OnceLock::new();
+static STAGE_SEQ: AtomicU64 = AtomicU64::new(0);
+
+fn staging_map() -> &'static Mutex<HashMap<String, StagedFile>> {
+    STAGING.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn next_stage_id() -> String {
+    let seq = STAGE_SEQ.fetch_add(1, Ordering::SeqCst);
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    format!("stg_{}_{}", nanos, seq)
+}
+
+/// 把字节落盘到 `workspace/.attachments/`（base64 附件与分片 commit 共用）。
+fn persist_bytes(workspace: &Option<String>, name: &str, bytes: &[u8]) -> Result<String, String> {
+    let ws = workspace
+        .as_ref()
+        .ok_or_else(|| "无工作空间，无法保存文件附件".to_string())?;
+    if bytes.is_empty() {
+        return Err("附件内容为空".to_string());
+    }
+    let dir = std::path::Path::new(ws).join(".attachments");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("创建 .attachments 目录失败：{e}"))?;
+    let safe = sanitize_filename(name);
+    let ts = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let stamped = format!("{}_{}", ts, safe);
+    let path = dir.join(&stamped);
+    // 双重校验：最终路径必须仍在 .attachments 内（sanitize 已去分隔符，此处兜底）。
+    if !path.starts_with(&dir) {
+        return Err("非法文件名".to_string());
+    }
+    std::fs::write(&path, bytes).map_err(|e| format!("写入文件失败：{e}"))?;
+    Ok(path.to_string_lossy().to_string())
+}
+
+/// 把 base64 文件附件落盘到 `workspace/.attachments/`，返回绝对路径。
+/// 无工作空间或内容为空时返回错误（调用方会注入提示文本而非中断）。
+fn persist_file(workspace: &Option<String>, name: &str, b64: &str) -> Result<String, String> {
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(b64)
+        .map_err(|e| format!("base64 解码失败：{e}"))?;
+    persist_bytes(workspace, name, &bytes)
+}
+
+/// mime → 扩展名兜底：前端可能传 `blob` 但携带真实 mime（如 image/png）。
+/// commit 时若文件名缺扩展名则据此补全，避免落盘文件无类型后缀。
+fn ext_from_mime(mime: &str) -> Option<&'static str> {
+    match mime {
+        "image/png" => Some("png"),
+        "image/jpeg" | "image/jpg" => Some("jpg"),
+        "image/gif" => Some("gif"),
+        "image/webp" => Some("webp"),
+        "image/bmp" => Some("bmp"),
+        "image/svg+xml" => Some("svg"),
+        "application/pdf" => Some("pdf"),
+        "text/plain" => Some("txt"),
+        "text/csv" => Some("csv"),
+        "application/json" => Some("json"),
+        "application/zip" => Some("zip"),
+        "application/msword" => Some("doc"),
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document" => Some("docx"),
+        "application/vnd.ms-excel" => Some("xls"),
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" => Some("xlsx"),
+        "application/vnd.ms-powerpoint" => Some("ppt"),
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation" => Some("pptx"),
+        _ => None,
+    }
+}
+
+/// 开始一个分片暂存会话，返回 stage_id（前端据此分块追加字节）。
+pub fn stage_begin(name: String, mime: String) -> String {
+    let id = next_stage_id();
+    staging_map()
+        .lock()
+        .unwrap()
+        .insert(id.clone(), StagedFile { name, mime, data: Vec::new() });
+    id
+}
+
+/// 追加一个分片（原始字节，来自前端 `Uint8Array`）。
+pub fn stage_append(stage_id: &str, data: &[u8]) -> Result<(), String> {
+    let mut m = staging_map().lock().unwrap();
+    match m.get_mut(stage_id) {
+        Some(f) => {
+            f.data.extend_from_slice(data);
+            Ok(())
+        }
+        None => Err("分片会话不存在或已过期".to_string()),
+    }
+}
+
+/// 提交分片暂存：落盘到 `workspace/.attachments/` 并返回最终路径，清理缓冲。
+pub fn stage_commit(stage_id: &str, workspace: &Option<String>) -> Result<String, String> {
+    let f = staging_map()
+        .lock()
+        .unwrap()
+        .remove(stage_id)
+        .ok_or("分片会话不存在或已过期")?;
+    // 文件名缺扩展名时（如 blob），按 mime 兜底补全，保证落盘文件有可用后缀。
+    let name = if std::path::Path::new(&f.name).extension().is_none() {
+        match ext_from_mime(&f.mime) {
+            Some(ext) => format!("{}.{}", f.name, ext),
+            None => f.name,
+        }
+    } else {
+        f.name
+    };
+    persist_bytes(workspace, &name, &f.data)
+}
+
+/// 取消分片暂存（失败 / 超时清理，避免缓冲泄漏）。
+pub fn stage_abort(stage_id: &str) {
+    staging_map().lock().unwrap().remove(stage_id);
+}
+
+/// 把当前轮附件注入最后一条 user 消息，按三类路由：
+/// - `image`：多模态 `image_url` 数组（需多模态模型）。
+/// - `text`：提取文本直接内联进 prompt（任意模型可用）。
+/// - `file`：base64 落盘到 `workspace/.attachments/`，注入本地路径提示，由 agent 用 `native__read_file`/沙箱解析（任意模型可用）。
+///
+/// 设计要点：text/file 附件统一拼回纯文本块——仅当存在图片时才改写为多模态数组，
+/// 从而**非多模态模型也能消费文本/文件附件**（纯字符串 content 兼容）。
+fn inject_attachments(
+    messages: &mut Vec<Value>,
+    attachments: &[AttachmentInput],
+    workspace: &Option<String>,
+) {
+    if attachments.is_empty() {
         return;
     }
     if let Some(last) = messages.last_mut() {
-        if last.get("role").and_then(|v| v.as_str()) == Some("user") {
-            let text = last
-                .get("content")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string();
-            let names: Vec<&str> = attachments
-                .iter()
-                .filter(|a| a.kind == "image" && !a.data_url.is_empty())
-                .map(|a| a.name.as_deref().unwrap_or("<未命名>"))
-                .collect();
-            let mut parts = vec![json!({ "type": "text", "text": text })];
-            parts.extend(image_parts);
-            last["content"] = json!(parts);
-            println!(
-                "[agent] context: 已注入 {} 张图片到当前轮 user 消息（多模态）：[{}]",
-                names.len(),
-                names.join(", "),
-            );
+        if last.get("role").and_then(|v| v.as_str()) != Some("user") {
+            return;
         }
+        let base_text = last
+            .get("content")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let image_parts: Vec<Value> = attachments
+            .iter()
+            .filter(|a| a.kind == "image" && !a.data_url.is_empty())
+            .map(|a| json!({ "type": "image_url", "image_url": { "url": a.data_url } }))
+            .collect();
+        // 文本 / 文件附件统一拼回纯文本块（兼容非多模态模型）。
+        let mut text_blocks: Vec<String> = Vec::new();
+        let mut names: Vec<String> = Vec::new();
+        for a in attachments {
+            match a.kind.as_str() {
+                "text" => {
+                    if let Some(c) = &a.content {
+                        let label = a.name.clone().unwrap_or_else(|| "<文本内容>".into());
+                        text_blocks.push(format!("\n\n[附件：{}]\n```\n{}\n```", label, c));
+                        names.push(label);
+                    }
+                }
+                "file" => {
+                    let name = a.name.clone().unwrap_or_else(|| "未命名文件".into());
+                    // 已分片落盘的附件直接复用暂存路径，避免重复写盘；否则由 base64 解码落盘。
+                    let landed = if let Some(p) = &a.path {
+                        Ok(p.clone())
+                    } else {
+                        persist_file(workspace, &name, a.content.as_deref().unwrap_or(""))
+                    };
+                    match landed {
+                        Ok(path) => {
+                            let mime = a
+                                .mime
+                                .clone()
+                                .unwrap_or_else(|| "application/octet-stream".into());
+                            text_blocks.push(format!(
+                                "\n\n[附件文件：{}（{}，{} 字节）已保存到本地路径：{} ]\n请按需使用 native__read_file 或沙箱 Python（pdfplumber / python-docx / openpyxl 等）解析该文件后再回答用户问题。",
+                                name, mime, a.size.unwrap_or(0), path
+                            ));
+                            names.push(name);
+                        }
+                        Err(e) => {
+                            println!("[agent] context: 文件附件落盘失败（{}）：{}", name, e);
+                            text_blocks.push(format!(
+                                "\n\n[附件文件：{} 落盘失败：{} ]\n无法读取该文件内容。",
+                                name, e
+                            ));
+                            names.push(name);
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        if image_parts.is_empty() && text_blocks.is_empty() {
+            return;
+        }
+        if image_parts.is_empty() {
+            // 纯文本模型兼容：保持字符串 content。
+            let mut combined = base_text;
+            for b in &text_blocks {
+                combined.push_str(b);
+            }
+            last["content"] = json!(combined);
+        } else {
+            let mut combined = base_text;
+            for b in &text_blocks {
+                combined.push_str(b);
+            }
+            let mut parts = vec![json!({ "type": "text", "text": combined })];
+            parts.extend(image_parts.clone());
+            last["content"] = json!(parts);
+        }
+        println!(
+            "[agent] context: 已注入 {} 个附件（图片{}张 / 文本·文件{}个）：[{}]",
+            attachments.len(),
+            image_parts.len(),
+            text_blocks.len(),
+            names.join(", ")
+        );
     }
 }
 
@@ -90,7 +308,7 @@ pub(crate) async fn build_context_messages(
         None => {
             println!("[agent] context: 无 session_id，仅装配 [system + 当前提问]（不含历史）");
             let mut m = build_request_messages(&cfg.system_prompt, None, None, &[], prompt);
-            inject_attachments(&mut m, &cfg.attachments);
+            inject_attachments(&mut m, &cfg.attachments, &cfg.workspace);
             return Ok(m);
         }
     };
@@ -197,7 +415,7 @@ pub(crate) async fn build_context_messages(
         &records,
         prompt,
     );
-    inject_attachments(&mut messages, &cfg.attachments);
+    inject_attachments(&mut messages, &cfg.attachments, &cfg.workspace);
 
     // 装配链路日志：各 Slot 体量 + 最终规模，便于排错时确认上下文构成。
     println!(

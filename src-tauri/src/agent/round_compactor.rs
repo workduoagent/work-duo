@@ -33,6 +33,7 @@ use crate::agent::events;
 use crate::agent::runtime::call_llm;
 use crate::agent::runtime::now_ms;
 use crate::agent::types::AgentRuntimeConfig;
+use crate::agent::types::ArtifactRef;
 use crate::agent::wd_mem;
 
 /// 单个工具 / Skill 定义占用的上下文 token 估算（与前端 `AVG_TOOL_TOKENS` 保持一致）。
@@ -297,6 +298,47 @@ pub(crate) async fn persist_session_tokens(
     }
 }
 
+/// 登记单个文件产物进 `artifacts` 表（best-effort：取池/写库失败仅告警，不影响主流程）。
+///
+/// 由 `agent::artifacts::register_artifacts` 在子任务成功闭环后逐条调用。
+pub(crate) async fn persist_artifact(
+    app: &AppHandle,
+    session_id: Option<&str>,
+    round_id: Option<&str>,
+    ar: &ArtifactRef,
+) {
+    let pool = match get_pool(app).await {
+        Ok(p) => p,
+        Err(e) => {
+            println!("[agent] persist_artifact: 取池失败：{e}");
+            return;
+        }
+    };
+    if let Err(e) = sqlx::query(
+        "INSERT INTO artifacts \
+         (id, session_id, round_id, task_id, step, artifact_type, path, mime_type, description, version, checksum, size, created_at) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind(&ar.artifact_id)
+    .bind(session_id)
+    .bind(round_id)
+    .bind(&ar.task_id)
+    .bind(ar.step as i64)
+    .bind(&ar.artifact_type)
+    .bind(&ar.path)
+    .bind(&ar.mime_type)
+    .bind(&ar.description)
+    .bind(1i64) // version：覆盖重跑版本自增留待后续扩展，当前固定 1
+    .bind(None::<String>) // checksum：预留
+    .bind(ar.size as i64)
+    .bind(ar.created_at)
+    .execute(&pool)
+    .await
+    {
+        println!("[agent] persist_artifact: 写库失败（artifact_id={}）：{e}", ar.artifact_id);
+    }
+}
+
 /// 后台非阻塞滚动压缩触发器。
 ///
 /// 读取会话 `total_turns` 与 `summary_round_count`，计算未压缩轮数
@@ -449,7 +491,22 @@ pub(crate) async fn trigger_background_compaction(
                     }
                 }
 
+                // 被压缩轮次的 raw_messages 总字符（估算节省的上下文 token 量）。
+                let compacted_chars: usize = rounds
+                    .iter()
+                    .map(|r| r.raw_messages_json.chars().count())
+                    .sum();
                 events::emit_status(&app_bg, "历史对话已自动压缩进上下文摘要");
+                // 结构化压缩完成事件（替代纯字符串 status，供记忆宫殿/上下文健康视图消费）。
+                events::emit_context_compacted(
+                    &app_bg,
+                    &events::ContextCompactedPayload {
+                        compacted_rounds: rounds.len(),
+                        summary_length: new_summary.chars().count(),
+                        tokens_saved: compacted_chars / 4,
+                        success: true,
+                    },
+                );
             }
             Err(err) => {
                 eprintln!("[Compactor] 后台压缩失败：{err}");

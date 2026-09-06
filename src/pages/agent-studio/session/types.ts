@@ -34,6 +34,8 @@ export interface ToolStep {
   durationMs?: number
   /** 步骤创建时间戳（epoch ms）。 */
   createdAt: number
+  /** 所属规划步骤序号（前端按 step_started 标记，用于按步骤归组渲染；可选）。 */
+  step?: number
 }
 
 /** 对话流里的一段流式/完整文本（助手的最终回复）。 */
@@ -42,6 +44,8 @@ export interface StreamChunk {
   text: string
   /** 是否为首帧（true 时前端清空上一段承接区，另起新气泡）。 */
   done: boolean
+  /** 思考分层标签（thinking_chunk 时携带）：plan=规划 / exec=执行 / selfcheck=自检。 */
+  layer?: 'plan' | 'exec' | 'selfcheck'
 }
 
 /** 审批请求（高危操作挂起）。 */
@@ -72,6 +76,8 @@ export interface PlanStep {
   status: PlanStepStatus
   /** 步骤产物摘要（step_finished 时回填）。 */
   summary?: string
+  /** 前置依赖的步骤 task_id 列表（plan_generated 事件携带，驱动 §3.2 画布 DAG 连边）。 */
+  dependsOn?: string[]
 }
 
 /** 规划/步骤视图（plan_generated / step_started / step_finished 事件携带）。 */
@@ -83,6 +89,63 @@ export interface PlanView {
   title?: string
   status?: PlanStepStatus
   summary?: string
+}
+
+/** 子任务文件产物引用（「产物画廊」数据源，对应 Rust `ArtifactRef` + `agent-artifact-created` 事件）。 */
+export interface ArtifactRef {
+  /** 产物唯一标识。 */
+  artifactId: string
+  /** 产生该产物的子任务 id。 */
+  taskId?: string
+  /** 子任务序号（1-based）。 */
+  step: number
+  /** 产物类型：file / image / document / spreadsheet / code / json / report / directory … */
+  artifactType: string
+  /** 产物绝对路径（已规范化、落于工作空间内）。 */
+  path: string
+  /** MIME 类型（由扩展名推导）。 */
+  mimeType?: string
+  /** 文件名 / 描述。 */
+  description: string
+  /** 字节大小（目录为 0）。 */
+  size: number
+  /** 创建时间（epoch 毫秒）。 */
+  createdAt?: number
+}
+
+/** 步骤级恢复请求（对应 Rust `agent-recovery-needed` 事件，渲染恢复面板）。 */
+export interface RecoveryRequest {
+  /** 受阻子任务序号（1-based）。 */
+  step: number
+  /** 子任务 id（PlanSubTask.task_id）。 */
+  taskId: string
+  /** 子任务标题。 */
+  title: string
+  /** 受阻原因（最后一次失败摘要）。 */
+  reason: string
+  /** 受阻子任务已产出摘要（可能为空）。 */
+  summary: string
+}
+
+/** 意图分类结果（intent_classified 事件携带，对应 Rust `IntentProfile` 经 camelCase 序列化）。 */
+export interface IntentClassified {
+  /** SIMPLE_CHAT | COMPOSITE_TASK */
+  intentType: string
+  reason: string
+  requiresPlanning: boolean
+  requiresTool: boolean
+  /** low | medium | high | critical */
+  riskLevel: string
+  requiresApproval: boolean
+  requiresArtifact: boolean
+}
+
+/** 分层思考片段（thinking_chunk 事件携带）。 */
+export interface ThinkingChunk {
+  /** plan=规划 / exec=执行 / selfcheck=自检 */
+  layer: 'plan' | 'exec' | 'selfcheck'
+  text: string
+  done: boolean
 }
 
 /** `agent-event` 的负载（按 `type` 区分具体事件）。 */
@@ -97,9 +160,12 @@ export interface AgentEvent {
     | 'plan_generated' // 三层流水线：阶段二规划生成（渲染步骤进度条）
     | 'step_started' // 子任务开始（对应步骤置 running）
     | 'step_finished' // 子任务结束（对应步骤置 success/failed，带产物摘要）
+    | 'intent_classified' // 阶段一意图分流结果（轨迹视图首节点）
+    | 'thinking_chunk' // 分层思考片段（plan/exec/selfcheck）
+    | 'plan_branch_generated' // §3.2 分支重规划结果（双分支对比）
   /** 工具步骤（tool_started / tool_finished 时使用）。 */
   step?: ToolStep
-  /** 文本片段（text_chunk 时使用）。 */
+  /** 文本片段（text_chunk / thinking_chunk 时使用）。 */
   chunk?: StreamChunk
   /** 状态/错误信息（status / error 时使用）。 */
   message?: string
@@ -107,6 +173,10 @@ export interface AgentEvent {
   seq?: number
   /** 规划/步骤视图（plan_generated / step_started / step_finished 时使用）。 */
   plan?: PlanView
+  /** 意图分类结果（intent_classified 时使用）。 */
+  intent?: IntentClassified
+  /** 分支重规划结果（plan_branch_generated 时使用）。 */
+  branch?: PlanBranchGenerated
 }
 
 /** Tauri 侧的审批结果回传（前端调用 `submit_approval_decision` 时携带）。 */
@@ -119,9 +189,19 @@ export interface ApprovalDecision {
 
 /** 消息附件（图片等），随 prompt 一起交给后端组装多模态 content。 */
 export interface ChatAttachmentInput {
-  type: 'image'
-  dataUrl: string
+  /** 附件类型：image 多模态图片 / text 已提取文本 / file 二进制（落盘引用）。 */
+  type: 'image' | 'text' | 'file'
   name?: string
+  /** 多模态图片的 data URL（type=image）。 */
+  dataUrl?: string
+  /** 文本内容（type=text）或 base64 数据（type=file）。 */
+  content?: string
+  /** MIME 类型（type=text/file）。 */
+  mime?: string
+  /** 字节大小。 */
+  size?: number
+  /** 已分片落盘后的本地绝对路径（type=file，由 stage_attachment 命令返回）；存在时后端直接复用，不重复写盘，气泡也据此显示落盘路径。 */
+  path?: string
 }
 
 /** 运行一轮任务的前端入参（对应 Rust `run_agent_task` 命令）。 */
@@ -144,4 +224,159 @@ export interface RunAgentTaskInput {
   disabledMcpIds?: string[]
   /** 本轮临时禁用的单个 MCP 工具 id 列表（仅会话内有效，不写库）。键为 mcp_tool_definition.id。 */
   disabledMcpToolIds?: string[]
+  /** 本轮临时启用的技能 id 列表（`@` 提及触发，仅会话内有效，不写库）。可包含智能体未绑定的技能，Rust 侧据此临时并入工具集。 */
+  enabledSkillIds?: string[]
+  /** 本轮临时启用的 MCP 服务 id 列表（`@` 提及触发，仅会话内有效，不写库）。可包含智能体未绑定的服务，Rust 侧据此把其全部工具临时并入工具集。 */
+  enabledMcpIds?: string[]
+  /** §3.2 分支重跑：直接采用前端合并好的完整计划（head + 新分支 tail），跳过 LLM 规划。字段名用 snake_case 以匹配 Rust `PlanDAG` 反序列化。 */
+  planOverride?: PlanDAG
+  /** 分支起点之前的已完成 head 步骤 task_id（流水线跳过执行，沿用其结果）。 */
+  preCompleted?: string[]
+  /** 产物管道初始上下文（head 步骤的已完成摘要），供 tail 步骤续接。 */
+  initialContext?: string
+}
+
+/** §3.2 分支重跑直接采用的计划（对应 Rust `PlanDAG`，snake_case 字段）。 */
+export interface PlanDAG {
+  /** 任务目标摘要。 */
+  goal_summary: string
+  /** 原子子任务（head + 新分支 tail 合并，step 连续编号）。 */
+  tasks: PlanSubTaskInput[]
+}
+
+/** §3.2 分支重跑的单个子任务（对应 Rust `PlanSubTask`，snake_case 字段）。 */
+export interface PlanSubTaskInput {
+  step: number
+  task_id: string
+  title: string
+  description: string
+  depends_on?: string[]
+}
+
+// ── §3.2 产物画布后半段：read_artifact 预览 + branch_from_step 分支重规划 ──
+
+/** read_artifact 命令返回的产物预览结果（对应 Rust `ReadArtifactResult`）。 */
+export interface ReadArtifactResult {
+  path: string
+  name: string
+  /** text | image | directory | binary | not_found | error */
+  kind: string
+  size: number
+  /** 文本内容（kind=text/binary/error/not_found 时携带，已截断）。 */
+  content?: string
+  /** 图片 data URL（kind=image 时携带，前端直接 <img> 渲染）。 */
+  dataUrl?: string
+  /** MIME 类型。 */
+  mime?: string
+  /** 目录子项名称列表（kind=directory 时携带）。 */
+  entries?: string[]
+  /** 文本是否被截断。 */
+  truncated: boolean
+}
+
+/** 分支重规划的单步（from_step 之后的替代方案，已重编号续接原步骤序号）。 */
+export interface BranchStep {
+  step: number
+  taskId: string
+  title: string
+  description: string
+  dependsOn: string[]
+}
+
+/** 分支重规划结果（从 fromStep 起的「原尾段 vs 新分支」双分支对比）。 */
+export interface PlanBranchGenerated {
+  /** 分支起点步骤序号（从此步骤之后重新规划）。 */
+  fromStep: number
+  /** 原方案的尾部步骤（step > fromStep），供对比。 */
+  originalTail: BranchStep[]
+  /** 新生成的替代分支步骤（已从 fromStep+1 起重编号）。 */
+  branchTasks: BranchStep[]
+  /** 用户触发分支时的目标/原因摘要。 */
+  goalSummary: string
+}
+
+/** branch_from_step 命令的前端入参。 */
+export interface BranchFromStepInput {
+  agentId: string
+  workspace?: string | null
+  fromStep: number
+  goalSummary: string
+  priorContext?: string
+  originalTail?: BranchStep[]
+  guidance?: string
+}
+
+// ── §3.3 记忆宫殿（Memory Palace）──
+
+/** 记忆分类（与 Rust `MEMORY_CATEGORIES` 保持一致）。 */
+export type MemoryCategory =
+  | 'decision'
+  | 'code_pattern'
+  | 'user_pref'
+  | 'architecture'
+  | 'fix'
+  | 'other'
+
+/** 单条记忆（对应 Rust `MemoryItem`，经 camelCase 序列化）。 */
+export interface MemoryItem {
+  id: string
+  agentId?: string | null
+  sessionId?: string | null
+  /** 短标题 / 关键词。 */
+  key: string
+  /** 记忆正文。 */
+  content: string
+  category: MemoryCategory
+  /** 引用次数（召回埋点累计，驱动热力图与权重排序）。 */
+  refCount: number
+  /** 是否显式锚定（用户/智能体刻意沉淀）。 */
+  anchored: boolean
+  /** 最近一次召回时间（epoch 毫秒，可空）。 */
+  lastRecalledAt?: number | null
+  createdAt: number
+  updatedAt: number
+}
+
+/** 热力图单点（按日聚合的召回次数）。 */
+export interface HeatmapPoint {
+  /** UTC 日期字符串 YYYY-MM-DD。 */
+  date: string
+  count: number
+}
+
+/** 锚定记忆入参（anchor_memory 命令）。 */
+export interface AnchorMemoryInput {
+  agentId?: string | null
+  sessionId?: string | null
+  key: string
+  content: string
+  category?: MemoryCategory
+  /** true=手动锚定（钉住）；省略/false=仅沉淀（参与 ref_count 排序但不钉）。原生工具 native__anchor_memory 传 false。 */
+  anchored?: boolean
+}
+
+/** 更新记忆入参（update_memory 命令）。 */
+export interface UpdateMemoryInput {
+  id: string
+  key?: string
+  content?: string
+  category?: MemoryCategory
+}
+
+/** 记忆召回事件载荷（agent-memory-recalled 事件）。 */
+export interface MemoryRecalledPayload {
+  item: MemoryItem
+}
+
+/** 记忆锚定事件载荷（agent-memory-anchored 事件）：手动锚定或智能体自动沉淀后推送，供卡片实时刷新。 */
+export interface MemoryAnchoredPayload {
+  item: MemoryItem
+}
+
+/** 上下文压缩完成事件载荷（agent-context-compacted 事件）。 */
+export interface ContextCompactedPayload {
+  compactedRounds: number
+  summaryLength: number
+  tokensSaved: number
+  success: boolean
 }
