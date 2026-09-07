@@ -459,6 +459,8 @@ export interface SquadUpsertInput {
   mode: SquadMode
   leaderAgentId?: string | null
   globalMcpIds?: string[]
+  /** 全局 MCP 工具级开关：按 mcpId 记录被禁用的工具 id 列表（未列出的工具即启用）。 */
+  globalMcpTools?: Record<string, string[]>
   supportsFileInput?: boolean | null
   workspaceDir?: string | null
   runStrategy: SquadRunStrategy
@@ -483,6 +485,8 @@ export interface SquadInfo {
   leaderAgentId?: string | null
   uniqueId?: string | null
   globalMcpIds: string[]
+  /** 全局 MCP 工具级开关：按 mcpId 记录被禁用的工具 id 列表（未列出的工具即启用）。 */
+  globalMcpTools?: Record<string, string[]>
   supportsFileInput?: boolean | null
   workspaceDir?: string | null
   runStrategy: SquadRunStrategy

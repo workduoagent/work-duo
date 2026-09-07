@@ -493,6 +493,7 @@ CREATE TABLE IF NOT EXISTS agent_squad
     leader_agent_id TEXT,
     unique_id       TEXT,
     global_mcp_ids  TEXT,
+    global_mcp_tools TEXT,           -- 全局 MCP 工具级开关：JSON 对象 { [mcpId]: 被禁用工具 id[] }
     run_strategy    TEXT,
     supports_file_input INTEGER NOT NULL DEFAULT 0,
     workspace_dir   TEXT,

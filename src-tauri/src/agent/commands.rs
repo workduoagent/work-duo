@@ -1143,6 +1143,10 @@ pub async fn load_squad(app: &AppHandle, squad_id: &str) -> Result<SquadRuntimeC
     };
     let global_mcp_ids: Vec<String> =
         serde_json::from_str(&get_str(&squad, "global_mcp_ids")).unwrap_or_default();
+    // 全局 MCP 工具级开关：{ [mcpId]: 被禁用工具 id[] }，合并为运行期禁用集合。
+    let global_mcp_tools: std::collections::HashMap<String, Vec<String>> =
+        serde_json::from_str(&get_str(&squad, "global_mcp_tools")).unwrap_or_default();
+    let disabled_mcp_tool_ids: Vec<String> = global_mcp_tools.values().flatten().cloned().collect();
     let workspace_dir = {
         let w = get_str(&squad, "workspace_dir");
         if w.trim().is_empty() {
@@ -1184,7 +1188,11 @@ pub async fn load_squad(app: &AppHandle, squad_id: &str) -> Result<SquadRuntimeC
             None, // round_id
             None, // disabled_skill_ids
             None, // disabled_mcp_ids
-            None, // disabled_mcp_tool_ids
+            if disabled_mcp_tool_ids.is_empty() {
+                None
+            } else {
+                Some(disabled_mcp_tool_ids.clone())
+            }, // disabled_mcp_tool_ids
             None, // enabled_skill_ids
             if global_mcp_ids.is_empty() {
                 None

@@ -124,23 +124,52 @@
 
 /* ---------------- 编辑器 ---------------- */
 .squad-editor {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
+  &__tabs {
+    .ant-tabs-nav {
+      margin-bottom: 20px;
+    }
+    /* 覆盖 Tab 样式更贴合你的主题 */
+    .ant-tabs-tab {
+      font-size: 14px;
+      padding: 10px 16px;
+    }
+  }
+
+  &__pane {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    min-height: 420px;
+    max-height: 62vh;
+    overflow-y: auto;
+    /* 为滚动条留出喘息空间 */
+    padding-right: 8px;
+    padding-bottom: 12px;
+  }
 
   &__row {
     display: flex;
     flex-direction: column;
     gap: 6px;
     min-width: 0;
+
+    &--mt12 {
+      margin-top: 12px;
+    }
   }
 
-  /* 基础信息 2×2 网格：名称 / 头像 / 唯一标识 / 协作模式，描述整宽 */
+  /* 基础信息网络布局 */
   &__basic {
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 16px 20px;
     align-items: start;
+  }
+
+  &__extended {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
   }
 
   &__span2 {
@@ -151,89 +180,137 @@
     align-self: flex-start;
   }
 
-  &__mode-desc {
-    margin: 6px 0 0;
-    font-size: 12px;
+  &__alert {
+    margin-bottom: 8px;
+  }
+
+  /* 模式提示：压缩为单行紧凑提示，不再占用大块 Alert 区域 */
+  &__mode-note {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 10px;
+    border-radius: 8px;
+    background: var(--color-background-subtle);
+    border: 1px solid var(--color-border-muted);
+    font-size: 13px;
     color: var(--color-foreground-muted);
+    line-height: 1.4;
+
+    &-ico {
+      flex: none;
+      color: var(--color-brand-600);
+    }
+
+    b {
+      color: var(--color-foreground-intense);
+      font-weight: 600;
+    }
+  }
+
+  &__mode-note-sub {
+    margin-left: 6px;
+  }
+
+  /* 流水线连线规则：单行紧凑提示，取消原分界线 + 大块 Alert */
+  &__dag-hint {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 10px;
+    border-radius: 8px;
+    background: var(--color-background-subtle);
+    border: 1px solid var(--color-border-muted);
+    font-size: 13px;
+    color: var(--color-foreground-muted);
+    line-height: 1.4;
+
+    &-ico {
+      flex: none;
+      color: var(--color-brand-600);
+    }
+  }
+
+  &__roles-config {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
   }
 
   &__members {
-    border: 1px solid var(--color-border);
-    border-radius: 10px;
-    padding: 12px;
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 12px;
   }
 
   &__members-head {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    font-size: 13px;
+  }
+
+  &__members-title {
+    font-size: 14px;
     font-weight: 600;
     color: var(--color-foreground-intense);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  &__add-member {
+    min-width: 240px;
+  }
+
+  &__members-list {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 12px;
   }
 
   &__members-empty {
-    font-size: 12px;
-    color: var(--color-foreground-muted);
-    padding: 8px 0;
+    margin: 32px 0;
   }
 
+  /* 成员卡片悬浮强化 */
   &__member {
     border: 1px solid var(--color-border-muted);
     border-radius: 8px;
-    padding: 10px;
+    padding: 12px;
+    background: var(--color-background-subtle);
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 10px;
+    transition: all 0.25s ease;
+
+    &:hover {
+      border-color: var(--color-brand-400);
+      background: var(--color-background-base);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.04);
+    }
   }
 
   &__member-line {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 10px;
   }
 
-  &__member-agent {
-    flex: 1 1 0;
-    min-width: 0;
-  }
-
+  &__member-agent,
   &__member-role {
     flex: 1 1 0;
     min-width: 0;
   }
 
-  &__member-lead {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    font-size: 12px;
-    color: var(--color-foreground-muted);
-    white-space: nowrap;
-  }
-
-  &__member-order {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 12px;
-    color: var(--color-foreground-muted);
-  }
-
-  &__member-order-hint {
-    color: var(--color-foreground-muted);
-    opacity: 0.8;
+  &__member-prompt {
+    font-size: 13px;
+    background: var(--color-background-base);
   }
 
   &__strategy {
     display: flex;
     flex-direction: column;
-    gap: 12px;
-    border-top: 1px dashed var(--color-border-muted);
-    padding-top: 12px;
+    gap: 16px;
   }
 
   &__strategy-line {
@@ -241,21 +318,276 @@
     align-items: center;
     gap: 12px;
     flex-wrap: wrap;
+    font-size: 13px;
+    color: var(--color-foreground-intense);
   }
 
-  &__retry {
-    display: inline-flex;
-    align-items: center;
+  &__cron-box,
+  &__api-box {
+    display: flex;
+    flex-direction: column;
     gap: 6px;
-    font-size: 13px;
+  }
+
+  &__hint {
+    margin: 4px 0 0;
+    font-size: 12px;
     color: var(--color-foreground-muted);
   }
 
-  &__summarizer {
-    margin-top: 8px;
-    max-width: 320px;
+  &__file-input-line {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 14px;
+    color: var(--color-foreground-intense);
+  }
+
+  &__workspace-line {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+
+    input {
+      flex: 1 1 0;
+      min-width: 0;
+    }
+  }
+
+  /* 杂项原有保留 */
+  &__logo {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  &__logo-preview {
+    width: 52px;
+    height: 52px;
+    border-radius: 10px;
+    overflow: hidden;
+    border: 1px solid var(--color-border-muted);
+    background: var(--color-background-subtle);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex: none;
+
+    img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+  }
+
+  &__logo-empty {
+    font-size: 12px;
+    color: var(--color-foreground-muted);
+  }
+
+  &__logo-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  &__uid {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  &__mcp, &__leader {
+    width: 100%;
+  }
+
+  /* 团队头像：点击头像上传（移除原按钮） */
+  &__logo-pick {
+    display: inline-flex;
+    align-items: center;
+    gap: 12px;
+    cursor: pointer;
+    position: relative;
+    outline: none;
+
+    &:focus-visible .squad-editor__logo-preview {
+      box-shadow: 0 0 0 2px var(--color-brand-500);
+    }
+
+    &:hover .squad-editor__logo-preview {
+      border-color: var(--color-brand-400);
+    }
+  }
+
+  &__logo-preview {
+    border-style: dashed;
+    svg {
+      color: var(--color-foreground-muted);
+    }
+  }
+
+  &__logo-empty {
+    color: var(--color-foreground-muted);
+  }
+
+  &__logo-tip {
+    font-size: 13px;
+    color: var(--color-foreground-muted);
+    user-select: none;
+  }
+
+  &__logo-clear {
+    position: absolute;
+    top: -6px;
+    left: 44px;
+    width: 18px;
+    height: 18px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: none;
+    border-radius: 50%;
+    background: var(--color-danger);
+    color: #fff;
+    cursor: pointer;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+  }
+
+  /* 工作区：图标 + 输入组合后缀 */
+  &__ws-suffix {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+  }
+
+  /* 全局 MCP 服务：卡片化选择（总开关 + 工具子开关） */
+  &__mcp-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 12px;
+  }
+
+  &__mcp-card {
+    border: 1px solid var(--color-border-muted);
+    border-radius: 10px;
+    background: var(--color-background-subtle);
+    padding: 12px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    transition: border-color 0.2s ease;
+
+    &:hover {
+      border-color: var(--color-border);
+    }
+  }
+
+  &__mcp-card-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  &__mcp-card-title {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+  }
+
+  &__mcp-card-ico {
+    color: var(--color-brand-600);
+    flex: none;
+  }
+
+  &__mcp-card-name {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+
+  &__mcp-card-label {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--color-foreground-intense);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  &__mcp-card-sub {
+    font-size: 11px;
+    color: var(--color-foreground-muted);
+    margin-top: 1px;
+  }
+
+  &__mcp-card-tools {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    border-top: 1px dashed var(--color-border-muted);
+    padding-top: 8px;
+    /* 工具较多时限定卡片高度，超出滚动，避免单卡被无限拉高 */
+    max-height: 220px;
+    overflow-y: auto;
+    padding-right: 4px;
+
+    &::-webkit-scrollbar {
+      width: 6px;
+    }
+
+    &::-webkit-scrollbar-thumb {
+      background: var(--color-border);
+      border-radius: 999px;
+    }
+  }
+
+  &__mcp-card-hint {
+    font-size: 12px;
+    color: var(--color-foreground-muted);
+    line-height: 1.5;
+  }
+
+  &__tool-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 5px 8px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background 0.15s ease;
+
+    &:hover {
+      background: var(--color-background-base);
+    }
+  }
+
+  &__tool-name {
+    font-size: 13px;
+    color: var(--color-foreground);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  &__curl {
+    margin: 0;
+    padding: 10px 12px;
+    border-radius: 6px;
+    background: var(--color-background-base);
+    border: 1px solid var(--color-border-muted);
+    color: var(--color-foreground-intense);
+    font-size: 13px;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    word-break: break-all;
   }
 }
+
+
 
 /* ---------------- 运行控制台 ---------------- */
 .squad-console {

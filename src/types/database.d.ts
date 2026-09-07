@@ -152,6 +152,7 @@ export interface AgentSquadRow {
   leader_agent_id: string | null
   unique_id: string | null
   global_mcp_ids: string | null // JSON 数组文本
+  global_mcp_tools?: string | null // JSON 对象文本：{ [mcpId]: 被禁用工具 id[] }
   run_strategy: string | null // JSON 文本
   supports_file_input: number // 0 / 1
   workspace_dir?: string | null // 用户自选产物输出根目录（可空）

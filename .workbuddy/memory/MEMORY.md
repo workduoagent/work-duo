@@ -55,7 +55,7 @@ UI 令牌只用 `var(--color-*)`（禁 hex/px）；根容器 `width:100%`（禁 
 **chat 页右栏架构**：`chat.tsx` 右栏 `agent-chat__right` 弹性列（非 fixed，底部 150px 留白避让输入栏），`Tabs` 切换 **执行轨迹 / 画布 / 产物**（可拖拽调宽 300–680）。`useAgentSession` 统一持有 `trace`/`canvas`/`memories` 三状态机。气泡内 `ThoughtPanel`+`PlanToolTimeline` 为**持久化真相源**（落库 `m.thought/m.toolSteps/m.planSteps`，刷新可回显）；右栏 Tab 为实时内存（刷新清空），两处并存互不替代（2026-09-06 决策回退）。
 
 ## 11. Rust 工具链路径（重要 · 实测校正 2026-09-07）
-cargo 二进制 `/d/Rust/cargo/bin/cargo`（**非** `/d/envs/Rust/.cargo`）；CARGO_HOME `/d/Rust/cargo`；rustup 家目录 `/d/Rust/rustup`。**Cargo.toml 在 `src-tauri/`，`cargo check` 须在该目录执行**（仓库根无 Cargo.toml）。编译：`cd src-tauri && RUSTUP_HOME=/d/Rust/rustup CARGO_HOME=/d/Rust/cargo RUSTUP_TOOLCHAIN=stable-x86_64-pc-windows-msvc /d/Rust/cargo/bin/cargo check`。增量数秒~十几秒；`--offline` 易索引误报，联网重跑。真机重编前须停掉运行中的 `npm run tauri` 窗口，否则 `target/` 文件锁致 LNK1104。
+cargo 二进制 `/d/envs/Rust/.cargo/bin/cargo`（**非** `/d/Rust/cargo`，后者已不存在）；CARGO_HOME `/d/envs/Rust/.cargo`；rustup 家目录 `/d/Rust/rustup`（内含 `toolchains/stable-x86_64-pc-windows-msvc`）。**Cargo.toml 在 `src-tauri/`，`cargo check` 须在该目录执行**（仓库根无 Cargo.toml）。编译：`cd src-tauri && RUSTUP_HOME=/d/Rust/rustup CARGO_HOME=/d/envs/Rust/.cargo RUSTUP_TOOLCHAIN=stable-x86_64-pc-windows-msvc /d/envs/Rust/.cargo/bin/cargo check`。增量数秒~十几秒；`--offline` 易索引误报，联网重跑。真机重编前须停掉运行中的 `npm run tauri` 窗口，否则 `target/` 文件锁致 LNK1104。
 
 ## 12. Phase 3 创新（✅ 已落地 2026-09-06，原「延后」计划作废）
 源 `docs/WorkDuo_Agent_UI_优化与创新方案（K3）.md` §3。三视图全部实现，前端在 `src/pages/agent-studio/session/` 与 `src/pages/memory-palace/`：
@@ -78,5 +78,5 @@ cargo 二进制 `/d/Rust/cargo/bin/cargo`（**非** `/d/envs/Rust/.cargo`）；C
 - **工作空间**：成员各自私有，默认 `.wd_mem/squads/{squad_id}/{agent_id}/`（相对 app CWD 的隐藏目录）。**2026-09-07 起支持用户自选 `agent_squad.workspace_dir`**（建表 v20）：选中的绝对路径作为团队根，成员工作区为 `{workspace_dir}/{agent_id}`（保留隔离）；留空回退默认。前端表单「工作目录」字段（SquadEditorModal，含 Tauri 目录选择按钮），`squad_orchestrator::squad_member_workspace` 统一派生，`load_squad` 读出注入 `SquadRuntimeConfig.workspace`。群聊模式（chat）纯讨论不走 run_member_subtask，不落文件产物。
 - **成员任职**(`agent_squad_member`)：role + persona_override(注入 system_prompt 末尾) + pipeline_order + is_leader。
 - **运行策略**：execution_mode('manual'|'schedule'|'api') + retry_count。
-- **全局能力**：Squad 级 `global_mcp_ids` 强制并入成员工具集（复用 `@提及` 机制）。
+- **全局能力**：Squad 级 `global_mcp_ids` 强制并入成员工具集（复用 `@提及` 机制）；`global_mcp_tools`（`{mcpId: 被禁用工具id[]}`）实现「服务总开关 + 工具子开关」两级控制，运行时在 `load_squad` 合并为 `disabled_mcp_tool_ids` 传入 `load_config`。
 - **遗留待办**：ReactFlow 新依赖已装；定时/API 模式本期是否做真调度待确认；logo 存 emoji。

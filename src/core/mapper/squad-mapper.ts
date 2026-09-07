@@ -102,6 +102,7 @@ function rowToSquad(
     leaderAgentId: r.leader_agent_id ?? null,
     uniqueId: r.unique_id ?? null,
     globalMcpIds: safeParse<string[]>(r.global_mcp_ids, []),
+    globalMcpTools: safeParse<Record<string, string[]>>(r.global_mcp_tools ?? null, {}),
     supportsFileInput: r.supports_file_input === 1,
     workspaceDir: r.workspace_dir ?? null,
     runStrategy: safeParse<SquadInfo['runStrategy']>(r.run_strategy, {
@@ -190,6 +191,7 @@ export async function upsertSquad(input: SquadUpsertInput): Promise<SquadInfo[]>
       uniqueId: input.uniqueId ?? null,
       leaderAgentId,
       globalMcpIds: input.globalMcpIds ?? [],
+      globalMcpTools: input.globalMcpTools ?? {},
       supportsFileInput: input.supportsFileInput ?? false,
       workspaceDir: input.workspaceDir ?? null,
       runStrategy: input.runStrategy,
@@ -226,6 +228,7 @@ export async function upsertSquad(input: SquadUpsertInput): Promise<SquadInfo[]>
        leader_agent_id = excluded.leader_agent_id,
        unique_id       = excluded.unique_id,
        global_mcp_ids  = excluded.global_mcp_ids,
+       global_mcp_tools = excluded.global_mcp_tools,
        run_strategy    = excluded.run_strategy,
        supports_file_input = excluded.supports_file_input,
        workspace_dir  = excluded.workspace_dir,

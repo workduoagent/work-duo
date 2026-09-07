@@ -326,4 +326,10 @@ ALTER TABLE agent_squad ADD COLUMN supports_file_input INTEGER NOT NULL DEFAULT 
 -- `.wd_mem/squads/{squad_id}/`。成员实际工作区为 {workspace_dir}/{agent_id}（保留相互隔离）。
 -- 存量库（建表时无该列）通过本语句补齐；重复执行会被 updateTables 安全跳过（duplicate column name）。
 ALTER TABLE agent_squad ADD COLUMN workspace_dir TEXT;
+
+-- ---------- v21：小分队「全局 MCP 工具级开关」 ----------
+-- 记录各 MCP 服务下被禁用的工具 id（JSON 对象：{ [mcpId]: string[] }），
+-- 与 global_mcp_ids（启用的服务列表）配合实现「按服务总开关 + 按工具子开关」。
+-- 存量库（建表时无该列）通过本语句补齐；重复执行会被 updateTables 安全跳过（duplicate column name）。
+ALTER TABLE agent_squad ADD COLUMN global_mcp_tools TEXT;
 -- ============================================================
