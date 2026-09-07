@@ -495,6 +495,7 @@ CREATE TABLE IF NOT EXISTS agent_squad
     global_mcp_ids  TEXT,
     run_strategy    TEXT,
     supports_file_input INTEGER NOT NULL DEFAULT 0,
+    workspace_dir   TEXT,
     created_at      INTEGER NOT NULL,
     updated_at      INTEGER NOT NULL
 );

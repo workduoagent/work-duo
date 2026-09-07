@@ -1,50 +1,330 @@
 /* ============================================================
- * pages/sandbox/node — NodeJs 沙箱环境（占位）
- * 仅使用设计令牌 var(--color-*)。
+ * pages/sandbox/node — Node/Bun 沙箱环境
+ * 风格对齐 Python 模块与 MCP 模块：卡片上（名称 + 状态）/ 中（版本 + 依赖数）/ 下（图标按钮组）。
+ * 仅使用设计令牌 var(--color-*)，不写 hex / px 字面量；页面根容器全宽。
  * ============================================================ */
 
 .sandbox-node {
   width: 100%;
-  height: 100%;
   display: flex;
-  align-items: center;
-  justify-content: center;
+  flex-direction: column;
+  gap: 18px;
+  height: 100%;
+  overflow: hidden;
   background: var(--color-background);
 }
 
-.sandbox-node__inner {
+/* ---------------- 顶部 Header ---------------- */
+.sandbox-node__head {
   display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 12px;
-  max-width: 460px;
-  text-align: center;
-  padding: 32px;
-  border-radius: var(--radius-card);
-  background: var(--color-background-subtle);
-}
-
-.sandbox-node__icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 72px;
-  height: 72px;
-  border-radius: 50%;
-  color: var(--color-brand-500);
-  background: var(--color-brand-50);
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
 }
 
 .sandbox-node__title {
-  margin: 4px 0 0;
-  font-size: 1.125rem;
+  margin: 0 0 6px;
+  font-size: 1.25rem;
   font-weight: 600;
   color: var(--color-foreground-intense);
 }
 
 .sandbox-node__lead {
   margin: 0;
+  max-width: 680px;
   color: var(--color-foreground-muted);
   font-size: 0.875rem;
   line-height: 1.6;
+}
+
+.sandbox-node__actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 0 auto;
+}
+
+.sandbox-node__loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 64px 0;
+}
+
+/* ---------------- 环境卡片网格 ---------------- */
+.sandbox-node__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 16px;
+  align-content: start;
+  overflow-y: auto;
+  padding: 16px 12px;
+}
+
+.app-card.sandbox-node__card .ant-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  height: 100%;
+  padding: 16px;
+}
+
+.sandbox-node__card {
+  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+}
+
+.sandbox-node__card:hover {
+  transform: translateY(-3px);
+  border-color: var(--color-brand-300, var(--color-brand-600));
+  box-shadow: var(--shadow-md);
+}
+
+/* ---- 上：名称 + 状态 ---- */
+.sandbox-node__card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.sandbox-node__card-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--color-foreground-intense);
+
+  span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+.sandbox-node__badge {
+  flex: 0 0 auto;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  line-height: 18px;
+  font-weight: 500;
+  color: var(--color-brand-600);
+  background-color: var(--color-brand-50, var(--color-background-muted));
+  border: 1px solid var(--color-border);
+}
+
+.sandbox-node__status {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  line-height: 18px;
+  background-color: var(--color-background-muted);
+  color: var(--color-foreground-muted);
+}
+
+.sandbox-node__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+  background-color: currentColor;
+}
+
+.sandbox-node__status.is-ready {
+  background-color: var(--color-success-50, var(--color-background-muted));
+  color: var(--color-success);
+}
+
+.sandbox-node__status.is-ready .sandbox-node__dot {
+  box-shadow: 0 0 0 2px color-mix(in srgb, currentColor 35%, transparent);
+}
+
+/* ---- 中：版本 + 依赖数 ---- */
+.sandbox-node__card-mid {
+  display: flex;
+  gap: 16px;
+  padding: 10px 12px;
+  border-radius: calc(var(--radius-card) - 6px);
+  background: var(--color-background-muted);
+}
+
+.sandbox-node__meta-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8125rem;
+  color: var(--color-foreground-muted);
+}
+
+.sandbox-node__meta-label {
+  color: var(--color-foreground-muted);
+}
+
+.sandbox-node__meta-item b {
+  color: var(--color-foreground-intense);
+  font-weight: 600;
+}
+
+/* ---- 下：图标按钮组 ---- */
+.sandbox-node__card-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-top: 12px;
+  border-top: 1px solid var(--color-border);
+  margin-top: auto;
+}
+
+.sandbox-node__act-reset:not(:disabled) {
+  color: var(--color-warning) !important;
+}
+
+.sandbox-node__act-reset:not(:disabled):hover {
+  color: var(--color-warning) !important;
+  background-color: var(--color-warning-50) !important;
+}
+
+/* ---------------- 详情弹窗：依赖管理 ---------------- */
+.sandbox-node__detail {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.sandbox-node__detail-install {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.sandbox-node__detail-install > :last-child {
+  align-self: flex-end;
+}
+
+.sandbox-node__detail-list {
+  height: 46vh;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.sandbox-node__detail-search {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--color-background);
+  margin-bottom: 12px;
+}
+
+.sandbox-node__deps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.sandbox-node__deps li + li {
+  margin-top: 6px;
+}
+
+.sandbox-node__dep-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 2px 12px 8px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--color-border);
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--color-foreground-muted);
+}
+
+.sandbox-node__dep-head-name {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.sandbox-node__dep-head-ver {
+  flex: 0 0 auto;
+  color: var(--color-foreground-muted);
+}
+
+.sandbox-node__dep-head-op {
+  flex: 0 0 auto;
+  min-width: 24px;
+  text-align: right;
+}
+
+.sandbox-node__dep {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  border-radius: calc(var(--radius-card) - 8px);
+  background: var(--color-background-subtle);
+}
+
+.sandbox-node__dep-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--color-foreground-intense);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sandbox-node__dep-ver {
+  flex: 0 0 auto;
+  color: var(--color-foreground-muted);
+  font-size: 0.8125rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.sandbox-node__dep-del:hover {
+  color: var(--color-danger) !important;
+}
+
+/* ---------------- 运行脚本输出 ---------------- */
+.sandbox-node__path-row {
+  display: flex;
+  gap: 8px;
+}
+
+.sandbox-node__path-row > :first-child {
+  flex: 1;
+}
+
+.sandbox-node__output {
+  margin-top: 4px;
+}
+
+.sandbox-node__output-label {
+  font-size: 0.8125rem;
+  color: var(--color-foreground-muted);
+  margin-bottom: 6px;
+}
+
+.sandbox-node__output-pre {
+  margin: 0;
+  padding: 12px 14px;
+  min-height: 120px;
+  max-height: 40vh;
+  overflow: auto;
+  border-radius: var(--radius-card);
+  background: var(--color-background-subtle);
+  color: var(--color-foreground);
+  font-size: 0.8125rem;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  border: 1px solid var(--color-border);
 }

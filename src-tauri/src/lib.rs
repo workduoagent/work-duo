@@ -2,12 +2,14 @@
 mod agent;
 mod mcp;
 mod mamba_manager;
+mod bun_manager;
 mod fs_helper;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // 绿色便携运行时管理器：落在 Tauri 资源目录（$RESOURCES）下的 mamba_root，交由 Tauri 托管。
+    // 绿色便携运行时管理器：落在 Tauri 资源目录（$RESOURCES）下的 mamba_root / bun_root，交由 Tauri 托管。
     let mamba = mamba_manager::MambaManager::new();
+    let bun = bun_manager::BunManager::new();
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_sql::Builder::default().build())
@@ -17,6 +19,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .manage(mamba)
+        .manage(bun)
         .manage(agent::runtime::AgentRuntime::new())
         .setup(|app| -> Result<(), Box<dyn std::error::Error>> {
             // 后台静默确保 Agent 默认环境（default）存在；失败仅日志，不阻塞启动。
@@ -33,6 +36,9 @@ pub fn run() {
                 if let Err(e) = mamba_manager::ensure_default_env(&handle).await {
                     eprintln!("[mamba] 默认环境初始化失败：{e}");
                 }
+                if let Err(e) = bun_manager::ensure_default_bun(&handle).await {
+                    eprintln!("[bun] 默认环境初始化失败：{e}");
+                }
             });
             Ok(())
         })
@@ -47,6 +53,14 @@ pub fn run() {
             mamba_manager::reset_mamba_env,
             mamba_manager::delete_mamba_env,
             mamba_manager::run_python_script,
+            bun_manager::init_bun_env,
+            bun_manager::list_bun_envs,
+            bun_manager::list_bun_packages,
+            bun_manager::install_bun_packages,
+            bun_manager::uninstall_bun_packages,
+            bun_manager::reset_bun_env,
+            bun_manager::delete_bun_env,
+            bun_manager::run_node_script,
             agent::commands::run_agent_task,
             agent::commands::run_squad_task,
             agent::commands::anchor_squad_memory,

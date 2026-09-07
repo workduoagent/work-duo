@@ -11,7 +11,7 @@
  * `run_squad_task`，事件经 @tauri-apps/api/event 订阅。
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react'
-import { Plus, Trash2, Pencil, Play, Users, History, Brain, Settings2, FileUp, Inbox } from 'lucide-react'
+import { Plus, Trash2, Pencil, Play, Users, History, Brain, Settings2, FileUp, Inbox, FolderOpen } from 'lucide-react'
 import { Empty, Spin, Popconfirm, Tag } from 'antd'
 import { Button, Card, Modal, Field, FieldLabel, Input, Select, Segmented, Switch, InputNumber } from '@/components/ui'
 import { useNotify } from '@/components/ui/notify'
@@ -43,6 +43,7 @@ import type {
 } from '@/types/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { invoke } from '@tauri-apps/api/core'
+import { open as openDialog } from '@tauri-apps/plugin-dialog'
 import {
   ReactFlow,
   Background,
@@ -118,6 +119,7 @@ interface EditorState {
   leaderAgentId: string
   globalMcpIds: string[]
   supportsFileInput: boolean
+  workspaceDir: string
   executionMode: SquadExecutionMode
   retryCount: number
   scheduleCron: string
@@ -137,6 +139,7 @@ function blankState(): EditorState {
     leaderAgentId: '',
     globalMcpIds: [],
     supportsFileInput: false,
+    workspaceDir: '',
     executionMode: 'manual',
     retryCount: 3,
     scheduleCron: '',
@@ -158,6 +161,7 @@ function fromSquad(s: SquadInfo): EditorState {
     leaderAgentId: s.leaderAgentId ?? '',
     globalMcpIds: s.globalMcpIds ?? [],
     supportsFileInput: s.supportsFileInput ?? false,
+    workspaceDir: s.workspaceDir ?? '',
     executionMode: s.runStrategy.executionMode,
     retryCount: s.runStrategy.retryCount,
     scheduleCron: s.runStrategy.scheduleCron ?? '',
@@ -521,6 +525,15 @@ function SquadEditorModal({
     e.target.value = ''
   }
 
+  const onPickWorkspace = async () => {
+    try {
+      const picked = await openDialog({ directory: true, multiple: false })
+      if (typeof picked === 'string') setState((s) => ({ ...s, workspaceDir: picked }))
+    } catch {
+      /* 非 Tauri 环境忽略 */
+    }
+  }
+
   const copyText = (text: string) => {
     navigator.clipboard?.writeText(text).then(
       () => message.success('已复制'),
@@ -609,6 +622,7 @@ function SquadEditorModal({
         leaderAgentId,
         globalMcpIds: state.globalMcpIds,
         supportsFileInput: state.supportsFileInput,
+        workspaceDir: state.workspaceDir.trim() || null,
         runStrategy: {
           executionMode: state.executionMode,
           retryCount: state.retryCount,
@@ -871,6 +885,25 @@ function SquadEditorModal({
           </div>
           <p className="squad-editor__hint">
             开启后，运行该小分队时允许附带文件（{state.mode === 'pipeline' ? '在画布「输入节点」挂载' : '随任务指令一并提交'}），成员可读取文件内容参与协作。
+          </p>
+        </Field>
+
+        <Field className="squad-editor__row squad-editor__workspace">
+          <FieldLabel htmlFor="squad-workspace">工作目录</FieldLabel>
+          <div className="squad-editor__workspace-line">
+            <Input
+              id="squad-workspace"
+              autoComplete="off"
+              placeholder="留空 = 默认隐藏目录 .wd_mem/squads/{squad_id}/"
+              value={state.workspaceDir}
+              onChange={(e) => setState((s) => ({ ...s, workspaceDir: e.target.value }))}
+            />
+            <Button variant="soft" size="sm" onClick={onPickWorkspace}>
+              选择目录
+            </Button>
+          </div>
+          <p className="squad-editor__hint">
+            成员产物输出根目录（绝对路径）。每个成员在其下 <code>{'{目录}/{agent_id}'}</code> 子目录隔离工作；留空则回退默认隐藏目录。
           </p>
         </Field>
 
@@ -1565,6 +1598,13 @@ export default function SquadsWorkspacePage() {
                 </div>
 
                 <p className="squads__card-desc">{squad.description || '暂无描述'}</p>
+
+                <div className="squads__card-workspace">
+                  <FolderOpen size={13} />
+                  <span title={squad.workspaceDir || ''}>
+                    {squad.workspaceDir || '工作目录：默认隐藏 .wd_mem/squads/'}
+                  </span>
+                </div>
 
                 <div className="squads__card-members">
                   <Users size={13} />

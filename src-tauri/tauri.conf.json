@@ -42,7 +42,8 @@
       "icons/icon.ico"
     ],
     "externalBin": [
-      "binaries/micromamba"
+      "binaries/micromamba",
+      "binaries/bun"
     ]
   }
 }

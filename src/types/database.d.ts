@@ -154,6 +154,7 @@ export interface AgentSquadRow {
   global_mcp_ids: string | null // JSON 数组文本
   run_strategy: string | null // JSON 文本
   supports_file_input: number // 0 / 1
+  workspace_dir?: string | null // 用户自选产物输出根目录（可空）
   created_at: number
   updated_at: number
 }

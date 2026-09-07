@@ -38,6 +38,11 @@
           "args": true,
           "name": "binaries/micromamba",
           "sidecar": true
+        },
+        {
+          "name": "binaries/bun",
+          "sidecar": true,
+          "args": true
         }
       ]
     },

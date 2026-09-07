@@ -9,7 +9,9 @@ import { useCallback, useEffect, useState } from 'react'
 import { SlidersHorizontal, Brain, ShieldCheck, Info } from 'lucide-react'
 import { Spin } from 'antd'
 import { PythonLogo } from '@/components/icons/PythonLogo'
+import { NodeLogo } from '@/components/icons/NodeLogo'
 import SandboxPythonPage from '@/pages/sandbox/python'
+import SandboxNodePage from '@/pages/sandbox/node'
 import MemoryPalace from '@/pages/memory-palace/MemoryPalace'
 import {
   loadSettings,
@@ -21,7 +23,7 @@ import { SecurityPanel } from './components/SecurityPanel'
 import { AboutPanel } from './components/AboutPanel'
 import './index.scss'
 
-type SectionId = 'system' | 'memory' | 'security' | 'about' | 'sandbox-python'
+type SectionId = 'system' | 'memory' | 'security' | 'about' | 'sandbox-python' | 'sandbox-node'
 
 interface FlatNavItem {
   id: SectionId
@@ -44,7 +46,10 @@ const SECTIONS: FlatNavItem[] = [
 const GROUPS: NavGroup[] = [
   {
     label: '沙箱环境',
-    items: [{ id: 'sandbox-python', label: 'Python', icon: <PythonLogo className="settings__nav-icon-img" /> }],
+    items: [
+      { id: 'sandbox-python', label: 'Python', icon: <PythonLogo className="settings__nav-icon-img" /> },
+      { id: 'sandbox-node', label: 'Node', icon: <NodeLogo className="settings__nav-icon-img" /> },
+    ],
   },
 ]
 
@@ -121,6 +126,7 @@ export default function SettingsPage() {
         )}
         {active === 'about' && <AboutPanel />}
         {active === 'sandbox-python' && <SandboxPythonPage />}
+        {active === 'sandbox-node' && <SandboxNodePage />}
       </main>
     </div>
   )

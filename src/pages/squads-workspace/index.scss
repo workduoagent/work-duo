@@ -763,6 +763,21 @@
     font-size: 12px;
     color: var(--color-foreground-muted);
   }
+
+  &__card-workspace {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--color-foreground-muted);
+    overflow: hidden;
+
+    span {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+  }
 }
 
 .squad-editor {
@@ -780,6 +795,17 @@
     gap: 10px;
     font-size: 14px;
     color: var(--color-foreground-intense);
+  }
+
+  &__workspace-line {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+
+    input {
+      flex: 1 1 0;
+      min-width: 0;
+    }
   }
 }
 

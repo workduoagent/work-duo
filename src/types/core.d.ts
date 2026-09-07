@@ -460,6 +460,7 @@ export interface SquadUpsertInput {
   leaderAgentId?: string | null
   globalMcpIds?: string[]
   supportsFileInput?: boolean | null
+  workspaceDir?: string | null
   runStrategy: SquadRunStrategy
   members: SquadMemberInput[]
   chatConfig: SquadChatConfig
@@ -483,6 +484,7 @@ export interface SquadInfo {
   uniqueId?: string | null
   globalMcpIds: string[]
   supportsFileInput?: boolean | null
+  workspaceDir?: string | null
   runStrategy: SquadRunStrategy
   members: SquadMember[]
   chatConfig: SquadChatConfig

@@ -991,10 +991,11 @@ async fn load_config(
 \n运行任何 Python 代码的唯一正确方式：\
 \n1. 先用 `native__write_file` 把 .py 脚本写入工作空间（建议放 `.wd_mem/scripts/`，便于复用）；\
 \n2. 再调用 `native__run_python_sandbox` 并传入该脚本的绝对路径执行（默认环境 `default`）。\
+\n运行任何 JavaScript / TypeScript 代码（如前端脚本、轻量数据处理、API 调用），用 `native__run_node_sandbox` 传入代码或脚本绝对路径即可（默认环境 `default`）。\
 \n**严禁**：\
-\n- 不要尝试调用系统 `python` / `python3`，不要用 `where python`、`python --version` 探测本机 Python；\
-\n- 绝对禁止用 winget / choco / brew / apt 安装系统级 Python 或任何系统软件——这会脱离沙箱并污染用户本机环境；\
-\n- 沙箱缺少第三方库时先 import 确认，确实缺失则如实告知用户，切勿自行安装系统级包。",
+\n- 不要尝试调用系统 `python` / `python3` / `node` / `bun`，不要用 `where python`、`python --version`、`node -v` 探测本机运行时；\
+\n- 绝对禁止用 winget / choco / brew / apt 安装系统级 Python / Node 或任何系统软件——这会脱离沙箱并污染用户本机环境；\
+\n- 沙箱缺少第三方库（Python 的 pandas / Node 的 axios 等）时先 import / require 确认，确实缺失则如实告知用户，切勿自行安装系统级包。",
                 );
             } else if cfg!(target_os = "windows") {
                 system_prompt.push_str(
@@ -1102,8 +1103,9 @@ category 取值：decision（决策）/ code_pattern（代码模式）/ user_pre
 /// 并由 `global_mcp_ids` 强制并入成员的 MCP 工具集。
 ///
 /// 返回的 `SquadRuntimeConfig` 供 Phase 3-5 的协作引擎（orchestrator / pipeline / chat）消费。
-/// 注意：成员的实际私有 workspace 由运行期派生（.wd_mem/squads/{squad_id}/{agent_id}/）后覆盖，
-/// 此处 workspace 传 None，load_config 据此跳过工作空间注入、运行期再装配。
+/// `workspace` 读取自 agent_squad.workspace_dir（用户自选产物根目录，可空）：
+/// 运行期据此派生成员私有 workspace（{workspace}/{agent_id}，有值）或回退默认
+/// `.wd_mem/squads/{squad_id}/{agent_id}/`。详见 squad_orchestrator::squad_member_workspace。
 pub async fn load_squad(app: &AppHandle, squad_id: &str) -> Result<SquadRuntimeConfig, String> {
     let instances = app.state::<DbInstances>();
     let guard = instances.0.read().await;
@@ -1141,6 +1143,14 @@ pub async fn load_squad(app: &AppHandle, squad_id: &str) -> Result<SquadRuntimeC
     };
     let global_mcp_ids: Vec<String> =
         serde_json::from_str(&get_str(&squad, "global_mcp_ids")).unwrap_or_default();
+    let workspace_dir = {
+        let w = get_str(&squad, "workspace_dir");
+        if w.trim().is_empty() {
+            None
+        } else {
+            Some(w)
+        }
+    };
     let run_strategy: SquadRunStrategy = serde_json::from_str(&get_str(&squad, "run_strategy"))
         .unwrap_or_else(|_| SquadRunStrategy {
             execution_mode: "manual".to_string(),
@@ -1274,7 +1284,7 @@ pub async fn load_squad(app: &AppHandle, squad_id: &str) -> Result<SquadRuntimeC
         run_strategy,
         members,
         chat_config,
-        workspace: None,
+        workspace: workspace_dir,
     })
 }
 

@@ -55,6 +55,20 @@ struct DelegatedTask {
     instruction: String,
 }
 
+/// 计算某成员的运行工作目录。
+///
+/// - 若 squad 配置了用户自选根目录（`workspace`，非空），成员工作区为 `{root}/{agent_id}`；
+/// - 否则回退默认隔离目录 `.wd_mem/squads/{squad_id}/{agent_id}`。
+fn squad_member_workspace(workspace: &Option<String>, squad_id: &str, agent_id: &str) -> String {
+    match workspace {
+        Some(root) if !root.trim().is_empty() => {
+            let trimmed = root.trim().trim_end_matches(['/', '\\']);
+            format!("{}/{}", trimmed, agent_id)
+        }
+        _ => format!(".wd_mem/squads/{}/{}", squad_id, agent_id),
+    }
+}
+
 /// 运行一次小分队协作任务（编排式）。
 ///
 /// 流程：建会话 → 选主管 → 主管规划委派 → 逐子任务派成员执行（带重试）→ leader 汇总。
@@ -155,10 +169,8 @@ pub async fn run_squad_task(app: &AppHandle, squad: SquadRuntimeConfig, prompt: 
     for task in &delegated {
         // 按角色 / agent_id 匹配成员；匹配不到则退回主管。
         let member = match_member(&squad.members, &task.assignee).unwrap_or(&leader);
-        let ws = format!(
-            ".wd_mem/squads/{}/{}",
-            squad.squad_id, member.agent.agent_id
-        );
+        let ws =
+            squad_member_workspace(&squad.workspace, &squad.squad_id, &member.agent.agent_id);
         let subtask_prompt = if context.is_empty() {
             task.instruction.clone()
         } else {
@@ -525,6 +537,7 @@ fn build_dag_plan(members: &[SquadMemberConfig]) -> Result<DagPlan, String> {
 async fn run_pipeline_node(
     app: &AppHandle,
     squad_id: &str,
+    workspace: &Option<String>,
     member: &SquadMemberConfig,
     prompt: &str,
     context: &str,
@@ -532,7 +545,7 @@ async fn run_pipeline_node(
     pool: &sqlx::SqlitePool,
     session_id: &str,
 ) -> String {
-    let ws = format!(".wd_mem/squads/{}/{}", squad_id, member.agent.agent_id);
+    let ws = squad_member_workspace(workspace, squad_id, &member.agent.agent_id);
     let mut output = String::new();
     let mut last_err: Option<String> = None;
     for attempt in 0..retry {
@@ -660,7 +673,7 @@ async fn run_squad_pipeline(
             .map(|&up| outputs[up].clone())
             .collect::<Vec<_>>()
             .join("\n\n");
-        let out = run_pipeline_node(app, &squad.squad_id, member, prompt, &ctx, retry, pool, session_id).await;
+        let out = run_pipeline_node(app, &squad.squad_id, &squad.workspace, member, prompt, &ctx, retry, pool, session_id).await;
         outputs[mi] = out;
     }
 

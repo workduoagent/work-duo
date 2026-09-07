@@ -35,6 +35,8 @@ use crate::agent::tools::ToolError;
 use crate::agent::tools::ToolRegistry;
 use crate::mamba_manager::MambaManager;
 use crate::mamba_manager::run_python_in_sandbox;
+use crate::bun_manager::BunManager;
+use crate::bun_manager::run_node_in_sandbox;
 
 /// 宿主命令绝对硬超时（秒）。超时即显式 Kill 子进程，严防阻塞型命令挂死 Tokio 运行时。
 const COMMAND_TIMEOUT_SECS: u64 = 60;
@@ -793,6 +795,154 @@ impl AgentTool for RunPythonSandboxTool {
     }
 }
 
+/* ----------------------------- run_node_sandbox ----------------------------- */
+
+pub struct RunNodeSandboxTool {
+    app: AppHandle,
+}
+
+impl RunNodeSandboxTool {
+    pub fn new(app: AppHandle) -> Self {
+        Self { app }
+    }
+}
+
+#[async_trait]
+impl AgentTool for RunNodeSandboxTool {
+    fn name(&self) -> String {
+        "native__run_node_sandbox".into()
+    }
+    fn tool_definition(&self) -> Value {
+        def(
+            "native__run_node_sandbox",
+            "在 Work Duo 内置的 Bun 隔离 Node 沙箱中运行 JavaScript / TypeScript 脚本（默认环境 default）。\n\
+             【运行 Node 的唯一正确方式】\n\
+             1. 直接用 code 参数给 JS/TS 源码（工具会自动落盘 .wd_mem/scripts/ 再执行），或先用 native__write_file 写脚本再传 script_path；\n\
+             2. 脚本里直接 `import` / `require` 你需要的包（lodash / axios / zod / exceljs 等），运行时若缺失会自动按需安装并重试，无需你手动安装，也不要浪费轮次逐个探测包是否存在。\n\
+             【严禁】\n\
+             - 不要执行系统 node / bun 命令，不要用 `node --version`、`bun --version` 探测本机运行时；\n\
+             - 绝对禁止用 `npm install -g` / 系统包管理器安装全局 Node 环境或任何系统软件——\
+             这会脱离沙箱并污染用户本机环境；缺包时交给运行时自动安装即可。\n\
+             本工具需用户审批，且要求该智能体已开启沙箱权限。",
+            json!({
+                "code": {
+                    "type": "string",
+                    "description": "JavaScript / TypeScript 源代码（推荐用法：直接给代码，工具会自动落盘到 .wd_mem/scripts/ 再执行）"
+                },
+                "filename": {
+                    "type": "string",
+                    "description": "可选，配合 code 使用：落盘脚本名（默认 auto_run_<时间戳>.mjs），无需带路径；可带 .mjs/.cjs/.js/.ts 后缀"
+                },
+                "script_path": {
+                    "type": "string",
+                    "description": "已存在脚本的绝对路径（须在工作空间内）；与 code 二选一，两者都给时以 code 为准"
+                },
+                "env_name": { "type": "string", "description": "Bun 环境名，默认 default" }
+            }),
+            &[],
+        )
+    }
+    fn check_permission(&self, _args: &Value) -> PermissionLevel {
+        PermissionLevel::RequireApproval
+    }
+    async fn execute(&self, args: Value, ctx: &ToolContext) -> Result<String, ToolError> {
+        println!(
+            "[agent] native__run_node_sandbox: 请求 sandbox_enabled={} args={}",
+            ctx.sandbox_enabled,
+            crate::agent::runtime::clip(&args.to_string(), 500),
+        );
+        if !ctx.sandbox_enabled {
+            println!("[agent] native__run_node_sandbox: 拒绝，allow_sandbox=false");
+            return Err(ToolError::PermissionDenied(
+                "该智能体未开启沙箱权限（allow_sandbox=false），拒绝执行".into(),
+            ));
+        }
+        // 与 Python 沙箱同构：① code 直传（消除模型绕道到系统 node 的动机）；② script_path 兼容旧用法。
+        let code = args.get("code").and_then(|v| v.as_str());
+        let script_path = args.get("script_path").and_then(|v| v.as_str());
+
+        let resolved_script: String = if let Some(code) = code {
+            let ws = ctx.workspace.clone().ok_or_else(|| {
+                ToolError::PermissionDenied(
+                    "未提供工作空间，无法落盘 Node 脚本（请先绑定工程目录），或改用 script_path 传入已有脚本".into(),
+                )
+            })?;
+            let raw_name = args
+                .get("filename")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .trim();
+            let name = if raw_name.is_empty() {
+                let ts = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_millis())
+                    .unwrap_or(0);
+                format!("auto_run_{ts}.mjs")
+            } else if raw_name.ends_with(".mjs")
+                || raw_name.ends_with(".cjs")
+                || raw_name.ends_with(".js")
+                || raw_name.ends_with(".ts")
+            {
+                raw_name.to_string()
+            } else {
+                format!("{raw_name}.mjs")
+            };
+            // 文件名消毒：剔除路径分隔符与非法字符，杜绝 ../ 穿越
+            let safe_name: String = name
+                .chars()
+                .filter(|c| !matches!(c, '/' | '\\' | ':' | '"' | '<' | '>' | '|' | '?' | '*'))
+                .collect();
+            let dir = ws.join(".wd_mem").join("scripts");
+            std::fs::create_dir_all(&dir)
+                .map_err(|e| ToolError::ExecutionFailed(format!("创建脚本目录失败：{e}")))?;
+            let p = dir.join(&safe_name);
+            std::fs::write(&p, code)
+                .map_err(|e| ToolError::ExecutionFailed(format!("写入脚本失败：{e}")))?;
+            // 落盘后仍过 PathGuard，确保最终执行路径未逃逸工作空间。
+            let abs = PathGuard::check(&p.to_string_lossy(), ctx)?;
+            abs.to_string_lossy().to_string()
+        } else if let Some(sp) = script_path {
+            let abs = PathGuard::check(sp, ctx)?;
+            abs.to_string_lossy().to_string()
+        } else {
+            return Err(ToolError::InvalidArgs(
+                "run_node_sandbox 需要提供 code（JS/TS 源码，推荐）或 script_path（工作空间内脚本绝对路径）之一".into(),
+            ));
+        };
+        let env_name = args
+            .get("env_name")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+
+        println!(
+            "[agent] native__run_node_sandbox: 开始 script={} env={}",
+            resolved_script,
+            env_name.as_deref().unwrap_or("default"),
+        );
+        let started = Instant::now();
+        let mgr = self.app.state::<BunManager>();
+        match run_node_in_sandbox(&self.app, &*mgr, env_name, resolved_script).await {
+            Ok(out) => {
+                println!(
+                    "[agent] native__run_node_sandbox: 成功 result={}字符 耗时={}ms 内容={}",
+                    out.chars().count(),
+                    started.elapsed().as_millis(),
+                    crate::agent::runtime::clip(&out, 500),
+                );
+                Ok(out)
+            }
+            Err(e) => {
+                println!(
+                    "[agent] native__run_node_sandbox: 失败 耗时={}ms error={}",
+                    started.elapsed().as_millis(),
+                    e
+                );
+                Err(ToolError::ExecutionFailed(e))
+            }
+        }
+    }
+}
+
 /// 注册全部原生工具到注册表。
 /// 注册全部原生工具。
 ///
@@ -816,4 +966,7 @@ pub fn register_native_tools(registry: &mut ToolRegistry, app: &AppHandle, sandb
         registry.register(Arc::new(ExecuteCommandTool));
     }
     registry.register(Arc::new(RunPythonSandboxTool::new(app.clone())));
+    // Node 沙箱工具：与 Python 同构，始终注册（执行时再按 sandbox_enabled 校验），
+    // 沙箱开启即同时提供 Python + Node 两种运行时供模型按任务自选语言（方案 A）。
+    registry.register(Arc::new(RunNodeSandboxTool::new(app.clone())));
 }

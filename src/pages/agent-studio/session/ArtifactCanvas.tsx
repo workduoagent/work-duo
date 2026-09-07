@@ -179,8 +179,8 @@ export function ArtifactCanvas({
   const [selectedStep, setSelectedStep] = useState<number | null>(null)
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; step: number } | null>(null)
 
-  // 拖拽状态（ref 避免频繁 re-render）
-  const dragRef = useRef<{ startX: number; startY: number; vbX: number; vbY: number } | null>(null)
+  // 拖拽状态（ref 避免频繁 re-render）；mousedown 时把 viewBox 尺寸一并快照，避免 mousemove 里读 ref 竞态
+  const dragRef = useRef<{ startX: number; startY: number; vbX: number; vbY: number; w: number; h: number } | null>(null)
   const [isDragging, setIsDragging] = useState(false)
 
   // layout 变化时重置 viewBox
@@ -204,32 +204,37 @@ export function ArtifactCanvas({
         startY: e.clientY,
         vbX: viewBox.x,
         vbY: viewBox.y,
+        w: viewBox.w,
+        h: viewBox.h,
       }
       setIsDragging(true)
       setSelectedStep(null)
       setContextMenu(null)
     },
-    [viewBox.x, viewBox.y],
+    [viewBox.x, viewBox.y, viewBox.w, viewBox.h],
   )
 
   const onSvgMouseMove = useCallback(
     (e: MouseEvent<SVGSVGElement>) => {
-      if (!dragRef.current) return
+      const drag = dragRef.current
+      if (!drag) return
       const container = containerRef.current
       if (!container) return
       const rect = container.getBoundingClientRect()
-      // 把屏幕像素位移换算成 viewBox 坐标位移
-      const scaleX = viewBox.w / rect.width
-      const scaleY = viewBox.h / rect.height
-      const dx = (e.clientX - dragRef.current.startX) * scaleX
-      const dy = (e.clientY - dragRef.current.startY) * scaleY
-      setViewBox((vb) => ({
-        ...vb,
-        x: dragRef.current!.vbX - dx,
-        y: dragRef.current!.vbY - dy,
-      }))
+      // 把屏幕像素位移换算成 viewBox 坐标位移（用拖拽起点的 viewBox 尺寸快照）
+      const scaleX = drag.w / rect.width
+      const scaleY = drag.h / rect.height
+      const dx = (e.clientX - drag.startX) * scaleX
+      const dy = (e.clientY - drag.startY) * scaleY
+      // 直接用快照计算后传普通对象，避免在 setState updater 内读 dragRef 导致的空指针竞态
+      setViewBox({
+        x: drag.vbX - dx,
+        y: drag.vbY - dy,
+        w: drag.w,
+        h: drag.h,
+      })
     },
-    [viewBox.w, viewBox.h],
+    [],
   )
 
   const onSvgMouseUp = useCallback(() => {

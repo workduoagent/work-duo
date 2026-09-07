@@ -320,4 +320,10 @@ ALTER TABLE agent_squad ADD COLUMN unique_id TEXT;
 -- 控制运行该小分队时是否允许附带文件输入（如流水线的起始输入节点可挂载文件）。
 -- 存量库（建表时无该列）通过本语句补齐；重复执行会被 updateTables 安全跳过（duplicate column name）。
 ALTER TABLE agent_squad ADD COLUMN supports_file_input INTEGER NOT NULL DEFAULT 0;
+
+-- ---------- v20：小分队「工作目录」 ----------
+-- 用户自选的产物输出根目录（绝对路径）；为空则运行期回退默认隔离目录
+-- `.wd_mem/squads/{squad_id}/`。成员实际工作区为 {workspace_dir}/{agent_id}（保留相互隔离）。
+-- 存量库（建表时无该列）通过本语句补齐；重复执行会被 updateTables 安全跳过（duplicate column name）。
+ALTER TABLE agent_squad ADD COLUMN workspace_dir TEXT;
 -- ============================================================

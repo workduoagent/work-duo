@@ -102,6 +102,8 @@ function rowToSquad(
     leaderAgentId: r.leader_agent_id ?? null,
     uniqueId: r.unique_id ?? null,
     globalMcpIds: safeParse<string[]>(r.global_mcp_ids, []),
+    supportsFileInput: r.supports_file_input === 1,
+    workspaceDir: r.workspace_dir ?? null,
     runStrategy: safeParse<SquadInfo['runStrategy']>(r.run_strategy, {
       executionMode: 'manual',
       retryCount: 3,
@@ -189,6 +191,7 @@ export async function upsertSquad(input: SquadUpsertInput): Promise<SquadInfo[]>
       leaderAgentId,
       globalMcpIds: input.globalMcpIds ?? [],
       supportsFileInput: input.supportsFileInput ?? false,
+      workspaceDir: input.workspaceDir ?? null,
       runStrategy: input.runStrategy,
       members: input.members.map((m) => ({
         ...m,
@@ -213,8 +216,8 @@ export async function upsertSquad(input: SquadUpsertInput): Promise<SquadInfo[]>
   const db = await getDb()
   await db.execute(
     `INSERT INTO agent_squad
-       (id, name, logo, description, mode, leader_agent_id, unique_id, global_mcp_ids, run_strategy, supports_file_input, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       (id, name, logo, description, mode, leader_agent_id, unique_id, global_mcp_ids, run_strategy, supports_file_input, workspace_dir, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET
        name            = excluded.name,
        logo            = excluded.logo,
@@ -225,6 +228,7 @@ export async function upsertSquad(input: SquadUpsertInput): Promise<SquadInfo[]>
        global_mcp_ids  = excluded.global_mcp_ids,
        run_strategy    = excluded.run_strategy,
        supports_file_input = excluded.supports_file_input,
+       workspace_dir  = excluded.workspace_dir,
        updated_at      = excluded.updated_at`,
     [
       id,
@@ -237,6 +241,7 @@ export async function upsertSquad(input: SquadUpsertInput): Promise<SquadInfo[]>
       toJson(input.globalMcpIds ?? []),
       toJson(input.runStrategy),
       input.supportsFileInput ? 1 : 0,
+      input.workspaceDir ?? null,
       t,
       t,
     ],

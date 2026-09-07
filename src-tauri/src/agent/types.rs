@@ -364,8 +364,8 @@ pub struct SquadRuntimeConfig {
     pub run_strategy: SquadRunStrategy,
     pub members: Vec<SquadMemberConfig>,
     pub chat_config: SquadChatConfig,
-    /// 小分队工作区（可选；成员实际私有 workspace 由运行期派生，覆盖此字段）。
-    #[allow(dead_code)]
+    /// 小分队工作区（可选；用户自选产物输出根目录）。
+    /// 运行期据此派生成员私有 workspace：有值则为 `{workspace}/{agent_id}`，否则回退 `.wd_mem/squads/{squad_id}/{agent_id}`。
     pub workspace: Option<String>,
 }
 
