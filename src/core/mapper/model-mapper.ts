@@ -18,6 +18,7 @@ import type { ModelProvider } from '@/types/core'
 import type { ModelConfig } from '@/core/file/model-file'
 import type { ModelConfigRow } from '@/types/database'
 import { getDb } from '@/core/db/SqlService'
+import { safeIso } from './safeTime'
 
 /* ------------------------------------------------------------------ *
  * 行 <-> 领域模型 转换
@@ -72,8 +73,8 @@ function rowToModel(r: ModelConfigRow): ModelConfig {
     toolCalls: r.tool_calls === 1,
     description: r.description ?? undefined,
     tags: safeParse<string[] | null>(r.tags, null) ?? undefined,
-    createdAt: new Date(r.created_at).toISOString(),
-    updatedAt: new Date(r.updated_at).toISOString(),
+    createdAt: safeIso(r.created_at),
+    updatedAt: safeIso(r.updated_at),
   }
   // 还原分类专属参数到对应键（text/multimodal/...）
   if (params) (model as unknown as Record<string, unknown>)[category] = params
@@ -253,6 +254,8 @@ export async function bulkUpsertModels(
         row.model_name,
         row.base_url,
         row.api_key,
+        row.app_id,
+        row.api_secret,
         row.category,
         row.enabled,
         row.tool_calls,

@@ -11,6 +11,7 @@
  * 负责会话（session）与轮次（round）的持久化。
  */
 import { isTauri } from '@/core/config'
+import { safeIso } from './safeTime'
 import { getDb } from '@/core/db/SqlService'
 import type {
   AgentConversationRound,
@@ -56,8 +57,8 @@ function rowToSession(r: AgentConversationSessionRow): AgentConversationSession 
     toolsTokens: r.tools_tokens ?? undefined,
     summaryRoundCount: r.summary_round_count ?? undefined,
     totalTurns: r.total_turns ?? undefined,
-    createdAt: new Date(r.created_at).toISOString(),
-    updatedAt: new Date(r.updated_at).toISOString(),
+    createdAt: safeIso(r.created_at),
+    updatedAt: safeIso(r.updated_at),
   }
 }
 
@@ -77,8 +78,8 @@ function rowToRound(r: AgentConversationRoundRow): AgentConversationRound {
     startTime: r.start_time ?? undefined,
     endTime: r.end_time ?? undefined,
     rawMessagesJson: r.raw_messages_json ?? undefined,
-    createdAt: new Date(r.created_at).toISOString(),
-    updatedAt: new Date(r.updated_at).toISOString(),
+    createdAt: safeIso(r.created_at),
+    updatedAt: safeIso(r.updated_at),
   }
 }
 
@@ -459,8 +460,8 @@ export async function listSessionTree(agentCode: string): Promise<SessionTreeGro
     toolsTokens: r.tools_tokens ?? undefined,
     summaryRoundCount: r.summary_round_count ?? undefined,
     totalTurns: r.total_turns ?? undefined,
-    createdAt: new Date(r.created_at).toISOString(),
-    updatedAt: new Date(r.updated_at).toISOString(),
+    createdAt: safeIso(r.created_at),
+    updatedAt: safeIso(r.updated_at),
     projectName: r.project_name ?? undefined,
     projectRootPath: r.project_root_path ?? undefined,
     projectIsPinned: r.project_is_pinned === 1,

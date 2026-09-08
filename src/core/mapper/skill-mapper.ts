@@ -12,6 +12,7 @@
  *  - 非 Tauri 环境（浏览器 dev）回退 localStorage，保证可调试。
  */
 import { isTauri } from '@/core/config'
+import { safeIso } from './safeTime'
 import type { SkillInfo } from '@/core/file/skill-file'
 import type { SkillInfoRow } from '@/types/database'
 import { getDb } from '@/core/db/SqlService'
@@ -66,8 +67,8 @@ function rowToSkill(r: SkillInfoRow): SkillInfo {
     scenario: r.scenario ?? undefined,
     status: r.status,
     path: r.path ?? undefined,
-    createdAt: new Date(r.created_at).toISOString(),
-    updatedAt: new Date(r.updated_at).toISOString(),
+    createdAt: safeIso(r.created_at),
+    updatedAt: safeIso(r.updated_at),
   }
 }
 

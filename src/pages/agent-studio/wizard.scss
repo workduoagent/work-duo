@@ -319,47 +319,81 @@
 
   /* ---------- 步骤2：模型槽位 ---------- */
   &__slots {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(min(100%, 360px), 1fr));
-    gap: 14px;
     width: 100%;
+    max-width: 1200px;
+    margin: 0 auto;
+    min-height: 100%;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
+    gap: 16px;
+    align-items: stretch;
+
+    @media (max-width: 720px) {
+      grid-template-columns: 1fr;
+    }
   }
 
-  &__slot.app-card .ant-card-body {
-    display: flex;
-    flex-direction: column;
-    gap: 14px;
-    padding: 18px;
+  &__slot {
+    &.app-card {
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+
+      &:hover {
+        transform: translateY(-2px);
+        border-color: var(--color-brand-300, var(--color-brand-600));
+        box-shadow: var(--shadow-md);
+      }
+    }
+
+    &.app-card .ant-card-body {
+      flex: 1 1 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      padding: 20px;
+    }
   }
 
   &__slot-head {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 14px;
+    flex-shrink: 0;
   }
 
   &__slot-icon {
-    width: 32px;
-    height: 32px;
+    width: 44px;
+    height: 44px;
     flex: none;
-    border-radius: 9px;
+    border-radius: 12px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
     background-color: var(--color-brand-50);
     color: var(--color-brand-600);
+
+    svg {
+      width: 22px;
+      height: 22px;
+    }
   }
 
   &__slot-titles {
     min-width: 0;
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
   }
 
   &__slot-title {
     display: flex;
     align-items: center;
     gap: 8px;
-    font-size: 14px;
-    font-weight: 600;
+    font-size: 16px;
+    font-weight: 650;
     color: var(--color-foreground-intense);
   }
 
@@ -370,11 +404,12 @@
     line-height: 17px;
     background-color: var(--color-brand-50);
     color: var(--color-brand-600);
+    flex: none;
   }
 
   &__slot-desc {
-    margin-top: 2px;
     font-size: 12px;
+    line-height: 1.5;
     color: var(--color-foreground-muted);
   }
 
@@ -383,16 +418,19 @@
     align-items: center;
     justify-content: space-between;
     gap: 12px;
-    padding-top: 4px;
+    padding-top: 12px;
     border-top: 1px dashed var(--color-border);
     font-size: 12px;
     color: var(--color-foreground-muted);
+    flex-shrink: 0;
   }
 
   &__param-grid {
+    flex: 1 1 auto;
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
     gap: 14px 18px;
+    align-content: start;
   }
 
   /* ---------- 步骤3/4：三栏挑选器 ---------- */

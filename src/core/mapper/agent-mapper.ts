@@ -30,6 +30,7 @@ import type {
   AgentSkillRefRow,
 } from '@/types/database'
 import { getDb } from '@/core/db/SqlService'
+import { safeIso } from './safeTime'
 
 /* ------------------------------------------------------------------ *
  * 行 <-> 领域模型 转换
@@ -69,8 +70,8 @@ function rowToAgent(r: AgentInfoRow): AgentInfo {
     autoToolExecMode: r.auto_tool_exec_mode === 1,
     allowSandbox: r.allow_sandbox === 1,
     memoryMode: (r.memory_mode as MemoryMode) ?? 'off',
-    createdAt: new Date(r.created_at).toISOString(),
-    updatedAt: new Date(r.updated_at).toISOString(),
+    createdAt: safeIso(r.created_at),
+    updatedAt: safeIso(r.updated_at),
   }
 }
 
@@ -81,8 +82,8 @@ function rowToMcpRef(r: AgentMcpRefRow): AgentMcpToolRef {
     mcpId: r.mcp_id,
     toolId: r.tool_id,
     isActive: r.is_active === 1,
-    createdAt: new Date(r.created_at).toISOString(),
-    updatedAt: new Date(r.updated_at).toISOString(),
+    createdAt: safeIso(r.created_at),
+    updatedAt: safeIso(r.updated_at),
   }
 }
 
@@ -92,8 +93,8 @@ function rowToSkillRef(r: AgentSkillRefRow): AgentSkillRef {
     agentId: r.agent_id,
     skillId: r.skill_id,
     isActive: r.is_active === 1,
-    createdAt: new Date(r.created_at).toISOString(),
-    updatedAt: new Date(r.updated_at).toISOString(),
+    createdAt: safeIso(r.created_at),
+    updatedAt: safeIso(r.updated_at),
   }
 }
 

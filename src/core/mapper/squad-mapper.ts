@@ -11,6 +11,7 @@
  * 本 mapper 仅负责小分队的「元数据 CRUD + 运行历史查询」。
  */
 import { isTauri } from '@/core/config'
+import { safeIso } from './safeTime'
 import { invoke } from '@tauri-apps/api/core'
 import type {
   SquadApiConfig,
@@ -67,7 +68,7 @@ async function loadMembers(db: Awaited<ReturnType<typeof getDb>>, squadId: strin
     pipelineOrder: r.pipeline_order ?? null,
     dependsOn: r.depends_on ? safeParse<string[]>(r.depends_on, []) : [],
     isLeader: r.is_leader === 1,
-    createdAt: new Date(r.created_at).toISOString(),
+    createdAt: safeIso(r.created_at),
   }))
 }
 
@@ -114,8 +115,8 @@ function rowToSquad(
       maxRounds: chat.maxRounds,
       summarizerAgentId: chat.summarizerAgentId ?? null,
     },
-    createdAt: new Date(r.created_at).toISOString(),
-    updatedAt: new Date(r.updated_at).toISOString(),
+    createdAt: safeIso(r.created_at),
+    updatedAt: safeIso(r.updated_at),
   }
 }
 
@@ -317,8 +318,8 @@ export async function listSquadSessions(squadId: string): Promise<SquadSession[]
     mode: (r.mode as SquadSession['mode']) || 'orchestrator',
     status: r.status,
     snapshot: r.snapshot ?? undefined,
-    createdAt: new Date(r.created_at).toISOString(),
-    updatedAt: new Date(r.updated_at).toISOString(),
+    createdAt: safeIso(r.created_at),
+    updatedAt: safeIso(r.updated_at),
   }))
 }
 
@@ -338,7 +339,7 @@ export async function listSquadRounds(sessionId: string): Promise<SquadRound[]> 
     role: r.role ?? '',
     kind: (r.kind as SquadRound['kind']) ?? 'subtask',
     content: r.content,
-    createdAt: new Date(r.created_at).toISOString(),
+    createdAt: safeIso(r.created_at),
   }))
 }
 

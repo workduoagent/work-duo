@@ -16,6 +16,7 @@
  * 通过 syncMcpTools 写入，不在此提供手动「构建」工具的能力。
  */
 import { isTauri } from '@/core/config'
+import { safeIso } from './safeTime'
 import type {
   McpProtocolType,
   McpAuthType,
@@ -80,8 +81,8 @@ function rowToMcp(r: McpInfoRow): McpInfo {
     description: r.description ?? undefined,
     scenario: r.scenario ?? undefined,
     timeoutSec: r.timeout_sec ?? 120,
-    createdAt: new Date(r.created_at).toISOString(),
-    updatedAt: new Date(r.updated_at).toISOString(),
+    createdAt: safeIso(r.created_at),
+    updatedAt: safeIso(r.updated_at),
   }
 }
 
@@ -122,8 +123,8 @@ function rowToTool(r: McpToolDefinitionRow): McpToolDefinition {
     timeout: r.timeout || 0,
     testParams:
       safeParse<Record<string, unknown> | null>(r.test_params, null) ?? undefined,
-    createdAt: new Date(r.created_at).toISOString(),
-    updatedAt: new Date(r.updated_at).toISOString(),
+    createdAt: safeIso(r.created_at),
+    updatedAt: safeIso(r.updated_at),
   }
 }
 

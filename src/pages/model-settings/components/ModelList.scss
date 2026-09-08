@@ -77,9 +77,18 @@
 .app-card.model-card .ant-card-body {
   display: flex;
   flex-direction: column;
-  gap: 12px; /* 上半部分各区块拉开呼吸感 */
+  gap: 12px; /* 各区块拉开呼吸感 */
   height: 100%;
   padding: 16px; /* antd 默认 24px 偏大，紧凑卡片收敛 */
+}
+
+/* 卡片主体内容：吸收卡片剩余高度，把测试结果与操作栏推到卡片底部并对齐 */
+.model-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  flex: 1;
+  min-height: 0;
 }
 
 .model-card:hover {

@@ -13,6 +13,7 @@
  *  - 非 Tauri 环境（浏览器 dev）回退 localStorage，保证可调试（资产扫描返回空）。
  */
 import { isTauri } from '@/core/config'
+import { safeIso } from './safeTime'
 import type { KnowledgeBase, KnowledgeAsset, KnowledgeAssetType } from '@/types/core'
 import type { KnowledgeBaseRow, KnowledgeAssetRow } from '@/types/database'
 import { getDb } from '@/core/db/SqlService'
@@ -51,8 +52,8 @@ function rowToKb(r: KnowledgeBaseRow, base: string): KnowledgeBase {
     name: r.name,
     description: r.description ?? undefined,
     scenario: r.scenario ?? undefined,
-    createdAt: new Date(r.created_at).toISOString(),
-    updatedAt: new Date(r.updated_at).toISOString(),
+    createdAt: safeIso(r.created_at),
+    updatedAt: safeIso(r.updated_at),
     path: `${base.replace(/\/+$/, '')}/${r.identifier}`,
     fileCount: r.file_count ?? 0,
     fileSize: r.file_size ?? 0,
@@ -68,8 +69,8 @@ function rowToAsset(r: KnowledgeAssetRow): KnowledgeAsset {
     fileExt: r.file_ext ?? undefined,
     fileSize: r.file_size,
     filePath: r.file_path,
-    createdAt: new Date(r.created_at).toISOString(),
-    updatedAt: new Date(r.updated_at).toISOString(),
+    createdAt: safeIso(r.created_at),
+    updatedAt: safeIso(r.updated_at),
   }
 }
 

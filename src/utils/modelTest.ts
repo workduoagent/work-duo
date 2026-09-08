@@ -23,19 +23,7 @@
 import { isTauri } from '@/core/config'
 import { fetch as tauriFetch } from '@tauri-apps/plugin-http'
 import { testXfyun } from '@/core/model/iflytek'
-
-export interface ModelTestInput {
-  baseUrl: string
-  apiKey?: string
-  modelName?: string
-  category?: string
-  /** 服务商（决定是否走讯飞签名 WebSocket 测试） */
-  provider?: string
-  /** 讯飞三件套：AppId */
-  appId?: string
-  /** 讯飞三件套：APISecret */
-  apiSecret?: string
-}
+import type { ModelConfig } from '@/core/file/model-file'
 
 export interface ModelTestResult {
   ok: boolean
@@ -47,7 +35,11 @@ export interface ModelTestResult {
 }
 
 /** 直接使用用户填写的完整 URL，仅按末尾关键字选请求体与方法（不做路径拼接） */
-function resolveProbe(url: string, modelName?: string): {
+function resolveProbe(
+  url: string,
+  modelName?: string,
+  config?: Record<string, unknown>,
+): {
   url: string
   method: 'POST' | 'GET'
   body?: string
@@ -65,7 +57,7 @@ function resolveProbe(url: string, modelName?: string): {
   }
   // 对话端点：POST 最小对话请求
   if (/\/chat\/completions$|\/completions$/i.test(target)) {
-    return { url: target, method: 'POST', body: chatBody(model) }
+    return { url: target, method: 'POST', body: chatBody(model, config) }
   }
   // TEI 原生重排序端点 /rerank：请求体 {query, texts, raw_scores}
   if (/\/rerank\b/i.test(target)) {
@@ -80,25 +72,49 @@ function resolveProbe(url: string, modelName?: string): {
     return { url: target, method: 'GET' }
   }
   // 其余：默认按对话端点 POST（用户填写的应是可直接调用的完整 URL）
-  return { url: target, method: 'POST', body: chatBody(model) }
+  return { url: target, method: 'POST', body: chatBody(model, config) }
 }
 
-/** 最小对话请求体（与智能体 call_llm_stream 保持一致：stream:true） */
-function chatBody(model: string): string {
-  return JSON.stringify({
+/**
+ * 最小对话请求体——**严格对齐智能体 call_llm_stream_once 的真实可用请求**：
+ *  - 基础体固定为 { model, messages, stream:true, stream_options:{include_usage:true} }
+ *  - 额外注入模型选中分类的参数对象（即 DB 的 config 列内容，camelCase 如 maxTokens/
+ *    temperature），与智能体从 llm_config 注入的行为一致（只跳过 model/messages/
+ *    stream/stream_options，reasoning 归一化同 runtime.rs）。
+ * 这样探针的请求就与「智能体实际挂载该模型发出的请求」完全一致，避免「测试 400、
+ * 挂载后却正常」的假阴性（之前手写 max_tokens:1 与真实参数脱节正是 400 根因）。
+ */
+function chatBody(model: string, config?: Record<string, unknown>): string {
+  const body: Record<string, unknown> = {
     model,
     messages: [{ role: 'user', content: 'hi' }],
-    max_tokens: 1,
-    // 多数 OpenAI 兼容 / 多模态网关只接受流式；stream:false 会被网关以 400 拒回。
-    // 与智能体实际请求对齐，避免「连通性测试 400、挂载后却正常」的假阴性。
     stream: true,
     stream_options: { include_usage: true },
-  })
+  }
+  if (config) {
+    for (const [k, v] of Object.entries(config)) {
+      // 与 runtime.rs 一致：这些键由基础体固定提供，配置里的同名键不覆盖
+      if (k === 'model' || k === 'messages' || k === 'stream' || k === 'stream_options') continue
+      // reasoning 归一化：true → {}；false / 缺失 → 省略（对齐 runtime.rs）
+      if (k === 'reasoning') {
+        if (v === true) body['reasoning'] = {}
+        else if (v !== false) body['reasoning'] = v
+        continue
+      }
+      body[k] = v
+    }
+  }
+  return JSON.stringify(body)
 }
 
-/** 构造请求头 */
+/** 构造请求头——与智能体 call_llm_stream_once 对齐（含 Accept: text/event-stream） */
 function buildHeaders(apiKey?: string): Record<string, string> {
-  const h: Record<string, string> = { 'Content-Type': 'application/json' }
+  const h: Record<string, string> = {
+    'Content-Type': 'application/json',
+    // 智能体在 call_llm_stream_once 中显式声明此头；部分严格网关据此决定 SSE 响应，
+    // 探针补齐以避免因缺头导致的非 2xx 误判。
+    Accept: 'text/event-stream',
+  }
   if (apiKey) h['Authorization'] = `Bearer ${apiKey}`
   return h
 }
@@ -188,24 +204,30 @@ async function probe(
 }
 
 export async function testModelConnection(
-  input: ModelTestInput,
+  model: ModelConfig,
 ): Promise<ModelTestResult> {
-  const raw = input.baseUrl?.trim()
+  const raw = model.baseUrl?.trim()
   if (!raw) return { ok: false, level: 'error', message: '缺少 Base URL' }
 
   // 讯飞（iflytek）TTS/STT：走签名 WebSocket 测试，不走通用 HTTP 探测
-  if (input.provider === 'iflytek' && (input.category === 'tts' || input.category === 'stt')) {
+  if (model.provider === 'iflytek' && (model.category === 'tts' || model.category === 'stt')) {
     return testXfyun({
-      category: input.category as 'tts' | 'stt',
+      category: model.category as 'tts' | 'stt',
       hostUrl: raw,
-      appId: input.appId ?? '',
-      apiKey: input.apiKey ?? '',
-      apiSecret: input.apiSecret ?? '',
+      appId: model.appId ?? '',
+      apiKey: model.apiKey ?? '',
+      apiSecret: model.apiSecret ?? '',
     })
   }
 
-  const { url, method, body } = resolveProbe(raw, input.modelName)
-  const headers = buildHeaders(input.apiKey)
+  // 取模型选中分类的参数对象（与 modelToRow 写入 config 列的内容一致），
+  // 让探针请求与智能体 call_llm_stream_once 注入 llm_config 后的请求完全对齐。
+  const params = (model as unknown as Record<string, unknown>)[model.category]
+  const configObj =
+    params && typeof params === 'object' ? (params as Record<string, unknown>) : undefined
+
+  const { url, method, body } = resolveProbe(raw, model.modelName, configObj)
+  const headers = buildHeaders(model.apiKey)
   const start = performance.now()
 
   try {

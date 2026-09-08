@@ -124,57 +124,59 @@ export function ModelList({
                   {m.enabled ? '已启用' : '已停用'}
               </span>
 
-                            <div className="model-card__head">
-                                <div className="model-card__avatar" aria-hidden="true">
-                                    {logoUrl && (
-                                        <img
-                                            className="model-card__logo"
-                                            src={logoUrl}
-                                            alt={providerLabel(m.provider)}
-                                            onError={(e) => {
-                                                // 保留 onError：防范图片由于网络或跨域加载失败的情况
-                                                ;(e.target as HTMLImageElement).style.display = 'none'
-                                                const parent = (e.target as HTMLImageElement).parentElement
-                                                if (parent) {
-                                                    const fb = parent.querySelector('.model-card__avatar-fallback')
-                                                    if (fb) (fb as HTMLElement).style.display = ''
-                                                }
-                                            }}
-                                        />
-                                    )}
-                                    <span className="model-card__avatar-fallback" style={{display: 'none'}}>
+                            <div className="model-card__body">
+                                <div className="model-card__head">
+                                    <div className="model-card__avatar" aria-hidden="true">
+                                        {logoUrl && (
+                                            <img
+                                                className="model-card__logo"
+                                                src={logoUrl}
+                                                alt={providerLabel(m.provider)}
+                                                onError={(e) => {
+                                                    // 保留 onError：防范图片由于网络或跨域加载失败的情况
+                                                    ;(e.target as HTMLImageElement).style.display = 'none'
+                                                    const parent = (e.target as HTMLImageElement).parentElement
+                                                    if (parent) {
+                                                        const fb = parent.querySelector('.model-card__avatar-fallback')
+                                                        if (fb) (fb as HTMLElement).style.display = ''
+                                                    }
+                                                }}
+                                            />
+                                        )}
+                                        <span className="model-card__avatar-fallback" style={{display: 'none'}}>
                     {initial}
                   </span>
+                                    </div>
+                                    <div className="model-card__titles">
+                                        <h3 className="model-card__name" title={m.name}>
+                                            {m.name || '(未命名)'}
+                                        </h3>
+                                        <code className="model-card__model" title={m.modelName}>
+                                            {m.modelName || '—'}
+                                        </code>
+                                    </div>
                                 </div>
-                                <div className="model-card__titles">
-                                    <h3 className="model-card__name" title={m.name}>
-                                        {m.name || '(未命名)'}
-                                    </h3>
-                                    <code className="model-card__model" title={m.modelName}>
-                                        {m.modelName || '—'}
-                                    </code>
-                                </div>
-                            </div>
 
-                            <div className="model-card__tags">
-                                <span className="model-card__chip">{providerLabel(m.provider)}</span>
-                                <span className="model-card__chip model-card__chip--muted">
+                                <div className="model-card__tags">
+                                    <span className="model-card__chip">{providerLabel(m.provider)}</span>
+                                    <span className="model-card__chip model-card__chip--muted">
                   {categoryLabel(m.category)}
                 </span>
-                                {m.toolCalls && (
-                                    <span className="model-card__chip model-card__chip--tool"
-                                          title="支持 Tool / Function Calling">
+                                    {m.toolCalls && (
+                                        <span className="model-card__chip model-card__chip--tool"
+                                              title="支持 Tool / Function Calling">
                     <Wrench size={11}/>
                     工具调用
                   </span>
+                                    )}
+                                </div>
+
+                                {m.description && (
+                                    <p className="model-card__desc" title={m.description}>
+                                        {m.description}
+                                    </p>
                                 )}
                             </div>
-
-                            {m.description && (
-                                <p className="model-card__desc" title={m.description}>
-                                    {m.description}
-                                </p>
-                            )}
 
                             {result && (
                                 <div
