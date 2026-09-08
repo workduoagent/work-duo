@@ -588,8 +588,9 @@
     button {
       display: inline-flex;
       align-items: center;
+      justify-content: center;
       gap: 4px;
-      padding: 4px 8px;
+      padding: 4px;
       border: none;
       border-radius: 6px;
       background: transparent;
@@ -618,6 +619,16 @@
     font-size: 0.72rem;
     font-family: var(--font-mono, monospace);
     white-space: nowrap;
+
+    span {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+
+      svg {
+        flex: none;
+      }
+    }
   }
 
   &__thinking-panel {

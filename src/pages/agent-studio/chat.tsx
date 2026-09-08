@@ -40,6 +40,8 @@ import {
   Copy,
   Volume2,
   RefreshCw,
+  Coins,
+  Clock,
   Mic,
   ImagePlus,
   Search,
@@ -749,23 +751,29 @@ function MessageActions({
       <div className="agent-chat__msg-actions">
         <button type="button" title="复制正文" onClick={handleCopy}>
           <Copy size={14} />
-          <span>复制</span>
         </button>
         {agent.ttsId && (
           <button type="button" title="朗读" onClick={handleSpeak}>
             <Volume2 size={14} />
-            <span>朗读</span>
           </button>
         )}
         <button type="button" title="重新生成" onClick={onRegenerate}>
           <RefreshCw size={14} />
-          <span>重新生成</span>
         </button>
       </div>
       <div className="agent-chat__msg-meta">
-        <span>消耗 {msg.tokenCount ?? estimateTokens(msg.content)} tokens</span>
-        <span>对话 {formatConversationDuration(conversationMs)}</span>
-        <span>耗时 {formatDuration(msg.durationMs ?? 0)}</span>
+        <span title="本次消耗 token 数">
+          <Coins size={13} />
+          {msg.tokenCount ?? estimateTokens(msg.content)} tokens
+        </span>
+        <span title="对话总时长">
+          <MessageSquare size={13} />
+          {formatConversationDuration(conversationMs)}
+        </span>
+        <span title="本轮耗时">
+          <Clock size={13} />
+          {formatDuration(msg.durationMs ?? 0)}
+        </span>
       </div>
     </div>
   )
