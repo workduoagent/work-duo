@@ -83,13 +83,16 @@ function resolveProbe(url: string, modelName?: string): {
   return { url: target, method: 'POST', body: chatBody(model) }
 }
 
-/** 最小对话请求体 */
+/** 最小对话请求体（与智能体 call_llm_stream 保持一致：stream:true） */
 function chatBody(model: string): string {
   return JSON.stringify({
     model,
     messages: [{ role: 'user', content: 'hi' }],
     max_tokens: 1,
-    stream: false,
+    // 多数 OpenAI 兼容 / 多模态网关只接受流式；stream:false 会被网关以 400 拒回。
+    // 与智能体实际请求对齐，避免「连通性测试 400、挂载后却正常」的假阴性。
+    stream: true,
+    stream_options: { include_usage: true },
   })
 }
 
