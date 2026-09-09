@@ -36,6 +36,35 @@ fn resolve_path(target: &str, workspace: Option<&Path>) -> PathBuf {
     }
 }
 
+/// 把 target 按 `|` 拆成多个候选路径（与 `text_contains` 的 value 容错对称）。
+/// 单一路径（无 `|`）时退化为单元素向量，完全向后兼容。
+fn resolve_candidates(target: &str, workspace: Option<&Path>) -> Vec<PathBuf> {
+    target
+        .split('|')
+        .map(|x| resolve_path(x.trim(), workspace))
+        .collect()
+}
+
+/// 在候选中找第一个满足谓词的文件/目录；找不到返回 None。
+fn first_hit<F>(cands: &[PathBuf], pred: F) -> Option<PathBuf>
+where
+    F: Fn(&std::fs::Metadata) -> bool,
+{
+    cands
+        .iter()
+        .find(|p| p.metadata().map(|m| pred(&m)).unwrap_or(false))
+        .cloned()
+}
+
+/// 候选路径的人类可读拼接（用于失败明细）。
+fn cands_disp(cands: &[PathBuf]) -> String {
+    cands
+        .iter()
+        .map(|p| p.display().to_string())
+        .collect::<Vec<_>>()
+        .join(" | ")
+}
+
 /// 执行单条判定标准，返回 (是否通过, 人类可读说明)。
 fn check_one(c: &SuccessCriterion, workspace: Option<&Path>) -> (bool, String) {
     let ct = c.check_type.to_lowercase();
@@ -45,44 +74,59 @@ fn check_one(c: &SuccessCriterion, workspace: Option<&Path>) -> (bool, String) {
                 Some(t) => t,
                 None => return (false, "file_exists 缺 target".into()),
             };
-            let p = resolve_path(target, workspace);
-            let ok = p.metadata().map(|m| m.is_file()).unwrap_or(false);
-            (ok, format!("文件应存在：{}", p.display()))
+            let cands = resolve_candidates(target, workspace);
+            match first_hit(&cands, |m| m.is_file()) {
+                Some(p) => (true, format!("文件应存在：{}", p.display())),
+                None => (false, format!("文件应存在（任一）：{}", cands_disp(&cands))),
+            }
         }
         "file_nonempty" => {
             let target = match &c.target {
                 Some(t) => t,
                 None => return (false, "file_nonempty 缺 target".into()),
             };
-            let p = resolve_path(target, workspace);
-            let ok = p
-                .metadata()
-                .map(|m| m.is_file() && m.len() > 0)
-                .unwrap_or(false);
-            (ok, format!("文件应存在且非空：{}", p.display()))
+            let cands = resolve_candidates(target, workspace);
+            match first_hit(&cands, |m| m.is_file() && m.len() > 0) {
+                Some(p) => (true, format!("文件应存在且非空：{}", p.display())),
+                None => (false, format!("文件应存在且非空（任一）：{}", cands_disp(&cands))),
+            }
         }
         "directory_exists" => {
             let target = match &c.target {
                 Some(t) => t,
                 None => return (false, "directory_exists 缺 target".into()),
             };
-            let p = resolve_path(target, workspace);
-            let ok = p.metadata().map(|m| m.is_dir()).unwrap_or(false);
-            (ok, format!("目录应存在：{}", p.display()))
+            let cands = resolve_candidates(target, workspace);
+            match first_hit(&cands, |m| m.is_dir()) {
+                Some(p) => (true, format!("目录应存在：{}", p.display())),
+                None => (false, format!("目录应存在（任一）：{}", cands_disp(&cands))),
+            }
         }
         "json_valid" => {
             let target = match &c.target {
                 Some(t) => t,
                 None => return (false, "json_valid 缺 target".into()),
             };
-            let p = resolve_path(target, workspace);
-            match std::fs::read_to_string(&p) {
-                Ok(s) => {
-                    let ok = serde_json::from_str::<serde_json::Value>(&s).is_ok();
-                    (ok, format!("JSON 应可解析：{}", p.display()))
+            let cands = resolve_candidates(target, workspace);
+            // 任一候选可读且 JSON 可解析即通过（与文件类分支的「任一命中」对称）。
+            let mut last_err = String::new();
+            for p in &cands {
+                match std::fs::read_to_string(p) {
+                    Ok(s) if serde_json::from_str::<serde_json::Value>(&s).is_ok() => {
+                        return (true, format!("JSON 应可解析：{}", p.display()));
+                    }
+                    Ok(_) => last_err = format!("JSON 解析失败：{}", p.display()),
+                    Err(e) => last_err = format!("读取失败 {}：{}", p.display(), e),
                 }
-                Err(e) => (false, format!("读取失败 {}：{}", p.display(), e)),
             }
+            (
+                false,
+                if last_err.is_empty() {
+                    format!("JSON 应可解析（任一）：{}", cands_disp(&cands))
+                } else {
+                    last_err
+                },
+            )
         }
         "text_contains" => {
             let target = match &c.target {
@@ -145,19 +189,18 @@ fn check_one(c: &SuccessCriterion, workspace: Option<&Path>) -> (bool, String) {
                 None => return (false, "excel_row_count 缺 target".into()),
             };
             let n = c.threshold.unwrap_or(1);
-            let p = resolve_path(target, workspace);
-            let meta = p.metadata();
-            let ok = meta.map(|m| m.is_file() && m.len() > 0).unwrap_or(false);
-            (
-                ok,
-                format!("（Excel 行数≥{n} 暂以文件存在且非空代理）xlsx 应存在：{}", p.display()),
-            )
+            let cands = resolve_candidates(target, workspace);
+            match first_hit(&cands, |m| m.is_file() && m.len() > 0) {
+                Some(p) => (true, format!("（Excel 行数≥{n} 暂以文件存在且非空代理）xlsx 应存在：{}", p.display())),
+                None => (false, format!("（Excel 行数≥{n} 暂以文件存在且非空代理）xlsx 应存在（任一）：{}", cands_disp(&cands))),
+            }
         }
         other => (false, format!("未知校验类型：{other}")),
     }
 }
 
 /// 对一个子任务的全部 `success_criteria` 做确定性校验，汇总结果。
+#[tracing::instrument(skip_all)]
 pub fn verify_task(task: &PlanSubTask, workspace: Option<&Path>) -> VerificationResult {
     if task.success_criteria.is_empty() {
         return VerificationResult {

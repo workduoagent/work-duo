@@ -93,7 +93,7 @@ pub async fn register_artifacts(
 
     if !out.is_empty() {
         crate::agent::events::emit_artifact_created(app, task.step, &out);
-        println!(
+        tracing::info!(
             "[agent] artifacts: 步骤 {} 登记 {} 个产物：{}",
             task.step,
             out.len(),

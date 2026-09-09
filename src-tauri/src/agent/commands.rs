@@ -108,7 +108,7 @@ pub async fn run_agent_task(
     )
     .await?;
 
-    println!(
+    tracing::info!(
         "[agent] run_agent_task 收到请求: agent_id={} prompt_len={} workspace={:?} 附件数={}",
         input.agent_id,
         input.prompt.chars().count(),
@@ -125,10 +125,10 @@ pub async fn run_agent_task(
         input.pre_completed.clone().unwrap_or_default().into_iter().collect();
     let initial_context = input.initial_context.clone().unwrap_or_default();
     tauri::async_runtime::spawn(async move {
-        println!("[agent] run_agent_task 后台任务已 spawn，开始 run_task");
+        tracing::info!("[agent] run_agent_task 后台任务已 spawn，开始 run_task");
         rt.run_task(&app_clone, cfg, prompt, plan_override, pre_completed, initial_context)
             .await;
-        println!("[agent] run_agent_task 后台任务 run_task 结束");
+        tracing::info!("[agent] run_agent_task 后台任务 run_task 结束");
     });
     Ok(())
 }
@@ -151,7 +151,7 @@ pub async fn cancel_agent_task(runtime: State<'_, AgentRuntime>) -> Result<(), S
         .store(true, std::sync::atomic::Ordering::SeqCst);
     // 若后台流水线正挂在恢复等待上，同步唤醒（否则取消信号无法跳出 wait 挂起）。
     runtime.recovery.cancel();
-    println!("[agent] cancel_agent_task: 已置位取消标志，后台任务将尽快终止");
+    tracing::info!("[agent] cancel_agent_task: 已置位取消标志，后台任务将尽快终止");
     Ok(())
 }
 
@@ -506,7 +506,7 @@ pub async fn branch_from_step(app: AppHandle, input: BranchFromStepInput) -> Res
         goal_summary: input.goal_summary.clone(),
     };
     crate::agent::events::emit_plan_branch(&app, &branch);
-    println!(
+    tracing::info!(
         "[agent] branch_from_step: 已生成分支（from_step={} 共 {} 步新分支）",
         input.from_step,
         branch.branch_tasks.len()
@@ -673,7 +673,7 @@ async fn load_config(
         DbPool::Sqlite(p) => p.clone(),
     };
     drop(guard);
-    println!("[agent] load_config: 数据库连接已就绪 (sqlite:workduo.db)");
+    tracing::info!("[agent] load_config: 数据库连接已就绪 (sqlite:workduo.db)");
 
     let row = sqlx::query("SELECT * FROM agent_info WHERE id = ?")
         .bind(agent_id)
@@ -681,7 +681,7 @@ async fn load_config(
         .await
         .map_err(|e| format!("查询智能体失败：{e}"))?
         .ok_or_else(|| format!("智能体不存在：{agent_id}"))?;
-    println!("[agent] load_config: 已找到智能体 {agent_id}");
+    tracing::info!("[agent] load_config: 已找到智能体 {agent_id}");
 
     let get_str = |row: &sqlx::sqlite::SqliteRow, col: &str| -> String {
         row.try_get::<Option<String>, _>(col)
@@ -852,7 +852,8 @@ async fn load_config(
     }
 
     let skill_rows = sqlx::query(
-        "SELECT s.id AS skill_id, s.name AS name, s.description AS description, s.instruction AS instruction \
+        "SELECT s.id AS skill_id, s.name AS name, s.description AS description, s.instruction AS instruction, \
+                s.skill_markdown AS skill_markdown, s.path AS skill_path \
          FROM skill_info s JOIN agent_skill_ref r ON r.skill_id = s.id \
          WHERE r.agent_id = ?",
     )
@@ -896,10 +897,22 @@ async fn load_config(
                 .ok()
                 .flatten()
                 .unwrap_or_default();
+            let skill_markdown = r
+                .try_get::<Option<String>, _>("skill_markdown")
+                .ok()
+                .flatten()
+                .unwrap_or_default();
+            let skill_path = r
+                .try_get::<Option<String>, _>("skill_path")
+                .ok()
+                .flatten()
+                .unwrap_or_default();
             SkillToolWrapper {
                 skill_id: skill_id.clone(),
                 skill_name: if name.is_empty() { skill_id } else { name },
                 skill_description: if desc.is_empty() { instruction } else { desc },
+                skill_markdown,
+                skill_path,
             }
         })
         .collect();
@@ -911,7 +924,7 @@ async fn load_config(
         if !en_set.is_empty() {
             let ph = en_set.iter().map(|_| "?").collect::<Vec<_>>().join(",");
             let q = format!(
-                "SELECT id, name, description, instruction FROM skill_info WHERE id IN ({})",
+                "SELECT id, name, description, instruction, skill_markdown, path FROM skill_info WHERE id IN ({})",
                 ph
             );
             let mut qb = sqlx::query(&q);
@@ -934,10 +947,14 @@ async fn load_config(
                     let name = r.try_get::<Option<String>, _>("name").ok().flatten().unwrap_or_default();
                     let desc = r.try_get::<Option<String>, _>("description").ok().flatten().unwrap_or_default();
                     let instruction = r.try_get::<Option<String>, _>("instruction").ok().flatten().unwrap_or_default();
+                    let skill_markdown = r.try_get::<Option<String>, _>("skill_markdown").ok().flatten().unwrap_or_default();
+                    let skill_path = r.try_get::<Option<String>, _>("path").ok().flatten().unwrap_or_default();
                     skill_tools.push(SkillToolWrapper {
                         skill_id: sid.clone(),
                         skill_name: if name.is_empty() { sid } else { name },
                         skill_description: if desc.is_empty() { instruction } else { desc },
+                        skill_markdown,
+                        skill_path,
                     });
                 }
             }
@@ -958,7 +975,7 @@ async fn load_config(
         }
     };
 
-    println!(
+    tracing::info!(
         "[agent] load_config 完成: llm_id={} model={} mcp_tools={} skill_tools={} auto_exec={} sandbox={} system_prompt={}字符 附件数={}",
         if llm_id.is_empty() { "<无>" } else { llm_id.as_str() },
         if llm_model_name.is_empty() { "<无>" } else { llm_model_name.as_str() },
@@ -1042,10 +1059,10 @@ async fn load_config(
                     system_prompt.push_str("\n\n### 长期记忆固化闭环（Long-term Memory Consolidation）\n\
 完成一个实质性的功能模块开发或深度 Bug 修复后，若本次任务沉淀了值得长期复用的「设计蓝图 / 架构约定 / 避坑法则」，请主动调用 `native__archive_artifact` 将其写入 `.wd_mem/artifacts/`（文件名用 kebab-case，如 `auth-flow.md`）。\
 若你不确定是否值得归档，请直接向用户提问：「本次任务涉及的核心设计是否需要提炼并归档至 `.wd_mem/artifacts/` 作为永久知识资产？」——得到确认后再写入。日常闲聊或微小改动无需归档。");
-                    println!("[agent] load_config: 已确保 .wd_mem 结构并注入复用清单 workspace={}", ws_trim);
+                    tracing::info!("[agent] load_config: 已确保 .wd_mem 结构并注入复用清单 workspace={}", ws_trim);
                 }
                 Err(e) => {
-                    println!("[agent] load_config: 创建 .wd_mem 失败（降级为不使用记忆区）：{e}");
+                    tracing::info!("[agent] load_config: 创建 .wd_mem 失败（降级为不使用记忆区）：{e}");
                 }
             }
         }
@@ -1058,7 +1075,7 @@ async fn load_config(
         if !block.is_empty() {
             system_prompt.push_str("\n\n");
             system_prompt.push_str(&block);
-            println!(
+            tracing::info!(
                 "[agent] load_config: 已自动召回 {} 条记忆注入系统提示",
                 recalled.len()
             );
@@ -1275,7 +1292,7 @@ pub async fn load_squad(app: &AppHandle, squad_id: &str) -> Result<SquadRuntimeC
             },
         };
 
-    println!(
+    tracing::info!(
         "[agent] load_squad: 已加载小分队 {} 模式={} 成员数={} 全局MCP={}",
         squad_id,
         mode,
@@ -1317,7 +1334,7 @@ async fn load_squad_memory_block(
     let rows = match rows {
         Ok(r) => r,
         Err(e) => {
-            println!("[agent] load_squad_memory_block: 查询失败：{e}");
+            tracing::info!("[agent] load_squad_memory_block: 查询失败：{e}");
             return String::new();
         }
     };
@@ -1368,6 +1385,7 @@ pub struct RunSquadTaskInput {
 /// 先 `load_squad` 组装 `SquadRuntimeConfig`（含成员人设注入 + 全局 MCP 并入），
 /// 再 spawn 后台任务交给 `squad_orchestrator::run_squad_task` 执行（成员各自独立运行、互不共享文件系统）。
 #[tauri::command]
+#[tracing::instrument(skip_all)]
 pub async fn run_squad_task(app: AppHandle, input: RunSquadTaskInput) -> Result<(), String> {
     let squad = load_squad(&app, &input.squad_id).await?;
     let app_clone = app.clone();

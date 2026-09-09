@@ -108,7 +108,7 @@ impl AgentRuntime {
         }
         // 工具已全部直接注册进 base（原生 + Skill + MCP），base 即完整注册表。
         let registry = base;
-        println!(
+        tracing::info!(
             "[agent] run_task: 工具注册完成，共 {} 个工具（原生 + Skill + MCP）",
             registry.get_tools_for_llm().len()
         );
@@ -130,7 +130,7 @@ impl AgentRuntime {
         // 阶段一：意图分流（规则短路优先，灰色地带走轻量 LLM 分类）。
         let intent = crate::agent::intent::classify_intent(&cfg, &prompt).await;
         events::emit_intent_classified(app, &intent);
-        println!(
+        tracing::info!(
             "[agent] run_task: 意图判定 = {} reason={} risk={} 需规划={} 需工具={} 需审批={}",
             intent.intent_type,
             clip(&intent.reason, 200),
@@ -146,7 +146,7 @@ impl AgentRuntime {
         let effective_auto_exec =
             cfg.auto_tool_exec_mode && !intent.requires_approval && !intent.is_high_risk();
         if !effective_auto_exec && cfg.auto_tool_exec_mode {
-            println!(
+            tracing::info!(
                 "[agent] run_task: 风险等级 {} 触发强制人工审批（覆盖 auto_tool_exec_mode）",
                 intent.risk_level
             );
@@ -177,7 +177,7 @@ impl AgentRuntime {
         // §3.2 分支重跑：若前端已提供 plan_override，直接采用（跳过 LLM 规划，token 计 0）。
         events::emit_status(app, "正在规划任务步骤…");
         let (plan, plan_usage, plan_raw) = if let Some(po) = plan_override {
-            println!(
+            tracing::info!(
                 "[agent] run_task: 采用前端分支计划（共 {} 步，其中 {} 步预完成跳过），跳过 LLM 规划",
                 po.tasks.len(),
                 pre_completed.len()
@@ -189,7 +189,7 @@ impl AgentRuntime {
 
         // 规划期间用户可能已点击取消：规划完成后立即检查，避免拉起无意义的流水线。
         if self.cancel_flag.load(Ordering::SeqCst) {
-            println!("[agent] run_task: 规划完成后检测到取消信号，终止任务");
+            tracing::info!("[agent] run_task: 规划完成后检测到取消信号，终止任务");
             events::emit_status(app, "⛔ 任务已被用户取消");
             events::emit_task_done(app, plan_usage.0, plan_usage.1);
             return;
@@ -219,7 +219,7 @@ impl AgentRuntime {
 
         // 用户中途取消：跳过正常收尾（不持久化半成品 round），仅做取消提示并收尾。
         if result.cancelled {
-            println!("[agent] run_task: 流水线检测到取消信号，已提前收尾");
+            tracing::info!("[agent] run_task: 流水线检测到取消信号，已提前收尾");
             let task_usage = (plan_usage.0 + result.usage.0, plan_usage.1 + result.usage.1);
             events::emit_status(app, "⛔ 任务已被用户取消");
             events::emit_task_done(app, task_usage.0, task_usage.1);
@@ -260,21 +260,21 @@ impl AgentRuntime {
             sanitize_message_sequence(&mut compact_round);
             match serde_json::to_string(&compact_round) {
                 Ok(raw_json) => {
-                    println!(
+                    tracing::info!(
                         "[agent] run_task: 回填精简 raw_messages_json（round={} 大小={}字符）",
                         round_id,
                         raw_json.chars().count(),
                     );
                     crate::agent::round_compactor::persist_round_raw(app, round_id, &raw_json).await;
                 }
-                Err(e) => println!("[agent] run_task: 序列化精简 raw_messages_json 失败：{e}"),
+                Err(e) => tracing::info!("[agent] run_task: 序列化精简 raw_messages_json 失败：{e}"),
             }
             if let Some(sid) = &cfg.session_id {
                 crate::agent::round_compactor::bump_session_turns(app, sid).await;
                 crate::agent::round_compactor::trigger_background_compaction(app, &cfg, sid).await;
             }
         } else {
-            println!("[agent] run_task: 无 round_id，跳过精简 raw_messages_json 回填");
+            tracing::info!("[agent] run_task: 无 round_id，跳过精简 raw_messages_json 回填");
         }
         return;
 
@@ -315,7 +315,7 @@ impl AgentRuntime {
                     .trim()
                     .to_string();
                 if content == "无" || content.is_empty() {
-                    println!("[agent] forced_memory_settle: 模型判定无可沉淀记忆");
+                    tracing::info!("[agent] forced_memory_settle: 模型判定无可沉淀记忆");
                     return;
                 }
                 let mut count = 0usize;
@@ -343,12 +343,12 @@ impl AgentRuntime {
                     .await
                     {
                         Ok(_) => count += 1,
-                        Err(e) => println!("[agent] forced_memory_settle: 锚定失败（key={}）：{e}", key),
+                        Err(e) => tracing::info!("[agent] forced_memory_settle: 锚定失败（key={}）：{e}", key),
                     }
                 }
-                println!("[agent] forced_memory_settle: 强制沉淀 {} 条记忆", count);
+                tracing::info!("[agent] forced_memory_settle: 强制沉淀 {} 条记忆", count);
             }
-            Err(e) => println!("[agent] forced_memory_settle: 总结 LLM 调用失败：{e}"),
+            Err(e) => tracing::info!("[agent] forced_memory_settle: 总结 LLM 调用失败：{e}"),
         }
     }
 
@@ -365,7 +365,7 @@ impl AgentRuntime {
         let mut messages = match crate::agent::context::build_context_messages(app, cfg, prompt).await {
             Ok(m) => m,
             Err(e) => {
-                println!("[agent] run_simple_chat: 上下文组装失败：{e}");
+                tracing::info!("[agent] run_simple_chat: 上下文组装失败：{e}");
                 events::emit_task_error(app, &format!("上下文组装失败：{e}"));
                 return;
             }
@@ -377,7 +377,7 @@ impl AgentRuntime {
         let mut trimmed = trim_history(&messages);
         sanitize_message_sequence(&mut trimmed);
 
-        println!(
+        tracing::info!(
             "[agent] run_simple_chat: 单次流式调用（上下文={}条消息[裁剪前{}条]）",
             trimmed.len(),
             messages.len(),
@@ -388,13 +388,13 @@ impl AgentRuntime {
                 task_usage.1 += outcome.usage.1;
                 // 流式过程中用户可能已点击取消：生成内容作废，仅做取消提示。
                 if cancel.load(Ordering::SeqCst) {
-                    println!("[agent] run_simple_chat: 流式返回后检测到取消信号，终止任务");
+                    tracing::info!("[agent] run_simple_chat: 流式返回后检测到取消信号，终止任务");
                     events::emit_status(app, "⛔ 任务已被用户取消");
                     events::emit_task_done(app, task_usage.0, task_usage.1);
                     return;
                 }
                 let content = outcome.content;
-                println!(
+                tracing::info!(
                     "[agent] run_simple_chat: 终态文本 {} 字符：{}",
                     content.chars().count(),
                     clip(content.trim(), 200),
@@ -406,7 +406,7 @@ impl AgentRuntime {
                 messages.push(json!({ "role": "assistant", "content": content }));
             }
             Err(e) => {
-                println!("[agent] run_simple_chat: LLM 调用失败：{e}");
+                tracing::info!("[agent] run_simple_chat: LLM 调用失败：{e}");
                 events::emit_task_error(app, &format!("LLM 调用失败：{e}"));
                 return;
             }
@@ -422,7 +422,7 @@ impl AgentRuntime {
                 Ok(raw_json) => {
                     crate::agent::round_compactor::persist_round_raw(app, round_id, &raw_json).await;
                 }
-                Err(e) => println!("[agent] run_simple_chat: 序列化 raw_messages_json 失败：{e}"),
+                Err(e) => tracing::info!("[agent] run_simple_chat: 序列化 raw_messages_json 失败：{e}"),
             }
             if let Some(sid) = &cfg.session_id {
                 crate::agent::round_compactor::bump_session_turns(app, sid).await;
@@ -444,6 +444,7 @@ pub(crate) struct ToolRoundStats {
 /// 固定环节：参数 JSON 自愈回灌（ParseError）→ 注册表查找 → 敏感工具审批挂起
 /// → 执行 → `truncate_tool_output(15000)` 物理截断 → 推送 tool_started/finished 事件。
 #[allow(clippy::too_many_arguments)]
+#[tracing::instrument(skip_all)]
 pub(crate) async fn run_tool_calls_round(
     app: &AppHandle,
     registry: &ToolRegistry,
@@ -467,7 +468,7 @@ pub(crate) async fn run_tool_calls_round(
             ParseOutcome::Ready { call_id, name, args } => (call_id, name, args),
             ParseOutcome::ParseError { call_id, name, error } => {
                 // 幻觉自愈：把 JSON 解析错误作为 ToolResult 回传，强制模型下一轮纠错。
-                println!(
+                tracing::info!(
                     "[agent] tool_round: 工具参数 JSON 解析失败 name={} err={}",
                     name,
                     clip(&error, 300),
@@ -482,7 +483,7 @@ pub(crate) async fn run_tool_calls_round(
                 continue;
             }
             ParseOutcome::Skip => {
-                println!(
+                tracing::info!(
                     "[agent] tool_round: 工具调用字段缺失，跳过 raw_tool_call={}",
                     clip(&tc.to_string(), 500),
                 );
@@ -494,13 +495,13 @@ pub(crate) async fn run_tool_calls_round(
         let tool = match registry.get(&tool_name) {
             Some(t) => t,
             None => {
-                println!("[agent] tool_round: 注册表找不到模型请求的工具 name={}", tool_name);
+                tracing::info!("[agent] tool_round: 注册表找不到模型请求的工具 name={}", tool_name);
                 events::emit_error(app, &format!("未知工具：{tool_name}"));
                 continue;
             }
         };
 
-        println!(
+        tracing::info!(
             "[agent] tool_round: 执行工具 {} (call_id={}) 参数={}",
             tool_name,
             call_id,
@@ -543,7 +544,7 @@ pub(crate) async fn run_tool_calls_round(
                     }
                 }
             };
-            println!(
+            tracing::info!(
                 "[agent] tool_round: 审批完成 approval_id={} approved={} reason={}",
                 approval_id,
                 approval_outcome.approved,
@@ -597,7 +598,7 @@ pub(crate) async fn run_tool_calls_round(
             duration_ms: Some(t0.elapsed().as_millis() as u64),
             created_at: now_ms(),
         });
-        println!(
+        tracing::info!(
             "[agent] tool_round: 工具 {} 执行完成 ok={} 耗时={}ms 结果={}",
             tool_name,
             result.is_ok(),
@@ -628,7 +629,7 @@ pub(crate) async fn call_llm(
         return Err("智能体未绑定有效的 LLM（base_url / model_name 为空）".into());
     }
 
-    println!(
+    tracing::info!(
         "[agent] call_llm: 请求 URL={} model={} 是否带 Key={}",
         normalize_chat_url(&cfg.llm_base_url),
         cfg.llm_model_name,
@@ -668,16 +669,16 @@ pub(crate) async fn call_llm(
         if let Some(enabled) = action {
             if enabled {
                 obj.insert("reasoning".into(), json!({}));
-                println!("[agent] call_llm: reasoning=true 归一化为 {{}}（网关要求字典）");
+                tracing::info!("[agent] call_llm: reasoning=true 归一化为 {{}}（网关要求字典）");
             } else {
                 obj.remove("reasoning");
-                println!("[agent] call_llm: reasoning=false 已移除");
+                tracing::info!("[agent] call_llm: reasoning=false 已移除");
             }
         }
     }
 
     let body_preview = serde_json::to_string(&sanitize_for_log(&body)).unwrap_or_default();
-    println!(
+    tracing::info!(
         "[agent] call_llm: 请求体预览（已脱敏/截断）={} ",
         clip(&body_preview, 1000)
     );
@@ -688,7 +689,7 @@ pub(crate) async fn call_llm(
     }
 
     let resp = req.send().await.map_err(|e| {
-        println!(
+        tracing::info!(
             "[agent] call_llm: 请求失败（耗时={}ms）：{}",
             request_started.elapsed().as_millis(),
             e
@@ -696,7 +697,7 @@ pub(crate) async fn call_llm(
         format!("请求失败：{e}")
     })?;
     let status = resp.status();
-    println!(
+    tracing::info!(
         "[agent] call_llm: 收到 HTTP {}（耗时={}ms）",
         status,
         request_started.elapsed().as_millis()
@@ -704,11 +705,11 @@ pub(crate) async fn call_llm(
     if !status.is_success() {
         let text = resp.text().await.unwrap_or_default();
         let safe_text = clip(&sanitize_for_log(&Value::String(text.clone())).to_string(), 5000);
-        println!("[agent] call_llm: HTTP {} 错误体（已脱敏/截断）={}", status, safe_text);
+        tracing::info!("[agent] call_llm: HTTP {} 错误体（已脱敏/截断）={}", status, safe_text);
         return Err(format!("HTTP {}：{}", status, clip(&text, 2000)));
     }
     let data: Value = resp.json().await.map_err(|e| format!("响应解析失败：{e}"))?;
-    println!(
+    tracing::info!(
         "[agent] call_llm: 非流式响应 JSON 大小={}字符 choices={} ",
         data.to_string().chars().count(),
         data.get("choices").and_then(|v| v.as_array()).map(|v| v.len()).unwrap_or(0)
@@ -726,7 +727,7 @@ pub(crate) async fn call_llm(
             }
         })
         .unwrap_or((0, 0));
-    println!(
+    tracing::info!(
         "[agent] call_llm: 非流式 usage prompt={} completion={}",
         usage.0, usage.1
     );
@@ -762,6 +763,7 @@ pub(crate) struct StreamOutcome {
 ///  - `delta.tool_calls` 是增量格式（首 chunk 带 id/name，后续仅带 arguments 片段），
 ///    按 `index` 归并为完整的标准 tool_calls；
 ///  - 调用方拿到空响应（正文与 tool_calls 皆空）时应回退非流式 `call_llm` 兜底。
+#[tracing::instrument(skip_all)]
 pub(crate) async fn call_llm_stream(
     _app: &AppHandle,
     cfg: &AgentRuntimeConfig,
@@ -778,7 +780,7 @@ pub(crate) async fn call_llm_stream(
             Err(e) if e.contains("取消") => return Err(e),
             // 网络 / HTTP 错误：重试一次，到上限则透传。
             Err(e) => {
-                println!(
+                tracing::info!(
                     "[agent] call_llm_stream: 第{}次请求失败，{}",
                     attempt + 1,
                     if attempt < MAX_RETRY { "重试一次" } else { "已达上限" }
@@ -794,7 +796,7 @@ pub(crate) async fn call_llm_stream(
                 // 重试一次避免浪费已喂的 prompt 却拿不到任何 token。
                 let is_empty = o.content.trim().is_empty() && o.tool_calls.is_empty();
                 if is_empty {
-                    println!(
+                    tracing::info!(
                         "[agent] call_llm_stream: 第{}次流式返回空响应（疑似网关断流），{}",
                         attempt + 1,
                         if attempt < MAX_RETRY { "重试一次" } else { "已达上限，按空响应返回" }
@@ -815,6 +817,7 @@ pub(crate) async fn call_llm_stream(
 /// 单次流式请求 + SSE 聚合（不含重试）。空响应以 `Ok(空 StreamOutcome)` 返回，
 /// 由 `call_llm_stream` 判断是否需要重试；用户取消以 `Err("任务已被用户取消")`
 /// 返回，保证重试包装层不会对其重试。
+#[tracing::instrument(skip_all)]
 async fn call_llm_stream_once(
     _app: &AppHandle,
     cfg: &AgentRuntimeConfig,
@@ -827,7 +830,7 @@ async fn call_llm_stream_once(
         return Err("智能体未绑定有效的 LLM（base_url / model_name 为空）".into());
     }
 
-    println!(
+    tracing::info!(
         "[agent] call_llm_stream: 请求 URL={} model={} 是否带 Key={}",
         normalize_chat_url(&cfg.llm_base_url),
         cfg.llm_model_name,
@@ -868,16 +871,16 @@ async fn call_llm_stream_once(
         if let Some(enabled) = action {
             if enabled {
                 obj.insert("reasoning".into(), json!({}));
-                println!("[agent] call_llm_stream: reasoning=true 归一化为 {{}}");
+                tracing::info!("[agent] call_llm_stream: reasoning=true 归一化为 {{}}");
             } else {
                 obj.remove("reasoning");
-                println!("[agent] call_llm_stream: reasoning=false 已移除");
+                tracing::info!("[agent] call_llm_stream: reasoning=false 已移除");
             }
         }
     }
 
     let body_preview = serde_json::to_string(&sanitize_for_log(&body)).unwrap_or_default();
-    println!(
+    tracing::info!(
         "[agent] call_llm_stream: 请求体预览（已脱敏/截断）={} ",
         clip(&body_preview, 1000)
     );
@@ -892,12 +895,12 @@ async fn call_llm_stream_once(
     // 取消优先（请求级兜底）：若已收到取消信号，绝不发起本次 HTTP 请求——
     // 否则会把整段 prompt 发给网关计费后立刻作废。轮次级取消检查见 run_subtask 主循环。
     if cancel.load(Ordering::SeqCst) {
-        println!("[agent] call_llm_stream: 取消信号已置位，跳过 HTTP 请求（不重复计费）");
+        tracing::info!("[agent] call_llm_stream: 取消信号已置位，跳过 HTTP 请求（不重复计费）");
         return Err("任务已被用户取消".into());
     }
 
     let resp = req.send().await.map_err(|e| {
-        println!(
+        tracing::info!(
             "[agent] call_llm_stream: 请求失败（耗时={}ms）：{}",
             request_started.elapsed().as_millis(),
             e
@@ -905,7 +908,7 @@ async fn call_llm_stream_once(
         format!("请求失败：{e}")
     })?;
     let status = resp.status();
-    println!(
+    tracing::info!(
         "[agent] call_llm_stream: 收到 HTTP {}（耗时={}ms）",
         status,
         request_started.elapsed().as_millis()
@@ -913,7 +916,7 @@ async fn call_llm_stream_once(
     if !status.is_success() {
         let text = resp.text().await.unwrap_or_default();
         let safe_text = clip(&sanitize_for_log(&Value::String(text.clone())).to_string(), 5000);
-        println!(
+        tracing::info!(
             "[agent] call_llm_stream: HTTP {} 错误体（已脱敏/截断）={}",
             status, safe_text
         );
@@ -938,14 +941,14 @@ async fn call_llm_stream_once(
         // 用户中途取消：立即终止拉流（连接随函数返回被丢弃），让本轮回合在
         // 调用方处检测到取消标志后提前结束。这是"停止按钮即时生效"的核心断流点。
         if cancel.load(Ordering::SeqCst) {
-            println!(
+            tracing::info!(
                 "[agent] call_llm_stream_once: 检测到取消信号，立即断流（已耗时={}ms）",
                 request_started.elapsed().as_millis()
             );
             return Err("任务已被用户取消".into());
         }
         let chunk = chunk_result.map_err(|e| {
-            println!("[agent] call_llm_stream: SSE 流读取失败（已耗时={}ms）：{}", request_started.elapsed().as_millis(), e);
+            tracing::info!("[agent] call_llm_stream: SSE 流读取失败（已耗时={}ms）：{}", request_started.elapsed().as_millis(), e);
             format!("流读取失败：{e}")
         })?;
         chunk_count += 1;
@@ -983,7 +986,7 @@ async fn call_llm_stream_once(
                 Err(e) => {
                     parse_error_count += 1;
                     // 整行已缓冲完整，正常不应再出现半截 JSON；若仍出现仅记录，不中断流。
-                    println!(
+                    tracing::info!(
                         "[agent] call_llm_stream: SSE JSON 解析失败 #{}：{}，data={}",
                         parse_error_count,
                         e,
@@ -1027,7 +1030,7 @@ async fn call_llm_stream_once(
         })
         .collect();
 
-    println!(
+    tracing::info!(
         "[agent] call_llm_stream: SSE 聚合完成 chunks={} lines={} parse_errors={} content={}字符 reasoning={}字符 tool_calls={} 总耗时={}ms",
         chunk_count,
         line_count,
@@ -1256,7 +1259,7 @@ approach or report the situation to the user."
         messages.insert(at, msg);
     }
     if patched > 0 {
-        println!(
+        tracing::info!(
             "[agent] sanitize_message_sequence: 补齐 {} 条缺失的 tool 结果占位（防止 tool_call 悬空触发 HTTP 400）",
             patched
         );
@@ -1275,7 +1278,7 @@ approach or report the situation to the user."
     });
     let dropped = before - messages.len();
     if dropped > 0 {
-        println!(
+        tracing::info!(
             "[agent] sanitize_message_sequence: 丢弃 {} 条孤儿 tool 结果（其发起者 assistant 已不在上下文中）",
             dropped
         );
@@ -1306,7 +1309,7 @@ fn trim_history(messages: &[Value]) -> Vec<Value> {
             .iter()
             .rposition(|m| m.get("role").and_then(|v| v.as_str()) != Some("tool"))
             .unwrap_or(0);
-        println!(
+        tracing::info!(
             "[agent] trim_history: 所有候选切点均不安全，退化保留最后一条非 tool 消息（start={}）",
             start
         );

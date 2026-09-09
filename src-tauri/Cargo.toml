@@ -35,4 +35,8 @@ tauri-plugin-shell = "2"
 async-trait = "0.1"
 tokio = { version = "1", features = ["sync", "rt", "time", "process"] }
 chrono = "0.4"
+# 统一日志框架（L0/L1 通用基础设施，领域无关）：tracing = slf4j 门面，tracing-subscriber = 订阅器，tracing-appender = 滚动文件落盘。
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-appender = "0.2"
 

@@ -4,6 +4,7 @@ mod mcp;
 mod mamba_manager;
 mod bun_manager;
 mod fs_helper;
+mod logging;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -22,22 +23,24 @@ pub fn run() {
         .manage(bun)
         .manage(agent::runtime::AgentRuntime::new())
         .setup(|app| -> Result<(), Box<dyn std::error::Error>> {
+            // 统一日志初始化（必须在任何 tracing 宏调用之前）。
+            crate::logging::init_logging(app.handle());
             // 后台静默确保 Agent 默认环境（default）存在；失败仅日志，不阻塞启动。
             // 严格延后：先 await DB 连接池就绪闸门，杜绝启动早期组件未就绪导致的空指针 / 连接断裂。
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 if let Err(e) = agent::round_compactor::wait_db_ready(&handle).await {
-                    eprintln!("[startup] DB 就绪等待失败，后台初始化跳过：{e}");
+                    tracing::error!("[startup] DB 就绪等待失败，后台初始化跳过：{e}");
                     return;
                 }
                 // 拉起小分队定时调度器与 API 触发服务（二者均依赖数据库就绪）。
                 agent::squad_scheduler::start_scheduler(handle.clone());
                 agent::squad_api_server::start_api_server(handle.clone());
                 if let Err(e) = mamba_manager::ensure_default_env(&handle).await {
-                    eprintln!("[mamba] 默认环境初始化失败：{e}");
+                    tracing::error!("[mamba] 默认环境初始化失败：{e}");
                 }
                 if let Err(e) = bun_manager::ensure_default_bun(&handle).await {
-                    eprintln!("[bun] 默认环境初始化失败：{e}");
+                    tracing::error!("[bun] 默认环境初始化失败：{e}");
                 }
             });
             Ok(())

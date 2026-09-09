@@ -105,7 +105,7 @@ async fn log_event(pool: &SqlitePool, memory_id: &str, event_type: &str, at: i64
     .execute(pool)
     .await
     {
-        println!("[memory] 写事件日志失败（{event_type}）：{e}");
+        tracing::info!("[memory] 写事件日志失败（{event_type}）：{e}");
     }
 }
 
@@ -379,7 +379,7 @@ pub async fn recall_top_memories(
     let pool = match get_pool(app).await {
         Ok(p) => p,
         Err(e) => {
-            println!("[memory] recall_top_memories: 取池失败：{e}");
+            tracing::info!("[memory] recall_top_memories: 取池失败：{e}");
             return (Vec::new(), String::new());
         }
     };
@@ -395,7 +395,7 @@ pub async fn recall_top_memories(
     {
         Ok(r) => r,
         Err(e) => {
-            println!("[memory] recall_top_memories: 查询失败：{e}");
+            tracing::info!("[memory] recall_top_memories: 查询失败：{e}");
             return (Vec::new(), String::new());
         }
     };
@@ -420,7 +420,7 @@ pub async fn recall_top_memories(
         .execute(&pool)
         .await
         {
-            println!("[memory] recall_top_memories: 计数更新失败 {id}：{e}");
+            tracing::info!("[memory] recall_top_memories: 计数更新失败 {id}：{e}");
         }
         log_event(&pool, &id, "recall", now).await;
         let mut item = row_to_item(row);

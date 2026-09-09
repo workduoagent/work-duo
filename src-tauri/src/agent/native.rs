@@ -84,18 +84,18 @@ impl AgentTool for ReadFileTool {
         let abs = match PathGuard::check(path, ctx) {
             Ok(abs) => abs,
             Err(e) => {
-                println!("[agent] native__read_file: 路径校验失败 path={} error={:?}", path, e);
+                tracing::info!("[agent] native__read_file: 路径校验失败 path={} error={:?}", path, e);
                 return Err(e);
             }
         };
-        println!("[agent] native__read_file: 开始 path={} resolved={}", path, abs.display());
+        tracing::info!("[agent] native__read_file: 开始 path={} resolved={}", path, abs.display());
         let started = Instant::now();
         // TOCTOU 二次确认：先打开文件句柄，再基于句柄校验真实物理路径未逃逸工作空间，
         // 防御「check 与 open 之间符号链接被替换」的竞态窗口。
         let mut file = match File::open(&abs) {
             Ok(f) => f,
             Err(e) => {
-                println!(
+                tracing::info!(
                     "[agent] native__read_file: 失败 path={} 耗时={}ms error={}",
                     abs.display(),
                     started.elapsed().as_millis(),
@@ -105,7 +105,7 @@ impl AgentTool for ReadFileTool {
             }
         };
         if let Err(e) = PathGuard::verify_opened(&abs, &file, ctx) {
-            println!(
+            tracing::info!(
                 "[agent] native__read_file: TOCTOU 校验失败 path={} error={:?}",
                 abs.display(),
                 e
@@ -115,7 +115,7 @@ impl AgentTool for ReadFileTool {
         let mut content = String::new();
         match file.read_to_string(&mut content) {
             Ok(_) => {
-                println!(
+                tracing::info!(
                     "[agent] native__read_file: 成功 bytes={} chars={} 耗时={}ms 内容={}",
                     content.len(),
                     content.chars().count(),
@@ -125,7 +125,7 @@ impl AgentTool for ReadFileTool {
                 Ok(content)
             }
             Err(e) => {
-                println!(
+                tracing::info!(
                     "[agent] native__read_file: 失败 path={} 耗时={}ms error={}",
                     abs.display(),
                     started.elapsed().as_millis(),
@@ -168,7 +168,7 @@ impl AgentTool for WriteFileTool {
         let abs = match PathGuard::check(path, ctx) {
             Ok(abs) => abs,
             Err(e) => {
-                println!("[agent] native__write_file: 路径校验失败 path={} error={:?}", path, e);
+                tracing::info!("[agent] native__write_file: 路径校验失败 path={} error={:?}", path, e);
                 return Err(e);
             }
         };
@@ -177,7 +177,7 @@ impl AgentTool for WriteFileTool {
                 ToolError::ExecutionFailed(format!("创建父目录失败：{e}"))
             })?;
         }
-        println!(
+        tracing::info!(
             "[agent] native__write_file: 开始 path={} resolved={} content_bytes={} content_preview={}",
             path,
             abs.display(),
@@ -189,7 +189,7 @@ impl AgentTool for WriteFileTool {
         let mut file = match File::create(&abs) {
             Ok(f) => f,
             Err(e) => {
-                println!(
+                tracing::info!(
                     "[agent] native__write_file: 失败 path={} 耗时={}ms error={}",
                     abs.display(),
                     started.elapsed().as_millis(),
@@ -199,7 +199,7 @@ impl AgentTool for WriteFileTool {
             }
         };
         if let Err(e) = PathGuard::verify_opened(&abs, &file, ctx) {
-            println!(
+            tracing::info!(
                 "[agent] native__write_file: TOCTOU 校验失败 path={} error={:?}",
                 abs.display(),
                 e
@@ -208,7 +208,7 @@ impl AgentTool for WriteFileTool {
         }
         match file.write_all(content.as_bytes()) {
             Ok(()) => {
-                println!(
+                tracing::info!(
                     "[agent] native__write_file: 成功 path={} bytes={} 耗时={}ms",
                     abs.display(),
                     content.len(),
@@ -217,7 +217,7 @@ impl AgentTool for WriteFileTool {
                 Ok(format!("已写入 {} 字节到 {}", content.len(), abs.display()))
             }
             Err(e) => {
-                println!(
+                tracing::info!(
                     "[agent] native__write_file: 失败 path={} 耗时={}ms error={}",
                     abs.display(),
                     started.elapsed().as_millis(),
@@ -284,7 +284,7 @@ impl AgentTool for ArchiveArtifactTool {
         let abs = match PathGuard::check(&rel, ctx) {
             Ok(abs) => abs,
             Err(e) => {
-                println!(
+                tracing::info!(
                     "[agent] native__archive_artifact: 路径校验失败 rel={} error={:?}",
                     rel, e
                 );
@@ -295,7 +295,7 @@ impl AgentTool for ArchiveArtifactTool {
             std::fs::create_dir_all(parent)
                 .map_err(|e| ToolError::ExecutionFailed(format!("创建父目录失败：{e}")))?;
         }
-        println!(
+        tracing::info!(
             "[agent] native__archive_artifact: 开始 rel={} resolved={} content_bytes={}",
             rel,
             abs.display(),
@@ -306,7 +306,7 @@ impl AgentTool for ArchiveArtifactTool {
         let mut file = match File::create(&abs) {
             Ok(f) => f,
             Err(e) => {
-                println!(
+                tracing::info!(
                     "[agent] native__archive_artifact: 失败 rel={} 耗时={}ms error={}",
                     rel,
                     started.elapsed().as_millis(),
@@ -316,7 +316,7 @@ impl AgentTool for ArchiveArtifactTool {
             }
         };
         if let Err(e) = PathGuard::verify_opened(&abs, &file, ctx) {
-            println!(
+            tracing::info!(
                 "[agent] native__archive_artifact: TOCTOU 校验失败 path={} error={:?}",
                 abs.display(),
                 e
@@ -325,7 +325,7 @@ impl AgentTool for ArchiveArtifactTool {
         }
         match file.write_all(content.as_bytes()) {
             Ok(()) => {
-                println!(
+                tracing::info!(
                     "[agent] native__archive_artifact: 成功 path={} bytes={} 耗时={}ms",
                     abs.display(),
                     content.len(),
@@ -448,7 +448,7 @@ impl AgentTool for EditFileTool {
         let new_str = args.get("new_str").and_then(|v| v.as_str()).unwrap_or("");
 
         let abs = PathGuard::check(path, ctx)?;
-        println!(
+        tracing::info!(
             "[agent] native__edit_file: 开始 path={} resolved={} old_str={} new_str={}",
             path,
             abs.display(),
@@ -459,7 +459,7 @@ impl AgentTool for EditFileTool {
         let original = match std::fs::read_to_string(&abs) {
             Ok(content) => content,
             Err(e) => {
-                println!("[agent] native__edit_file: 读取失败 path={} error={}", abs.display(), e);
+                tracing::info!("[agent] native__edit_file: 读取失败 path={} error={}", abs.display(), e);
                 return Err(ToolError::ExecutionFailed(format!("读取失败：{e}")));
             }
         };
@@ -476,7 +476,7 @@ impl AgentTool for EditFileTool {
         let updated_bytes = updated.len();
         match std::fs::write(&abs, &updated) {
             Ok(()) => {
-                println!(
+                tracing::info!(
                     "[agent] native__edit_file: 成功 path={} 原始bytes={} 新bytes={} 耗时={}ms",
                     abs.display(),
                     original.len(),
@@ -486,7 +486,7 @@ impl AgentTool for EditFileTool {
                 Ok(format!("已在 {} 完成 1 处替换", abs.display()))
             }
             Err(e) => {
-                println!(
+                tracing::info!(
                     "[agent] native__edit_file: 写回失败 path={} 耗时={}ms error={}",
                     abs.display(),
                     started.elapsed().as_millis(),
@@ -522,10 +522,10 @@ impl AgentTool for ListDirectoryTool {
         let path = args.get("path").and_then(|v| v.as_str()).unwrap_or(".");
         let abs = PathGuard::check(path, ctx)?;
         if !abs.is_dir() {
-            println!("[agent] native__list_directory: 目标不是目录 path={}", abs.display());
+            tracing::info!("[agent] native__list_directory: 目标不是目录 path={}", abs.display());
             return Err(ToolError::InvalidArgs(format!("{} 不是目录", abs.display())));
         }
-        println!("[agent] native__list_directory: 开始 path={} resolved={}", path, abs.display());
+        tracing::info!("[agent] native__list_directory: 开始 path={} resolved={}", path, abs.display());
         let started = Instant::now();
         let mut entries: Vec<String> = Vec::new();
         for e in std::fs::read_dir(&abs).map_err(|e| {
@@ -541,7 +541,7 @@ impl AgentTool for ListDirectoryTool {
         }
         let result = serde_json::to_string(&json!({ "entries": entries }))
             .unwrap_or_else(|_| "{}".into());
-        println!(
+        tracing::info!(
             "[agent] native__list_directory: 成功 entries={} result={}字符 耗时={}ms",
             result.matches("\"").count() / 2,
             result.chars().count(),
@@ -579,7 +579,7 @@ impl AgentTool for ExecuteCommandTool {
             .workspace
             .clone()
             .or_else(|| std::env::current_dir().ok());
-        println!(
+        tracing::info!(
             "[agent] native__execute_command: 开始 cwd={} command={}",
             cwd.as_ref().map(|p| p.display().to_string()).unwrap_or_else(|| "<默认>".into()),
             crate::agent::runtime::clip(command, 500),
@@ -608,7 +608,7 @@ impl AgentTool for ExecuteCommandTool {
             Ok(Ok(out)) => {
                 let stdout = String::from_utf8_lossy(&out.stdout).to_string();
                 let stderr = String::from_utf8_lossy(&out.stderr).to_string();
-                println!(
+                tracing::info!(
                     "[agent] native__execute_command: 返回 exit_code={:?} stdout={}字符 stderr={}字符 耗时={}ms stdout_preview={} stderr_preview={}",
                     out.status.code(),
                     stdout.chars().count(),
@@ -629,7 +629,7 @@ impl AgentTool for ExecuteCommandTool {
             Err(_elapsed) => {
                 // 超时：wait_with_output 的 future 被 drop，kill_on_drop(true) 已显式终止子进程，
                 // 确保主 Tokio 运行时不被永久挂起、进程不留活口。
-                println!(
+                tracing::info!(
                     "[agent] native__execute_command: 超时 {}s，已强制终止子进程 command={}",
                     COMMAND_TIMEOUT_SECS,
                     crate::agent::runtime::clip(command, 300),
@@ -695,13 +695,13 @@ impl AgentTool for RunPythonSandboxTool {
         PermissionLevel::RequireApproval
     }
     async fn execute(&self, args: Value, ctx: &ToolContext) -> Result<String, ToolError> {
-        println!(
+        tracing::info!(
             "[agent] native__run_python_sandbox: 请求 sandbox_enabled={} args={}",
             ctx.sandbox_enabled,
             crate::agent::runtime::clip(&args.to_string(), 500),
         );
         if !ctx.sandbox_enabled {
-            println!("[agent] native__run_python_sandbox: 拒绝，allow_sandbox=false");
+            tracing::info!("[agent] native__run_python_sandbox: 拒绝，allow_sandbox=false");
             return Err(ToolError::PermissionDenied(
                 "该智能体未开启沙箱权限（allow_sandbox=false），拒绝执行".into(),
             ));
@@ -766,7 +766,7 @@ impl AgentTool for RunPythonSandboxTool {
         // resolved_script 已是校验并归一化的绝对路径：模型可能传相对路径（如 `install_openpyxl.py`），
         // 而 Rust 进程 cwd 并非工作空间，直接交给 mamba 会因「脚本文件不存在」失败。
 
-        println!(
+        tracing::info!(
             "[agent] native__run_python_sandbox: 开始 script={} env={}",
             resolved_script,
             env_name.as_deref().unwrap_or("default"),
@@ -775,7 +775,7 @@ impl AgentTool for RunPythonSandboxTool {
         let mgr = self.app.state::<MambaManager>();
         match run_python_in_sandbox(&self.app, &*mgr, env_name, resolved_script).await {
             Ok(out) => {
-                println!(
+                tracing::info!(
                     "[agent] native__run_python_sandbox: 成功 result={}字符 耗时={}ms 内容={}",
                     out.chars().count(),
                     started.elapsed().as_millis(),
@@ -784,7 +784,7 @@ impl AgentTool for RunPythonSandboxTool {
                 Ok(out)
             }
             Err(e) => {
-                println!(
+                tracing::info!(
                     "[agent] native__run_python_sandbox: 失败 耗时={}ms error={}",
                     started.elapsed().as_millis(),
                     e
@@ -846,13 +846,13 @@ impl AgentTool for RunNodeSandboxTool {
         PermissionLevel::RequireApproval
     }
     async fn execute(&self, args: Value, ctx: &ToolContext) -> Result<String, ToolError> {
-        println!(
+        tracing::info!(
             "[agent] native__run_node_sandbox: 请求 sandbox_enabled={} args={}",
             ctx.sandbox_enabled,
             crate::agent::runtime::clip(&args.to_string(), 500),
         );
         if !ctx.sandbox_enabled {
-            println!("[agent] native__run_node_sandbox: 拒绝，allow_sandbox=false");
+            tracing::info!("[agent] native__run_node_sandbox: 拒绝，allow_sandbox=false");
             return Err(ToolError::PermissionDenied(
                 "该智能体未开启沙箱权限（allow_sandbox=false），拒绝执行".into(),
             ));
@@ -914,7 +914,7 @@ impl AgentTool for RunNodeSandboxTool {
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
 
-        println!(
+        tracing::info!(
             "[agent] native__run_node_sandbox: 开始 script={} env={}",
             resolved_script,
             env_name.as_deref().unwrap_or("default"),
@@ -923,7 +923,7 @@ impl AgentTool for RunNodeSandboxTool {
         let mgr = self.app.state::<BunManager>();
         match run_node_in_sandbox(&self.app, &*mgr, env_name, resolved_script).await {
             Ok(out) => {
-                println!(
+                tracing::info!(
                     "[agent] native__run_node_sandbox: 成功 result={}字符 耗时={}ms 内容={}",
                     out.chars().count(),
                     started.elapsed().as_millis(),
@@ -932,7 +932,7 @@ impl AgentTool for RunNodeSandboxTool {
                 Ok(out)
             }
             Err(e) => {
-                println!(
+                tracing::info!(
                     "[agent] native__run_node_sandbox: 失败 耗时={}ms error={}",
                     started.elapsed().as_millis(),
                     e

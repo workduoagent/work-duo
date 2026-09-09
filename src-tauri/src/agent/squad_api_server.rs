@@ -62,7 +62,7 @@ pub fn start_api_server(app: AppHandle) {
         });
 
         if !enabled {
-            println!("[api] 小分队 API 服务未启用（app_config.squad_api_enabled != 'true'），跳过监听");
+            tracing::info!("[api] 小分队 API 服务未启用（app_config.squad_api_enabled != 'true'），跳过监听");
             return;
         }
 
@@ -70,18 +70,18 @@ pub fn start_api_server(app: AppHandle) {
         let listener = match TcpListener::bind(&addr) {
             Ok(l) => l,
             Err(e) => {
-                println!("[api] 无法绑定 {addr}：{e}");
+                tracing::info!("[api] 无法绑定 {addr}：{e}");
                 return;
             }
         };
-        println!("[api] 小分队 API 服务已启动：{addr}");
+        tracing::info!("[api] 小分队 API 服务已启动：{addr}");
         for stream in listener.incoming() {
             match stream {
                 Ok(s) => {
                     let app2 = app.clone();
                     std::thread::spawn(move || handle_conn(s, app2));
                 }
-                Err(e) => println!("[api] accept 错误：{e}"),
+                Err(e) => tracing::info!("[api] accept 错误：{e}"),
             }
         }
     });

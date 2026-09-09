@@ -52,6 +52,7 @@ impl ApprovalManager {
 
     /// 挂起等待决策：注册 pending 并立即返回接收端，由调用方 `await`。
     /// 返回 (request, rx)：request 用于推前端，rx 用于阻塞等待用户决策。
+    #[tracing::instrument(skip_all)]
     pub async fn suspend(&self, request: ApprovalRequest) -> oneshot::Receiver<ApprovalOutcome> {
         let (tx, rx) = oneshot::channel();
         let approval_id = request.approval_id.clone();
@@ -60,7 +61,7 @@ impl ApprovalManager {
             .lock()
             .await
             .insert(approval_id.clone(), Pending { tx });
-        println!(
+        tracing::info!(
             "[agent] approval: 已挂起 approval_id={} tool={} 当前pending={}个",
             approval_id,
             tool_name,
@@ -81,7 +82,7 @@ impl ApprovalManager {
                 approved,
                 reason,
             }).is_ok();
-            println!(
+            tracing::info!(
                 "[agent] approval: 收到决策 approval_id={} approved={} sent={} 剩余pending={}个",
                 approval_id,
                 approved,
@@ -90,7 +91,7 @@ impl ApprovalManager {
             );
             sent
         } else {
-            println!(
+            tracing::info!(
                 "[agent] approval: 未找到挂起项 approval_id={} approved={}（可能已超时/取消）",
                 approval_id, approved
             );
@@ -101,6 +102,6 @@ impl ApprovalManager {
     /// 超时/取消时清理挂起项（避免内存泄漏）。
     pub async fn cancel(&self, approval_id: &str) {
         let removed = self.pending.lock().await.remove(approval_id).is_some();
-        println!("[agent] approval: 清理 approval_id={} removed={}", approval_id, removed);
+        tracing::info!("[agent] approval: 清理 approval_id={} removed={}", approval_id, removed);
     }
 }

@@ -107,6 +107,7 @@ pub(crate) async fn get_pool(app: &AppHandle) -> Result<SqlitePool, String> {
 /// 任何后台调度 / 定时任务（滚动压缩、环境预热等）都必须先 `await` 本函数，
 /// 确保核心应用上下文（App Context、DB Pool）完全初始化后再执行，杜绝启动早期
 /// 组件未就绪导致的空指针或数据库连接断裂。
+#[tracing::instrument(skip_all)]
 pub(crate) async fn wait_db_ready(app: &AppHandle) -> Result<(), String> {
     let probe = async {
         loop {
@@ -182,7 +183,7 @@ pub(crate) async fn persist_round_raw(app: &AppHandle, round_id: &str, raw_messa
     let pool = match get_pool(app).await {
         Ok(p) => p,
         Err(e) => {
-            println!("[agent] persist_round_raw: 取池失败：{e}");
+            tracing::info!("[agent] persist_round_raw: 取池失败：{e}");
             return;
         }
     };
@@ -195,7 +196,7 @@ pub(crate) async fn persist_round_raw(app: &AppHandle, round_id: &str, raw_messa
     .execute(&pool)
     .await
     {
-        println!("[agent] persist_round_raw: 写 raw_messages_json 失败：{e}");
+        tracing::info!("[agent] persist_round_raw: 写 raw_messages_json 失败：{e}");
     }
 }
 
@@ -204,7 +205,7 @@ pub(crate) async fn bump_session_turns(app: &AppHandle, session_id: &str) {
     let pool = match get_pool(app).await {
         Ok(p) => p,
         Err(e) => {
-            println!("[agent] bump_session_turns: 取池失败：{e}");
+            tracing::info!("[agent] bump_session_turns: 取池失败：{e}");
             return;
         }
     };
@@ -217,7 +218,7 @@ pub(crate) async fn bump_session_turns(app: &AppHandle, session_id: &str) {
     .execute(&pool)
     .await
     {
-        println!("[agent] bump_session_turns: 失败：{e}");
+        tracing::info!("[agent] bump_session_turns: 失败：{e}");
     }
 }
 
@@ -236,12 +237,12 @@ pub(crate) async fn persist_tools_tokens(
     let pool = match get_pool(app).await {
         Ok(p) => p,
         Err(e) => {
-            println!("[agent] persist_tools_tokens: 取池失败：{e}");
+            tracing::info!("[agent] persist_tools_tokens: 取池失败：{e}");
             return;
         }
     };
     let tokens = (mcp_count as i64 + skill_count as i64) * AVG_TOOL_TOKENS;
-    println!(
+    tracing::info!(
         "[agent] persist_tools_tokens: session={} mcp工具={} skill={} → tools_tokens={}",
         session_id, mcp_count, skill_count, tokens
     );
@@ -254,7 +255,7 @@ pub(crate) async fn persist_tools_tokens(
     .execute(&pool)
     .await
     {
-        println!("[agent] persist_tools_tokens: 写 tools_tokens 失败：{e}");
+        tracing::info!("[agent] persist_tools_tokens: 写 tools_tokens 失败：{e}");
     }
 }
 
@@ -272,11 +273,11 @@ pub(crate) async fn persist_session_tokens(
     let pool = match get_pool(app).await {
         Ok(p) => p,
         Err(e) => {
-            println!("[agent] persist_session_tokens: 取池失败：{e}");
+            tracing::info!("[agent] persist_session_tokens: 取池失败：{e}");
             return;
         }
     };
-    println!(
+    tracing::info!(
         "[agent] persist_session_tokens: session={} prompt+={} completion+={}",
         session_id, prompt_delta, completion_delta
     );
@@ -294,7 +295,7 @@ pub(crate) async fn persist_session_tokens(
     .execute(&pool)
     .await
     {
-        println!("[agent] persist_session_tokens: 写会话 token 失败：{e}");
+        tracing::info!("[agent] persist_session_tokens: 写会话 token 失败：{e}");
     }
 }
 
@@ -310,7 +311,7 @@ pub(crate) async fn persist_artifact(
     let pool = match get_pool(app).await {
         Ok(p) => p,
         Err(e) => {
-            println!("[agent] persist_artifact: 取池失败：{e}");
+            tracing::info!("[agent] persist_artifact: 取池失败：{e}");
             return;
         }
     };
@@ -335,7 +336,7 @@ pub(crate) async fn persist_artifact(
     .execute(&pool)
     .await
     {
-        println!("[agent] persist_artifact: 写库失败（artifact_id={}）：{e}", ar.artifact_id);
+        tracing::info!("[agent] persist_artifact: 写库失败（artifact_id={}）：{e}", ar.artifact_id);
     }
 }
 
@@ -346,6 +347,7 @@ pub(crate) async fn persist_artifact(
 /// Tokio 异步任务，向前合并 `[summary_round_count+1 .. +roll_forward_count]` 轮进摘要，
 /// 并原子推进 `summary_round_count`。调用方（run_task）在 ReAct 循环结束后立即返回，
 /// 真正的压缩 HTTP 请求在后台 Task 中独立运行，**不阻塞用户下一轮提问**。
+#[tracing::instrument(skip_all)]
 pub(crate) async fn trigger_background_compaction(
     app: &AppHandle,
     cfg: &AgentRuntimeConfig,
@@ -354,7 +356,7 @@ pub(crate) async fn trigger_background_compaction(
     let pool = match get_pool(app).await {
         Ok(p) => p,
         Err(e) => {
-            println!("[agent] trigger_background_compaction: 取池失败：{e}");
+            tracing::info!("[agent] trigger_background_compaction: 取池失败：{e}");
             return;
         }
     };
@@ -385,7 +387,7 @@ pub(crate) async fn trigger_background_compaction(
     // 每轮触发阈值与滚动步长由 CompactorConfig 默认配置决定（规范：每 5 轮触发、向前合并 2 轮）。
     let compactor = CompactorConfig::default();
     let pending = total_turns.saturating_sub(last_compact);
-    println!(
+    tracing::info!(
         "[Compactor] 触发判定：session={} total_turns={} 已压缩至={} 未压缩={} 阈值={}",
         session_id, total_turns, last_compact, pending, compactor.trigger_threshold
     );
@@ -395,7 +397,7 @@ pub(crate) async fn trigger_background_compaction(
 
     let range_start = last_compact + 1;
     let range_end = last_compact + compactor.roll_forward_count;
-    println!(
+    tracing::info!(
         "[Compactor] 达到阈值，派发后台压缩：合并轮次 {}..={}（旧摘要={}）",
         range_start,
         range_end,
@@ -414,7 +416,7 @@ pub(crate) async fn trigger_background_compaction(
         let pool = match get_pool(&app_bg).await {
             Ok(p) => p,
             Err(e) => {
-                println!("[Compactor] 取池失败：{e}");
+                tracing::info!("[Compactor] 取池失败：{e}");
                 return;
             }
         };
@@ -434,7 +436,7 @@ pub(crate) async fn trigger_background_compaction(
         {
             Ok(r) => r,
             Err(e) => {
-                println!("[Compactor] 读取待压缩轮次失败：{e}");
+                tracing::info!("[Compactor] 读取待压缩轮次失败：{e}");
                 return;
             }
         };
@@ -459,7 +461,7 @@ pub(crate) async fn trigger_background_compaction(
 
         match execute_summary_call(&cfg_bg, old_summary.as_deref(), &rounds).await {
             Ok(new_summary) => {
-                println!(
+                tracing::info!(
                     "[Compactor] 压缩调用完成：输入轮次={} 旧摘要={}字符 → 新摘要={}字符",
                     rounds.len(),
                     old_summary.as_ref().map(|s| s.chars().count()).unwrap_or(0),
@@ -476,10 +478,10 @@ pub(crate) async fn trigger_background_compaction(
                 .execute(&pool)
                 .await
                 {
-                    println!("[Compactor] 写回 summary 失败：{e}");
+                    tracing::info!("[Compactor] 写回 summary 失败：{e}");
                     return;
                 }
-                println!(
+                tracing::info!(
                     "[Compactor] 已滚动压缩 turns {}..{} 进摘要（session={}）",
                     range_start, range_end, sid
                 );
@@ -487,7 +489,7 @@ pub(crate) async fn trigger_background_compaction(
                 // 双轨落盘：若会话绑定工程，额外将摘要写入 .wd_mem/sessions/{id}.summary.md。
                 if let Some(root) = resolve_project_root(&pool, &sid).await {
                     if let Err(e) = wd_mem::write_session_summary(&root, &sid, &new_summary) {
-                        println!("[Compactor] 写会话摘要文件失败（仅影响文件轨）：{e}");
+                        tracing::info!("[Compactor] 写会话摘要文件失败（仅影响文件轨）：{e}");
                     }
                 }
 
@@ -509,7 +511,7 @@ pub(crate) async fn trigger_background_compaction(
                 );
             }
             Err(err) => {
-                eprintln!("[Compactor] 后台压缩失败：{err}");
+                tracing::error!("[Compactor] 后台压缩失败：{err}");
             }
         }
     });
@@ -584,7 +586,7 @@ Your job is to merge the Existing Summary and the Target Conversation Rounds int
         json!({ "role": "system", "content": system_compress_rule }),
         json!({ "role": "user", "content": prompt }),
     ];
-    println!(
+    tracing::info!(
         "[Compactor] 准备调用摘要 LLM：轮次={} prompt={}字符 system_rule={}字符 old_summary={}字符",
         rounds.len(),
         prompt.chars().count(),
@@ -601,10 +603,10 @@ Your job is to merge the Existing Summary and the Target Conversation Rounds int
         .trim()
         .to_string();
     if summary.is_empty() {
-        println!("[Compactor] 摘要 LLM 返回空内容，压缩失败");
+        tracing::info!("[Compactor] 摘要 LLM 返回空内容，压缩失败");
         return Err("压缩结果为空".into());
     }
-    println!(
+    tracing::info!(
         "[Compactor] 摘要内容预览（前500字符）：{}",
         crate::agent::runtime::clip(&summary, 500)
     );

@@ -255,7 +255,7 @@ fn inject_attachments(
                             names.push(name);
                         }
                         Err(e) => {
-                            println!("[agent] context: 文件附件落盘失败（{}）：{}", name, e);
+                            tracing::info!("[agent] context: 文件附件落盘失败（{}）：{}", name, e);
                             text_blocks.push(format!(
                                 "\n\n[附件文件：{} 落盘失败：{} ]\n无法读取该文件内容。",
                                 name, e
@@ -286,7 +286,7 @@ fn inject_attachments(
             parts.extend(image_parts.clone());
             last["content"] = json!(parts);
         }
-        println!(
+        tracing::info!(
             "[agent] context: 已注入 {} 个附件（图片{}张 / 文本·文件{}个）：[{}]",
             attachments.len(),
             image_parts.len(),
@@ -306,7 +306,7 @@ pub(crate) async fn build_context_messages(
     let sid = match &cfg.session_id {
         Some(s) => s.clone(),
         None => {
-            println!("[agent] context: 无 session_id，仅装配 [system + 当前提问]（不含历史）");
+            tracing::info!("[agent] context: 无 session_id，仅装配 [system + 当前提问]（不含历史）");
             let mut m = build_request_messages(&cfg.system_prompt, None, None, &[], prompt);
             inject_attachments(&mut m, &cfg.attachments, &cfg.workspace);
             return Ok(m);
@@ -418,7 +418,7 @@ pub(crate) async fn build_context_messages(
     inject_attachments(&mut messages, &cfg.attachments, &cfg.workspace);
 
     // 装配链路日志：各 Slot 体量 + 最终规模，便于排错时确认上下文构成。
-    println!(
+    tracing::info!(
         "[agent] context: 装配完成 session={} | Slot0 系统提示={}字符(custom_rules={}) | Slot1 项目记忆={} | Slot2 摘要={} | 活跃轮次={}(起始round_index={}) | 当前提问={}字符 附件={} | 最终 messages={}条/约{}字符",
         sid,
         system_prompt.chars().count(),

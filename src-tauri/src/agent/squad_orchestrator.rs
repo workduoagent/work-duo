@@ -73,11 +73,12 @@ fn squad_member_workspace(workspace: &Option<String>, squad_id: &str, agent_id: 
 ///
 /// 流程：建会话 → 选主管 → 主管规划委派 → 逐子任务派成员执行（带重试）→ leader 汇总。
 /// 每个成员运行在独立私有的 `.wd_mem/squads/{squad_id}/{agent_id}/` 工作区，互不干扰。
+#[tracing::instrument(skip_all)]
 pub async fn run_squad_task(app: &AppHandle, squad: SquadRuntimeConfig, prompt: String) {
     let pool = match get_pool(app).await {
         Ok(p) => p,
         Err(e) => {
-            println!("[squad] run_squad_task: 获取数据库失败：{e}");
+            tracing::info!("[squad] run_squad_task: 获取数据库失败：{e}");
             return;
         }
     };
@@ -137,7 +138,7 @@ pub async fn run_squad_task(app: &AppHandle, squad: SquadRuntimeConfig, prompt: 
     let leader = match leader {
         Some(l) => l,
         None => {
-            println!("[squad] run_squad_task: 无可用主管成员");
+            tracing::info!("[squad] run_squad_task: 无可用主管成员");
             return;
         }
     };
@@ -190,7 +191,7 @@ pub async fn run_squad_task(app: &AppHandle, squad: SquadRuntimeConfig, prompt: 
                 }
                 Err(e) => {
                     last_err = Some(e.clone());
-                    println!(
+                    tracing::info!(
                         "[squad] 成员 {} 子任务第 {} 次失败：{}",
                         member.agent.agent_id,
                         attempt + 1,
@@ -281,7 +282,7 @@ pub async fn run_squad_task(app: &AppHandle, squad: SquadRuntimeConfig, prompt: 
             summary,
         },
     );
-    println!(
+    tracing::info!(
         "[squad] run_squad_task: 会话 {} 完成，模式={}，子任务数={}",
         session_id,
         mode,
@@ -343,7 +344,7 @@ async fn plan_squad_delegation(
             parse_delegation(&content)
         }
         Err(e) => {
-            println!("[squad] plan_squad_delegation: LLM 调用失败：{e}");
+            tracing::info!("[squad] plan_squad_delegation: LLM 调用失败：{e}");
             Vec::new()
         }
     }
@@ -420,7 +421,7 @@ async fn summarize(leader_cfg: &AgentRuntimeConfig, prompt: &str, context: &str)
             }
         }
         Err(e) => {
-            println!("[squad] summarize: LLM 调用失败：{e}");
+            tracing::info!("[squad] summarize: LLM 调用失败：{e}");
             None
         }
     }
@@ -556,7 +557,7 @@ async fn run_pipeline_node(
             }
             Err(e) => {
                 last_err = Some(e.clone());
-                println!(
+                tracing::info!(
                     "[squad] 流水线成员 {} 第 {} 次失败：{}",
                     member.agent.agent_id,
                     attempt + 1,
@@ -605,6 +606,7 @@ async fn run_pipeline_node(
 /// 各成员运行在独立私有工作区，互不干扰；末工序输出即最终交付物（本模式不额外调用汇总 LLM，降本）。
 /// 若任一成员设置了 `depends_on`，则升级为 DAG 拓扑执行：每个节点以所有上游成员产出为 `initial_context`，
 /// 最终汇总取所有「汇点」（无下游依赖的节点）产出。
+#[tracing::instrument(skip_all)]
 async fn run_squad_pipeline(
     app: &AppHandle,
     squad: &SquadRuntimeConfig,
@@ -620,7 +622,7 @@ async fn run_squad_pipeline(
         match build_dag_plan(&squad.members) {
             Ok(p) => p,
             Err(e) => {
-                println!("[squad] pipeline: DAG 构建失败，会话 {}：{e}", session_id);
+                tracing::info!("[squad] pipeline: DAG 构建失败，会话 {}：{e}", session_id);
                 let _ = sqlx::query(
                     "INSERT INTO agent_squad_round (id, squad_id, session_id, speaker_agent_id, role, content, kind, created_at) \
                      VALUES (?, ?, ?, NULL, '系统', ?, 'system', ?)",
@@ -748,7 +750,7 @@ async fn run_squad_pipeline(
             summary,
         },
     );
-    println!(
+    tracing::info!(
         "[squad] pipeline: 会话 {} 完成，模式={}{}",
         session_id,
         if use_dag { "DAG" } else { "线性" },
@@ -761,6 +763,7 @@ async fn run_squad_pipeline(
 /// 与编排式（Leader 拆解委派）和流水线（线性串流）不同，群聊强调「多向讨论」：
 /// 每轮各参与者基于讨论目标 + 共享黑板（所有人历史发言）给出见解，最后由汇总主笔产出结论。
 /// 每轮发言为单次 `call_llm`（轻量、偏对话），不跑完整 pipeline，契合圆桌语义。
+#[tracing::instrument(skip_all)]
 async fn run_squad_chat(
     app: &AppHandle,
     squad: &SquadRuntimeConfig,
@@ -817,7 +820,7 @@ async fn run_squad_chat(
             let content = match crate::agent::runtime::call_llm(&member.agent, &messages, &[]).await {
                 Ok((resp, _)) => extract_llm_text(&resp),
                 Err(e) => {
-                    println!("[squad] chat 成员 {} 第 {} 轮发言失败：{e}", member.agent.agent_id, r + 1);
+                    tracing::info!("[squad] chat 成员 {} 第 {} 轮发言失败：{e}", member.agent.agent_id, r + 1);
                     format!("（成员 {} 发言失败：{e}）", member.agent.agent_id)
                 }
             };
@@ -860,7 +863,7 @@ async fn run_squad_chat(
     let sum_cfg = match summarizer {
         Some(m) => &m.agent,
         None => {
-            println!("[squad] chat: 无可用汇总主笔");
+            tracing::info!("[squad] chat: 无可用汇总主笔");
             events::emit_squad_session_done(
                 app,
                 &events::SquadSessionDonePayload {
@@ -892,7 +895,7 @@ async fn run_squad_chat(
             }
         }
         Err(e) => {
-            println!("[squad] chat: 汇总主笔调用失败：{e}");
+            tracing::info!("[squad] chat: 汇总主笔调用失败：{e}");
             blackboard.clone()
         }
     };
@@ -937,7 +940,7 @@ async fn run_squad_chat(
             summary,
         },
     );
-    println!(
+    tracing::info!(
         "[squad] chat: 会话 {} 完成，轮次={}，参与成员数={}",
         session_id,
         max_rounds,

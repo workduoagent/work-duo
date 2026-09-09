@@ -73,9 +73,9 @@ pub struct StreamChunk {
 
 fn emit(app: &AppHandle, event: &str, payload: &impl Serialize) {
     if let Err(e) = app.emit(event, payload) {
-        println!("[agent] emit `{event}` failed: {e}");
+        tracing::info!("[agent] emit `{event}` failed: {e}");
     } else {
-        println!("[agent] emit `{event}` ok");
+        tracing::info!("[agent] emit `{event}` ok");
     }
 }
 

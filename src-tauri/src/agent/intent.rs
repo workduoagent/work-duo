@@ -38,12 +38,12 @@ pub async fn classify_intent(cfg: &AgentRuntimeConfig, prompt: &str) -> IntentPr
 
     // 短路 1：短消息且无复杂信号 → 明显闲聊，0 成本直接判。
     if len <= 20 && !has_hint {
-        println!("[agent] intent: 规则短路 → SIMPLE_CHAT（len={len} 无复杂信号）");
+        tracing::info!("[agent] intent: 规则短路 → SIMPLE_CHAT（len={len} 无复杂信号）");
         return profile("SIMPLE_CHAT", "规则短路：短消息且无复杂关键词", prompt);
     }
     // 短路 2：命中复杂信号且描述较长 → 明显复合任务，直接判。
     if has_hint && len >= 30 {
-        println!("[agent] intent: 规则短路 → COMPOSITE_TASK（命中复杂关键词）");
+        tracing::info!("[agent] intent: 规则短路 → COMPOSITE_TASK（命中复杂关键词）");
         return profile("COMPOSITE_TASK", "规则短路：命中复杂任务关键词", prompt);
     }
 
@@ -68,7 +68,7 @@ risk_level（low/medium/high/critical，涉及删除/安装/执行/改系统/部
             match parse_intent_json(&content) {
                 Some(mut p) => {
                     enrich(&mut p, prompt);
-                    println!(
+                    tracing::info!(
                         "[agent] intent: LLM 分类 → {}（{}ms）reason={} risk={} approval={}",
                         p.intent_type,
                         started.elapsed().as_millis(),
@@ -79,7 +79,7 @@ risk_level（low/medium/high/critical，涉及删除/安装/执行/改系统/部
                     p
                 }
                 None => {
-                    println!(
+                    tracing::info!(
                         "[agent] intent: 分类结果解析失败，降级 COMPOSITE_TASK content={}",
                         runtime::clip(&content, 300),
                     );
@@ -88,7 +88,7 @@ risk_level（low/medium/high/critical，涉及删除/安装/执行/改系统/部
             }
         }
         Err(e) => {
-            println!("[agent] intent: 分类调用失败：{e}，降级 COMPOSITE_TASK");
+            tracing::info!("[agent] intent: 分类调用失败：{e}，降级 COMPOSITE_TASK");
             fallback("分类调用失败", prompt)
         }
     }

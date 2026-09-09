@@ -435,13 +435,13 @@ async fn run_script_with_selfheal(
     let (stdout, stderr, code) = run_bun_sidecar(app, bun_root, args, cwd).await?;
     if code != Some(0) {
         if let Some(mods) = missing_modules(&stderr) {
-            println!(
+            tracing::info!(
                 "[agent] run_node: 检测到缺失依赖 {:?}，尝试自动安装后重试一次",
                 mods
             );
             match install_packages_silent(app, bun_root, &mods).await {
                 Ok(specs) => {
-                    println!("[agent] run_node: 已自动安装依赖（{}），重试执行", specs);
+                    tracing::info!("[agent] run_node: 已自动安装依赖（{}），重试执行", specs);
                     let args2 = vec![tmp_path.to_string_lossy().to_string()];
                     let (o2, e2, c2) = run_bun_sidecar(app, bun_root, args2, cwd).await?;
                     return match c2 {
@@ -450,7 +450,7 @@ async fn run_script_with_selfheal(
                         None => Err(format!("脚本进程异常终止，未收到退出码：\n{e2}")),
                     };
                 }
-                Err(e) => println!("[agent] run_node: 自动安装缺失依赖失败：{e}"),
+                Err(e) => tracing::info!("[agent] run_node: 自动安装缺失依赖失败：{e}"),
             }
         }
     }

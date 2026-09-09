@@ -62,7 +62,7 @@ impl RecoveryHub {
     pub fn request(&self, req: RecoveryRequest) {
         *self.pending.lock().unwrap() = Some(req);
         self.notify.notify_one();
-        println!("[agent] recovery: 子任务 step 进入等待恢复（emit agent-recovery-needed）");
+        tracing::info!("[agent] recovery: 子任务 step 进入等待恢复（emit agent-recovery-needed）");
     }
 
     /// 当前是否有子任务在等待恢复（前端可用以禁用按钮 / 显示面板）。
@@ -72,7 +72,7 @@ impl RecoveryHub {
 
     /// 回传恢复决策并唤醒挂起的流水线。
     pub fn resolve(&self, d: RecoveryDecision) {
-        println!(
+        tracing::info!(
             "[agent] recovery: 收到恢复决策 {}",
             match &d {
                 RecoveryDecision::Retry => "Retry".into(),

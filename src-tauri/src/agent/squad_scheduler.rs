@@ -39,9 +39,10 @@ async fn get_pool(app: &AppHandle) -> Result<sqlx::SqlitePool, String> {
 }
 
 /// 启动定时调度循环（在 app setup 中调用，后台独立异步任务）。
+#[tracing::instrument(skip_all)]
 pub fn start_scheduler(app: AppHandle) {
     tauri::async_runtime::spawn(async move {
-        println!("[scheduler] 小分队定时调度器已启动（每 30s 扫描一次）");
+        tracing::info!("[scheduler] 小分队定时调度器已启动（每 30s 扫描一次）");
         loop {
             tokio::time::sleep(Duration::from_secs(30)).await;
             run_due_squads(&app).await;
@@ -50,11 +51,12 @@ pub fn start_scheduler(app: AppHandle) {
 }
 
 /// 扫描并触发所有到点的定时小分队。
+#[tracing::instrument(skip_all)]
 async fn run_due_squads(app: &AppHandle) {
     let pool = match get_pool(app).await {
         Ok(p) => p,
         Err(e) => {
-            println!("[scheduler] 获取数据库失败：{e}");
+            tracing::info!("[scheduler] 获取数据库失败：{e}");
             return;
         }
     };
@@ -65,7 +67,7 @@ async fn run_due_squads(app: &AppHandle) {
     {
         Ok(r) => r,
         Err(e) => {
-            println!("[scheduler] 查询小分队失败：{e}");
+            tracing::info!("[scheduler] 查询小分队失败：{e}");
             return;
         }
     };
@@ -102,7 +104,7 @@ async fn run_due_squads(app: &AppHandle) {
         let schedule = match CronSchedule::parse(&cron) {
             Some(s) => s,
             None => {
-                println!("[scheduler] 小分队 {} 的 cron 解析失败，跳过：{}", id, cron);
+                tracing::info!("[scheduler] 小分队 {} 的 cron 解析失败，跳过：{}", id, cron);
                 continue;
             }
         };
@@ -111,7 +113,7 @@ async fn run_due_squads(app: &AppHandle) {
         let fire = match schedule.last_fire_before(&now) {
             Some(t) => t,
             None => {
-                println!("[scheduler] 小分队 {} 近 8 天内无匹配时刻，跳过", id);
+                tracing::info!("[scheduler] 小分队 {} 近 8 天内无匹配时刻，跳过", id);
                 continue;
             }
         };
@@ -136,10 +138,10 @@ async fn run_due_squads(app: &AppHandle) {
                     .bind(&sid)
                     .execute(&pool2)
                     .await;
-                    println!("[scheduler] 触发小分队 {}（cron={}）", sid, cron);
+                    tracing::info!("[scheduler] 触发小分队 {}（cron={}）", sid, cron);
                     run_squad_task(&app2, cfg, prompt).await;
                 }
-                Err(e) => println!("[scheduler] load_squad 失败 {}: {e}", sid),
+                Err(e) => tracing::info!("[scheduler] load_squad 失败 {}: {e}", sid),
             }
         });
     }

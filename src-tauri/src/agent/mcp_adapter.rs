@@ -92,7 +92,7 @@ impl AgentTool for McpRemoteTool {
         _ctx: &ToolContext,
     ) -> Result<String, ToolError> {
         let arguments = args.get("arguments").cloned().unwrap_or(json!({}));
-        println!(
+        tracing::info!(
             "[agent] MCP 工具 {} 调用：endpoint={} protocol={} 是否带 Key={} 参数={}",
             self.original_name,
             crate::mcp::redact_endpoint(&self.endpoint_url),
@@ -118,7 +118,7 @@ impl AgentTool for McpRemoteTool {
         })
         .await;
         if resp.ok {
-            println!(
+            tracing::info!(
                 "[agent] MCP 工具 {} 返回 ok（{}字符）：{}",
                 self.original_name,
                 resp.raw.chars().count(),
@@ -127,7 +127,7 @@ impl AgentTool for McpRemoteTool {
             Ok(resp.raw)
         } else {
             let err = resp.error.unwrap_or_else(|| "MCP 调用失败".into());
-            println!("[agent] MCP 工具 {} 返回失败：{}", self.original_name, err);
+            tracing::info!("[agent] MCP 工具 {} 返回失败：{}", self.original_name, err);
             Err(ToolError::ExecutionFailed(err))
         }
     }

@@ -21,6 +21,11 @@ pub struct SkillToolWrapper {
     pub skill_id: String,
     pub skill_name: String,
     pub skill_description: String,
+    /// SKILL.md 正文（落库于 `skill_info.skill_markdown`）。调用技能时返回给模型，
+    /// 使其真正遵循工作流 / 脚手架脚本 / 质量门禁，而非仅依赖 `instruction` 铁律。
+    pub skill_markdown: String,
+    /// 技能本地资源目录（落库于 `skill_info.path`），含 `references/` 与 `scripts/`。
+    pub skill_path: String,
 }
 
 #[async_trait]
@@ -34,7 +39,10 @@ impl AgentTool for SkillToolWrapper {
             "type": "function",
             "function": {
                 "name": self.name(),
-                "description": format!("[Skill] {}", self.skill_description),
+                "description": format!(
+                    "[Skill] {}（调用本工具获取该技能完整 SKILL.md 工作流与脚手架脚本指引，须严格遵循返回内容执行）",
+                    self.skill_description
+                ),
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -61,22 +69,49 @@ impl AgentTool for SkillToolWrapper {
             .get("task")
             .and_then(|v| v.as_str())
             .unwrap_or("<未提供任务>");
-        println!(
-            "[agent] skill__{}: 开始 skill_name={} task={}",
+        tracing::info!(
+            "[agent] skill__{}: 调用 skill_name={} task={}",
             self.skill_id,
             self.skill_name,
             crate::agent::runtime::clip(task, 500),
         );
-        // 当前为只读包装：返回技能说明，真实执行后续接入业务核心。
-        let result = format!(
-            "技能『{}』（id={}）已接收任务：{}\n（只读包装模式：真实业务执行待接入）",
+
+        // 真实返回 SKILL.md 正文（落库于 skill_info.skill_markdown），使模型真正遵循
+        // 工作流 / 脚手架脚本 / 质量门禁，而非仅依赖 instruction 铁律或凭通用经验现写文件。
+        let mut parts: Vec<String> = Vec::new();
+        parts.push(format!(
+            "## 技能『{}』完整指引（id={}）\n\n你已调用该技能来处理任务：{}\n",
             self.skill_name, self.skill_id, task
+        ));
+
+        if !self.skill_markdown.trim().is_empty() {
+            parts.push(self.skill_markdown.clone());
+        } else if !self.skill_description.trim().is_empty() {
+            parts.push(format!(
+                "> 该技能未配置 SKILL.md 正文，回退说明：{}\n",
+                self.skill_description
+            ));
+        } else {
+            parts.push("> 该技能未配置 SKILL.md 正文与说明。\n".to_string());
+        }
+
+        if !self.skill_path.trim().is_empty() {
+            parts.push(format!(
+                "## 本地资源目录\n- 技能根目录：`{}`\n- `references/` 含规范文档；`scripts/` 含脚手架/工具脚本（如 `setup_project.py`）。\n- 若工作流要求执行脚手架脚本，请先用 read_file 读取对应脚本内容，再通过沙箱（python/node）运行，禁止凭记忆臆造命令。\n",
+                self.skill_path
+            ));
+        }
+
+        parts.push(
+            "## 执行要求\n你必须严格遵循上方 SKILL.md 的工作流（Workflow）与质量门禁（如：依赖版本固定、build 通过、测试通过）完成任务，不得仅凭通用经验现写文件。\n"
+                .to_string(),
         );
-        println!(
-            "[agent] skill__{}: 完成 result={}字符 内容={}",
+
+        let result = parts.concat();
+        tracing::info!(
+            "[agent] skill__{}: 完成 result={}字符",
             self.skill_id,
             result.chars().count(),
-            crate::agent::runtime::clip(&result, 500),
         );
         Ok(result)
     }

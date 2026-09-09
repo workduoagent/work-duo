@@ -143,6 +143,8 @@ export function useAgentSession(): AgentSessionState {
   const cancelRef = useRef<(() => void) | null>(null)
   // isRunning 的实时镜像，用于 run 入口的竞态拦截（useCallback 闭包里的 isRunning 可能是旧值）。
   const isRunningRef = useRef(false)
+  // pendingApproval 的实时镜像：授权挂起期用于暂停安全定时器护栏，避免「超时误判后端异常」。
+  const pendingApprovalRef = useRef(false)
   // 任务兜底保险：后端正常情况下一定会通过 `agent-task-done` / `agent-task-error`
   // 主动复位 UI（多轮智能体任务可能耗时数分钟）。此超时仅用于 Rust 进程异常（panic）
   // 导致终态事件丢失的极端场景，时长设得足够长（20 分钟），避免把仍在运行的后端误判为「超时」。
@@ -157,6 +159,12 @@ export function useAgentSession(): AgentSessionState {
   const setRunning = useCallback((value: boolean) => {
     isRunningRef.current = value
     setIsRunning(value)
+  }, [])
+
+  // 统一设置 pendingApproval 并同步 ref 镜像（避免在多处手动维护 ref 漏写）。
+  const applyPendingApproval = useCallback((v: ApprovalRequest | null) => {
+    pendingApprovalRef.current = v !== null
+    setPendingApproval(v)
   }, [])
 
   const flushSteps = useCallback(() => {
@@ -293,15 +301,17 @@ export function useAgentSession(): AgentSessionState {
   const startTaskTimeout = useCallback(() => {
     clearTaskTimeout()
     // 仅作极端兜底（见 taskTimeoutRef 注释）：正常多轮任务不会触发。
+    // 设计原则：定时器只告警、不结束任务 —— isRunning（发送按钮可用态）只能由后端终态
+    // 事件（agent-task-done / agent-task-error）或用户主动「停止」翻转，定时器无权翻转。
+    // 否则一旦超时但 Rust 后端仍在运行，前端却把发送按钮解禁，用户可往未结束的任务再发消息，不合理。
     taskTimeoutRef.current = setTimeout(() => {
-      console.warn('[agent] 任务超过 20 分钟未收到结束事件，疑似后端异常，复位 UI 状态')
-      setRunning(false)
-      setIsStreaming(false)
-      setStatusText('长时间未收到后端结束信号，任务可能仍在后台运行，可点击「停止」后重新发起')
-      // 兜底收敛残留的 running 步骤，避免永久 loading
-      finalizeStuckSteps()
+      if (pendingApprovalRef.current) return // 仍在等授权 → 合法暂停，继续等，不当后端异常
+      console.warn('[agent] 任务超过 20 分钟未收到结束事件，仅作告警，不复位运行态')
+      // 非破坏性提示：后端可能仍健康运行，发送按钮保持禁用，由用户主动「停止」结束。
+      setStatusText('⏳ 任务已运行超过 20 分钟仍未收到结束信号，可能仍在后台执行；如需中断请点「停止」')
+      // 不调 setRunning(false) / setIsStreaming(false) / finalizeStuckSteps（避免解禁输入框、误杀在跑任务）
     }, 20 * 60_000)
-  }, [clearTaskTimeout, finalizeStuckSteps])
+  }, [clearTaskTimeout])
 
   const run = useCallback(
     async (input: RunAgentTaskInput) => {
@@ -315,7 +325,7 @@ export function useAgentSession(): AgentSessionState {
       setIsStreaming(false)
       setThoughts([])
       setPlanSteps([])
-      setPendingApproval(null)
+      applyPendingApproval(null)
       setStatusText('')
       setLiveTokenUsage(null)
       setTaskError(null)
@@ -373,7 +383,11 @@ export function useAgentSession(): AgentSessionState {
   )
 
   const submitDecision = useCallback(async (decision: ApprovalDecision) => {
-    setPendingApproval(null)
+    applyPendingApproval(null)
+    // 决策后清除「等待授权」提示，任务恢复运行。
+    setStatusText('')
+    // 决策回传后恢复安全定时器（覆盖后续可能耗时的步骤）。
+    startTaskTimeout()
     if (!isTauri) return
     try {
       // 与 run_agent_task 同理：命令入参是名为 `decision` 的结构体，必须包在 `decision` 键下。
@@ -388,7 +402,7 @@ export function useAgentSession(): AgentSessionState {
       // 决策回传失败仅日志；Rust 侧会超时释放挂起。
       console.error('[agent] submit_approval_decision failed', e)
     }
-  }, [isTauri])
+  }, [isTauri, startTaskTimeout])
 
   const reset = useCallback(() => {
     stepsRef.current.clear()
@@ -561,7 +575,10 @@ export function useAgentSession(): AgentSessionState {
       const offApproval = await listen<ApprovalRequest>(
         'agent-awaiting-approval',
         (ev) => {
-          setPendingApproval(ev.payload)
+          // 授权挂起：暂停 20 分钟安全定时器（这是合法暂停，非后端异常），并给出明确等待态。
+          clearTaskTimeout()
+          applyPendingApproval(ev.payload)
+          setStatusText('⏸ 等待授权：请在弹窗中选择允许 / 拒绝，任务已暂停')
         },
       )
       const offDone = await listen<{ promptTokens: number; completionTokens: number }>(

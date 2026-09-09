@@ -55,6 +55,7 @@ pub struct PipelineResult {
 /// 依据 `depends_on` 做拓扑就绪判定：某步骤仅在其全部前置步骤成功后进入 READY；
 /// 一批 READY 的步骤并发执行（`join_all`，受 `MAX_PARALLEL_SUBTASKS` 上限约束）。
 /// 子任务失败经自动重试（MAX_SUBTASK_RETRIES）后仍不闭环 → 步骤级恢复挂起（#8）。
+#[tracing::instrument(skip_all)]
 pub async fn run_pipeline(
     app: &AppHandle,
     cfg: &AgentRuntimeConfig,
@@ -136,7 +137,7 @@ pub async fn run_pipeline(
                 "任务存在无法解决的步骤依赖（疑似循环依赖或引用了不存在的步骤），受阻步骤：{}",
                 stuck,
             );
-            println!("[agent] pipeline: 依赖死锁，中止：{}", report);
+            tracing::info!("[agent] pipeline: 依赖死锁，中止：{}", report);
             return PipelineResult {
                 final_text: report,
                 usage: total_usage,
@@ -286,7 +287,7 @@ pub async fn run_pipeline(
             .collect::<Vec<_>>()
             .join("\n"),
     );
-    println!(
+    tracing::info!(
         "[agent] pipeline: 全部 {} 个子任务闭环，总 usage=({},{})",
         total, total_usage.0, total_usage.1,
     );
@@ -409,7 +410,7 @@ async fn run_subtask(
     let mut usage: (u64, u64) = (0, 0);
     let mut consecutive_errors = 0usize;
 
-    println!(
+    tracing::info!(
         "[agent] pipeline: 子任务开始 step={}/{} title={} 工具数={}",
         task.step,
         total,
@@ -424,7 +425,7 @@ async fn run_subtask(
         // 每轮开始前检查取消：用户点击「停止」后，下一轮边界立即终止本子任务，
         // 不再发起新的 LLM 调用（正在进行的流会在 call_llm_stream 内部断流）。
         if cancel.load(std::sync::atomic::Ordering::SeqCst) {
-            println!(
+            tracing::info!(
                 "[agent] pipeline: 子任务 step={} 第 {} 轮前检测到取消信号，终止",
                 task.step, round,
             );
@@ -447,7 +448,7 @@ async fn run_subtask(
         let mut outcome = match runtime::call_llm_stream(app, cfg, &messages, &tools, cancel).await {
             Ok(o) => o,
             Err(e) => {
-                println!(
+                tracing::info!(
                     "[agent] pipeline: 子任务 step={} 第 {} 轮 LLM 调用失败：{e}",
                     task.step, round
                 );
@@ -469,7 +470,7 @@ async fn run_subtask(
         // 「流式空响应回退」非流式调用——否则会把整段 prompt 再发给网关一遍（重复计费），
         // 且回退得到的决策本就作废。这是「停止按钮即时生效、不重复计费」的关键。
         if cancel.load(std::sync::atomic::Ordering::SeqCst) {
-            println!(
+            tracing::info!(
                 "[agent] pipeline: 子任务 step={} 流式返回后检测到取消信号，终止",
                 task.step,
             );
@@ -488,7 +489,7 @@ async fn run_subtask(
         // 流式空响应兜底：个别网关不支持流式 tool_calls，回退一次非流式拿真实决策。
         // 仅在未取消时执行（取消已在上方面退出），避免重复计费。
         if outcome.content.trim().is_empty() && outcome.tool_calls.is_empty() {
-            println!(
+            tracing::info!(
                 "[agent] pipeline: 子任务 step={} 第 {} 轮流式空响应，回退非流式兜底",
                 task.step, round
             );
@@ -527,7 +528,7 @@ async fn run_subtask(
         usage.0 += outcome.usage.0;
         usage.1 += outcome.usage.1;
 
-        println!(
+        tracing::info!(
             "[agent] pipeline: 子任务 step={} 第 {} 轮 LLM 返回 | 正文={}字符 tool_calls={}个",
             task.step,
             round,
@@ -549,14 +550,14 @@ async fn run_subtask(
                 if !result.met {
                     success = false;
                     verify_detail = result.details;
-                    println!(
+                    tracing::info!(
                         "[agent] pipeline: 子任务 step={} 客观校验未通过：{}",
                         task.step,
                         runtime::clip(&verify_detail, 200),
                     );
                 }
             }
-            println!(
+            tracing::info!(
                 "[agent] pipeline: 子任务 step={} 闭环（总轮 {}，工具轮 {}）success={} summary={}",
                 task.step,
                 round,
@@ -596,7 +597,7 @@ async fn run_subtask(
         // （产物可能已生成，但模型未能自行收敛）。终态汇报轮在上面的分支单独放行。
         tool_iterations += 1;
         if tool_iterations > MAX_SUBTASK_ITERATIONS {
-            println!(
+            tracing::info!(
                 "[agent] pipeline: 子任务 step={} 超过 {} 个工具轮仍未收敛（总轮 {}）",
                 task.step, MAX_SUBTASK_ITERATIONS, round,
             );
@@ -649,7 +650,7 @@ async fn run_subtask(
             consecutive_errors += 1;
         }
         if consecutive_errors >= MAX_SUBTASK_CONSECUTIVE_ERRORS {
-            println!(
+            tracing::info!(
                 "[agent] pipeline: 子任务 step={} 连续 {} 轮工具全失败，判定受阻",
                 task.step, consecutive_errors,
             );

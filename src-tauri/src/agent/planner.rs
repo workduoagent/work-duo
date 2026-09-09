@@ -19,6 +19,7 @@ use crate::agent::types::PlanSubTask;
 const MAX_PLAN_STEPS: usize = 5;
 
 /// 生成任务规划。返回 (PlanDAG, 本次规划的真实 token 用量)。
+#[tracing::instrument(skip_all)]
 pub async fn build_plan(
     cfg: &AgentRuntimeConfig,
     prompt: &str,
@@ -89,10 +90,10 @@ text_contains 的 value 建议用 `|` 分隔多个同义措辞（例如「风险
                         }
                     }
                     if plan.tasks.is_empty() {
-                        println!("[agent] planner: 规划结果为空，降级 Single-Task Fallback");
+                        tracing::info!("[agent] planner: 规划结果为空，降级 Single-Task Fallback");
                         return (single_task_fallback(prompt), usage, content.clone());
                     }
-                    println!(
+                    tracing::info!(
                         "[agent] planner: 规划完成（{}ms）goal={} 步骤数={}：{}",
                         started.elapsed().as_millis(),
                         runtime::clip(&plan.goal_summary, 100),
@@ -106,7 +107,7 @@ text_contains 的 value 建议用 `|` 分隔多个同义措辞（例如「风险
                     (plan, usage, content.clone())
                 }
                 None => {
-                    println!(
+                    tracing::info!(
                         "[agent] planner: 规划 JSON 解析失败，降级 Single-Task Fallback content={}",
                         runtime::clip(&content, 400),
                     );
@@ -115,7 +116,7 @@ text_contains 的 value 建议用 `|` 分隔多个同义措辞（例如「风险
             }
         }
         Err(e) => {
-            println!("[agent] planner: 规划调用失败：{e}，降级 Single-Task Fallback");
+            tracing::info!("[agent] planner: 规划调用失败：{e}，降级 Single-Task Fallback");
             (single_task_fallback(prompt), (0, 0), String::new())
         }
     }
