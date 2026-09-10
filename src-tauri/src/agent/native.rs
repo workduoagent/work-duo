@@ -1167,7 +1167,7 @@ impl AgentTool for RunPythonSandboxTool {
             "native__run_python_sandbox",
             "在 Work Duo 内置的 micromamba 隔离 Python 沙箱中运行脚本（默认环境 default）。\n\
              【运行 Python 的唯一正确方式】\n\
-             1. 直接用 code 参数给 Python 源码（工具会自动落盘 .wd_mem/scripts/ 再执行），或先用 native__write_file 写脚本再传 script_path；\n\
+             1. 直接用 code 参数给 Python 源码（工具会自动落盘 .wd_mem/runtime/scripts/ 再执行，脚本内相对路径以工作空间根为基准），或先用 native__write_file 写脚本再传 script_path；\n\
              2. 脚本里直接 import 你需要的库（pandas / numpy / openpyxl / scipy / matplotlib 等），运行时若缺失会自动按需安装并重试，无需你手动安装，也不要浪费轮次逐个探测库是否存在。\n\
              【严禁】\n\
              - 不要执行系统 python / python3 命令，不要用 where python、python --version 探测本机 Python；\n\
@@ -1177,7 +1177,7 @@ impl AgentTool for RunPythonSandboxTool {
             json!({
                 "code": {
                     "type": "string",
-                    "description": "Python 源代码（推荐用法：直接给代码，工具会自动落盘到 .wd_mem/scripts/ 再执行）"
+                    "description": "Python 源代码（推荐用法：直接给代码，工具会自动落盘到 .wd_mem/runtime/scripts/ 再执行）"
                 },
                 "filename": {
                     "type": "string",
@@ -1209,7 +1209,7 @@ impl AgentTool for RunPythonSandboxTool {
             ));
         }
         // 两种调用方式（code 优先）：
-        // ① code：直接给源码 → 内部落盘到 `.wd_mem/scripts/` 再执行。
+        // ① code：直接给源码 → 内部落盘到 `.wd_mem/runtime/scripts/` 再执行。
         //    这一步是消除「模型改用 execute_command 跑系统 python」动机的关键：原先强制
         //    「先 write_file 写脚本、再传 script_path」（两步 + 每次审批），摩擦过大导致绕道。
         // ② script_path：已存在脚本的绝对路径（兼容旧用法）。
@@ -1243,7 +1243,7 @@ impl AgentTool for RunPythonSandboxTool {
                 .chars()
                 .filter(|c| !matches!(c, '/' | '\\' | ':' | '"' | '<' | '>' | '|' | '?' | '*'))
                 .collect();
-            let dir = ws.join(".wd_mem").join("scripts");
+            let dir = ws.join(".wd_mem").join("runtime").join("scripts");
             std::fs::create_dir_all(&dir)
                 .map_err(|e| ToolError::ExecutionFailed(format!("创建脚本目录失败：{e}")))?;
             let p = dir.join(&safe_name);
@@ -1275,7 +1275,7 @@ impl AgentTool for RunPythonSandboxTool {
         );
         let started = Instant::now();
         let mgr = self.app.state::<MambaManager>();
-        match run_python_in_sandbox(&self.app, &*mgr, env_name, resolved_script).await {
+        match run_python_in_sandbox(&self.app, &*mgr, env_name, resolved_script, ctx.workspace.as_deref()).await {
             Ok(out) => {
                 tracing::info!(
                     "[agent] native__run_python_sandbox: 成功 result={}字符 耗时={}ms 内容={}",
@@ -1319,7 +1319,7 @@ impl AgentTool for RunNodeSandboxTool {
             "native__run_node_sandbox",
             "在 Work Duo 内置的 Bun 隔离 Node 沙箱中运行 JavaScript / TypeScript 脚本（默认环境 default）。\n\
              【运行 Node 的唯一正确方式】\n\
-             1. 直接用 code 参数给 JS/TS 源码（工具会自动落盘 .wd_mem/scripts/ 再执行），或先用 native__write_file 写脚本再传 script_path；\n\
+             1. 直接用 code 参数给 JS/TS 源码（工具会自动落盘 .wd_mem/runtime/scripts/ 再执行，脚本内相对路径以工作空间根为基准），或先用 native__write_file 写脚本再传 script_path；\n\
              2. 脚本里直接 `import` / `require` 你需要的包（lodash / axios / zod / exceljs 等），运行时若缺失会自动按需安装并重试，无需你手动安装，也不要浪费轮次逐个探测包是否存在。\n\
              【严禁】\n\
              - 不要执行系统 node / bun 命令，不要用 `node --version`、`bun --version` 探测本机运行时；\n\
@@ -1329,7 +1329,7 @@ impl AgentTool for RunNodeSandboxTool {
             json!({
                 "code": {
                     "type": "string",
-                    "description": "JavaScript / TypeScript 源代码（推荐用法：直接给代码，工具会自动落盘到 .wd_mem/scripts/ 再执行）"
+                    "description": "JavaScript / TypeScript 源代码（推荐用法：直接给代码，工具会自动落盘到 .wd_mem/runtime/scripts/ 再执行）"
                 },
                 "filename": {
                     "type": "string",
@@ -1394,7 +1394,7 @@ impl AgentTool for RunNodeSandboxTool {
                 .chars()
                 .filter(|c| !matches!(c, '/' | '\\' | ':' | '"' | '<' | '>' | '|' | '?' | '*'))
                 .collect();
-            let dir = ws.join(".wd_mem").join("scripts");
+            let dir = ws.join(".wd_mem").join("runtime").join("scripts");
             std::fs::create_dir_all(&dir)
                 .map_err(|e| ToolError::ExecutionFailed(format!("创建脚本目录失败：{e}")))?;
             let p = dir.join(&safe_name);
@@ -1423,7 +1423,7 @@ impl AgentTool for RunNodeSandboxTool {
         );
         let started = Instant::now();
         let mgr = self.app.state::<BunManager>();
-        match run_node_in_sandbox(&self.app, &*mgr, env_name, resolved_script).await {
+        match run_node_in_sandbox(&self.app, &*mgr, env_name, resolved_script, ctx.workspace.as_deref()).await {
             Ok(out) => {
                 tracing::info!(
                     "[agent] native__run_node_sandbox: 成功 result={}字符 耗时={}ms 内容={}",

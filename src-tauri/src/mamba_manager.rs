@@ -670,6 +670,7 @@ pub async fn run_python_in_sandbox(
     mgr: &MambaManager,
     env_name: Option<String>,
     script_path: String,
+    cwd: Option<&Path>,
 ) -> Result<String, String> {
     let (mamba_root, rc) = mgr.setup(app)?;
 
@@ -696,6 +697,7 @@ pub async fn run_python_in_sandbox(
     std::fs::copy(&script, &tmp_path).map_err(|e| format!("复制脚本到临时文件失败：{e}"))?;
 
     // 执行与缺失库自愈统一走 run_script_with_selfheal（含临时脚本清理）。
+    // 有效工作目录：Agent 注入的 cwd（通常为工作空间根）优先；未提供时回退到脚本所在目录（UI 行为）。
     let result = run_script_with_selfheal(
         app,
         mgr,
@@ -703,7 +705,7 @@ pub async fn run_python_in_sandbox(
         &rc,
         &env,
         &tmp_path,
-        original_parent.as_deref(),
+        cwd.or(original_parent.as_deref()),
     )
     .await;
     let _ = std::fs::remove_file(&tmp_path);

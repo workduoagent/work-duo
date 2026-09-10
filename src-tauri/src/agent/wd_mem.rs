@@ -83,11 +83,11 @@ pub(crate) fn ensure_wd_mem(workspace_root: &str) -> Result<PathBuf, String> {
             "# Work Duo 运行时记忆区：高频碎片忽略，长期资产纳入版本控制\n\
 # 忽略（随运行高频变化，不入库）\n\
 sessions/\n\
-data/\n\
-outputs/\n\
+runtime/data/\n\
+runtime/outputs/\n\
 graph/nodes.jsonl\n\
 graph/edges.jsonl\n\
-# 纳入版本控制（长期知识资产）：MEMORY.md / knowledge/ / scripts/ / README.md\n",
+# 纳入版本控制（长期知识资产）：MEMORY.md / knowledge/ / runtime/scripts/ / README.md\n",
         )
         .map_err(|e| format!("写入 .wd_mem/.gitignore 失败: {}", e))?;
     }

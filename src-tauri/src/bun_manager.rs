@@ -506,6 +506,7 @@ pub async fn run_node_in_sandbox(
     mgr: &BunManager,
     env_name: Option<String>,
     script_path: String,
+    cwd: Option<&Path>,
 ) -> Result<String, String> {
     let (bun_root, _pkg) = mgr.setup(app)?;
     let _env = env_name.unwrap_or_else(|| DEFAULT_ENV.to_string());
@@ -530,7 +531,8 @@ pub async fn run_node_in_sandbox(
     let tmp_path = run_tmp.join(format!("__sandbox_run_{stamp}{ext}"));
     std::fs::copy(&script, &tmp_path).map_err(|e| format!("复制脚本到临时文件失败：{e}"))?;
 
-    let result = run_script_with_selfheal(app, &bun_root, &tmp_path, original_parent.as_deref()).await;
+    // 有效工作目录：Agent 注入的 cwd（通常为工作空间根）优先；未提供时回退到脚本所在目录（UI 行为）。
+    let result = run_script_with_selfheal(app, &bun_root, &tmp_path, cwd.or(original_parent.as_deref())).await;
     let _ = std::fs::remove_file(&tmp_path);
     result
 }
