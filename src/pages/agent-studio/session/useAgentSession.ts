@@ -20,6 +20,7 @@ import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { invoke } from '@tauri-apps/api/core'
 import { isTauri } from '@/core/config'
+import { useNotify } from '@/components/ui/notify'
 import type {
   AgentEvent,
   ApprovalDecision,
@@ -136,6 +137,10 @@ export function useAgentSession(): AgentSessionState {
   const [planBranch, setPlanBranch] = useState<PlanBranchGenerated | null>(null)
   // 步骤级恢复：子任务自动重试耗尽仍失败时挂起，等待用户决策（重试/跳过/接管）。
   const [recovery, setRecovery] = useState<RecoveryRequest | null>(null)
+
+  // 统一消息实例：启动拦截（并发互斥）等需要「显式提示」的场景走 modal，
+  // 不走通用 toast（连点「运行」被后端主闸门拦截时，用户应明确看到原因）。
+  const { modal } = useNotify()
 
   // 用 ref 持有最新状态，供 Tauri 事件回调里更新（避免闭包陈旧）。
   const stepsRef = useRef<Map<string, ToolStep>>(new Map())
@@ -373,10 +378,29 @@ export function useAgentSession(): AgentSessionState {
         })
       } catch (e) {
         clearTaskTimeout()
+        const msg =
+          typeof e === 'string'
+            ? e
+            : e instanceof Error
+              ? e.message
+              : '任务启动失败'
+
+        // 并发互斥：后端 spawn 前主闸门已拦截重复启动，返回精确中文文案
+        // 「已有任务正在运行，请先等待其完成或点击停止。」——此时原任务仍在跑，
+        // 绝不能清 isRunning（否则输入框被错误解锁、停止按钮消失），只做显式提示。
+        if (msg.includes('已有任务正在运行') || msg.includes('正在运行')) {
+          modal.warning({
+            title: '已有任务在运行',
+            content: msg,
+            okText: '我知道了',
+          })
+          return
+        }
+
+        // 其他启动失败：复位运行态，并把错误作为状态文本短暂提示（交由页面渲染）。
         setRunning(false)
         setStatusText('')
-        // 错误交由页面 toast；这里仅把错误作为状态文本短暂提示。
-        setStatusText(typeof e === 'string' ? e : '任务启动失败')
+        setStatusText(msg)
       }
     },
     [flushSteps, mockRun, clearTaskTimeout, startTaskTimeout],

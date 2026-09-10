@@ -30,6 +30,7 @@ tauri-plugin-store = "2"
 tauri-plugin-sql = { version = "2.0.0", features = ["sqlite"] }
 sqlx = { version = "0.8", features = ["sqlite", "runtime-tokio"] }
 reqwest = { version = "0.12", features = ["json", "stream"] }
+regex = "1"    # 原生工具 regex_replace（Rust regex 语法，线性时间无 ReDoS）
 futures-util = "0.3"
 tauri-plugin-shell = "2"
 async-trait = "0.1"
@@ -39,4 +40,6 @@ chrono = "0.4"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing-appender = "0.2"
+# zip 读写（含 deflate 压缩，自带 flate2，无需单独引入）；首梯队原生工具 zip_create / zip_extract 依赖。
+zip = "2"
 

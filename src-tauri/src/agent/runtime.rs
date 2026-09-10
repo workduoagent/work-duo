@@ -14,13 +14,14 @@
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use futures_util::StreamExt;
 use serde_json::json;
 use serde_json::Value;
 use tauri::AppHandle;
 use tokio::sync::Mutex;
+use tokio::time::timeout;
 
 use crate::agent::approval::ApprovalManager;
 use crate::agent::approval::ApprovalOutcome;
@@ -39,6 +40,9 @@ use crate::agent::types::ToolStep;
 const MAX_HISTORY_TURNS: usize = 24;
 /// 工具返回结果物理截断阈值（字符）。防止超大输出撑爆上下文、无谓消耗 Token。
 const MAX_TOOL_OUTPUT_LENGTH: usize = 15000;
+/// 敏感工具审批挂起超时（秒）。用户不点弹窗时避免任务永久挂起；
+/// 超时与「停止」(`cancel_all` drop Sender) 都收敛到拒绝分支，不新增状态通路。
+const APPROVAL_TIMEOUT_SECS: u64 = 300;
 
 /// 运行时共享状态（托管于 Tauri State，供命令访问）。
 #[derive(Clone)]
@@ -48,8 +52,27 @@ pub struct AgentRuntime {
     /// 任务取消标志（用户点击「停止」时由 `cancel_agent_task` 置 true）。
     /// 以 `Arc<AtomicBool>` 形式在命令与后台任务间共享，无需额外句柄即可感知取消。
     pub cancel_flag: Arc<AtomicBool>,
+    /// 并发互斥标志：同一 `AgentRuntime` 同一时刻只允许一个 `run_task` 流水线执行。
+    /// 互斥唯一真源是 `run_agent_task`（spawn 前）的 `try_acquire_run_lock()` 抢占，
+    /// 已被占用则同步 `Err("已有任务在运行")` 返回前端（连点「运行」不再静默吞掉）；
+    /// `run_task` 自身不再做任何补抢/忽略判断（调用约束见其文档注释）。
+    /// 复位由 `RunningGuard`（Drop 守卫）在 run_task 收尾时负责，不遗留 `running=true`。
+    pub running: Arc<AtomicBool>,
     /// 步骤级恢复挂起中枢（子任务自动重试耗尽后等待用户决策：重试 / 跳过 / 接管）。
     pub recovery: Arc<crate::agent::recovery::RecoveryHub>,
+}
+
+/// 并发互斥守卫：生命周期结束（正常退出 / 取消 / 异常 / panic）时自动复位 `running`。
+/// 持有 `Arc<AtomicBool>`（而非借用），以便跨 `spawn` 闭包移动（'static 要求）；
+/// 这样无论任务从哪条路径结束，都不会遗留 `running=true` 把后续任务永久挡在门外。
+/// 主闸门在 `run_agent_task`（spawn 前），此处守卫负责在 run_task 收尾时复位。
+pub(crate) struct RunningGuard {
+    flag: Arc<AtomicBool>,
+}
+impl Drop for RunningGuard {
+    fn drop(&mut self) {
+        self.flag.store(false, Ordering::SeqCst);
+    }
 }
 
 impl AgentRuntime {
@@ -58,11 +81,34 @@ impl AgentRuntime {
             approval: Arc::new(ApprovalManager::new()),
             native: Arc::new(Mutex::new(ToolRegistry::new())),
             cancel_flag: Arc::new(AtomicBool::new(false)),
+            running: Arc::new(AtomicBool::new(false)),
             recovery: crate::agent::recovery::RecoveryHub::new(),
         }
     }
 
+    /// 抢占并发互斥锁（spawn 前主闸门）。成功返回 `RunningGuard`（收尾时自动复位 `running`）；
+    /// 已被占用（上一次任务仍在运行）返回 `None`——调用方应同步 `Err` 给前端，
+    /// 而非返回 `Ok(())` 后把任务静默忽略（UX 修复：连点「运行」可见「已有任务在运行」）。
+    pub fn try_acquire_run_lock(&self) -> Option<RunningGuard> {
+        if self
+            .running
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_ok()
+        {
+            Some(RunningGuard {
+                flag: self.running.clone(),
+            })
+        } else {
+            None
+        }
+    }
+
     /// 启动一轮任务（被 `run_agent_task` 命令调用，后台 spawn）。
+    ///
+    /// **调用约束**：本方法**仅允许**由 `run_agent_task` 在持有 `run_task` 运行锁
+    /// （`try_acquire_run_lock()` 返回的 `RunningGuard`）之后调用。并发互斥的唯一真源
+    /// 是 `run_agent_task` 入口处那次抢锁——本方法内部不再做任何补抢/忽略判断，
+    /// 故不可被其他路径直接调用（否则会绕过闸门、产生双流水线并发）。
     #[allow(unreachable_code)]
     pub async fn run_task(
         &self,
@@ -120,6 +166,7 @@ impl AgentRuntime {
             sandbox_enabled: cfg.allow_sandbox,
             agent_id: cfg.agent_id.clone(),
             session_id: cfg.session_id.clone(),
+            http_allowed_hosts: cfg.http_allowed_hosts.clone(),
         };
 
         // ────────────────────────────────────────────────────────────────────
@@ -214,6 +261,7 @@ impl AgentRuntime {
             &self.recovery,
             &pre_completed,
             &initial_context,
+            false,
         )
         .await;
 
@@ -221,7 +269,13 @@ impl AgentRuntime {
         if result.cancelled {
             tracing::info!("[agent] run_task: 流水线检测到取消信号，已提前收尾");
             let task_usage = (plan_usage.0 + result.usage.0, plan_usage.1 + result.usage.1);
-            events::emit_status(app, "⛔ 任务已被用户取消");
+            // 问题 1 修复：按取消来源分流文案——用户主动停止保持原文案；
+            // 无人值守恢复超时（cancel_reason=Some）带出系统自动取消原因，不再误报「用户取消」。
+            let status_msg = match &result.cancel_reason {
+                None => "⛔ 任务已被用户取消".to_string(),
+                Some(r) => format!("⛔ {r}"),
+            };
+            events::emit_status(app, &status_msg);
             events::emit_task_done(app, task_usage.0, task_usage.1);
             return;
         }
@@ -534,8 +588,24 @@ pub(crate) async fn run_tool_calls_round(
             };
             events::emit_awaiting_approval(app, &req);
             let rx = approval.suspend(req).await;
-            let approval_outcome: ApprovalOutcome = match rx.await {
-                Ok(o) => o,
+            // 审批挂起设独立超时，避免用户不点弹窗导致任务永久挂起。
+            // 超时与「停止」(`cancel_all` drop Sender) 都走拒绝分支，不新增状态通路。
+            // 三态：`Ok(Ok)`=前端决策；`Ok(Err)`=Sender 被 drop（停止触发，通道关闭）；
+            // `Err`=超时（清理 pending 条目后自动拒绝）。
+            let approval_outcome: ApprovalOutcome = match timeout(
+                Duration::from_secs(APPROVAL_TIMEOUT_SECS),
+                rx,
+            )
+            .await
+            {
+                Ok(Ok(o)) => o,
+                Ok(Err(_)) => {
+                    approval.cancel(&approval_id).await;
+                    ApprovalOutcome {
+                        approved: false,
+                        reason: Some("任务已取消，审批通道关闭".into()),
+                    }
+                }
                 Err(_) => {
                     approval.cancel(&approval_id).await;
                     ApprovalOutcome {
@@ -585,6 +655,9 @@ pub(crate) async fn run_tool_calls_round(
                 ("failed".into(), truncate_tool_output(m.as_str()))
             }
             Err(ToolError::ExecutionFailed(m)) | Err(ToolError::PermissionDenied(m)) => {
+                // 真实执行失败 / 权限被拒：同样计入连续错误序列，驱动 pipeline 熔断。
+                // 注：审批「用户拒绝」走上方 L573 的 `continue`，不经过此分支，不会被误熔断。
+                iter_had_error = true;
                 ("failed".into(), truncate_tool_output(m.as_str()))
             }
         };

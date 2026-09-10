@@ -7,7 +7,7 @@
 //!   在用户授权的工作空间（workspace）内活动。
 
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -32,6 +32,9 @@ pub struct ToolContext {
     pub agent_id: String,
     /// 当前会话 ID（原生工具据此把跨会话记忆归属到会话；空闲/非运行态为 None）。
     pub session_id: Option<String>,
+    /// HTTP 请求主机白名单（由 app_config.http_allowed_hosts 解析后透传）：空 = 不限制；
+    /// 非空 = native__http_request 仅放行命中列表中的主机（含其子域）。
+    pub http_allowed_hosts: Vec<String>,
 }
 
 /// 工具执行错误。
@@ -117,11 +120,20 @@ impl PathGuard {
             ws.join(path)
         };
 
-        // 归一化（解析 `..` 与 `.`），失败回退原样。
-        let normalized = std::fs::canonicalize(&candidate).unwrap_or_else(|_| candidate.clone());
+        // 两级归一化：
+        // ① 文件存在 → canonicalize 拿到真实物理路径（解析 symlink），边界比对最准；
+        // ② 文件不存在（如「要新建的文件」）→ canonicalize 失败，回退纯组件级的逻辑归一化，
+        //    解析 `..`/`.` 后做边界比对。注意：不能把 canonicalize 失败的原样路径直接比，
+        //    否则 `../../etc/passwd` 这类含 `..` 的路径会被 starts_with 按组件前缀误判「在工作空间内」（越界漏洞）。
+        let normalized = match std::fs::canonicalize(&candidate) {
+            Ok(real) => real,
+            Err(_) => logical_normalize(&candidate)?,
+        };
 
-        let ws_norm = std::fs::canonicalize(ws)
-            .unwrap_or_else(|_| ws.clone());
+        let ws_norm = match std::fs::canonicalize(ws) {
+            Ok(real) => real,
+            Err(_) => logical_normalize(ws)?,
+        };
 
         // 比较前统一剥离 Windows 的 `\\?\` 前缀（verbatim 前缀）并（Windows 下）忽略大小写：
         // 文件存在时 canonicalize 返回带 `\\?\` 前缀的绝对路径，不存在时回退到不带前缀的原样
@@ -197,5 +209,48 @@ fn normalize_for_guard(p: &Path) -> PathBuf {
     let s = p.to_string_lossy().replace("\\\\?\\", "");
     let s = if cfg!(windows) { s.to_lowercase() } else { s };
     PathBuf::from(s)
+}
+
+/// 纯逻辑路径归一化（不依赖文件是否存在，不做任何 IO）。
+///
+/// 逐个组件处理：遇 `..` 弹出上一段；遇 `.` 跳过；其余压栈。用于 `canonicalize`
+/// 失败（目标不存在）时的边界比对——把 `a/../b.txt` 解析为 `ws/b.txt`、把
+/// `../../etc/passwd` 解析为 `etc/passwd`（明显越界）。
+///
+/// **逃逸判定**：若 `..` 弹出导致栈空（已到文件系统根仍上溯，或相对路径回退越过起点），
+/// 视为路径逃逸工作空间边界，返回 `InvalidArgs` 拒绝，而非「尽力而为」继续比对。
+fn logical_normalize(p: &Path) -> Result<PathBuf, ToolError> {
+    let mut stack: Vec<Component> = Vec::new();
+    for comp in p.components() {
+        match comp {
+            Component::ParentDir => {
+                // 弹出上一段；若已到根或相对起点（栈空）则视为逃逸。
+                match stack.last() {
+                    None => {
+                        return Err(ToolError::InvalidArgs(format!(
+                            "路径逃逸工作空间边界：{}",
+                            p.display()
+                        )))
+                    }
+                    Some(c) if matches!(c, Component::RootDir | Component::Prefix(_)) => {
+                        return Err(ToolError::InvalidArgs(format!(
+                            "路径逃逸工作空间边界：{}",
+                            p.display()
+                        )))
+                    }
+                    Some(_) => {
+                        stack.pop();
+                    }
+                }
+            }
+            Component::CurDir => { /* 跳过 `.` */ }
+            other => stack.push(other),
+        }
+    }
+    let mut result = PathBuf::new();
+    for comp in stack {
+        result.push(comp.as_os_str());
+    }
+    Ok(result)
 }
 

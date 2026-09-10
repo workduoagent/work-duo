@@ -30,6 +30,7 @@ use crate::agent::recovery::RecoveryDecision;
 use crate::agent::runtime::AgentRuntime;
 use crate::agent::skill_adapter::SkillToolWrapper;
 use crate::agent::tools::{PathGuard, ToolContext};
+use crate::agent::native::parse_host_allowlist;
 use crate::agent::types::AgentRuntimeConfig;
 use crate::agent::types::BranchStep;
 use crate::agent::types::PlanBranchGenerated;
@@ -93,6 +94,17 @@ pub async fn run_agent_task(
     runtime: State<'_, AgentRuntime>,
     input: RunAgentTaskInput,
 ) -> Result<(), String> {
+    // 并发互斥（spawn 前主闸门，且必须早于 load_config）：连点「运行」时第二次请求
+    // 立刻拿到 Err，零 DB 开销；若 load_config 失败，guard 随 `?` 提前 return 自动 Drop，
+    // 锁正确释放，无需额外处理。
+    let running_guard = match runtime.try_acquire_run_lock() {
+        Some(g) => g,
+        None => {
+            tracing::warn!("[agent] run_agent_task: 已有任务在运行，拒绝重复启动");
+            return Err("已有任务正在运行，请先等待其完成或点击停止。".into());
+        }
+    };
+
     let cfg = load_config(
         &app,
         &input.agent_id,
@@ -124,7 +136,11 @@ pub async fn run_agent_task(
     let pre_completed: std::collections::HashSet<String> =
         input.pre_completed.clone().unwrap_or_default().into_iter().collect();
     let initial_context = input.initial_context.clone().unwrap_or_default();
+
+    // 锁已在上方入口处抢占（running_guard）：跨 spawn 持有，run_task 任意出口
+    // （正常 / 取消 / panic）自动复位 running；本处不再抢锁。
     tauri::async_runtime::spawn(async move {
+        let _running_guard = running_guard;
         tracing::info!("[agent] run_agent_task 后台任务已 spawn，开始 run_task");
         rt.run_task(&app_clone, cfg, prompt, plan_override, pre_completed, initial_context)
             .await;
@@ -151,6 +167,9 @@ pub async fn cancel_agent_task(runtime: State<'_, AgentRuntime>) -> Result<(), S
         .store(true, std::sync::atomic::Ordering::SeqCst);
     // 若后台流水线正挂在恢复等待上，同步唤醒（否则取消信号无法跳出 wait 挂起）。
     runtime.recovery.cancel();
+    // 若后台流水线正挂在敏感工具审批上，清空所有 pending 审批（drop Sender →
+    // `rx.await` 走拒绝分支），否则「停止」无法跳出审批挂起、任务永久卡住。
+    runtime.approval.cancel_all().await;
     tracing::info!("[agent] cancel_agent_task: 已置位取消标志，后台任务将尽快终止");
     Ok(())
 }
@@ -248,6 +267,7 @@ pub async fn read_artifact(
         sandbox_enabled: false,
         agent_id: String::new(),
         session_id: None,
+        http_allowed_hosts: Vec::new(),
     };
     let abs = match PathGuard::check(&path, &ctx) {
         Ok(p) => p,
@@ -1095,6 +1115,26 @@ category 取值：decision（决策）/ code_pattern（代码模式）/ user_pre
         }
     }
 
+    // HTTP 请求主机白名单（app_config.http_allowed_hosts）：空 = 不限制；非空 = 仅允许命中主机（含子域）。
+    let http_allowed_hosts = {
+        let row = sqlx::query("SELECT value FROM app_config WHERE key = 'http_allowed_hosts'")
+            .fetch_optional(&pool)
+            .await
+            .ok()
+            .flatten();
+        match row {
+            Some(r) => {
+                let raw = r
+                    .try_get::<Option<String>, _>("value")
+                    .ok()
+                    .flatten()
+                    .unwrap_or_default();
+                parse_host_allowlist(&raw)
+            }
+            None => Vec::new(),
+        }
+    };
+
     Ok(AgentRuntimeConfig {
         agent_id: agent_id.to_string(),
         system_prompt,
@@ -1111,6 +1151,7 @@ category 取值：decision（决策）/ code_pattern（代码模式）/ user_pre
         session_id,
         round_id,
         attachments: attachments.unwrap_or_default(),
+        http_allowed_hosts,
     })
 }
 

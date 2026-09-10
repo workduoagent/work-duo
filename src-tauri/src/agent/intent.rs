@@ -13,12 +13,20 @@ use crate::agent::runtime;
 use crate::agent::types::AgentRuntimeConfig;
 use crate::agent::types::IntentProfile;
 
-/// 复杂任务信号关键词（中英对照，命中任一即倾向 COMPOSITE_TASK）。
-const COMPOSITE_HINTS: &[&str] = &[
-    "文件", "代码", "脚本", "python", "数据", "抓取", "采集", "下载", "生成", "读取", "写入",
-    "excel", "csv", "json", "报表", "预测", "分析", "安装", "检查", "报错", "修复", "bug",
-    "运行", "执行", "整理", "爬", "截图", "建模", "仿真", "file", "code", "script", "data",
-    "fetch", "download", "generate", "predict", "analy", "install", "error", "fix",
+/// 强工具信号关键词（中英对照）：命中即倾向 COMPOSITE_TASK，**直接规则短路**进入规划链，
+/// 不再走 LLM 分类——属于「明确要用电脑/工具干活」的语义（文件/脚本/抓取/部署/报错修复等）。
+const STRONG_TOOL_HINTS: &[&str] = &[
+    "文件", "代码", "脚本", "python", "excel", "csv", "json", "抓取", "采集", "下载", "读取",
+    "写入", "安装", "卸载", "格式化", "部署", "删除", "移除", "清空", "爬", "截图", "建模",
+    "仿真", "file", "code", "script", "fetch", "download", "install", "uninstall", "format",
+    "rm -rf", "报错", "修复", "bug", "error", "fix", "运行", "执行",
+];
+
+/// 弱任务信号关键词（中英对照）：仅表示「生成/分析/整理」等任务**类型**，本身不必然需要工具，
+/// **不触发** COMPOSITE 短路——命中后若消息较短仍走 LLM 分类，避免「帮我生成一句祝福」被误判复合任务。
+const WEAK_TASK_HINTS: &[&str] = &[
+    "数据", "生成", "报表", "预测", "分析", "检查", "整理", "data", "generate", "predict",
+    "analy",
 ];
 
 /// 高风险信号关键词（命中即视为 HIGH 风险，强制走人工审批，哪怕开启自动执行）。
@@ -34,17 +42,20 @@ pub async fn classify_intent(cfg: &AgentRuntimeConfig, prompt: &str) -> IntentPr
     let trimmed = prompt.trim();
     let len = trimmed.chars().count();
     let lower = trimmed.to_lowercase();
-    let has_hint = COMPOSITE_HINTS.iter().any(|k| lower.contains(&k.to_lowercase()));
+    // 仅强工具信号触发 COMPOSITE 短路；弱任务信号（生成/分析…）不短路，交 LLM 判断。
+    let has_strong = STRONG_TOOL_HINTS.iter().any(|k| lower.contains(&k.to_lowercase()));
+    let has_weak = WEAK_TASK_HINTS.iter().any(|k| lower.contains(&k.to_lowercase()));
 
-    // 短路 1：短消息且无复杂信号 → 明显闲聊，0 成本直接判。
-    if len <= 20 && !has_hint {
-        tracing::info!("[agent] intent: 规则短路 → SIMPLE_CHAT（len={len} 无复杂信号）");
-        return profile("SIMPLE_CHAT", "规则短路：短消息且无复杂关键词", prompt);
+    // 短路 1：短消息且「强/弱工具信号均无」→ 明显闲聊，0 成本直接判 SIMPLE；
+    // 含弱信号但无强工具的短消息（如「帮我分析一下」）仍走 LLM，避免误判闲聊漏掉复合任务。
+    if len <= 20 && !has_strong && !has_weak {
+        tracing::info!("[agent] intent: 规则短路 → SIMPLE_CHAT（len={len} 无强/弱工具信号）");
+        return profile("SIMPLE_CHAT", "规则短路：短消息且无工具关键词", prompt);
     }
-    // 短路 2：命中复杂信号且描述较长 → 明显复合任务，直接判。
-    if has_hint && len >= 30 {
-        tracing::info!("[agent] intent: 规则短路 → COMPOSITE_TASK（命中复杂关键词）");
-        return profile("COMPOSITE_TASK", "规则短路：命中复杂任务关键词", prompt);
+    // 短路 2：命中强工具信号且描述较长 → 明显复合任务，直接判。
+    if has_strong && len >= 30 {
+        tracing::info!("[agent] intent: 规则短路 → COMPOSITE_TASK（命中强工具关键词）");
+        return profile("COMPOSITE_TASK", "规则短路：命中强工具任务关键词", prompt);
     }
 
     // 灰色地带 → LLM 轻量分类（非流式、0 工具）。

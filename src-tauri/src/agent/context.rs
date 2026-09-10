@@ -435,3 +435,108 @@ pub(crate) async fn build_context_messages(
 
     Ok(messages)
 }
+
+/// P2-1 滚动会话背景摘要：仅提取「会话背景」用于子任务 prompt 注入，**不组装完整历史轮次**
+/// （保持微 ReAct 隔离——工具型子任务只能感知「用户说过什么 / 已确认什么结论」，不感知工具报文）。
+///
+/// 读取两块：① 滚动摘要（复用 `build_context_messages` 的读取逻辑：工程绑定优先
+/// `.wd_mem/sessions/{id}.summary.md`，回退 DB `summary`）；② 最近 1~2 条 `user_question`
+/// （`round_index > last_compact`，取最新两条），便于子任务理解用户偏好/约束。
+///
+/// 约束：
+/// - `session_id` 为 None（squad 成员路径）直接返回 `None`，调用方跳过注入，不 panic；
+/// - 超 800 字符截断，避免摘要膨胀破坏微 ReAct 干净上下文；
+/// - 仅返回背景文本本身，注入时的「【会话背景摘要】」段头由 pipeline 负责拼接。
+pub(crate) async fn load_session_background(
+    app: &AppHandle,
+    cfg: &AgentRuntimeConfig,
+) -> Option<String> {
+    let sid = cfg.session_id.as_ref()?;
+    let pool = match get_pool(app).await {
+        Ok(p) => p,
+        Err(e) => {
+            tracing::info!("[agent] context: 背景摘要读取失败（DB 未连接）：{e}");
+            return None;
+        }
+    };
+    let meta = sqlx::query(
+        "SELECT summary, summary_round_count, project_id \
+         FROM agent_conversation_session WHERE id = ?",
+    )
+    .bind(sid)
+    .fetch_optional(&pool)
+    .await
+    .ok()
+    .flatten();
+    let last_compact: i64 = meta
+        .as_ref()
+        .and_then(|r| r.try_get::<Option<i64>, _>("summary_round_count").ok().flatten())
+        .unwrap_or(0);
+    let db_summary: Option<String> = meta
+        .as_ref()
+        .and_then(|r| r.try_get::<Option<String>, _>("summary").ok().flatten())
+        .filter(|s| !s.trim().is_empty());
+    // 工程根路径（用于读取 .wd_mem 本地摘要文件）。
+    let project_id: Option<String> = meta
+        .as_ref()
+        .and_then(|r| r.try_get::<Option<String>, _>("project_id").ok().flatten())
+        .filter(|s| !s.trim().is_empty());
+    let project_root: Option<String> = match &project_id {
+        Some(pid) => sqlx::query("SELECT root_path FROM agent_project WHERE id = ?")
+            .bind(pid)
+            .fetch_optional(&pool)
+            .await
+            .ok()
+            .flatten()
+            .and_then(|r| r.try_get::<Option<String>, _>("root_path").ok().flatten())
+            .filter(|s| !s.trim().is_empty()),
+        None => None,
+    };
+
+    // [Slot 2] 会话滚动摘要：工程绑定优先本地 .wd_mem 文件，否则回退 DB summary。
+    let session_summary: Option<String> = match &project_root {
+        Some(root) => wd_mem::read_session_summary(root, sid).or(db_summary),
+        None => db_summary,
+    };
+
+    // 最近 1~2 条用户原话（round_index > last_compact，取最新两条）。
+    let recent_user: Vec<String> = sqlx::query(
+        "SELECT user_question FROM agent_conversation_round \
+         WHERE session_id = ? AND round_index > ? \
+         ORDER BY round_index DESC LIMIT 2",
+    )
+    .bind(sid)
+    .bind(last_compact)
+    .fetch_all(&pool)
+    .await
+    .ok()
+    .map(|rows| {
+        rows.iter()
+            .filter_map(|r| r.try_get::<Option<String>, _>("user_question").ok().flatten())
+            .filter(|s| !s.trim().is_empty())
+            .collect::<Vec<_>>()
+    })
+    .unwrap_or_default();
+
+    let mut bg = String::new();
+    if let Some(s) = &session_summary {
+        bg.push_str(s.trim());
+    }
+    for q in &recent_user {
+        if !bg.is_empty() {
+            bg.push('\n');
+        }
+        bg.push_str(&format!("（用户原话）{q}"));
+    }
+    if bg.trim().is_empty() {
+        return None;
+    }
+    // 截断 800 字符，避免摘要膨胀破坏微 ReAct 干净上下文。
+    let bg = if bg.chars().count() > 800 {
+        let truncated: String = bg.chars().take(800).collect();
+        format!("{truncated}…")
+    } else {
+        bg
+    };
+    Some(bg)
+}

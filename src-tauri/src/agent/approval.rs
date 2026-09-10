@@ -104,4 +104,19 @@ impl ApprovalManager {
         let removed = self.pending.lock().await.remove(approval_id).is_some();
         tracing::info!("[agent] approval: 清理 approval_id={} removed={}", approval_id, removed);
     }
+
+    /// 全局停止时清空所有挂起审批：drop 全部 Sender → 对应 `rx.await` 走拒绝分支，
+    /// 唤醒被审批挂起的流水线（否则「停止」无法跳出 `rx.await` 挂起）。
+    /// 幂等：已 `resolve` 的条目不在 Map 中，`clear` 无副作用。
+    pub async fn cancel_all(&self) {
+        let count = {
+            let mut pending = self.pending.lock().await;
+            let n = pending.len();
+            pending.clear();
+            n
+        };
+        if count > 0 {
+            tracing::info!("[agent] approval: cancel_all 清空 {} 个挂起审批", count);
+        }
+    }
 }

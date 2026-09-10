@@ -91,6 +91,9 @@ INSERT OR IGNORE INTO app_config (key, value) VALUES ('session_auto_new', 'false
 INSERT OR IGNORE INTO app_config (key, value) VALUES ('session_idle_hours', '24');
 -- 知识库存储根路径（默认 $APPDATA/.knowledge_base，可在「设置」页修改）。
 INSERT OR IGNORE INTO app_config (key, value) VALUES ('knowledge_base_path', '$APPDATA/.knowledge_base');
+-- HTTP 请求主机白名单（http_request 硬防护）：逗号 / 分号 / 空白分隔的域名列表，小写存储。
+-- 空字符串 = 不限制（允许任意 http/https 主机）；非空 = 仅允许命中列表中的主机（含其子域），其余拒绝。
+INSERT OR IGNORE INTO app_config (key, value) VALUES ('http_allowed_hosts', '');
 
 -- ============ MCP 服务接入表（mcp_info） ============
 -- 行映射见 src/types/database.d.ts 的 McpInfoRow。

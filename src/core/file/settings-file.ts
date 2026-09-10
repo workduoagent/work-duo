@@ -40,6 +40,8 @@ export interface AppSettings {
   sessionAutoNew: boolean
   /** 自动新会话的空闲小时数阈值，默认 24 */
   sessionIdleHours: number
+  /** HTTP 请求主机白名单（对应 app_config.http_allowed_hosts）；空数组 = 不限制，非空 = 仅允许命中主机（含其子域） */
+  httpAllowedHosts: string[]
 }
 
 /** app_config 中各设置项的 key（与 init.sql 种子、config-mapper 保持一致）。 */
@@ -52,6 +54,7 @@ export const CONFIG_KEYS = {
   clientNotify: 'client_notify',
   sessionAutoNew: 'session_auto_new',
   sessionIdleHours: 'session_idle_hours',
+  httpAllowedHosts: 'http_allowed_hosts',
 } as const
 
 /** 各设置的出厂默认值（缺失时回退）。 */
@@ -64,6 +67,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   clientNotify: true,
   sessionAutoNew: false,
   sessionIdleHours: 24,
+  httpAllowedHosts: [],
 }
 
 /** 网络代理模式下拉选项（运行期）。 */
@@ -78,7 +82,11 @@ export const PROXY_MODE_OPTIONS: { value: ProxyMode; label: string }[] = [
  * ------------------------------------------------------------------ */
 
 /** 原始字符串存储的 key（不 JSON 包裹，保持与历史种子一致）。 */
-const RAW_STRING_KEYS = new Set<string>([CONFIG_KEYS.skillPath, CONFIG_KEYS.knowledgeBasePath])
+const RAW_STRING_KEYS = new Set<string>([
+  CONFIG_KEYS.skillPath,
+  CONFIG_KEYS.knowledgeBasePath,
+  CONFIG_KEYS.httpAllowedHosts,
+])
 
 function parseValue<T>(raw: string | undefined, fallback: T): T {
   if (raw == null) return fallback
@@ -103,6 +111,19 @@ function parseValue<T>(raw: string | undefined, fallback: T): T {
 function serializeValue(key: string, value: unknown): string {
   if (RAW_STRING_KEYS.has(key)) return String(value)
   return JSON.stringify(value)
+}
+
+/**
+ * 解析 app_config.http_allowed_hosts：逗号 / 分号 / 空白分隔 → 小写、去空数组；
+ * 空串 / 未设置 → 空数组（表示不限制任何主机）。
+ * 分隔规则与 Rust 侧 native::parse_host_allowlist 完全一致（数组经 serializeValue 落库为逗号分隔串）。
+ */
+function parseHostAllowlist(raw: string | undefined): string[] {
+  if (!raw) return []
+  return raw
+    .split(/[,;\s]+/)
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean)
 }
 
 /* ------------------------------------------------------------------ *
@@ -140,6 +161,7 @@ export async function loadSettings(): Promise<AppSettings> {
       all[k.sessionIdleHours],
       DEFAULT_SETTINGS.sessionIdleHours,
     ),
+    httpAllowedHosts: parseHostAllowlist(all[k.httpAllowedHosts]),
   }
 }
 

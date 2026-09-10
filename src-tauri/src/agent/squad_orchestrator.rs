@@ -167,6 +167,8 @@ pub async fn run_squad_task(app: &AppHandle, squad: SquadRuntimeConfig, prompt: 
 
     let mut context = String::new();
     let retry = squad.run_strategy.retry_count.max(1) as usize;
+    // P2-3 模式感知恢复（与 run_squad_pipeline 同源）：schedule/api 视为无人值守。
+    let unattended = matches!(squad.run_strategy.execution_mode.as_str(), "schedule" | "api");
     for task in &delegated {
         // 按角色 / agent_id 匹配成员；匹配不到则退回主管。
         let member = match_member(&squad.members, &task.assignee).unwrap_or(&leader);
@@ -184,7 +186,7 @@ pub async fn run_squad_task(app: &AppHandle, squad: SquadRuntimeConfig, prompt: 
         let mut output = String::new();
         let mut last_err: Option<String> = None;
         for attempt in 0..retry {
-            match run_member_subtask(app, &member.agent, &subtask_prompt, &ws, "").await {
+            match run_member_subtask(app, &member.agent, &subtask_prompt, &ws, "", unattended).await {
                 Ok(t) => {
                     output = t;
                     break;
@@ -434,6 +436,9 @@ async fn run_member_subtask(
     prompt: &str,
     workspace: &str,
     initial_context: &str,
+    // P2-3 无人值守模式（schedule/api）：子任务恢复等待超时自动取消整条流水线，防止卡死；
+    // manual 模式恒为 false，恢复等待保持永久阻塞（行为不变）。
+    unattended: bool,
 ) -> Result<String, String> {
     let mut cfg = member_cfg.clone();
     cfg.workspace = Some(workspace.to_string());
@@ -460,6 +465,7 @@ async fn run_member_subtask(
         sandbox_enabled: cfg.allow_sandbox,
         agent_id: cfg.agent_id.clone(),
         session_id: None,
+        http_allowed_hosts: cfg.http_allowed_hosts.clone(),
     };
 
     let approval = ApprovalManager::new();
@@ -477,11 +483,17 @@ async fn run_member_subtask(
         &recovery,
         &HashSet::<String>::new(),
         initial_context,
+        unattended,
     )
     .await;
 
     if result.cancelled {
-        return Err("子任务被取消".into());
+        // 问题 1 配套：若取消带系统原因（无人值守超时），一并带入错误串，便于 squad 上层区分。
+        let err = match &result.cancel_reason {
+            Some(r) => format!("子任务被取消：{r}"),
+            None => "子任务被取消".to_string(),
+        };
+        return Err(err.into());
     }
     Ok(result.final_text)
 }
@@ -545,12 +557,14 @@ async fn run_pipeline_node(
     retry: usize,
     pool: &sqlx::SqlitePool,
     session_id: &str,
+    // P2-3 无人值守模式透传。
+    unattended: bool,
 ) -> String {
     let ws = squad_member_workspace(workspace, squad_id, &member.agent.agent_id);
     let mut output = String::new();
     let mut last_err: Option<String> = None;
     for attempt in 0..retry {
-        match run_member_subtask(app, &member.agent, &prompt.to_string(), &ws, context).await {
+        match run_member_subtask(app, &member.agent, &prompt.to_string(), &ws, context, unattended).await {
             Ok(t) => {
                 output = t;
                 break;
@@ -615,6 +629,9 @@ async fn run_squad_pipeline(
     session_id: &str,
 ) {
     let retry = squad.run_strategy.retry_count.max(1) as usize;
+    // P2-3 模式感知恢复：schedule / api 模式视为无人值守 → 子任务失败恢复超时自动取消；
+    // manual 模式保持永久等待用户决策。execution_mode 取值即 SquadRunStrategy 既有字段。
+    let unattended = matches!(squad.run_strategy.execution_mode.as_str(), "schedule" | "api");
     let use_dag = squad.members.iter().any(|m| !m.depends_on.is_empty());
 
     // 执行计划：执行顺序 + 每个节点的上游输入来源（成员下标）。
@@ -675,7 +692,7 @@ async fn run_squad_pipeline(
             .map(|&up| outputs[up].clone())
             .collect::<Vec<_>>()
             .join("\n\n");
-        let out = run_pipeline_node(app, &squad.squad_id, &squad.workspace, member, prompt, &ctx, retry, pool, session_id).await;
+        let out = run_pipeline_node(app, &squad.squad_id, &squad.workspace, member, prompt, &ctx, retry, pool, session_id, unattended).await;
         outputs[mi] = out;
     }
 

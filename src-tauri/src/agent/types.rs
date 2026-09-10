@@ -90,6 +90,9 @@ pub struct AgentRuntimeConfig {
     pub round_id: Option<String>, // 前端建好的本轮 id（ReAct 循环结束后回填 raw_messages_json）
     /// 当前轮用户消息附件（多模态图片；仅注入当轮，历史轮由 raw_messages_json 原样保留）。
     pub attachments: Vec<AttachmentInput>,
+    /// HTTP 请求主机白名单（由 app_config.http_allowed_hosts 解析）：空 = 不限制；
+    /// 非空 = 仅允许命中列表中的主机（含其子域），native__http_request 据此拒绝越界主机。
+    pub http_allowed_hosts: Vec<String>,
 }
 
 /* ================= 三层流水线架构（意图分流 → DAG 规划 → 微 ReAct 执行） ================= */
@@ -294,6 +297,10 @@ pub struct SubTaskOutput {
     /// 是否被用户中途取消（cancel_agent_task 触发）：取消的子任务不计入失败重试，
     /// 流水线据此提前整体收尾。
     pub cancelled: bool,
+    /// 是否被「跳过」（用户选择 Skip，或单步恢复次数达上限被自动跳过）。
+    /// 与 `success` 正交：跳过步虽放行后续依赖、流水线可正常收尾，但**不计入「成功闭环」**，
+    /// 否则会污染最终回顾与自检（P1-4 修复：原先 `Skip` 把 `success` 置 true 导致跳过=成功）。
+    pub skipped: bool,
     /// 本子任务成功闭环后登记的文件产物（注册进 artifacts 表，驱动前端「产物画廊」）。
     #[allow(dead_code)]
     pub artifacts: Vec<ArtifactRef>,

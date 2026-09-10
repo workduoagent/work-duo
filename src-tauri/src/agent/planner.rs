@@ -125,12 +125,23 @@ text_contains 的 value 建议用 `|` 分隔多个同义措辞（例如「风险
 /// 系统能力大纲（概括，不含 JSON Schema）。
 /// 与能力层注册表保持同源：原生收敛工具 + 全局注入的 MCP/Skill。
 fn capability_outline(cfg: &AgentRuntimeConfig) -> String {
-    let mut lines = vec![
-        "1. 本地文件系统操作：读 / 写 / 改 / 列目录（限于授权工作空间内）；".to_string(),
-        "2. 沙箱 Python 执行（run_python_sandbox，直接传 code 参数）：数据抓取、报表生成、数学建模；沙箱为纯净 Python 3.11，脚本运行时会自动按需安装缺失的常用数据科学库（pandas/numpy/openpyxl/scipy 等），你只需正常 import 即可，无需手动安装；".to_string(),
-        "3. 工作空间记忆管理：沉淀或提取 .wd_mem/ 历史工件与长期记忆；".to_string(),
+    // 能力清单（按先后顺序排列，不含编号），最后统一编号，保证「沙箱条目被条件跳过」时编号仍连续。
+    let mut caps: Vec<String> = vec![
+        "本地文件系统操作：读 / 写 / 改 / 删 / 移 / 列目录 / 检索 / 压缩解压 / 正则替换（限于授权工作空间内）；HTTP 请求（native__http_request，需用户审批）；".to_string(),
     ];
-    let mut idx = 4;
+    // 方案 A：沙箱运行时仅在 allow_sandbox=true 时列入能力大纲，与工具注册表同源
+    //（allow_sandbox=false 时沙箱工具未注册，此处也不应谎称「你有沙箱能力」，否则又一处提示/能力不一致）。
+    if cfg.allow_sandbox {
+        caps.push(
+            "沙箱 Python 执行（run_python_sandbox，直接传 code 参数）：数据抓取、报表生成、数学建模；沙箱为纯净 Python 3.11，脚本运行时会自动按需安装缺失的常用数据科学库（pandas/numpy/openpyxl/scipy 等），你只需正常 import 即可，无需手动安装；".to_string(),
+        );
+    }
+    caps.push("工作空间记忆管理：沉淀或提取 .wd_mem/ 历史工件与长期记忆；".to_string());
+    let mut lines: Vec<String> = Vec::with_capacity(caps.len() + 2);
+    for (i, c) in caps.iter().enumerate() {
+        lines.push(format!("{}. {}", i + 1, c));
+    }
+    let mut idx = caps.len() + 1;
     if !cfg.mcp_tools.is_empty() {
         let names: Vec<&str> = cfg
             .mcp_tools

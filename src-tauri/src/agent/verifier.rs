@@ -65,6 +65,46 @@ fn cands_disp(cands: &[PathBuf]) -> String {
         .join(" | ")
 }
 
+/// 读取文件用于校验：先确认「存在性 + 是否目录」，再读内容。
+/// 把裸 `os error 2/3/5` 翻译成清晰中文，落实「先看文件有没有，你不能上来就读」的闭环要求。
+fn read_text_for_verify(p: &Path) -> Result<String, String> {
+    match std::fs::metadata(p) {
+        Ok(m) if m.is_dir() => Err(format!(
+            "目标是目录而非文件：{}（目录无法按文本读取，请指定具体文件或改用 directory_exists）",
+            p.display()
+        )),
+        Ok(_) => std::fs::read_to_string(p)
+            .map_err(|e| format!("读取失败 {}：{}", p.display(), e)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Err(format!(
+            "文件不存在：{}（请确认路径，或先用 native__write_file 创建该文件）",
+            p.display()
+        )),
+        Err(e) => Err(format!("读取失败 {}：{}", p.display(), e)),
+    }
+}
+
+/// 递归遍历目录，任一文件内容命中任一关键词即通过（用于 `text_contains` 目标是目录的场景）。
+/// 跳过 >4MB 的文件避免误吞巨型产物；读取失败的文件静默跳过（不阻塞其他文件命中）。
+fn grep_dir(dir: &Path, keywords: &[&str]) -> std::io::Result<bool> {
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        let meta = entry.metadata()?;
+        if meta.is_dir() {
+            if grep_dir(&path, keywords)? {
+                return Ok(true);
+            }
+        } else if meta.is_file() && meta.len() <= 4 * 1024 * 1024 {
+            if let Ok(s) = std::fs::read_to_string(&path) {
+                if keywords.iter().any(|kw| s.contains(kw)) {
+                    return Ok(true);
+                }
+            }
+        }
+    }
+    Ok(false)
+}
+
 /// 执行单条判定标准，返回 (是否通过, 人类可读说明)。
 fn check_one(c: &SuccessCriterion, workspace: Option<&Path>) -> (bool, String) {
     let ct = c.check_type.to_lowercase();
@@ -111,12 +151,12 @@ fn check_one(c: &SuccessCriterion, workspace: Option<&Path>) -> (bool, String) {
             // 任一候选可读且 JSON 可解析即通过（与文件类分支的「任一命中」对称）。
             let mut last_err = String::new();
             for p in &cands {
-                match std::fs::read_to_string(p) {
+                match read_text_for_verify(p) {
                     Ok(s) if serde_json::from_str::<serde_json::Value>(&s).is_ok() => {
                         return (true, format!("JSON 应可解析：{}", p.display()));
                     }
                     Ok(_) => last_err = format!("JSON 解析失败：{}", p.display()),
-                    Err(e) => last_err = format!("读取失败 {}：{}", p.display(), e),
+                    Err(msg) => last_err = msg,
                 }
             }
             (
@@ -137,34 +177,77 @@ fn check_one(c: &SuccessCriterion, workspace: Option<&Path>) -> (bool, String) {
                 Some(v) => v,
                 None => return (false, "text_contains 缺 value".into()),
             };
-            let p = resolve_path(target, workspace);
-            match std::fs::read_to_string(&p) {
-                Ok(s) => {
-                    // 多关键词容错：value 以 `|` 分隔多个候选措辞，任一命中即通过
-                    // （语义包含即算过）。例如 `风险提示|主要风险|风险` 可避免被散文措辞卡死。
-                    // 单一关键词（无 `|`）时退化为精确子串匹配，完全向后兼容。
-                    let candidates: Vec<&str> = value
-                        .split('|')
-                        .map(|x| x.trim())
-                        .filter(|x| !x.is_empty())
-                        .collect();
-                    if candidates.is_empty() {
-                        (false, format!("text_contains 的 value 为空：{value}"))
-                    } else if candidates.iter().any(|kw| s.contains(kw)) {
-                        (true, format!("文件 {} 内容包含「{}」之一", p.display(), value))
-                    } else {
-                        (
-                            false,
-                            format!(
-                                "文件 {} 应包含「{}」之一（实际未命中任一关键词）",
-                                p.display(),
-                                candidates.join(" / ")
-                            ),
-                        )
+            // 多关键词容错：value 以 `|` 分隔多个候选措辞，任一命中即通过
+            // （语义包含即算过）。例如 `风险提示|主要风险|风险` 可避免被散文措辞卡死。
+            // 单一关键词（无 `|`）时退化为精确子串匹配，完全向后兼容。
+            let keywords: Vec<&str> = value
+                .split('|')
+                .map(|x| x.trim())
+                .filter(|x| !x.is_empty())
+                .collect();
+            if keywords.is_empty() {
+                return (false, format!("text_contains 的 value 为空：{value}"));
+            }
+            // 目标支持 `|` 多候选（与 value 容错对称）；任一候选命中即通过。
+            let cands = resolve_candidates(target, workspace);
+            let mut last_err = String::new();
+            for p in &cands {
+                // 目标是目录：递归遍历各文件内容，任一文件命中即通过（闭环校验，不把目录当文件读）。
+                if let Ok(m) = std::fs::metadata(p) {
+                    if m.is_dir() {
+                        match grep_dir(p, &keywords) {
+                            Ok(true) => {
+                                return (
+                                    true,
+                                    format!(
+                                        "目录 {} 下存在文件内容包含「{}」之一",
+                                        p.display(),
+                                        value
+                                    ),
+                                )
+                            }
+                            Ok(false) => {
+                                last_err = format!(
+                                    "目录 {} 下所有文件均未包含「{}」之一",
+                                    p.display(),
+                                    keywords.join(" / ")
+                                );
+                                continue;
+                            }
+                            Err(e) => {
+                                last_err = format!("遍历目录失败 {}：{}", p.display(), e);
+                                continue;
+                            }
+                        }
                     }
                 }
-                Err(e) => (false, format!("读取失败 {}：{}", p.display(), e)),
+                // 目标是文件（或不存在）：读取后做子串匹配。
+                match read_text_for_verify(p) {
+                    Ok(s) => {
+                        if keywords.iter().any(|kw| s.contains(kw)) {
+                            return (
+                                true,
+                                format!("文件 {} 内容包含「{}」之一", p.display(), value),
+                            );
+                        } else {
+                            last_err = format!(
+                                "文件 {} 应包含「{}」之一（实际未命中任一关键词）",
+                                p.display(),
+                                keywords.join(" / ")
+                            );
+                        }
+                    }
+                    Err(msg) => last_err = msg,
+                }
             }
+            (
+                false,
+                if last_err.is_empty() {
+                    format!("text_contains 目标（任一）：{}", cands_disp(&cands))
+                } else {
+                    last_err
+                },
+            )
         }
         "text_min_lines" => {
             let target = match &c.target {
@@ -172,15 +255,30 @@ fn check_one(c: &SuccessCriterion, workspace: Option<&Path>) -> (bool, String) {
                 None => return (false, "text_min_lines 缺 target".into()),
             };
             let n = c.threshold.unwrap_or(1);
-            let p = resolve_path(target, workspace);
-            match std::fs::read_to_string(&p) {
-                Ok(s) => {
-                    let lines = s.lines().count();
-                    let ok = lines >= n;
-                    (ok, format!("文件 {} 行数应 ≥ {}（实际 {}）", p.display(), n, lines))
+            let cands = resolve_candidates(target, workspace);
+            let mut last_err = String::new();
+            for p in &cands {
+                match read_text_for_verify(p) {
+                    Ok(s) => {
+                        let lines = s.lines().count();
+                        let ok = lines >= n;
+                        if ok {
+                            return (true, format!("文件 {} 行数应 ≥ {}（实际 {}）", p.display(), n, lines));
+                        } else {
+                            last_err = format!("文件 {} 行数应 ≥ {}（实际 {}）", p.display(), n, lines);
+                        }
+                    }
+                    Err(msg) => last_err = msg,
                 }
-                Err(e) => (false, format!("读取失败 {}：{}", p.display(), e)),
             }
+            (
+                false,
+                if last_err.is_empty() {
+                    format!("text_min_lines 目标（任一）：{}", cands_disp(&cands))
+                } else {
+                    last_err
+                },
+            )
         }
         "excel_row_count" => {
             // 暂以「文件存在且非空」代理（不引入 Excel 解析依赖）。

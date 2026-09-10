@@ -399,6 +399,32 @@
   margin-top: 16px;
 }
 
+/* ---------------- HTTP 主机白名单 ---------------- */
+.set-hosts {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+  background: var(--color-background-subtle);
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+}
+
+.set-hosts__row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.set-hosts__row .ant-input,
+.set-hosts__row input {
+  flex: 1 1 auto;
+}
+
+.set-hosts__add {
+  align-self: flex-start;
+}
+
 /* ---------------- 关于我们 ---------------- */
 .set-about-version {
   padding: 4px 10px;
