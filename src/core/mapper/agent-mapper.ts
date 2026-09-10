@@ -304,8 +304,8 @@ export async function upsertAgent(input: AgentUpsertInput): Promise<AgentInfo[]>
     `INSERT INTO agent_info
        (id, logo, scenario, name, identifier, description, system_prompt, welcome_message,
         llm_id, llm_config, tts_id, tts_config, stt_id, stt_config,
-        is_active, auto_tool_exec_mode, allow_sandbox, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        is_active, auto_tool_exec_mode, allow_sandbox, memory_mode, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET
         logo                = excluded.logo,
         scenario            = excluded.scenario,
@@ -323,6 +323,7 @@ export async function upsertAgent(input: AgentUpsertInput): Promise<AgentInfo[]>
         is_active           = excluded.is_active,
         auto_tool_exec_mode = excluded.auto_tool_exec_mode,
         allow_sandbox       = excluded.allow_sandbox,
+        memory_mode         = excluded.memory_mode,
         updated_at          = excluded.updated_at`,
     [
       id,

@@ -26,6 +26,7 @@ use tokio::time::timeout;
 use crate::agent::approval::ApprovalManager;
 use crate::agent::approval::ApprovalOutcome;
 use crate::agent::events;
+use crate::agent::graph::KnowledgeGraph;
 use crate::agent::native;
 use crate::agent::tools::PermissionLevel;
 use crate::agent::tools::ToolContext;
@@ -137,12 +138,12 @@ impl AgentRuntime {
             .await;
         }
 
-        // 1) 组装工具注册表（基础原生 + 绑定的 Skill/MCP 工具）
+        // 1) 组装工具注册表（基础原生 + 绑定的 MCP 工具）。
+        //    绑定的 Skill 不再注册为工具（避免「先调 skill__xxx 拿指引再干活」的浪费轮次），
+        //    改为在 pipeline::run_subtask 的 user 消息中注入 skill_markdown 指引。
         let mut base = self.native.lock().await.clone();
         // 沙箱模式下不注册 execute_command（宿主 shell），能力层与提示层保持一致
         native::register_native_tools(&mut base, app, cfg.allow_sandbox, &cfg.memory_mode);
-        // 技能：直接注册进本轮本地注册表（AgentTool 只读包装，真实执行待接入业务核心）
-        crate::agent::skill_adapter::register_skills_into(&mut base, cfg.skill_tools.clone());
         // MCP：按 mcp_id 分组，逐 server 注册（复用现有 mcp::call_mcp_tool 透传）
         let mut by_server: std::collections::BTreeMap<String, Vec<crate::agent::mcp_adapter::MountedMcpTool>> =
             Default::default();
@@ -250,20 +251,66 @@ impl AgentRuntime {
         events::emit_token_update(app, plan_usage.0, plan_usage.1);
 
         // 阶段三：流水线隔离执行（子任务独立上下文、产物管道、失败重试 3 次）。
+        // 图驱动：打开（或新建）本工作空间的统一实体图，把规划写入图，运行时状态由图承载。
+        let mut graph = match KnowledgeGraph::open(cfg.workspace.as_deref()) {
+            Ok(g) => g,
+            Err(e) => {
+                tracing::info!("[agent] run_task: 打开实体图失败：{e}");
+                events::emit_task_error(app, &format!("打开实体图失败：{e}"));
+                return;
+            }
+        };
+        let session_id = cfg
+            .session_id
+            .clone()
+            .unwrap_or_else(|| format!("sess_{}", now_ms()));
+        graph.plan_to_graph(&plan, &session_id);
+        // §3.2 分支重跑：把预完成的 head 步骤标记为 completed（流水线跳过执行），
+        // 并补发 step_finished 让前端画布标记为「已完成」。
+        let plan_total = plan.tasks.len();
+        for tid in &pre_completed {
+            if let Some(nid) = graph.find_task_node(&session_id, tid) {
+                graph.set_task_status(&nid, "completed");
+                let (step, title) = match graph.get_node(&nid) {
+                    Some(n) => (
+                        n.props.get("step").and_then(|v| v.as_u64()).unwrap_or(0) as usize,
+                        n.props
+                            .get("title")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string(),
+                    ),
+                    None => (0, String::new()),
+                };
+                events::emit_step_finished(
+                    app,
+                    step,
+                    plan_total,
+                    &title,
+                    true,
+                    "（沿用已完成结果，分支重跑跳过）",
+                );
+            }
+        }
+        // 分支重跑基底：initial_context 作为产物管道初始摘要，供 tail 步骤续接 head 成果。
+        if !initial_context.is_empty() {
+            graph.set_session_initial_context(&session_id, &initial_context);
+        }
         let result = crate::agent::pipeline::run_pipeline(
             app,
             &cfg,
             &registry,
             &ctx,
             &self.approval,
-            &plan,
+            &mut graph,
+            &session_id,
             &self.cancel_flag,
             &self.recovery,
-            &pre_completed,
-            &initial_context,
             false,
         )
         .await;
+        // 收尾：保存会话子图快照（完整子图，供后续检索/复盘）。
+        graph.snapshot(&session_id);
 
         // 用户中途取消：跳过正常收尾（不持久化半成品 round），仅做取消提示并收尾。
         if result.cancelled {
@@ -507,6 +554,8 @@ pub(crate) async fn run_tool_calls_round(
     cfg: &AgentRuntimeConfig,
     messages: &mut Vec<Value>,
     outcome: &StreamOutcome,
+    // 当前子任务步骤序号：用于把工具调用精确归属到对应步骤卡片（前端按 step 展示工具调用列表）。
+    current_step: usize,
 ) -> ToolRoundStats {
     messages.push(json!({
         "role": "assistant",
@@ -573,6 +622,7 @@ pub(crate) async fn run_tool_calls_round(
             result: None,
             duration_ms: None,
             created_at: now_ms(),
+            step: Some(current_step),
         });
 
         // 敏感工具：审批挂起（auto_tool_exec_mode 时跳过逐次确认）
@@ -631,6 +681,7 @@ pub(crate) async fn run_tool_calls_round(
                     result: Some(format!("已拒绝：{reason}")),
                     duration_ms: None,
                     created_at: now_ms(),
+                    step: Some(current_step),
                 });
                 messages.push(json!({
                     "role": "tool",
@@ -670,6 +721,7 @@ pub(crate) async fn run_tool_calls_round(
             result: Some(result_text.clone()),
             duration_ms: Some(t0.elapsed().as_millis() as u64),
             created_at: now_ms(),
+            step: Some(current_step),
         });
         tracing::info!(
             "[agent] tool_round: 工具 {} 执行完成 ok={} 耗时={}ms 结果={}",

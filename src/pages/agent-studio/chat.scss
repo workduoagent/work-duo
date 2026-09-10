@@ -182,8 +182,10 @@
     display: flex;
     flex-direction: column;
     min-width: 0;
-    /* 输入栏改为 fixed 铺满底部，主内容区需预留出被固定输入栏遮挡的高度（默认 ~128px，再留一点余量）。 */
-    padding-bottom: 150px;
+    /* 输入栏 fixed 铺满底部且高度可被用户拖拽拉高（最高 320px）：避让高度跟随
+       `--input-h`（由 chat.tsx 按实际输入框高度下发），保证拉高后底部消息不被遮挡。
+       fallback 48px 对应输入框最小高度，+110px 为输入栏其余 chrome（padding/工具栏/手柄）高度。 */
+    padding-bottom: calc(var(--input-h, 48px) + 110px);
   }
 
   &__side-head {
@@ -2336,8 +2338,8 @@
   flex-direction: column;
   min-height: 0;
   // 宽度由内联 style 控制（默认 340px，可拖拽调节）；右侧 14px 避让视口边
-  // 与左侧栏对齐的留白；底部 150px 避让固定输入栏（输入栏 fixed 铺满视口底部）
-  margin: 14px 14px 150px 0;
+  // 与左侧栏对齐的留白；底部避让高度跟随 `--input-h`，输入框拉高时面板同步上移不被遮挡。
+  margin: 14px 14px calc(var(--input-h, 48px) + 110px) 0;
   border-radius: var(--radius-card);
   border: 1px solid var(--color-border, #e5e5e5);
   background: var(--color-background-subtle, #fafafa);
@@ -2354,7 +2356,8 @@
 &__resize {
   flex: 0 0 6px;
   align-self: stretch;
-  margin: 14px 0 150px;
+  // 底部避让高度跟随 `--input-h`，与右栏、主区保持一致，输入框拉高时手柄同步上移。
+  margin: 14px 0 calc(var(--input-h, 48px) + 110px);
   cursor: col-resize;
   background: transparent;
   border-radius: 3px;

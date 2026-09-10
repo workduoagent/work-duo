@@ -6,7 +6,6 @@
 //! 流水线 / 群聊模式在 Phase 4 / Phase 5 复用并扩展本文件的运行骨架。
 
 use std::collections::BTreeMap;
-use std::collections::HashSet;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
@@ -23,8 +22,8 @@ use crate::agent::mcp_adapter;
 use crate::agent::native;
 use crate::agent::planner;
 use crate::agent::pipeline;
+use crate::agent::graph::KnowledgeGraph;
 use crate::agent::recovery::RecoveryHub;
-use crate::agent::skill_adapter;
 use crate::agent::tools::ToolContext;
 use crate::agent::tools::ToolRegistry;
 use crate::agent::types::AgentRuntimeConfig;
@@ -186,7 +185,7 @@ pub async fn run_squad_task(app: &AppHandle, squad: SquadRuntimeConfig, prompt: 
         let mut output = String::new();
         let mut last_err: Option<String> = None;
         for attempt in 0..retry {
-            match run_member_subtask(app, &member.agent, &subtask_prompt, &ws, "", unattended).await {
+            match run_member_subtask(app, &member.agent, &subtask_prompt, &ws, unattended).await {
                 Ok(t) => {
                     output = t;
                     break;
@@ -435,7 +434,6 @@ async fn run_member_subtask(
     member_cfg: &AgentRuntimeConfig,
     prompt: &str,
     workspace: &str,
-    initial_context: &str,
     // P2-3 无人值守模式（schedule/api）：子任务恢复等待超时自动取消整条流水线，防止卡死；
     // manual 模式恒为 false，恢复等待保持永久阻塞（行为不变）。
     unattended: bool,
@@ -447,10 +445,21 @@ async fn run_member_subtask(
 
     let (plan, _, _) = planner::build_plan(&cfg, prompt, Some(workspace)).await;
 
-    // 工具注册表（镜像 run_task 分支 B：原生 + Skill + MCP）。
+    // 图驱动：为每个成员子任务打开独立实体图（按 workspace + 成员 id 区分会话），
+    // 规划写入图，运行时状态由图承载，与单 Agent 路径一致。
+    let session_id = format!("squad_{}", cfg.agent_id);
+    let mut graph = match KnowledgeGraph::open(Some(workspace)) {
+        Ok(g) => g,
+        Err(e) => {
+            tracing::info!("[squad] 打开成员实体图失败：{e}");
+            return Err(format!("成员子任务图初始化失败：{e}"));
+        }
+    };
+    graph.plan_to_graph(&plan, &session_id);
+
+    // 工具注册表（镜像 run_task 分支 B：原生 + MCP；Skill 不再注册为工具，改由 run_subtask 注入 prompt）。
     let mut base = ToolRegistry::new();
     native::register_native_tools(&mut base, app, cfg.allow_sandbox, &cfg.memory_mode);
-    skill_adapter::register_skills_into(&mut base, cfg.skill_tools.clone());
     let mut by_server: BTreeMap<String, Vec<mcp_adapter::MountedMcpTool>> = Default::default();
     for t in &cfg.mcp_tools {
         by_server.entry(t.mcp_id.clone()).or_default().push(t.clone());
@@ -478,14 +487,14 @@ async fn run_member_subtask(
         &registry,
         &ctx,
         &approval,
-        &plan,
+        &mut graph,
+        &session_id,
         &cancel,
         &recovery,
-        &HashSet::<String>::new(),
-        initial_context,
         unattended,
     )
     .await;
+    graph.snapshot(&session_id);
 
     if result.cancelled {
         // 问题 1 配套：若取消带系统原因（无人值守超时），一并带入错误串，便于 squad 上层区分。
@@ -547,13 +556,13 @@ fn build_dag_plan(members: &[SquadMemberConfig]) -> Result<DagPlan, String> {
 }
 
 /// 执行单个流水线节点（带重试），落库并推送 round 事件，返回该成员最终产出文本。
+/// 上游成员产出由调用方已折叠进 `prompt`（实现「前步产出→后步输入」的自动串联）。
 async fn run_pipeline_node(
     app: &AppHandle,
     squad_id: &str,
     workspace: &Option<String>,
     member: &SquadMemberConfig,
     prompt: &str,
-    context: &str,
     retry: usize,
     pool: &sqlx::SqlitePool,
     session_id: &str,
@@ -564,7 +573,7 @@ async fn run_pipeline_node(
     let mut output = String::new();
     let mut last_err: Option<String> = None;
     for attempt in 0..retry {
-        match run_member_subtask(app, &member.agent, &prompt.to_string(), &ws, context, unattended).await {
+        match run_member_subtask(app, &member.agent, &prompt.to_string(), &ws, unattended).await {
             Ok(t) => {
                 output = t;
                 break;
@@ -615,10 +624,10 @@ async fn run_pipeline_node(
 }
 
 /// 流水线（pipeline）：成员按 `pipeline_order` 线性串流，前序工序的 `final_text` 作为后序工序的
-/// `initial_context` 喂入 `run_pipeline`（产物管道初始摘要），实现「前步产出→后步输入」的链式传递。
+/// 上游上下文，折叠进后序成员的 prompt（实现「前步产出→后步输入」的链式传递，等价于原 run_pipeline 的 initial_context）。
 ///
 /// 各成员运行在独立私有工作区，互不干扰；末工序输出即最终交付物（本模式不额外调用汇总 LLM，降本）。
-/// 若任一成员设置了 `depends_on`，则升级为 DAG 拓扑执行：每个节点以所有上游成员产出为 `initial_context`，
+/// 若任一成员设置了 `depends_on`，则升级为 DAG 拓扑执行：每个节点以所有上游成员产出为上游上下文，
 /// 最终汇总取所有「汇点」（无下游依赖的节点）产出。
 #[tracing::instrument(skip_all)]
 async fn run_squad_pipeline(
@@ -687,12 +696,22 @@ async fn run_squad_pipeline(
 
     for (pos, &mi) in plan.order.iter().enumerate() {
         let member = &squad.members[mi];
-        let ctx = plan.inputs[pos]
+        let upstream = plan.inputs[pos]
             .iter()
             .map(|&up| outputs[up].clone())
             .collect::<Vec<_>>()
             .join("\n\n");
-        let out = run_pipeline_node(app, &squad.squad_id, &squad.workspace, member, prompt, &ctx, retry, pool, session_id, unattended).await;
+        // 上游成员产出折叠进本节点 prompt：实现「前步产出→后步输入」的自动串联
+        // （原 run_pipeline 的 initial_context 已移除，改为在 prompt 层串联，行为等价）。
+        let node_prompt = if upstream.trim().is_empty() {
+            prompt.to_string()
+        } else {
+            format!(
+                "{}\n\n[上游成员已交付产物]\n{}\n\n请基于上述上游产出继续完成本节点任务。",
+                prompt, upstream
+            )
+        };
+        let out = run_pipeline_node(app, &squad.squad_id, &squad.workspace, member, &node_prompt, retry, pool, session_id, unattended).await;
         outputs[mi] = out;
     }
 

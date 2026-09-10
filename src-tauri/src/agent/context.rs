@@ -30,6 +30,7 @@ use tauri::AppHandle;
 use crate::agent::round_compactor::build_request_messages;
 use crate::agent::round_compactor::get_pool;
 use crate::agent::round_compactor::ConversationRoundRecord;
+use crate::agent::graph::KnowledgeGraph;
 use crate::agent::types::AgentRuntimeConfig;
 use crate::agent::types::AttachmentInput;
 use crate::agent::wd_mem;
@@ -439,9 +440,11 @@ pub(crate) async fn build_context_messages(
 /// P2-1 滚动会话背景摘要：仅提取「会话背景」用于子任务 prompt 注入，**不组装完整历史轮次**
 /// （保持微 ReAct 隔离——工具型子任务只能感知「用户说过什么 / 已确认什么结论」，不感知工具报文）。
 ///
-/// 读取两块：① 滚动摘要（复用 `build_context_messages` 的读取逻辑：工程绑定优先
+/// 读取三块：① 滚动摘要（复用 `build_context_messages` 的读取逻辑：工程绑定优先
 /// `.wd_mem/sessions/{id}.summary.md`，回退 DB `summary`）；② 最近 1~2 条 `user_question`
-/// （`round_index > last_compact`，取最新两条），便于子任务理解用户偏好/约束。
+/// （`round_index > last_compact`，取最新两条），便于子任务理解用户偏好/约束；
+/// ③ 图聚合（§5.9）：若本会话统一实体图中有已完成 / 历史任务节点，把其 summary 并入背景，
+/// 让跨轮子任务感知「本会话此前已完成过什么」。图非唯一真相源，仅在确有已落地摘要时追加。
 ///
 /// 约束：
 /// - `session_id` 为 None（squad 成员路径）直接返回 `None`，调用方跳过注入，不 panic；
@@ -528,6 +531,32 @@ pub(crate) async fn load_session_background(
         }
         bg.push_str(&format!("（用户原话）{q}"));
     }
+
+    // [Slot 3b] 图聚合（§5.9 会话背景从图读）：本会话已在统一实体图中有「已完成 / 历史任务」节点时，
+    // 把其 summary 并入背景，让跨轮子任务感知「本会话此前已完成过什么」。
+    // 注意：跨轮重跑时 `plan_to_graph` 会把上一轮 completed 节点置 `obsolete`（summary 字段保留），
+    // 故过滤 `status ∈ {completed, obsolete}` 且 summary 非空，才能捞出历史已完成摘要。
+    // 图非唯一真相源：无 workspace / 图不可打开 / 无已落地摘要时静默跳过，不改既有 DB/文件读取逻辑。
+    if let Some(ws) = cfg.workspace.as_deref() {
+        if let Ok(g) = KnowledgeGraph::open(Some(ws)) {
+            let mut graph_lines: Vec<String> = Vec::new();
+            for n in g.session_tasks(sid) {
+                let st = n.props.get("status").and_then(|v| v.as_str()).unwrap_or("");
+                let summary = n.props.get("summary").and_then(|v| v.as_str()).unwrap_or("").trim();
+                if (st == "completed" || st == "obsolete") && !summary.is_empty() {
+                    graph_lines.push(format!("- {summary}"));
+                }
+            }
+            if !graph_lines.is_empty() {
+                if !bg.is_empty() {
+                    bg.push_str("\n\n");
+                }
+                bg.push_str("【本会话已完成任务】\n");
+                bg.push_str(&graph_lines.join("\n"));
+            }
+        }
+    }
+
     if bg.trim().is_empty() {
         return None;
     }

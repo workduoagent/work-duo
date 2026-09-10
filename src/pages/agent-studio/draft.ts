@@ -113,6 +113,8 @@ export function draftToInput(draft: AgentDraft, id?: string): AgentUpsertInput {
     isActive: draft.isActive,
     autoToolExecMode: draft.autoToolExecMode,
     allowSandbox: draft.allowSandbox,
+    // 记忆模式必须随草稿提交，否则提交对象丢失该字段、落库恒为默认 'off'（新建/编辑都受影响）。
+    memoryMode: draft.memoryMode,
     mcpTools: draft.mcpTools,
     skillIds: draft.skillIds,
   }

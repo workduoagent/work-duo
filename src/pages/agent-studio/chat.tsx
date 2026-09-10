@@ -2580,6 +2580,9 @@ export default function AgentChatPage() {
   return (
     <div
       className="agent-chat"
+      // 输入框实际高度（用户可拖拽拉高，最高 320px）作为 CSS 变量下发，
+      // 供主内容区 / 右侧执行轨迹面板 / 宽度拖柄动态避让，避免拉高后输入框遮挡这些区域。
+      style={{ '--input-h': `${inputHeight}px` } as React.CSSProperties}
       onDragEnter={(e) => {
         // 整窗拖拽吸附：用 depth 计数嵌套 enter/leave，避免子元素冒泡导致遮罩闪烁。
         if (e.dataTransfer?.types && Array.from(e.dataTransfer.types).includes('Files')) {

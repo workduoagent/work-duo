@@ -28,6 +28,8 @@ pub struct SkillToolWrapper {
     pub skill_path: String,
 }
 
+// Skill 不再注册为工具（改为 prompt 注入），`AgentTool` impl 与 `register_skills_into` 暂未调用，标记 dead_code 保留复用。
+#[allow(dead_code)]
 #[async_trait]
 impl AgentTool for SkillToolWrapper {
     fn name(&self) -> String {
@@ -118,6 +120,8 @@ impl AgentTool for SkillToolWrapper {
 }
 
 /// 便捷：把若干 Skill 包装器直接注册进原生注册表（不做 Provider 区分时）。
+/// **已废弃**：Skill 现改由 `pipeline::build_skill_guidance` 注入子任务 user 消息，不再注册为工具。
+#[allow(dead_code)]
 pub fn register_skills_into(registry: &mut ToolRegistry, skills: Vec<SkillToolWrapper>) {
     for s in skills {
         registry.register(Arc::new(s));

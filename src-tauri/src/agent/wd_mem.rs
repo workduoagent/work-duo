@@ -21,6 +21,12 @@ const SESSIONS_DIR: &str = "sessions";
 const SCRIPTS_DIR: &str = "scripts";
 const DATA_DIR: &str = "data";
 const OUTPUTS_DIR: &str = "outputs";
+/// 实体图目录（单 Agent 统一实体图，见 graph.rs）。
+const GRAPH_DIR: &str = "graph";
+/// 知识层目录（长期记忆 MEMORY.md + 产物 artifacts/）。
+const KNOWLEDGE_DIR: &str = "knowledge";
+/// 运行时区目录（脚本 scripts / 中间数据 data / 产物归档 outputs）。
+const RUNTIME_DIR: &str = "runtime";
 const README_FILE: &str = "README.md";
 const GITIGNORE_FILE: &str = ".gitignore";
 
@@ -36,12 +42,23 @@ fn wd_mem_base(workspace_root: &str) -> PathBuf {
 /// 使运行期产生的可复用脚本 / 中间数据 / 长期记忆有统一归宿，避免散落污染用户目录。
 pub(crate) fn ensure_wd_mem(workspace_root: &str) -> Result<PathBuf, String> {
     let base = wd_mem_base(workspace_root);
-    for sub in [SCRIPTS_DIR, DATA_DIR, OUTPUTS_DIR, SESSIONS_DIR, ARTIFACTS_DIR] {
+    // 规范目录结构：sessions / graph / knowledge(+artifacts) / runtime(+scripts/data/outputs)
+    for sub in [SESSIONS_DIR, GRAPH_DIR, KNOWLEDGE_DIR, RUNTIME_DIR] {
         std::fs::create_dir_all(base.join(sub))
             .map_err(|e| format!("创建 .wd_mem/{} 目录失败: {}", sub, e))?;
     }
+    std::fs::create_dir_all(base.join(KNOWLEDGE_DIR).join(ARTIFACTS_DIR))
+        .map_err(|e| format!("创建 .wd_mem/{}/{} 目录失败: {}", KNOWLEDGE_DIR, ARTIFACTS_DIR, e))?;
+    for sub in [SCRIPTS_DIR, DATA_DIR, OUTPUTS_DIR] {
+        std::fs::create_dir_all(base.join(RUNTIME_DIR).join(sub))
+            .map_err(|e| format!("创建 .wd_mem/{}/{} 目录失败: {}", RUNTIME_DIR, sub, e))?;
+    }
 
-    let global = base.join(GLOBAL_MEMORY_FILE);
+    // 旧部署目录迁移（幂等）：早期版本把 scripts/data/outputs 放根下、MEMORY.md/artifacts 放根下，
+    // 现统一收进 runtime/ 与 knowledge/。迁移失败不 panic（降级为新目录共存），仅日志警告。
+    migrate_legacy_layout(&base);
+
+    let global = base.join(KNOWLEDGE_DIR).join(GLOBAL_MEMORY_FILE);
     if !global.exists() {
         let tpl = format!(
             "# Work Duo - Project Memory & Architecture Context\nInitialized: {}\n\n## 1. Project Rules\n\n## 2. Key Architecture & File Notes\n",
@@ -57,7 +74,8 @@ pub(crate) fn ensure_wd_mem(workspace_root: &str) -> Result<PathBuf, String> {
             .map_err(|e| format!("写入 .wd_mem/README.md 失败: {}", e))?;
     }
 
-    // 自动生成 .gitignore：高频碎片（sessions/data/outputs）忽略，长期资产（MEMORY.md/artifacts/scripts）纳入版本控制。
+    // 自动生成 .gitignore：高频碎片（sessions/data/outputs/graph 运行时 JSONL）忽略，
+    // 长期资产（MEMORY.md/knowledge/artifacts/scripts/README.md）纳入版本控制。
     let gitignore = base.join(GITIGNORE_FILE);
     if !gitignore.exists() {
         std::fs::write(
@@ -67,11 +85,46 @@ pub(crate) fn ensure_wd_mem(workspace_root: &str) -> Result<PathBuf, String> {
 sessions/\n\
 data/\n\
 outputs/\n\
-# 纳入版本控制（长期知识资产）：MEMORY.md / artifacts/ / scripts/ / README.md\n",
+graph/nodes.jsonl\n\
+graph/edges.jsonl\n\
+# 纳入版本控制（长期知识资产）：MEMORY.md / knowledge/ / scripts/ / README.md\n",
         )
         .map_err(|e| format!("写入 .wd_mem/.gitignore 失败: {}", e))?;
     }
     Ok(base)
+}
+
+/// 旧部署目录布局迁移（幂等）：
+/// - `scripts/` `data/` `outputs/` → `runtime/<同名>`；
+/// - `MEMORY.md` → `knowledge/MEMORY.md`；
+/// - `artifacts/` → `knowledge/artifacts/`。
+/// 仅当源存在且目标不存在时执行 `rename`，重复调用安全（目标已存在则跳过）。
+fn migrate_legacy_layout(base: &Path) {
+    // 运行时碎片迁入 runtime/
+    for sub in [SCRIPTS_DIR, DATA_DIR, OUTPUTS_DIR] {
+        let src = base.join(sub);
+        let dst = base.join(RUNTIME_DIR).join(sub);
+        if src.is_dir() && !dst.exists() {
+            if let Err(e) = std::fs::rename(&src, &dst) {
+                tracing::warn!("[wd_mem] 迁移 {}/ → runtime/ 失败（已降级共存）：{}", sub, e);
+            }
+        }
+    }
+    // 长期记忆迁入 knowledge/
+    let mem_src = base.join(GLOBAL_MEMORY_FILE);
+    let mem_dst = base.join(KNOWLEDGE_DIR).join(GLOBAL_MEMORY_FILE);
+    if mem_src.is_file() && !mem_dst.exists() {
+        if let Err(e) = std::fs::rename(&mem_src, &mem_dst) {
+            tracing::warn!("[wd_mem] 迁移 MEMORY.md → knowledge/ 失败（已降级共存）：{}", e);
+        }
+    }
+    let art_src = base.join(ARTIFACTS_DIR);
+    let art_dst = base.join(KNOWLEDGE_DIR).join(ARTIFACTS_DIR);
+    if art_src.is_dir() && !art_dst.exists() {
+        if let Err(e) = std::fs::rename(&art_src, &art_dst) {
+            tracing::warn!("[wd_mem] 迁移 artifacts/ → knowledge/ 失败（已降级共存）：{}", e);
+        }
+    }
 }
 
 /// `.wd_mem/README.md` 内容：说明目录用途与分类规则（用户/智能体可读）。
@@ -82,14 +135,15 @@ fn wd_mem_readme() -> &'static str {
 可复用素材与长期记忆。\n\
 \n\
 ## 目录结构\n\
-- `MEMORY.md`：项目长期全局记忆（架构 / 避坑法则 / 用户偏好），全量注入系统提示，用户可直接编辑。\n\
-- `artifacts/` ：智能体完成复杂任务后主动沉淀的设计蓝图 / 架构约定（Markdown），随工程长期留存。\n\
-- `scripts/`  ：生成的自动化脚本（Python / Shell 等），跨任务可复用。再跑同类任务时优先复用。\n\
-- `data/`     ：抓取/计算的中间数据（CSV / JSON 等），供脚本复用（已被 .gitignore 忽略）。\n\
-- `outputs/`  ：最终产物的归档副本（可选，已被 .gitignore 忽略）。\n\
+- `knowledge/MEMORY.md`：项目长期全局记忆（架构 / 避坑法则 / 用户偏好），全量注入系统提示，用户可直接编辑。\n\
+- `knowledge/artifacts/` ：智能体完成复杂任务后主动沉淀的设计蓝图 / 架构约定（Markdown），随工程长期留存。\n\
+- `runtime/scripts/`  ：生成的自动化脚本（Python / Shell 等），跨任务可复用。再跑同类任务时优先复用。\n\
+- `runtime/data/`     ：抓取/计算的中间数据（CSV / JSON 等），供脚本复用（已被 .gitignore 忽略）。\n\
+- `runtime/outputs/`  ：最终产物的归档副本（可选，已被 .gitignore 忽略）。\n\
 - `sessions/` ：单会话滚动压缩摘要 `{session_id}.summary.md`（已被 .gitignore 忽略）。\n\
+- `graph/`    ：单 Agent 统一实体图（nodes.jsonl / edges.jsonl / _index.json / sessions/ 快照），运行时高频变更（已被 .gitignore 忽略）。\n\
 \n\
-> 注意：`sessions/` `data/` `outputs/` 已在 `.gitignore` 中忽略（高频碎片）；`MEMORY.md` `artifacts/` `scripts/` 建议纳入版本控制。运行产生的临时文件不在此目录。\n"
+> 注意：`sessions/` `runtime/data/` `runtime/outputs/` `graph/nodes.jsonl` `graph/edges.jsonl` 已在 `.gitignore` 中忽略（高频碎片）；`knowledge/MEMORY.md` `knowledge/artifacts/` `runtime/scripts/` 建议纳入版本控制。\n"
 }
 
 /// 生成 `.wd_mem/` 的「树状索引」：扫描 `artifacts/` `sessions/` `scripts/` `data/` 子目录，
@@ -103,8 +157,14 @@ pub(crate) fn build_tree_index(workspace_root: &str) -> Option<String> {
     const MAX_DEPTH: usize = 2;
     let mut entries: Vec<(String, String)> = Vec::new();
     let mut count = 0usize;
-    for sub in [ARTIFACTS_DIR, SESSIONS_DIR, SCRIPTS_DIR, DATA_DIR] {
-        let root = base.join(sub);
+    // 扫描路径随目录重构更新：knowledge/artifacts / sessions / runtime/scripts / runtime/data
+    for sub in [
+        format!("{}/{}", KNOWLEDGE_DIR, ARTIFACTS_DIR),
+        SESSIONS_DIR.to_string(),
+        format!("{}/{}", RUNTIME_DIR, SCRIPTS_DIR),
+        format!("{}/{}", RUNTIME_DIR, DATA_DIR),
+    ] {
+        let root = base.join(&sub);
         if root.is_dir() {
             walk_tree_index(&root, &base, 0, MAX_DEPTH, &mut count, MAX_INDEX_FILES, &mut entries);
         }
@@ -241,11 +301,17 @@ fn read_first_comment(path: &Path) -> Option<String> {
 }
 
 /// 读取项目级长期记忆（文件不存在返回 None）。
-/// 优先读规范命名的 `MEMORY.md`；兼容旧部署回退读 `project_memory.md`。
+/// 优先读规范命名 `knowledge/MEMORY.md`；兼容旧部署回退读根下 `MEMORY.md` 与 `project_memory.md`。
 pub(crate) fn read_project_memory(project_root: &str) -> Option<String> {
     let base = wd_mem_base(project_root);
-    let mem = base.join(GLOBAL_MEMORY_FILE);
+    let mem = base.join(KNOWLEDGE_DIR).join(GLOBAL_MEMORY_FILE);
     if let Ok(c) = std::fs::read_to_string(&mem) {
+        if !c.trim().is_empty() {
+            return Some(c);
+        }
+    }
+    let mem_legacy = base.join(GLOBAL_MEMORY_FILE);
+    if let Ok(c) = std::fs::read_to_string(&mem_legacy) {
         if !c.trim().is_empty() {
             return Some(c);
         }
@@ -256,10 +322,10 @@ pub(crate) fn read_project_memory(project_root: &str) -> Option<String> {
         .filter(|s| !s.trim().is_empty())
 }
 
-/// 写入项目级长期记忆（自动确保目录结构）。
+/// 写入项目级长期记忆（自动确保目录结构，落 knowledge/MEMORY.md）。
 pub(crate) fn write_project_memory(project_root: &str, content: &str) -> Result<(), String> {
     let base = ensure_wd_mem(project_root)?;
-    let global = base.join(GLOBAL_MEMORY_FILE);
+    let global = base.join(KNOWLEDGE_DIR).join(GLOBAL_MEMORY_FILE);
     std::fs::write(&global, content)
         .map_err(|e| format!("写入 MEMORY.md 失败: {}", e))
 }

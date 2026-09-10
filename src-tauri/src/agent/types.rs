@@ -22,6 +22,10 @@ pub struct ToolStep {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub duration_ms: Option<u64>,
     pub created_at: i64,
+    /// 该工具调用所属的子任务步骤序号（从 1 起）。串行化后同一时刻仅一个步骤在跑，
+    /// 但保留此字段可让前端精确归属工具调用到对应步骤卡片，未来若恢复并行也不会错乱。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub step: Option<usize>,
 }
 
 /// 审批请求（高危操作挂起，对应前端 ApprovalRequest）。
@@ -289,7 +293,11 @@ pub struct PlanBranchGenerated {
 /// 子任务内部几万字的工具报文与报错重试记录全部物理销毁，绝不流入下一环。
 #[derive(Debug, Clone)]
 pub struct SubTaskOutput {
+    // 以下 step/title/skipped 为子任务产出契约字段，与统一实体图节点（step/title/status）冗余；
+    // 当前 run_pipeline 仅消费 summary/success/cancelled/artifacts，故标记 allow（图驱动后图节点为唯一事实源）。
+    #[allow(dead_code)]
     pub step: usize,
+    #[allow(dead_code)]
     pub title: String,
     /// 纯文本产物摘要，如："已拉取 SOL 近 7 天数据共 168 条，写入 .wd_mem/data/sol_raw.json"
     pub summary: String,
@@ -300,6 +308,7 @@ pub struct SubTaskOutput {
     /// 是否被「跳过」（用户选择 Skip，或单步恢复次数达上限被自动跳过）。
     /// 与 `success` 正交：跳过步虽放行后续依赖、流水线可正常收尾，但**不计入「成功闭环」**，
     /// 否则会污染最终回顾与自检（P1-4 修复：原先 `Skip` 把 `success` 置 true 导致跳过=成功）。
+    #[allow(dead_code)]
     pub skipped: bool,
     /// 本子任务成功闭环后登记的文件产物（注册进 artifacts 表，驱动前端「产物画廊」）。
     #[allow(dead_code)]

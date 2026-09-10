@@ -984,7 +984,9 @@ impl AgentTool for PathExistsTool {
             "判断工作空间内某个路径（文件或目录）是否存在，并返回它的真实类型（文件/目录）。\
              文件还会额外返回 size（字节）与 modified_ms（最后修改时间，UNIX 毫秒）。\
              在调用 native__list_directory / native__edit_file / native__read_file / native__write_file 之前应先调用本工具确认路径存在且类型正确，\
-             避免「文件不存在 / 目标是目录」类错误。仅读取元信息，不读写文件内容，不触发审批。",
+             避免「文件不存在 / 目标是目录」类错误。仅读取元信息，不读写文件内容，不触发审批。\
+             注意：native__write_file / edit_file / read_file / list_directory 内部已自动探测路径存在性与类型，无需在调用它们之前预先调用本工具；\
+             仅在需要显式确认路径状态（如决策分支）时才使用本工具。",
             json!({ "path": { "type": "string", "description": "相对或绝对路径（须在工作空间内），如 src/utils 或 src/App.tsx" } }),
             &["path"],
         )
