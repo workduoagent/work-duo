@@ -17,6 +17,7 @@
 
 pub mod approval;
 pub mod artifacts;
+pub mod choice;
 pub mod commands;
 pub mod context;
 pub mod round_compactor;

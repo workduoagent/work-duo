@@ -36,6 +36,14 @@ export interface ToolStep {
   createdAt: number
   /** 所属规划步骤序号（前端按 step_started 标记，用于按步骤归组渲染；可选）。 */
   step?: number
+  /** 操作类型（read/write/edit/create/delete/move/list/search/exec/http/mcp…），一行式工具行动词。 */
+  op?: string
+  /** 目标文件 / 路径（相对工作空间原文）。 */
+  path?: string
+  /** 本次变更新增行数（仅文件变更类工具，后端精确 diff）。 */
+  linesAdded?: number
+  /** 本次变更删除行数（仅文件变更类工具，后端精确 diff）。 */
+  linesRemoved?: number
 }
 
 /** 对话流里的一段流式/完整文本（助手的最终回复）。 */
@@ -62,6 +70,28 @@ export interface ApprovalRequest {
   kind: 'edit_file' | 'execute_command' | 'other'
   /** 等待审批时 Rust 已给出的提示信息。 */
   hint?: string
+}
+
+/** 方案推荐：单个选项（Agent 调 `native__ask_user_choice` 时给出；前端渲染为 chip）。 */
+export interface ChoiceOption {
+  /** 选项唯一 id（前端回传时用）。 */
+  id: string
+  /** 展示文案。 */
+  label: string
+  /** 补充说明（可选）。 */
+  description?: string
+  /** 机器语义值（可选，如具体路径/模型名；回传时一并带回）。 */
+  value?: string
+}
+
+/** 方案推荐请求（对应 Rust `agent-choice-needed` 事件，渲染选项列表弹窗）。 */
+export interface ChoiceRequest {
+  /** 本次询问唯一标识（oneshot 通道 key）。 */
+  choiceId: string
+  /** 向用户提出的问题。 */
+  question: string
+  /** 可选项列表（2–5 个）。 */
+  options: ChoiceOption[]
 }
 
 /** 规划步骤状态（进度条渲染用）。 */
@@ -125,6 +155,12 @@ export interface RecoveryRequest {
   reason: string
   /** 受阻子任务已产出摘要（可能为空）。 */
   summary: string
+  /** 异常分档：A=可恢复（3 键：跳过|重试|接管）/ B=高风险歧义（4 键，含改方案）。Phase 2a 恒为 "A"。 */
+  tier?: string
+  /** 失败命令（接管面板展示用，2a 可空）。 */
+  failedCommand?: string
+  /** 已改动文件（接管面板展示用，2a 可空）。 */
+  changedFiles?: string[]
 }
 
 /** 意图分类结果（intent_classified 事件携带，对应 Rust `IntentProfile` 经 camelCase 序列化）。 */
@@ -182,9 +218,10 @@ export interface AgentEvent {
 /** Tauri 侧的审批结果回传（前端调用 `submit_approval_decision` 时携带）。 */
 export interface ApprovalDecision {
   approvalId: string
-  approved: boolean
-  /** 拒绝原因（approved=false 时回填给模型以引导纠偏，可选）。 */
-  reason?: string
+  /** 决策：approve=授权执行 / skip=跳过本次调用（不执行、不重试，按原计划继续） / takeover=授权+注入补充指示。 */
+  decision: 'approve' | 'skip' | 'takeover'
+  /** 接管时携带的用户补充指示（takeover 时有效，空等价于 approve）。 */
+  guidance?: string
 }
 
 /** 消息附件（图片等），随 prompt 一起交给后端组装多模态 content。 */

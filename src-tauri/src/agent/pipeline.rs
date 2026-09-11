@@ -18,7 +18,7 @@ use serde_json::Value;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tauri::AppHandle;
 use futures_util::future::join_all;
 
@@ -123,8 +123,16 @@ pub async fn run_pipeline(
     // 防止无人值守死锁；手动模式（manual）恒为 false，恢复等待保持永久阻塞（行为完全不变）。
     unattended: bool,
 ) -> PipelineResult {
-    let total = graph.session_task_count(session_id);
-    let goal_summary = graph.session_goal(session_id);
+    // 步数只统计「本轮」任务：二次规划会把上一轮节点置 obsolete（已被取代），
+    // 不计入本轮步数，否则同会话多轮会显示「步骤 1/N（N 含历史）」且回复聚合所有历史步骤。
+    let total = graph
+        .session_tasks(session_id)
+        .iter()
+        .filter(|n| {
+            let s = n.props.get("status").and_then(|v| v.as_str()).unwrap_or("");
+            s != "obsolete"
+        })
+        .count();
     let mut total_usage: (u64, u64) = (0, 0);
 
     // 单 Agent 强制串行（问题修复）：同一时刻仅执行一个子任务，消除多步并行导致的
@@ -161,7 +169,9 @@ pub async fn run_pipeline(
                 .iter()
                 .filter(|n| {
                     let s = n.props.get("status").and_then(|v| v.as_str()).unwrap_or("");
-                    s != "completed" && s != "skipped"
+                    // obsolete 是二次规划/分支重跑产生的「已被取代」终态，不算受阻步骤，
+                    // 否则会把上一轮被取代的节点误报为死锁（与 graph.rs::session_all_completed 一致）。
+                    s != "completed" && s != "skipped" && s != "obsolete"
                 })
                 .map(|n| {
                     format!(
@@ -307,6 +317,9 @@ pub async fn run_pipeline(
                     title: title.clone(),
                     reason: out.summary.clone(),
                     summary: String::new(),
+                    tier: "A".into(),
+                    failed_command: None,
+                    changed_files: None,
                 };
                 events::emit_recovery_needed(app, &req);
                 // 提前克隆失败原因：下面 `recovery.request(req)` 会 move 走 `req`，
@@ -398,6 +411,31 @@ pub async fn run_pipeline(
                             &format!("步骤 {}/{}：用户接管并补充指示后重试", step, total),
                         );
                     }
+                    RecoveryDecision::ChangeApproach(g) => {
+                        // 改方案（Phase 2b 启用）：回灌错误摘要 + 已试路径，要求 Agent 换思路重规划。
+                        // 2a 尚未接前端「改方案」按钮，此臂为穷尽匹配占位，行为与 Takeover 一致（带诊断重试）。
+                        let guidance = if g.trim().is_empty() {
+                            let reason = blocked_reason.trim();
+                            if reason.is_empty() {
+                                "上次执行未闭环，请换一种思路重规划后重试（不要重复同样的做法）。".to_string()
+                            } else {
+                                format!(
+                                    "上次执行未闭环，失败原因如下，请换一种思路重规划后重试（不要重复同样的做法）：\n{reason}"
+                                )
+                            }
+                        } else {
+                            g
+                        };
+                        graph.update_node(
+                            &task_node_id,
+                            json!({ "status": "pending", "retryCount": attempts, "guidance": guidance }),
+                        );
+                        events::emit_step_started(app, step, total, &title);
+                        events::emit_status(
+                            app,
+                            &format!("步骤 {}/{}：用户要求改方案后重试", step, total),
+                        );
+                    }
                     RecoveryDecision::Cancel => {
                         return PipelineResult {
                             final_text: "任务已被用户取消。".to_string(),
@@ -417,7 +455,15 @@ pub async fn run_pipeline(
     // 全部子任务闭环：自检验证（基于真实产物合成 selfcheck 层思考，供轨迹视图按层着色）。
     // 遍历图会话任务节点统计（成功闭环 / 跳过 / 产物），不臆造未发生的校验。
     {
-        let tasks = graph.session_tasks(session_id);
+        // 自检验证只统计本轮（非 obsolete）任务，排除上一轮被取代的历史节点。
+        let tasks: Vec<_> = graph
+            .session_tasks(session_id)
+            .into_iter()
+            .filter(|n| {
+                let s = n.props.get("status").and_then(|v| v.as_str()).unwrap_or("");
+                s != "obsolete"
+            })
+            .collect();
         let real_ok = tasks
             .iter()
             .filter(|n| {
@@ -456,36 +502,96 @@ pub async fn run_pipeline(
     }
 
     // 全部子任务闭环：合并全局执行视图（从图会话任务节点读取，跳过步用 ⏭️ 单独标注）。
-    let tasks = graph.session_tasks(session_id);
-    let skip_total = tasks
-        .iter()
-        .filter(|n| n.props.get("status").and_then(|v| v.as_str()) == Some("skipped"))
-        .count();
-    let review_lines: Vec<String> = tasks
-        .iter()
-        .map(|n| {
-            let step = n.props.get("step").and_then(|v| v.as_u64()).unwrap_or(0);
-            let title = n.props.get("title").and_then(|v| v.as_str()).unwrap_or("");
-            let summary = n.props.get("summary").and_then(|v| v.as_str()).unwrap_or("");
-            let skipped = n.props.get("status").and_then(|v| v.as_str()) == Some("skipped");
-            if skipped {
-                format!("⏭️ 步骤 {}「{}」：{}（已跳过）", step, title, summary)
-            } else {
-                format!("✅ 步骤 {}「{}」：{}", step, title, summary)
-            }
+    // 最终答复：直接给出各步骤的实际产出摘要，不再前置用户问题、不再加「执行过程回顾」脚手架
+    // 与 ✅/⏭️ 步骤标题（用户明确要求简洁、去 AI 味）。多步以空行分隔，单步即为该步摘要。
+    // 最终答复只聚合本轮（非 obsolete）任务的摘要：排除上一轮被 `plan_to_graph` 置为
+    // `obsolete` 的历史步骤，否则同会话多轮会把 phase5/phase6/phase7/phase8 等历史 summary
+    // 全拼进回复（用户实测「回复文字复述所有历史步骤」的根因）。
+    // 图驱动回复：仅聚合本轮（非 obsolete）TaskNode 的真实数据，杜绝「模型 summary 复述历史文件名」。
+    // 产物文件名优先取自本步 TaskNode 的 success_criteria.target —— 这是 planner 从用户当轮 prompt
+    // 解析的真实目标文件（写进图，不含任何历史文件名污染）；无文件任务（target 为空）才降级用模型
+    // summary（纯对话/读取类，无历史文件名污染风险）。失败/跳过步用图节点 status 与 summary（图真实错误）。
+    let tasks: Vec<_> = graph
+        .session_tasks(session_id)
+        .into_iter()
+        .filter(|n| {
+            let s = n.props.get("status").and_then(|v| v.as_str()).unwrap_or("");
+            s != "obsolete"
         })
         .collect();
-    let final_text = format!(
-        "{}\n\n———\n执行过程回顾（共 {} 步{}）：\n{}",
-        goal_summary,
-        total,
-        if skip_total > 0 {
-            format!("，其中 {} 步被跳过", skip_total)
-        } else {
-            String::new()
-        },
-        review_lines.join("\n"),
-    );
+    let review_lines: Vec<String> = tasks
+        .iter()
+        .filter_map(|n| {
+            let step = n.props.get("step").and_then(|v| v.as_u64()).unwrap_or(0);
+            let status = n.props.get("status").and_then(|v| v.as_str()).unwrap_or("");
+            let summary = n
+                .props
+                .get("summary")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            // 从图读取本步真实目标文件（planner 写入的 success_criteria.target），代码层约束，非 prompt。
+            let mut names: Vec<String> = Vec::new();
+            if let Some(plan) = graph.task_to_plan(&n.id) {
+                for t in plan.success_criteria.iter().filter_map(|c| c.target.clone()) {
+                    let t = t.trim();
+                    if t.is_empty() {
+                        continue;
+                    }
+                    let name = std::path::Path::new(t)
+                        .file_name()
+                        .and_then(|f| f.to_str())
+                        .unwrap_or(t)
+                        .to_string();
+                    if !names.contains(&name) {
+                        names.push(name);
+                    }
+                }
+            }
+            // 日志保留「步骤 N」便于定位（用户回复中不展示，去 AI 味、简洁）。
+            tracing::info!(
+                "[agent] pipeline: 回复聚合 步骤 {} status={} 产物={:?} summary_len={}",
+                step,
+                status,
+                names,
+                summary.len()
+            );
+            // 回复面向用户，不展示「步骤 N」这类内部调度术语（用户明确要求去 AI 味、简洁）。
+            let content = match status {
+                "completed" => {
+                    if !names.is_empty() {
+                        format!("已生成/更新 {}", names.join("、"))
+                    } else if !summary.is_empty() {
+                        summary // 无文件任务：纯对话/读取，降级模型 summary（无污染风险）
+                    } else {
+                        "已完成".to_string()
+                    }
+                }
+                "failed" => {
+                    if !summary.is_empty() {
+                        format!("执行失败 - {}", summary)
+                    } else {
+                        "执行失败".to_string()
+                    }
+                }
+                "skipped" => "已跳过".to_string(),
+                _ => {
+                    if !summary.is_empty() {
+                        summary
+                    } else {
+                        return None;
+                    }
+                }
+            };
+            Some(content)
+        })
+        .collect();
+    let final_text = if review_lines.is_empty() {
+        "任务已完成。".to_string()
+    } else {
+        review_lines.join("\n\n")
+    };
     tracing::info!(
         "[agent] pipeline: 全部 {} 个子任务闭环，总 usage=({},{})",
         total, total_usage.0, total_usage.1,
@@ -533,6 +639,7 @@ async fn run_subtask(
     background: &str,
 ) -> (SubTaskOutput, (u64, u64)) {
     // 认知上下文绝对隔离：崭新的 messages，0 历史包袱。
+    let t0 = Instant::now(); // 子任务级耗时基准（闭环日志用）
     let prior = if prior_summary.trim().is_empty() {
         "（无，你是第一个步骤）".to_string()
     } else {
@@ -606,8 +713,11 @@ async fn run_subtask(
         }
     };
     // 本步骤核心任务内容（独立于会话背景，便于 background 段按需前置拼接）。
+    // 注：文件名/回复准确性约束已改为图驱动（见上方 run_pipeline 最终回复从 success_criteria.target
+    // 聚合真实产物；context.rs §5.9 背景只注入历史步骤 title 而非文件名），此处不再用 prompt 软约束
+    // （小模型易忽略且不可靠）。
     let task_content = format!(
-        "【当前任务目标（步骤 {}/{}）】：{}\n任务详述：{}\n\n【前序步骤已交付产物】：\n{}{}\n\n请直接使用对应工具执行当前步骤；确认产物已成功生成后，立即给出简明结果汇报（包含产出文件的完整路径）。不要反复读取你已经掌握的数据，也不要重复验证已生成的产物——每步只做一次即可。{}",
+        "【当前任务目标（步骤 {}/{}）】：{}\n任务详述：{}\n\n【前序步骤已交付产物】：\n{}{}\n\n请直接使用对应工具执行当前步骤；确认产物已成功生成后，立即给出简明结果汇报（包含产出文件的完整路径）。{}",
         task.step, total, task.title, task.description, prior, criteria_hint,
         if guidance.trim().is_empty() {
             String::new()
@@ -659,6 +769,7 @@ async fn run_subtask(
 
     let mut round = 0usize; // 总 LLM 轮次（仅日志用）
     let mut tool_iterations = 0usize; // 工具轮次（计入预算；终态汇报轮不计入）
+    let mut last_tool_error: Option<String> = None; // 最近一次工具失败的错误（回显到恢复面板原因）
 
     loop {
         // 每轮开始前检查取消：用户点击「停止」后，下一轮边界立即终止本子任务，
@@ -685,27 +796,63 @@ async fn run_subtask(
         // 协议安全过滤：每次调用前无条件执行配对自检（彻底防 400）。
         runtime::sanitize_message_sequence(&mut messages);
 
-        let mut outcome = match runtime::call_llm_stream(app, cfg, &messages, &tools, cancel).await {
-            Ok(o) => o,
-            Err(e) => {
-                tracing::info!(
-                    "[agent] pipeline: 子任务 step={} 第 {} 轮 LLM 调用失败：{e}",
-                    task.step, round
-                );
-                return (
-                    SubTaskOutput {
-                        step: task.step,
-                        title: task.title.clone(),
-                        summary: format!("LLM 调用失败：{e}"),
-                        success: false,
-                        cancelled: false,
-                        skipped: false,
-                        artifacts: vec![],
-                    },
-                    usage,
-                );
+        // LLM 调用（含瞬态错误自动重试 + 指数退避）：429/网络抖动/超时等瞬态故障
+        // 不再直接抛给用户恢复面板，避免把可自愈的临时故障变成人工阻塞（问题二根因）。
+        let mut outcome: runtime::StreamOutcome;
+        let max_llm_retry = 3u32;
+        let mut llm_attempt = 0u32;
+        let mut llm_err: String;
+        loop {
+            match runtime::call_llm_stream(app, cfg, &messages, &tools, cancel, None).await {
+                Ok(o) => {
+                    outcome = o;
+                    break;
+                }
+                Err(e) => {
+                    llm_err = e.to_string();
+                    // 取消优先：已取消不再重试，直接终止。
+                    if cancel.load(std::sync::atomic::Ordering::SeqCst) {
+                        return (
+                            SubTaskOutput {
+                                step: task.step,
+                                title: task.title.clone(),
+                                summary: "任务已被用户取消".to_string(),
+                                success: false,
+                                cancelled: true,
+                                skipped: false,
+                                artifacts: vec![],
+                            },
+                            usage,
+                        );
+                    }
+                    llm_attempt += 1;
+                    if llm_attempt > max_llm_retry {
+                        tracing::info!(
+                            "[agent] pipeline: 子任务 step={} 第 {} 轮 LLM 调用重试 {} 次仍失败：{}",
+                            task.step, round, max_llm_retry, llm_err
+                        );
+                        return (
+                            SubTaskOutput {
+                                step: task.step,
+                                title: task.title.clone(),
+                                summary: format!("LLM 调用失败：{llm_err}"),
+                                success: false,
+                                cancelled: false,
+                                skipped: false,
+                                artifacts: vec![],
+                            },
+                            usage,
+                        );
+                    }
+                    let backoff = 1000u64 * llm_attempt as u64; // 1s, 2s, 3s
+                    tracing::info!(
+                        "[agent] pipeline: 子任务 step={} 第 {} 轮 LLM 调用失败（瞬态），第 {}/{} 次重试，退避 {}ms：{}",
+                        task.step, round, llm_attempt, max_llm_retry, backoff, llm_err
+                    );
+                    tokio::time::sleep(std::time::Duration::from_millis(backoff)).await;
+                }
             }
-        };
+        }
 
         // 取消优先：流式返回后若已取消，立即终止子任务并标记取消，绝不进入下方
         // 「流式空响应回退」非流式调用——否则会把整段 prompt 再发给网关一遍（重复计费），
@@ -772,11 +919,13 @@ async fn run_subtask(
         usage.1 += outcome.usage.1;
 
         tracing::info!(
-            "[agent] pipeline: 子任务 step={} 第 {} 轮 LLM 返回 | 正文={}字符 tool_calls={}个",
+            "[agent] pipeline: 子任务 step={} 第 {} 轮 LLM 返回 | 正文={}字符 tool_calls={}个 usage=({},{})",
             task.step,
             round,
             outcome.content.chars().count(),
             outcome.tool_calls.len(),
+            outcome.usage.0,
+            outcome.usage.1,
         );
 
         // 终态：无工具调用 → 产物摘要结算。
@@ -801,11 +950,12 @@ async fn run_subtask(
                 }
             }
             tracing::info!(
-                "[agent] pipeline: 子任务 step={} 闭环（总轮 {}，工具轮 {}）success={} summary={}",
+                "[agent] pipeline: 子任务 step={} 闭环（总轮 {}，工具轮 {}）success={} 耗时={}ms summary={}",
                 task.step,
                 round,
                 tool_iterations,
                 success,
+                t0.elapsed().as_millis(),
                 runtime::clip(&summary, 200),
             );
             // 成功闭环 → 从产物摘要抽取并登记文件产物（L1 文件存在校验后写库 + 推前端画廊）。
@@ -849,7 +999,14 @@ async fn run_subtask(
                 SubTaskOutput {
                     step: task.step,
                     title: task.title.clone(),
-                    summary: format!("子任务超过 {} 轮工具调用仍未闭环", MAX_SUBTASK_ITERATIONS),
+                    summary: format!(
+                        "子任务超过 {} 轮工具调用仍未闭环{}",
+                        MAX_SUBTASK_ITERATIONS,
+                        last_tool_error
+                            .as_ref()
+                            .map(|e| format!("；最近错误：{}", e.chars().take(300).collect::<String>()))
+                            .unwrap_or_default(),
+                    ),
                     success: false,
                     cancelled: false,
                     skipped: false,
@@ -883,6 +1040,10 @@ async fn run_subtask(
             task.step,
         )
         .await;
+        // 采集本轮最后的工具错误，供恢复面板回显真实受阻原因（问题一：弹窗给原因）。
+        if let Some(e) = stats.last_error.clone() {
+            last_tool_error = Some(e);
+        }
 
         // 在-flight 上下文压缩：保留最近 2 条 tool 结果完整，更早的压缩为单行摘要，
         // 抑制微 ReAct 长链路上每轮回填的全量工具报文持续撑大 input token。
@@ -904,7 +1065,14 @@ async fn run_subtask(
                 SubTaskOutput {
                     step: task.step,
                     title: task.title.clone(),
-                    summary: format!("连续 {} 轮工具调用全部失败，子任务受阻", consecutive_errors),
+                    summary: format!(
+                        "连续 {} 轮工具调用全部失败，子任务受阻{}",
+                        consecutive_errors,
+                        last_tool_error
+                            .as_ref()
+                            .map(|e| format!("；最近错误：{}", e.chars().take(300).collect::<String>()))
+                            .unwrap_or_default(),
+                    ),
                     success: false,
                     cancelled: false,
                     skipped: false,

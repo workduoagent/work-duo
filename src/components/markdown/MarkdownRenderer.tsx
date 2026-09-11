@@ -18,7 +18,9 @@ import rehypeKatex from 'rehype-katex'
 import rehypeHighlight from 'rehype-highlight'
 import mermaid from 'mermaid'
 import 'katex/dist/katex.min.css'
-import 'highlight.js/styles/github.css'
+// 注意：不在此引入 highlight.js 的预置主题 CSS（如 styles/github.css）。
+// 那些主题把 .hljs 背景硬编码为浅色、token 颜色按白底调校，暗色下会整块刷白、语法色崩坏。
+// 语法高亮配色改由 src/styles/root.scss 的 .md-body .hljs* 规则提供，跟随 .light/.dark 令牌切换。
 
 export interface MarkdownRendererProps {
   content: string

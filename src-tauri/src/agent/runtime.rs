@@ -25,6 +25,7 @@ use tokio::time::timeout;
 
 use crate::agent::approval::ApprovalManager;
 use crate::agent::approval::ApprovalOutcome;
+use crate::agent::choice::ChoiceHub;
 use crate::agent::events;
 use crate::agent::graph::KnowledgeGraph;
 use crate::agent::native;
@@ -61,6 +62,8 @@ pub struct AgentRuntime {
     pub running: Arc<AtomicBool>,
     /// 步骤级恢复挂起中枢（子任务自动重试耗尽后等待用户决策：重试 / 跳过 / 接管）。
     pub recovery: Arc<crate::agent::recovery::RecoveryHub>,
+    /// 方案推荐挂起中枢（Agent 调 `native__ask_user_choice` 后等待用户选择）。
+    pub choice: Arc<ChoiceHub>,
 }
 
 /// 并发互斥守卫：生命周期结束（正常退出 / 取消 / 异常 / panic）时自动复位 `running`。
@@ -84,6 +87,7 @@ impl AgentRuntime {
             cancel_flag: Arc::new(AtomicBool::new(false)),
             running: Arc::new(AtomicBool::new(false)),
             recovery: crate::agent::recovery::RecoveryHub::new(),
+            choice: Arc::new(ChoiceHub::new()),
         }
     }
 
@@ -199,19 +203,21 @@ impl AgentRuntime {
                 intent.risk_level
             );
         }
-        events::emit_status(
-            app,
-            &format!(
-                "意图：{}（风险 {}，需规划={}，需工具={}）",
-                intent.intent_type,
-                intent.risk_level.to_uppercase(),
-                intent.requires_planning,
-                intent.requires_tool,
-            ),
+        // 注：不再向前端推送意图分类状态（技术细节，用户不需要）；仅保留后端日志便于排查。
+        tracing::info!(
+            "[agent] run_task: 意图 = {} 风险={} 需规划={} 需工具={}（不推送前端）",
+            intent.intent_type,
+            intent.risk_level,
+            intent.requires_planning,
+            intent.requires_tool,
         );
         // 将审批策略固化进配置：流水线执行工具轮时据此决定是否挂起审批。
         let mut cfg = cfg;
         cfg.auto_tool_exec_mode = effective_auto_exec;
+        tracing::info!(
+            "[agent] run_task: 核心参数 agent={} auto_exec={} allow_sandbox={} memory_mode={:?} workspace={:?} intent={} risk={}",
+            cfg.agent_id, cfg.auto_tool_exec_mode, cfg.allow_sandbox, cfg.memory_mode, cfg.workspace, intent.intent_type, intent.risk_level,
+        );
 
         // 分支 A：简单对话 → 单次流式输出，0 工具介入，终态即结束。
         // 注意：分支重跑（plan_override 存在）时即便意图被分为 simple_chat 也强制走复合路径，
@@ -223,7 +229,8 @@ impl AgentRuntime {
 
         // 分支 B：复合任务 → 阶段二任务拆解规划。
         // §3.2 分支重跑：若前端已提供 plan_override，直接采用（跳过 LLM 规划，token 计 0）。
-        events::emit_status(app, "正在规划任务步骤…");
+        // 注：不再向前端推送「正在规划任务步骤…」状态（用户不需要该提示），仅保留后端日志。
+        tracing::info!("[agent] run_task: 进入复合任务规划阶段");
         let (plan, plan_usage, plan_raw) = if let Some(po) = plan_override {
             tracing::info!(
                 "[agent] run_task: 采用前端分支计划（共 {} 步，其中 {} 步预完成跳过），跳过 LLM 规划",
@@ -483,11 +490,25 @@ impl AgentRuntime {
             trimmed.len(),
             messages.len(),
         );
-        match call_llm_stream(app, cfg, &trimmed, &[], cancel).await {
+        match call_llm_stream(
+            app,
+            cfg,
+            &trimmed,
+            &[],
+            cancel,
+            // 增量推流：每个 SSE 正文 delta 立即作为 text_chunk 下发，前端逐字渲染为流式回复。
+            Some(&|delta: &str| {
+                if !delta.is_empty() {
+                    events::emit_text_chunk(app, delta, false);
+                }
+            }),
+        )
+        .await
+        {
             Ok(outcome) => {
                 task_usage.0 += outcome.usage.0;
                 task_usage.1 += outcome.usage.1;
-                // 流式过程中用户可能已点击取消：生成内容作废，仅做取消提示。
+                // 流式过程中用户可能已点击取消：已推送片段保留，仅补取消提示并收尾。
                 if cancel.load(Ordering::SeqCst) {
                     tracing::info!("[agent] run_simple_chat: 流式返回后检测到取消信号，终止任务");
                     events::emit_status(app, "⛔ 任务已被用户取消");
@@ -500,9 +521,7 @@ impl AgentRuntime {
                     content.chars().count(),
                     clip(content.trim(), 200),
                 );
-                if !content.is_empty() {
-                    events::emit_text_chunk(app, &content, false);
-                }
+                // 增量推流已在 call_llm_stream 内部逐片下发；此处仅补一个 done 标记收尾。
                 events::emit_text_chunk(app, "", true);
                 messages.push(json!({ "role": "assistant", "content": content }));
             }
@@ -537,6 +556,84 @@ impl AgentRuntime {
 pub(crate) struct ToolRoundStats {
     pub had_success: bool,
     pub had_error: bool,
+    /// 本轮最后一个失败工具的错误文本（供恢复面板回显真实受阻原因）。
+    pub last_error: Option<String>,
+}
+
+/// 工具「操作类型」：供前端一行式工具行展示动词。
+/// 原生工具按叶子名映射；MCP 工具（`mcp__server__tool`）统一 "mcp"。
+fn tool_op(tool_name: &str) -> Option<&'static str> {
+    if tool_name.starts_with("mcp__") {
+        return Some("mcp");
+    }
+    let leaf = tool_name.rsplit("__").next().unwrap_or(tool_name);
+    Some(match leaf {
+        "read_file" => "read",
+        "write_file" => "write",
+        "edit_file" => "edit",
+        "delete_path" => "delete",
+        "move_path" => "move",
+        "list_directory" => "list",
+        "grep_files" => "search",
+        "regex_replace" => "replace",
+        "zip_create" => "zip",
+        "zip_extract" => "unzip",
+        "path_exists" => "check",
+        "run_python_sandbox" | "run_node_sandbox" | "execute_command" => "exec",
+        "http_request" => "http",
+        "anchor_memory" => "memory",
+        _ => return None,
+    })
+}
+
+/// 从工具入参提取「目标路径 / 对象」：优先 path，其次 file/source/url/command。
+fn tool_path(args: &Value) -> Option<String> {
+    for k in ["path", "file", "source", "from", "url", "command"] {
+        if let Some(s) = args.get(k).and_then(|v| v.as_str()) {
+            let s = s.trim();
+            if !s.is_empty() {
+                return Some(s.to_string());
+            }
+        }
+    }
+    None
+}
+
+/// 是否为「文件变更类」工具（需要执行前后快照做精确 diff）。
+fn is_file_mutating(tool_name: &str) -> bool {
+    let leaf = tool_name.rsplit("__").next().unwrap_or(tool_name);
+    matches!(leaf, "write_file" | "edit_file" | "delete_path" | "move_path")
+}
+
+/// 精确行级 diff（LCS）：返回 (新增行数, 删除行数)。
+/// 规模保护：任一侧超过 4000 行时退化为「行数差」，避免 O(n*m) DP 抖动。
+fn diff_line_counts(before: Option<&str>, after: Option<&str>) -> (u32, u32) {
+    let b: Vec<&str> = before.map(|s| s.lines().collect()).unwrap_or_default();
+    let a: Vec<&str> = after.map(|s| s.lines().collect()).unwrap_or_default();
+    if b.is_empty() && a.is_empty() {
+        return (0, 0);
+    }
+    if b.len() > 4000 || a.len() > 4000 {
+        return (
+            a.len().saturating_sub(b.len()) as u32,
+            b.len().saturating_sub(a.len()) as u32,
+        );
+    }
+    let n = b.len();
+    let m = a.len();
+    // dp[i][j] = b[i..] 与 a[j..] 的 LCS 长度
+    let mut dp = vec![vec![0u32; m + 1]; n + 1];
+    for i in (0..n).rev() {
+        for j in (0..m).rev() {
+            dp[i][j] = if b[i] == a[j] {
+                dp[i + 1][j + 1] + 1
+            } else {
+                dp[i + 1][j].max(dp[i][j + 1])
+            };
+        }
+    }
+    let lcs = dp[0][0];
+    ((m as u32).saturating_sub(lcs), (n as u32).saturating_sub(lcs))
 }
 
 /// 执行一轮 LLM 返回的全部 tool_calls：把 assistant 消息与所有工具结果按序压入 messages。
@@ -565,6 +662,7 @@ pub(crate) async fn run_tool_calls_round(
 
     let mut iter_had_error = false;
     let mut iter_had_success = false;
+    let mut last_err: Option<String> = None;
 
     for tc in &outcome.tool_calls {
         let (call_id, tool_name, args) = match parse_tool_call(tc) {
@@ -608,11 +706,14 @@ pub(crate) async fn run_tool_calls_round(
             "[agent] tool_round: 执行工具 {} (call_id={}) 参数={}",
             tool_name,
             call_id,
-            clip(&serde_json::to_string(&args).unwrap_or_default(), 300),
+            clip(&serde_json::to_string(&args).unwrap_or_default(), 800),
         );
 
         let step_id = call_id.clone();
         let sensitive = tool.check_permission(&args) == PermissionLevel::RequireApproval;
+        // 一行式工具行元数据：操作类型 + 目标路径（执行前即可确定；行数在执行后 diff 得出）。
+        let op = tool_op(&tool_name);
+        let path_arg = tool_path(&args);
         events::emit_tool_started(app, &ToolStep {
             call_id: step_id.clone(),
             tool_name: tool_name.clone(),
@@ -623,8 +724,18 @@ pub(crate) async fn run_tool_calls_round(
             duration_ms: None,
             created_at: now_ms(),
             step: Some(current_step),
+            op: op.map(|s| s.to_string()),
+            path: path_arg.clone(),
+            lines_added: None,
+            lines_removed: None,
         });
 
+        // 接管补充指示（审批 Takeover 时捕获，执行后注入下一轮 user 消息）
+        let mut takeover_guidance: Option<String> = None;
+        tracing::info!(
+            "[agent] tool_round: 审批门禁检查 agent={} tool={} sensitive={} auto_exec={}",
+            cfg.agent_id, tool_name, sensitive, cfg.auto_tool_exec_mode,
+        );
         // 敏感工具：审批挂起（auto_tool_exec_mode 时跳过逐次确认）
         if sensitive && !cfg.auto_tool_exec_mode {
             let approval_id = format!("ap-{}-{}", cfg.agent_id, step_id);
@@ -651,47 +762,58 @@ pub(crate) async fn run_tool_calls_round(
                 Ok(Ok(o)) => o,
                 Ok(Err(_)) => {
                     approval.cancel(&approval_id).await;
-                    ApprovalOutcome {
-                        approved: false,
-                        reason: Some("任务已取消，审批通道关闭".into()),
-                    }
+                    ApprovalOutcome::Skip
                 }
                 Err(_) => {
                     approval.cancel(&approval_id).await;
-                    ApprovalOutcome {
-                        approved: false,
-                        reason: Some("审批超时，已自动拒绝".into()),
-                    }
+                    ApprovalOutcome::Skip
                 }
             };
             tracing::info!(
-                "[agent] tool_round: 审批完成 approval_id={} approved={} reason={}",
-                approval_id,
-                approval_outcome.approved,
-                approval_outcome.reason.as_deref().unwrap_or("<无>"),
+                "[agent] tool_round: 审批完成 approval_id={} outcome={:?}",
+                approval_id, approval_outcome,
             );
-            if !approval_outcome.approved {
-                let reason = approval_outcome.reason.unwrap_or_else(|| "用户拒绝".into());
-                events::emit_tool_finished(app, &ToolStep {
-                    call_id: step_id.clone(),
-                    tool_name: tool_name.clone(),
-                    status: "failed".into(),
-                    sensitive,
-                    args: Some(serde_json::to_string(&args).unwrap_or_default()),
-                    result: Some(format!("已拒绝：{reason}")),
-                    duration_ms: None,
-                    created_at: now_ms(),
-                    step: Some(current_step),
-                });
-                messages.push(json!({
-                    "role": "tool",
-                    "tool_call_id": call_id,
-                    "content": format!("用户拒绝执行：{reason}")
-                }));
-                continue;
+            // 审批决策分流：批准/接管→继续执行；跳过→记 skipped 并继续后续步骤。
+            match &approval_outcome {
+                ApprovalOutcome::Approve => {}
+                ApprovalOutcome::Takeover(g) => {
+                    takeover_guidance = Some(g.clone());
+                }
+                ApprovalOutcome::Skip => {
+                    events::emit_tool_finished(app, &ToolStep {
+                        call_id: step_id.clone(),
+                        tool_name: tool_name.clone(),
+                        status: "failed".into(),
+                        sensitive,
+                        args: Some(serde_json::to_string(&args).unwrap_or_default()),
+                        result: Some("用户跳过执行（未授权）".into()),
+                        duration_ms: None,
+                        created_at: now_ms(),
+                        step: Some(current_step),
+                        op: op.map(|s| s.to_string()),
+                        path: path_arg.clone(),
+                        lines_added: None,
+                        lines_removed: None,
+                    });
+                    messages.push(json!({
+                        "role": "tool",
+                        "tool_call_id": call_id,
+                        "content": "用户跳过执行（未授权），按原计划继续后续步骤"
+                    }));
+                    continue;
+                }
             }
         }
 
+        // 文件变更类工具：执行前快照原内容，执行后对比得出精确增删行数（前端工具行 +N/-M）。
+        let before_snapshot: Option<String> = if is_file_mutating(&tool_name) {
+            path_arg
+                .as_deref()
+                .and_then(|p| crate::agent::tools::PathGuard::check(p, ctx).ok())
+                .and_then(|abs| std::fs::read_to_string(abs).ok())
+        } else {
+            None
+        };
         // 执行工具
         let t0 = Instant::now();
         let result = tool.execute(args.clone(), ctx).await;
@@ -703,14 +825,29 @@ pub(crate) async fn run_tool_calls_round(
             Err(ToolError::InvalidArgs(m)) => {
                 // InvalidArgs 计入连续错误序列（死循环高风险）。
                 iter_had_error = true;
-                ("failed".into(), truncate_tool_output(m.as_str()))
+                let t = truncate_tool_output(m.as_str());
+                last_err = Some(t.clone());
+                ("failed".into(), t)
             }
             Err(ToolError::ExecutionFailed(m)) | Err(ToolError::PermissionDenied(m)) => {
                 // 真实执行失败 / 权限被拒：同样计入连续错误序列，驱动 pipeline 熔断。
                 // 注：审批「用户拒绝」走上方 L573 的 `continue`，不经过此分支，不会被误熔断。
                 iter_had_error = true;
-                ("failed".into(), truncate_tool_output(m.as_str()))
+                let t = truncate_tool_output(m.as_str());
+                last_err = Some(t.clone());
+                ("failed".into(), t)
             }
+        };
+        // 精确 diff：文件变更类工具对比执行前后快照，得出 +N/-M（后端 LCS，非前端估算）。
+        let (lines_added, lines_removed) = if is_file_mutating(&tool_name) {
+            let after_snapshot = path_arg
+                .as_deref()
+                .and_then(|p| crate::agent::tools::PathGuard::check(p, ctx).ok())
+                .and_then(|abs| std::fs::read_to_string(abs).ok());
+            let (a, r) = diff_line_counts(before_snapshot.as_deref(), after_snapshot.as_deref());
+            (Some(a), Some(r))
+        } else {
+            (None, None)
         };
         events::emit_tool_finished(app, &ToolStep {
             call_id: step_id.clone(),
@@ -722,12 +859,18 @@ pub(crate) async fn run_tool_calls_round(
             duration_ms: Some(t0.elapsed().as_millis() as u64),
             created_at: now_ms(),
             step: Some(current_step),
+            op: op.map(|s| s.to_string()),
+            path: path_arg.clone(),
+            lines_added,
+            lines_removed,
         });
         tracing::info!(
-            "[agent] tool_round: 工具 {} 执行完成 ok={} 耗时={}ms 结果={}",
+            "[agent] tool_round[{}]: {} ok={} 耗时={}ms step={} 结果={}",
+            call_id,
             tool_name,
             result.is_ok(),
             t0.elapsed().as_millis(),
+            current_step,
             clip(&result_text, 400),
         );
         messages.push(json!({
@@ -735,11 +878,19 @@ pub(crate) async fn run_tool_calls_round(
             "tool_call_id": call_id,
             "content": result_text
         }));
+        // 接管并继续：把用户补充指示注入下一轮 user 消息，引导子任务重跑方向。
+        if let Some(g) = &takeover_guidance {
+            messages.push(json!({
+                "role": "user",
+                "content": format!("（用户接管并补充指示：{}）", g)
+            }));
+        }
     }
 
     ToolRoundStats {
         had_success: iter_had_success,
         had_error: iter_had_error,
+        last_error: last_err,
     }
 }
 
@@ -762,7 +913,9 @@ pub(crate) async fn call_llm(
     );
 
     let request_started = Instant::now();
-    let client = reqwest::Client::new();
+    let client = crate::net::apply_proxy(reqwest::Client::builder(), &cfg.network_proxy)
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new());
     let url = normalize_chat_url(&cfg.llm_base_url);
 
     let mut body = json!({
@@ -895,11 +1048,12 @@ pub(crate) async fn call_llm_stream(
     messages: &[Value],
     tools: &[Value],
     cancel: &Arc<AtomicBool>,
+    on_text: Option<&(dyn Fn(&str) + Send + Sync)>,
 ) -> Result<StreamOutcome, String> {
     const MAX_RETRY: usize = 1;
     let mut last: Option<Result<StreamOutcome, String>> = None;
     for attempt in 0..=MAX_RETRY {
-        let outcome = call_llm_stream_once(_app, cfg, messages, tools, cancel).await;
+        let outcome = call_llm_stream_once(_app, cfg, messages, tools, cancel, on_text).await;
         match outcome {
             // 用户主动取消：绝不重试，直接透传错误（「停止 / 接管」路径依赖此行为）。
             Err(e) if e.contains("取消") => return Err(e),
@@ -949,6 +1103,7 @@ async fn call_llm_stream_once(
     messages: &[Value],
     tools: &[Value],
     cancel: &Arc<AtomicBool>,
+    on_text: Option<&(dyn Fn(&str) + Send + Sync)>,
 ) -> Result<StreamOutcome, String> {
     let _ = _app; // 事件推送已上移到 ReAct 循环，本函数只做拉流聚合
     if cfg.llm_base_url.is_empty() || cfg.llm_model_name.is_empty() {
@@ -963,7 +1118,9 @@ async fn call_llm_stream_once(
     );
 
     let request_started = Instant::now();
-    let client = reqwest::Client::new();
+    let client = crate::net::apply_proxy(reqwest::Client::builder(), &cfg.network_proxy)
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new());
     let url = normalize_chat_url(&cfg.llm_base_url);
 
     let mut body = json!({
@@ -1097,7 +1254,15 @@ async fn call_llm_stream_once(
             }
             match serde_json::from_str::<Value>(data) {
                 Ok(json) => {
-                    absorb_stream_delta(&json, &mut content, &mut reasoning, &mut tc_acc);
+                    let (content_delta, _reasoning_delta) =
+                        absorb_stream_delta(&json, &mut content, &mut reasoning, &mut tc_acc);
+                    // 增量推流：每收到一片正文 delta 立即经回调向前端 emit 一个 text_chunk，
+                    // 实现 SIMPLE_CHAT 等路径的逐字流式输出；ReAct 内部请求传 None 关闭。
+                    if let Some(cb) = on_text {
+                        if !content_delta.is_empty() {
+                            cb(&content_delta);
+                        }
+                    }
                     // 累计真实 token 用量（prompt / completion）
                     if let Some(u) = json.get("usage").and_then(|v| v.as_object()) {
                         if let (Some(p), Some(c)) = (
@@ -1129,7 +1294,13 @@ async fn call_llm_stream_once(
             let data = line.trim_start_matches("data:").trim();
             if data != "[DONE]" {
                 if let Ok(json) = serde_json::from_str::<Value>(data) {
-                    absorb_stream_delta(&json, &mut content, &mut reasoning, &mut tc_acc);
+                    let (content_delta, _reasoning_delta) =
+                        absorb_stream_delta(&json, &mut content, &mut reasoning, &mut tc_acc);
+                    if let Some(cb) = on_text {
+                        if !content_delta.is_empty() {
+                            cb(&content_delta);
+                        }
+                    }
                     if let Some(u) = json.get("usage").and_then(|v| v.as_object()) {
                         if let (Some(p), Some(c)) = (
                             u.get("prompt_tokens").and_then(|v| v.as_u64()),
@@ -1180,21 +1351,27 @@ fn absorb_stream_delta(
     content: &mut String,
     reasoning: &mut String,
     tc_acc: &mut std::collections::BTreeMap<u64, (String, String, String)>,
-) {
+) -> (String, String) {
+    let mut content_delta = String::new();
+    let mut reasoning_delta = String::new();
     let delta = json
         .get("choices")
         .and_then(|c| c.as_array())
         .and_then(|c| c.first())
         .and_then(|c| c.get("delta"));
-    let Some(delta) = delta else { return };
+    let Some(delta) = delta else {
+        return (content_delta, reasoning_delta);
+    };
 
     if let Some(c) = delta.get("content").and_then(|v| v.as_str()) {
         content.push_str(c);
+        content_delta.push_str(c);
     }
     // DeepSeek 等风格的推理字段（两种命名兼容）
     for key in ["reasoning", "reasoning_content"] {
         if let Some(r) = delta.get(key).and_then(|v| v.as_str()) {
             reasoning.push_str(r);
+            reasoning_delta.push_str(r);
         }
     }
     if let Some(tcs) = delta.get("tool_calls").and_then(|v| v.as_array()) {
@@ -1214,6 +1391,7 @@ fn absorb_stream_delta(
             }
         }
     }
+    (content_delta, reasoning_delta)
 }
 
 /// 把 base_url 规整为 `/chat/completions` 端点（兼容用户填 `/v1` 或完整地址）。

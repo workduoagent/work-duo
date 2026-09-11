@@ -532,15 +532,12 @@
       color: #fff;
       border-bottom-right-radius: 2px;
     }
+    // 智能体答复不再使用气泡：去背景、去内边距，正文直接铺在对话流上（仿 WorkBuddy）。
     .agent-chat__msg--agent & {
-      background: var(--color-background-soft, #f4f4f5);
+      background: transparent;
       color: var(--color-foreground, #222);
-      border-bottom-left-radius: 2px;
-
-      .dark & {
-        background: #1f1f1f;
-        color: #e6e6e6;
-      }
+      border-radius: 0;
+      padding: 0;
     }
   }
 
@@ -622,15 +619,54 @@
     font-family: var(--font-mono, monospace);
     white-space: nowrap;
 
-    span {
-      display: inline-flex;
-      align-items: center;
-      gap: 3px;
+      span {
+        display: inline-flex;
+        align-items: center;
+        gap: 3px;
 
-      svg {
-        flex: none;
+        svg {
+          flex: none;
+        }
       }
     }
+
+    &__msg-head {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+    }
+
+    &__msg-name {
+      flex: 0 0 auto;
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: var(--color-foreground, #222);
+
+      .dark & {
+        color: #e6e6e6;
+      }
+    }
+
+    // 思考内容平铺（去掉「已深度思考」胶囊与折叠）：直接铺在对话流，打字机逐字输出。
+  &__thinking-inline {
+    max-width: 100%;
+    margin: 0 0 6px;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-size: 0.82rem;
+    line-height: 1.65;
+    color: var(--color-muted, #888);
+  }
+
+  &__type-caret {
+    display: inline-block;
+    width: 2px;
+    height: 1em;
+    margin-left: 1px;
+    vertical-align: text-bottom;
+    background: currentColor;
+    animation: agent-chat-caret 1s steps(1) infinite;
   }
 
   &__thinking-panel {
@@ -1576,6 +1612,16 @@
   }
 }
 
+@keyframes agent-chat-caret {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
+}
+
 /* 授权通知（右下角，替代对话流内的审批弹窗） */
 .agent-approval-note {
   &__icon {
@@ -1692,6 +1738,75 @@
     }
     &__value {
       color: #d0d0d0;
+    }
+  }
+}
+
+/* 方案推荐弹窗（UserPromptPanel choice 类）：与审批/恢复同款右下角样式，选项 chip 列表 */
+.agent-choice-note {
+  &__icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--color-info, #1677ff);
+  }
+  &__question {
+    margin: 0 0 8px;
+    font-size: 0.84rem;
+    line-height: 1.5;
+    color: var(--color-foreground, #222);
+  }
+  &__options {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  &__chip {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+    width: 100%;
+    padding: 8px 10px;
+    border: 1px solid var(--color-border, #e5e7eb);
+    border-radius: 8px;
+    background: var(--color-bg, #fff);
+    cursor: pointer;
+    text-align: left;
+    transition: border-color 0.15s, background 0.15s;
+    &:hover {
+      border-color: var(--color-primary, #1677ff);
+      background: var(--color-primary-bg, #eef4ff);
+    }
+  }
+  &__label {
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: var(--color-foreground, #222);
+  }
+  &__desc {
+    font-size: 0.74rem;
+    color: var(--color-muted, #888);
+    line-height: 1.4;
+  }
+
+  .dark & {
+    &__question {
+      color: #e6e6e6;
+    }
+    &__chip {
+      background: #1f1f1f;
+      border-color: #333;
+      &:hover {
+        border-color: var(--color-primary, #1677ff);
+        background: #16243a;
+      }
+    }
+    &__label {
+      color: #e6e6e6;
+    }
+    &__desc {
+      color: #999;
     }
   }
 }
@@ -3023,7 +3138,7 @@
   border-radius: 8px;
   font-size: 12.5px;
   line-height: 1.6;
-  font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+  font-family: var(--font-mono, 'Cascadia Code', 'Fira Code', 'Consolas', monospace);
   white-space: pre-wrap;
   word-break: break-all;
   margin: 0;

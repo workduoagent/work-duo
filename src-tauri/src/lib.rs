@@ -5,6 +5,7 @@ mod mamba_manager;
 mod bun_manager;
 mod fs_helper;
 mod logging;
+mod net;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -72,7 +73,9 @@ pub fn run() {
             agent::commands::get_squad_api_config,
             agent::commands::set_squad_api_config,
             agent::commands::submit_approval_decision,
+            agent::commands::submit_choice_decision,
             agent::commands::cancel_agent_task,
+            net::http_probe,
             agent::commands::retry_subtask,
             agent::commands::skip_subtask,
             agent::commands::resolve_subtask,

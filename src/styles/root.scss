@@ -6,6 +6,7 @@
  * ============================================================ */
 
 @use "./variables.scss";
+@use "./fonts.scss";
 @use "./mixins.scss";
 @use "./layout.scss";
 @use "./message.scss";
@@ -69,28 +70,51 @@ body {
   color: var(--color-foreground);
 }
 
-/* Markdown 渲染（.md-body），由 MarkdownRenderer 使用 */
+/* ============================================================
+ * Markdown 渲染（.md-body），由 MarkdownRenderer 使用
+ * 排版目标：正文字号略放大、代码必须"看得清"（高对比 + 明确的底与边框）。
+ * ============================================================ */
 .md-body {
-  font-size: 0.875rem;
-  line-height: 1.75;
+  font-size: 0.9375rem; /* 15px：Markdown 正文比 UI 默认 14px 略大，长文更耐读 */
+  line-height: 1.8;
   color: var(--color-foreground);
+  word-break: break-word;
+}
+
+.md-body > *:first-child {
+  margin-top: 0;
+}
+
+.md-body > *:last-child {
+  margin-bottom: 0;
 }
 
 .md-body h1 {
-  margin: 1.25rem 0 0.75rem;
+  margin: 1.5rem 0 0.75rem;
   font-size: 1.5rem;
   font-weight: 600;
+  line-height: 1.4;
 }
 
 .md-body h2 {
-  margin: 1.25rem 0 0.5rem;
+  margin: 1.5rem 0 0.625rem;
   font-size: 1.25rem;
   font-weight: 600;
+  line-height: 1.45;
 }
 
 .md-body h3 {
-  margin: 1rem 0 0.5rem;
+  margin: 1.25rem 0 0.5rem;
   font-size: 1.125rem;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.md-body h4,
+.md-body h5,
+.md-body h6 {
+  margin: 1rem 0 0.5rem;
+  font-size: 1rem;
   font-weight: 600;
 }
 
@@ -98,16 +122,38 @@ body {
   margin-bottom: 0.75rem;
 }
 
-.md-body ul {
+.md-body strong {
+  font-weight: 600;
+  color: var(--color-foreground-intense);
+}
+
+.md-body ul,
+.md-body ol {
   margin-bottom: 0.75rem;
   padding-left: 1.5rem;
+}
+
+.md-body ul {
   list-style: disc;
 }
 
 .md-body ol {
-  margin-bottom: 0.75rem;
-  padding-left: 1.5rem;
   list-style: decimal;
+}
+
+.md-body li {
+  margin: 0.25rem 0;
+}
+
+.md-body li > ul,
+.md-body li > ol {
+  margin-bottom: 0;
+}
+
+/* GFM 任务列表：去掉项目符号 */
+.md-body li.task-list-item {
+  list-style: none;
+  margin-left: -1.25rem;
 }
 
 .md-body a {
@@ -119,32 +165,198 @@ body {
   text-decoration: underline;
 }
 
+.md-body hr {
+  height: 1px;
+  margin: 1.5rem 0;
+  border: none;
+  background: var(--color-border);
+}
+
+/* ---------- 行内代码：核心修复点 ----------
+ * 原样式只有极浅灰底、无边框、无显式字号/字体/颜色，观感"糊成一团"。
+ * 现改为：明确的底 + 细边框 + 深色高对比字 + 等宽字体 + 略放大字号。
+ */
 .md-body code {
-  padding: 0.125rem 0.375rem;
+  padding: 0.15em 0.4em;
+  border: 1px solid var(--color-code-border);
   border-radius: 6px;
-  font-size: 0.85em;
-  background: var(--color-background-muted);
+  background: var(--color-code-bg);
+  color: var(--color-code-fg);
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Consolas, monospace);
+  font-size: 0.875em;
+  font-weight: 500;
+  font-variant-ligatures: none;
+  white-space: break-spaces;
 }
 
+/* ---------- 围栏代码块 ---------- */
 .md-body pre {
-  margin-bottom: 0.75rem;
-  padding: 1rem;
-  border-radius: var(--radius-card);
-  font-size: 0.875rem;
+  margin-bottom: 0.875rem;
+  padding: 0.875rem 1rem;
+  border: 1px solid var(--color-code-border);
+  border-radius: 10px;
+  background: var(--color-code-bg);
+  color: var(--color-foreground);
+  font-size: 0.8125rem; /* 13px */
+  line-height: 1.7;
   overflow-x: auto;
-  background: var(--color-background-muted);
 }
 
+/* 代码块内的 code 复用同一等宽字体，但要去掉行内样式（底/边框/内边距） */
 .md-body pre code {
   padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font-size: inherit;
+  font-weight: 400;
+  white-space: pre;
+}
+
+/* ---------- highlight.js 语法高亮（自建主题，跟随 .light/.dark 令牌） ----------
+ * 替代原先强引入的 highlight.js/styles/github.css（亮色硬编码白底，暗色下整块刷白、token 色崩坏）。
+ * 这里只定义语法 token 颜色，背景统一交给 .md-body pre；颜色全部走 variables.scss 的 --hljs-* 令牌。
+ */
+.md-body .hljs {
+  color: var(--hljs-fg);
   background: transparent;
 }
 
+.md-body .hljs-comment,
+.md-body .hljs-quote {
+  color: var(--hljs-comment);
+  font-style: italic;
+}
+
+.md-body .hljs-keyword,
+.md-body .hljs-selector-tag,
+.md-body .hljs-literal,
+.md-body .hljs-doctag {
+  color: var(--hljs-keyword);
+}
+
+.md-body .hljs-string,
+.md-body .hljs-regexp {
+  color: var(--hljs-string);
+}
+
+.md-body .hljs-number,
+.md-body .hljs-meta .hljs-number {
+  color: var(--hljs-number);
+}
+
+.md-body .hljs-title,
+.md-body .hljs-title.class_,
+.md-body .hljs-title.function_,
+.md-body .hljs-section {
+  color: var(--hljs-title);
+}
+
+.md-body .hljs-attr,
+.md-body .hljs-attribute,
+.md-body .hljs-variable,
+.md-body .hljs-template-variable,
+.md-body .hljs-selector-attr,
+.md-body .hljs-selector-pseudo {
+  color: var(--hljs-attr);
+}
+
+.md-body .hljs-built_in,
+.md-body .hljs-builtin-name,
+.md-body .hljs-type,
+.md-body .hljs-symbol,
+.md-body .hljs-params {
+  color: var(--hljs-built_in);
+}
+
+.md-body .hljs-tag,
+.md-body .hljs-name {
+  color: var(--hljs-tag);
+}
+
+.md-body .hljs-meta {
+  color: var(--hljs-meta);
+}
+
+.md-body .hljs-emphasis {
+  font-style: italic;
+}
+
+.md-body .hljs-strong {
+  font-weight: 700;
+}
+
+.md-body .hljs-addition {
+  color: var(--hljs-addition-fg);
+  background: var(--hljs-addition-bg);
+}
+
+.md-body .hljs-deletion {
+  color: var(--hljs-deletion-fg);
+  background: var(--hljs-deletion-bg);
+}
+
 .md-body blockquote {
-  margin-bottom: 0.75rem;
-  padding-left: 1rem;
-  border-left: 4px solid var(--color-border);
+  margin: 0 0 0.875rem;
+  padding: 0.5rem 0 0.5rem 1rem;
+  border-left: 3px solid var(--color-brand-200);
+  border-radius: 0 8px 8px 0;
   color: var(--color-foreground-muted);
+}
+
+.md-body blockquote > *:last-child {
+  margin-bottom: 0;
+}
+
+/* ---------- GFM 表格（此前完全无样式） ---------- */
+.md-body table {
+  width: 100%;
+  margin-bottom: 0.875rem;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+
+.md-body th,
+.md-body td {
+  padding: 0.4rem 0.625rem;
+  border: 1px solid var(--color-border);
+  text-align: left;
+  vertical-align: top;
+}
+
+.md-body th {
+  background: var(--color-background-muted);
+  font-weight: 600;
+  color: var(--color-foreground-intense);
+}
+
+.md-body tbody tr:nth-child(even) {
+  background: var(--color-background-subtle);
+}
+
+/* ---------- 图片 / Mermaid ---------- */
+.md-body img {
+  max-width: 100%;
+  border-radius: 8px;
+}
+
+.md-mermaid {
+  margin-bottom: 0.875rem;
+  overflow-x: auto;
+  text-align: center;
+}
+
+.md-mermaid__error {
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--color-danger);
+  border-radius: 8px;
+  background: var(--color-danger-bg);
+  color: var(--color-danger);
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Consolas, monospace);
+  font-size: 0.8125rem;
+  text-align: left;
+  white-space: pre-wrap;
 }
 
 /* ============================================================

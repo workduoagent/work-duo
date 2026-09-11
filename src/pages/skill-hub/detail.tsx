@@ -450,7 +450,7 @@ export default function SkillDetailPage() {
             <h4 className="skillhub-detail-page__block-title">技能详情</h4>
             <Descriptions column={2} size="middle" bordered>
               <Descriptions.Item label="技能标识">
-                <code style={{ fontFamily: 'monospace' }}>{skill.identifier}</code>
+                <code style={{ fontFamily: 'var(--font-mono, monospace)' }}>{skill.identifier}</code>
               </Descriptions.Item>
               <Descriptions.Item label="技能名称">{skill.name || '-'}</Descriptions.Item>
               <Descriptions.Item label="分类">

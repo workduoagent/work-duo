@@ -414,7 +414,9 @@ impl KnowledgeGraph {
                 .get(id)
                 .and_then(|n| n.props.get("status").and_then(|v| v.as_str()))
                 .unwrap_or("");
-            s == "completed" || s == "skipped"
+            // obsolete 是二次规划/分支重跑时把上一轮节点置为「已被取代」的终态，
+            // 视为已解决，否则会污染「全部闭环」判定（详见 pipeline.rs 死锁分支）。
+            s == "completed" || s == "skipped" || s == "obsolete"
         })
     }
 
@@ -599,6 +601,8 @@ impl KnowledgeGraph {
     }
 
     /// 读取会话目标摘要（goal_summary）。
+    /// 注：最终答复已不再前置该摘要（去用户问题重复），此方法保留供后续检索/调试使用。
+    #[allow(dead_code)]
     pub fn session_goal(&self, session_id: &str) -> String {
         self.nodes
             .values()

@@ -191,7 +191,7 @@ export function MonacoJsonEditor({
             minimap: { enabled: false },
             fontSize: 13,
             fontFamily:
-              "ui-monospace, SFMono-Regular, 'JetBrains Mono', Consolas, monospace",
+              "'AppMono', ui-monospace, SFMono-Regular, 'JetBrains Mono', Consolas, monospace",
             scrollBeyondLastLine: false,
             automaticLayout: true,
             tabSize: 2,

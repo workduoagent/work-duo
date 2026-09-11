@@ -26,6 +26,7 @@ import type {
   ApprovalDecision,
   ApprovalRequest,
   ArtifactRef,
+  ChoiceRequest,
   IntentClassified,
   PlanBranchGenerated,
   PlanStep,
@@ -34,6 +35,7 @@ import type {
   ThinkingChunk,
   ToolStep,
 } from './types'
+import { baseName, opAction, opOf, pathFromArgs } from './toolNarrate'
 
 /** 会话对外暴露的实时状态。 */
 export interface AgentSessionState {
@@ -82,30 +84,16 @@ export interface AgentSessionState {
   recovery: RecoveryRequest | null
   /** 回传步骤级恢复决策（retry / skip / takeover；takeover 时携带补充指示）。 */
   resolveRecovery: (decision: 'retry' | 'skip' | 'takeover', guidance?: string) => Promise<void>
+  /** 方案推荐：Agent 主动询问用户（HITL Choice Chip），非 null 时渲染选项弹窗。 */
+  pendingChoice: ChoiceRequest | null
+  /** 回传方案推荐选择（用户点选的 optionId 唤醒后台挂起的 `native__ask_user_choice`）。 */
+  submitChoice: (optionId: string) => Promise<void>
 }
 
 function labelOf(toolName: string): string {
   // 去掉命名空间前缀：mcp__mineru__parse → parse；native__edit_file → edit_file
   const parts = toolName.split('__')
   return parts[parts.length - 1] ?? toolName
-}
-
-/** 把工具入参 JSON 压缩成可阅读的单行摘要（用于思考过程条目）。 */
-function summarizeArgs(raw?: string): string {
-  if (!raw) return '（无）'
-  try {
-    const pretty = JSON.stringify(JSON.parse(raw))
-    return pretty.length > 280 ? pretty.slice(0, 280) + '…' : pretty
-  } catch {
-    return raw.length > 280 ? raw.slice(0, 280) + '…' : raw
-  }
-}
-
-/** 把工具返回结果压成简短摘要（去除多余空白）。 */
-function summarizeResult(raw?: string): string {
-  if (!raw) return '（无输出）'
-  const text = raw.replace(/\s+/g, ' ').trim()
-  return text.length > 180 ? text.slice(0, 180) + '…' : text
 }
 
 export function useAgentSession(): AgentSessionState {
@@ -137,6 +125,8 @@ export function useAgentSession(): AgentSessionState {
   const [planBranch, setPlanBranch] = useState<PlanBranchGenerated | null>(null)
   // 步骤级恢复：子任务自动重试耗尽仍失败时挂起，等待用户决策（重试/跳过/接管）。
   const [recovery, setRecovery] = useState<RecoveryRequest | null>(null)
+  // 方案推荐：Agent 主动询问用户（HITL Choice Chip），挂起等待选择。
+  const [pendingChoice, setPendingChoice] = useState<ChoiceRequest | null>(null)
 
   // 统一消息实例：启动拦截（并发互斥）等需要「显式提示」的场景走 modal，
   // 不走通用 toast（连点「运行」被后端主闸门拦截时，用户应明确看到原因）。
@@ -150,6 +140,8 @@ export function useAgentSession(): AgentSessionState {
   const isRunningRef = useRef(false)
   // pendingApproval 的实时镜像：授权挂起期用于暂停安全定时器护栏，避免「超时误判后端异常」。
   const pendingApprovalRef = useRef(false)
+  // pendingChoice 的实时镜像：供 submitChoice 回调里读取最新值（避免闭包陈旧）。
+  const pendingChoiceRef = useRef<ChoiceRequest | null>(null)
   // 任务兜底保险：后端正常情况下一定会通过 `agent-task-done` / `agent-task-error`
   // 主动复位 UI（多轮智能体任务可能耗时数分钟）。此超时仅用于 Rust 进程异常（panic）
   // 导致终态事件丢失的极端场景，时长设得足够长（20 分钟），避免把仍在运行的后端误判为「超时」。
@@ -246,11 +238,7 @@ export function useAgentSession(): AgentSessionState {
       durationMs: 700,
       createdAt: t0,
     })
-    setThoughts((prev) => [
-      ...prev,
-      `决定调用工具 \`list_directory\`，参数：${summarizeArgs(JSON.stringify({ path: input.workspace ?? '.' }))}`,
-      '工具 `list_directory` 执行成功：返回目录条目 README.md / src/ / package.json',
-    ])
+    setThoughts((prev) => [...prev, '正在查看目录', '目录内容已获取：README.md / src/ / package.json'])
 
     // 工具 2：写文件（敏感，但 mock 不触发审批弹窗，仅展示步骤）
     const t1 = Date.now()
@@ -275,11 +263,7 @@ export function useAgentSession(): AgentSessionState {
       durationMs: 600,
       createdAt: t1,
     })
-    setThoughts((prev) => [
-      ...prev,
-      `决定调用工具 \`write_file\`，参数：${summarizeArgs(JSON.stringify({ path: 'output.md', content: '# 生成结果\n' }))}`,
-      '工具 `write_file` 执行成功：写入 12 字节',
-    ])
+    setThoughts((prev) => [...prev, '正在写入文件 output.md', '文件已生成'])
 
     // 流式文本回复：一次性给出完整目标文本，由页面打字机效果负责动画展示
     setIsStreaming(true)
@@ -341,6 +325,8 @@ export function useAgentSession(): AgentSessionState {
       setTraceThinking([])
       setPlanBranch(null)
       setRecovery(null)
+      pendingChoiceRef.current = null
+      setPendingChoice(null)
       clearTaskTimeout()
 
       if (!isTauri) {
@@ -418,8 +404,8 @@ export function useAgentSession(): AgentSessionState {
       await invoke('submit_approval_decision', {
         decision: {
           approvalId: decision.approvalId,
-          approved: decision.approved,
-          reason: decision.reason ?? null,
+          decision: decision.decision,
+          guidance: decision.guidance ?? null,
         },
       })
     } catch (e) {
@@ -427,6 +413,23 @@ export function useAgentSession(): AgentSessionState {
       console.error('[agent] submit_approval_decision failed', e)
     }
   }, [isTauri, startTaskTimeout])
+
+  // 方案推荐：回传用户所选 optionId，唤醒后台挂起的 `native__ask_user_choice`。
+  const submitChoice = useCallback(
+    async (optionId: string) => {
+      const choice = pendingChoiceRef.current
+      setPendingChoice(null)
+      if (!isTauri || !choice) return
+      try {
+        await invoke('submit_choice_decision', {
+          input: { choiceId: choice.choiceId, optionId },
+        })
+      } catch (e) {
+        console.error('[agent] submit_choice_decision failed', e)
+      }
+    },
+    [isTauri],
+  )
 
   const reset = useCallback(() => {
     stepsRef.current.clear()
@@ -443,6 +446,8 @@ export function useAgentSession(): AgentSessionState {
     setTraceThinking([])
     setPlanBranch(null)
     setRecovery(null)
+    pendingChoiceRef.current = null
+    setPendingChoice(null)
     clearTaskTimeout()
     setRunning(false)
   }, [flushSteps, clearTaskTimeout])
@@ -454,6 +459,8 @@ export function useAgentSession(): AgentSessionState {
       void invoke('cancel_agent_task').catch(() => {})
     }
     clearTaskTimeout()
+    pendingChoiceRef.current = null
+    setPendingChoice(null)
     setRunning(false)
     setIsStreaming(false)
   }, [isTauri, clearTaskTimeout])
@@ -492,27 +499,28 @@ export function useAgentSession(): AgentSessionState {
             if (e.step) {
               const step = { ...e.step, toolLabel: labelOf(e.step.toolName), step: currentStepRef.current ?? undefined }
               upsertStep(step)
-              // 把「决定调用哪个工具 + 参数」作为思考过程的一条记录（而非独立卡片）
-              setThoughts((prev) => [
-                ...prev,
-                `决定调用工具 \`${step.toolLabel}\`，参数：${summarizeArgs(step.args)}`,
-              ])
+              // 思考旁白：用自然语言表述「正在做什么」，不出现工具名（如 write_file）。
+              const op = step.op ?? opOf(step.toolName)
+              const target = baseName(step.path ?? pathFromArgs(step.args))
+              const object = target && target !== '.' ? ` ${target}` : ''
+              setThoughts((prev) => [...prev, `正在${opAction(op)}${object}`])
             }
             break
           case 'tool_finished':
             if (e.step) {
               const step = { ...e.step, toolLabel: labelOf(e.step.toolName), step: currentStepRef.current ?? undefined }
               upsertStep(step)
-              const ok = step.status === 'success'
-              const dur =
-                typeof step.durationMs === 'number'
-                  ? `（耗时 ${(step.durationMs / 1000).toFixed(1)}s）`
-                  : ''
-              // 把「工具结果」作为思考过程的一条记录
-              setThoughts((prev) => [
-                ...prev,
-                `工具 \`${step.toolLabel}\` ${ok ? '执行成功' : '执行失败'}${dur}：${summarizeResult(step.result)}`,
-              ])
+              // 成功不追加旁白（工具行已体现结果），仅失败时补一条人性化说明。
+              if (step.status !== 'success') {
+                const op = step.op ?? opOf(step.toolName)
+                const target = baseName(step.path ?? pathFromArgs(step.args))
+                const object = target && target !== '.' ? `（${target}）` : ''
+                const reason = (step.result ?? '').replace(/\s+/g, ' ').trim().slice(0, 100)
+                setThoughts((prev) => [
+                  ...prev,
+                  `${opAction(op)}失败${object}${reason ? `：${reason}` : ''}`,
+                ])
+              }
             }
             break
           case 'text_chunk':
@@ -641,6 +649,14 @@ export function useAgentSession(): AgentSessionState {
           setRecovery(ev.payload)
         },
       )
+      // 方案推荐：Agent 主动询问用户（HITL Choice Chip），挂起等待选择（选项 chip 弹窗）。
+      const offChoice = await listen<ChoiceRequest>(
+        'agent-choice-needed',
+        (ev) => {
+          pendingChoiceRef.current = ev.payload
+          setPendingChoice(ev.payload)
+        },
+      )
       // 实时 token 用量增量（运行中累计推送，驱动顶栏计数卡跳数）。
       const offToken = await listen<{ promptTokens: number; completionTokens: number }>(
         'agent-token-update',
@@ -676,10 +692,11 @@ export function useAgentSession(): AgentSessionState {
         offToken()
         offArtifact()
         offRecovery()
+        offChoice()
         offPlanBranch()
         return
       }
-      unlistenRef.current = [offEvent, offApproval, offDone, offErr, offToken, offArtifact, offRecovery, offPlanBranch]
+      unlistenRef.current = [offEvent, offApproval, offDone, offErr, offToken, offArtifact, offRecovery, offChoice, offPlanBranch]
     }
 
     void reg()
@@ -709,6 +726,8 @@ export function useAgentSession(): AgentSessionState {
     artifacts,
     recovery,
     resolveRecovery,
+    pendingChoice,
+    submitChoice,
     trace: { intent: traceIntent, thinking: traceThinking },
     planBranch,
   }

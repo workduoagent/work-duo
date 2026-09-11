@@ -26,6 +26,19 @@ pub struct ToolStep {
     /// 但保留此字段可让前端精确归属工具调用到对应步骤卡片，未来若恢复并行也不会错乱。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub step: Option<usize>,
+    /// 操作类型（read/write/edit/create/delete/move/list/search/exec/http/mcp…），
+    /// 供前端「一行式工具行」展示动词（读取/编辑/新增/删除…）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub op: Option<String>,
+    /// 目标文件 / 路径（相对工作空间原文，前端取文件名展示）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    /// 本次变更新增行数（仅文件变更类工具，后端精确 diff 得出）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lines_added: Option<u32>,
+    /// 本次变更删除行数（仅文件变更类工具，后端精确 diff 得出）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lines_removed: Option<u32>,
 }
 
 /// 审批请求（高危操作挂起，对应前端 ApprovalRequest）。
@@ -41,6 +54,42 @@ pub struct ApprovalRequest {
     pub kind: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hint: Option<String>,
+}
+
+/// 方案推荐：单个可选项（Agent 调 `native__ask_user_choice` 时给出；前端渲染为 chip）。
+#[derive(Debug, Clone, Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChoiceOption {
+    /// 选项唯一 id（前端回传时用）。
+    pub id: String,
+    /// 展示文案。
+    pub label: String,
+    /// 补充说明（可选）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// 机器语义值（可选，如具体路径/模型名；回传时一并带回）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub value: Option<String>,
+}
+
+/// 方案推荐请求载荷（事件 `agent-choice-needed` 携带，渲染选项列表弹窗）。
+#[derive(Debug, Clone, Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChoiceRequest {
+    /// 本次询问唯一标识（oneshot 通道 key）。
+    pub choice_id: String,
+    /// 向用户提出的问题。
+    pub question: String,
+    /// 可选项列表（2–5 个）。
+    pub options: Vec<ChoiceOption>,
+}
+
+/// 方案推荐结果（用户点选后回传，作为 `native__ask_user_choice` 工具结果注入 Agent 上下文）。
+#[derive(Debug, Clone)]
+pub struct ChoiceOutcome {
+    pub option_id: String,
+    pub label: String,
+    pub value: Option<String>,
 }
 
 /// 聊天附件，由前端随 `run_agent_task` 传入，注入当前轮 user 消息。
@@ -74,6 +123,27 @@ pub struct AttachmentInput {
     pub path: Option<String>,
 }
 
+/// 网络代理配置（对应 app_config.network_proxy：direct / system / manual）。
+///
+/// - `direct`：不使用代理（`.no_proxy()`，无视系统代理——开 VPN 时也能直连 LAN / 本机模型）；
+/// - `system`：沿用 reqwest 默认（读取系统代理）；
+/// - `manual`：按 `http` / `https` / `socks5` 字段显式设置代理。
+#[derive(Debug, Clone, Default, serde::Deserialize, serde::Serialize)]
+pub struct NetworkProxy {
+    #[serde(default = "default_proxy_mode")]
+    pub mode: String,
+    #[serde(default)]
+    pub http: Option<String>,
+    #[serde(default)]
+    pub https: Option<String>,
+    #[serde(default)]
+    pub socks5: Option<String>,
+}
+
+fn default_proxy_mode() -> String {
+    "direct".to_string()
+}
+
 /// 单个 agent 运行配置（由前端 run_agent_task 传入，或从 agent_info 读取）。
 #[derive(Debug, Clone, Default)]
 pub struct AgentRuntimeConfig {
@@ -97,6 +167,9 @@ pub struct AgentRuntimeConfig {
     /// HTTP 请求主机白名单（由 app_config.http_allowed_hosts 解析）：空 = 不限制；
     /// 非空 = 仅允许命中列表中的主机（含其子域），native__http_request 据此拒绝越界主机。
     pub http_allowed_hosts: Vec<String>,
+    /// 网络代理模式（direct / system / manual），由 app_config.network_proxy 解析。
+    /// 智能体所有 LLM 出站请求据此建客户端：direct 无视系统代理（兼容开 VPN 时直连 LAN 模型）。
+    pub network_proxy: NetworkProxy,
 }
 
 /* ================= 三层流水线架构（意图分流 → DAG 规划 → 微 ReAct 执行） ================= */

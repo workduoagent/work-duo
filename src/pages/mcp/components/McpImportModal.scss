@@ -39,7 +39,7 @@
   font-size: 0.82rem;
   font-weight: 600;
   color: var(--color-foreground-muted);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
 }
 
 .mcp-import__toolbar-actions {
@@ -53,7 +53,7 @@
   border: none !important;
   border-radius: 0 !important;
   background: transparent !important;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
   font-size: 0.8rem;
   resize: vertical;
 }
@@ -145,7 +145,7 @@
 .mcp-import__item-id {
   font-size: 0.75rem;
   color: var(--color-foreground-muted);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
 }
 
 .mcp-import__item-meta {

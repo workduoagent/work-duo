@@ -95,7 +95,7 @@
   }
 
   &__url {
-    font-family: monospace;
+    font-family: var(--font-mono, monospace);
     font-size: 12px;
     word-break: break-all;
     color: var(--color-foreground-muted);

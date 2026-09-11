@@ -158,6 +158,22 @@ pub async fn submit_approval_decision(
     Ok(runtime.approval.resolve(decision).await)
 }
 
+/// 回传方案推荐选择（Agent 调 `native__ask_user_choice` 挂起后，用户点选唤醒）。
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SubmitChoiceInput {
+    pub choice_id: String,
+    pub option_id: String,
+}
+
+#[tauri::command]
+pub async fn submit_choice_decision(
+    runtime: State<'_, AgentRuntime>,
+    input: SubmitChoiceInput,
+) -> Result<bool, String> {
+    Ok(runtime.choice.resolve(&input.choice_id, &input.option_id).await)
+}
+
 /// 取消当前任务（最佳努力）：置位共享取消标志，后台 run_task 流水线与流式拉取循环
 /// 会在下一轮边界 / 下一个 SSE chunk 处感知并立即终止，无需额外的任务句柄。
 #[tauri::command]
@@ -170,6 +186,7 @@ pub async fn cancel_agent_task(runtime: State<'_, AgentRuntime>) -> Result<(), S
     // 若后台流水线正挂在敏感工具审批上，清空所有 pending 审批（drop Sender →
     // `rx.await` 走拒绝分支），否则「停止」无法跳出审批挂起、任务永久卡住。
     runtime.approval.cancel_all().await;
+    runtime.choice.cancel_all().await;
     tracing::info!("[agent] cancel_agent_task: 已置位取消标志，后台任务将尽快终止");
     Ok(())
 }
@@ -1152,6 +1169,7 @@ category 取值：decision（决策）/ code_pattern（代码模式）/ user_pre
         round_id,
         attachments: attachments.unwrap_or_default(),
         http_allowed_hosts,
+        network_proxy: crate::net::load_network_proxy(&pool).await,
     })
 }
 

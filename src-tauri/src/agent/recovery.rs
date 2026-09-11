@@ -26,6 +26,8 @@ pub enum RecoveryDecision {
     Skip,
     /// 接管：注入用户补充指示，作为「引导式重试」重跑当前子任务（空指引等价于 Retry）。
     Takeover(String),
+    /// 改方案：把错误摘要 + 已试路径回灌，要求 Agent 换思路重规划（Phase 2b 启用，此处预留）。
+    ChangeApproach(String),
     /// 取消（用户在等待期间点击了取消）。
     Cancel,
 }
@@ -40,6 +42,13 @@ pub struct RecoveryRequest {
     pub reason: String,
     /// 受阻子任务已产出的摘要（可能为空）。
     pub summary: String,
+    /// 异常分档：A=可恢复（3 键：跳过|重试|接管）/ B=高风险歧义（4 键，含改方案）。
+    /// Phase 2a 恒为 "A"，档 B 与自动升档留 2b。
+    pub tier: String,
+    /// 失败命令（接管面板展示用，2a 可空）。
+    pub failed_command: Option<String>,
+    /// 已改动文件（接管面板展示用，2a 可空）。
+    pub changed_files: Option<Vec<String>>,
 }
 
 /// 步骤级恢复挂起中枢（托管于 `AgentRuntime` 共享状态，后端任务与命令跨任务访问）。
@@ -72,14 +81,27 @@ impl RecoveryHub {
 
     /// 回传恢复决策并唤醒挂起的流水线。
     pub fn resolve(&self, d: RecoveryDecision) {
-        tracing::info!(
-            "[agent] recovery: 收到恢复决策 {}",
-            match &d {
-                RecoveryDecision::Retry => "Retry".into(),
-                RecoveryDecision::Skip => "Skip".into(),
-                RecoveryDecision::Takeover(g) => format!("Takeover(len={})", g.chars().count()),
-                RecoveryDecision::Cancel => "Cancel".into(),
+        let decision_label = match &d {
+            RecoveryDecision::Retry => "Retry".into(),
+            RecoveryDecision::Skip => "Skip".into(),
+            RecoveryDecision::Takeover(g) => format!("Takeover(len={})", g.chars().count()),
+            RecoveryDecision::ChangeApproach(g) => {
+                format!("ChangeApproach(len={})", g.chars().count())
             }
+            RecoveryDecision::Cancel => "Cancel".into(),
+        };
+        // 改动 3D：读取挂起的 step / title，排查时直接定位是哪一个受阻子任务。
+        let (step, title) = self
+            .pending
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map_or((0usize, String::new()), |r| (r.step, r.title.clone()));
+        tracing::info!(
+            "[agent] recovery: 收到恢复决策 {}（step={}「{}」）",
+            decision_label,
+            step,
+            title,
         );
         *self.decision.lock().unwrap() = Some(d);
         self.notify.notify_one();

@@ -51,7 +51,7 @@
   }
 
   &__identifier-tag {
-    font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+    font-family: var(--font-mono, ui-monospace, SFMono-Regular, Consolas, monospace);
     font-size: 11.5px;
     padding: 2px 8px;
     border-radius: 999px;
@@ -631,7 +631,7 @@
   }
 
   &__tool-code {
-    font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+    font-family: var(--font-mono, ui-monospace, SFMono-Regular, Consolas, monospace);
     font-size: 11px;
     font-weight: 400;
     color: var(--color-foreground-muted);
@@ -765,7 +765,7 @@
   }
 
   &__skill-identifier {
-    font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+    font-family: var(--font-mono, ui-monospace, SFMono-Regular, Consolas, monospace);
     font-size: 11px;
     color: var(--color-foreground-muted);
   }

@@ -41,7 +41,7 @@ export function SkillDetailDrawer({
         <Space>
           <span>技能详情</span>
           {skill?.identifier && (
-            <Text type="secondary" style={{ fontSize: 13, fontFamily: 'monospace' }}>
+            <Text type="secondary" style={{ fontSize: 13, fontFamily: 'var(--font-mono, monospace)' }}>
               {skill.identifier}
             </Text>
           )}
@@ -94,7 +94,7 @@ export function SkillDetailDrawer({
               )}
             </Descriptions.Item>
             <Descriptions.Item label="存储路径">
-              <Text copyable style={{ fontFamily: 'monospace', fontSize: 12 }}>
+              <Text copyable style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: 12 }}>
                 {skill.path || '-'}
               </Text>
             </Descriptions.Item>

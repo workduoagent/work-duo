@@ -1,0 +1,133 @@
+/* 一行式工具调用行（ToolStepLine）：仿 WorkBuddy，工具调用只占一行。 */
+
+.tool-line {
+  margin: 1px 0;
+
+  &__row {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    width: 100%;
+    padding: 3px 8px;
+    border: none;
+    background: transparent;
+    border-radius: 6px;
+    cursor: pointer;
+    text-align: left;
+    font-size: 12.5px;
+    line-height: 1.5;
+    color: var(--color-foreground-muted);
+    transition: background 0.12s ease;
+
+    &:hover {
+      background: var(--color-surface-hover, rgba(0, 0, 0, 0.04));
+    }
+  }
+
+  &__status {
+    display: inline-flex;
+    align-items: center;
+    flex: none;
+    color: var(--color-foreground-muted);
+  }
+
+  &--success &__status {
+    color: var(--color-success);
+  }
+  &--failed &__status {
+    color: var(--color-danger);
+  }
+  &--running &__status {
+    color: var(--color-primary);
+  }
+
+  &__spin {
+    animation: tool-line-spin 1s linear infinite;
+  }
+
+  &__op {
+    display: inline-flex;
+    align-items: center;
+    flex: none;
+    color: var(--color-foreground-muted);
+  }
+
+  &__verb {
+    flex: none;
+    color: var(--color-foreground);
+    font-weight: 500;
+  }
+
+  &__name {
+    flex: none;
+    max-width: 340px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+    color: var(--color-brand-600, var(--color-primary));
+  }
+
+  &__delta {
+    flex: none;
+    display: inline-flex;
+    gap: 5px;
+    font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+    font-size: 12px;
+  }
+
+  &__add {
+    color: var(--color-success);
+  }
+
+  &__del {
+    color: var(--color-danger);
+  }
+
+  &__spacer {
+    flex: 1 1 auto;
+  }
+
+  &__tool {
+    flex: none;
+    font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+    font-size: 11px;
+    color: var(--color-foreground-subtle, var(--color-foreground-muted));
+    opacity: 0.7;
+  }
+
+  &__detail {
+    margin: 2px 0 4px 26px;
+    padding: 6px 8px;
+    border-left: 2px solid var(--color-border);
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  &__detail-block {
+    display: flex;
+    gap: 6px;
+    font-size: 12px;
+    line-height: 1.5;
+  }
+
+  &__detail-label {
+    flex: none;
+    color: var(--color-foreground-muted);
+  }
+
+  &__detail-value {
+    margin: 0;
+    white-space: pre-wrap;
+    word-break: break-all;
+    font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+    color: var(--color-foreground);
+  }
+}
+
+@keyframes tool-line-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

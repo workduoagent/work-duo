@@ -224,7 +224,7 @@ export default function McpDetailPage() {
                     <Descriptions column={2} size="middle" bordered>
                       <Descriptions.Item label="服务别名">{mcp.aliasName || '-'}</Descriptions.Item>
                       <Descriptions.Item label="服务标识">
-                        <code style={{ fontFamily: 'monospace' }}>{mcp.mcpName}</code>
+                        <code style={{ fontFamily: 'var(--font-mono, monospace)' }}>{mcp.mcpName}</code>
                       </Descriptions.Item>
                       <Descriptions.Item label="协议类型">
                         <Tag color="blue">{getMcpProtocolLabel(mcp.protocolType)}</Tag>

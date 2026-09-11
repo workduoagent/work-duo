@@ -27,12 +27,15 @@ use tokio::process::Command as AsyncCommand;
 use tokio::time::timeout;
 use tokio::time::Duration;
 
+use crate::agent::events;
 use crate::agent::tools::AgentTool;
 use crate::agent::tools::PathGuard;
 use crate::agent::tools::PermissionLevel;
 use crate::agent::tools::ToolContext;
 use crate::agent::tools::ToolError;
 use crate::agent::tools::ToolRegistry;
+use crate::agent::types::ChoiceOption;
+use crate::agent::types::ChoiceRequest;
 use crate::mamba_manager::MambaManager;
 use crate::mamba_manager::run_python_in_sandbox;
 use crate::bun_manager::BunManager;
@@ -819,13 +822,20 @@ impl AgentTool for EditFileTool {
             }
         }
         let count = original.matches(old_str).count();
+        // 改动 1：old_str 不匹配时，把文件前 800 字符回灌给模型，让它据此自行修正，
+        // 避免「未找到 → 凭记忆再猜 → 再次失败」的死循环。
+        let snippet = original.chars().take(800).collect::<String>();
         if count == 0 {
-            return Err(ToolError::InvalidArgs("old_str 在文件中未找到".into()));
+            return Err(ToolError::InvalidArgs(format!(
+                "old_str 在文件中未找到。当前文件实际内容前 800 字符如下，请据此修正 old_str 后重试：\n---\n{}\n---\n提示：old_str 必须与文件中的文本完全一致（含缩进、空格、换行）。建议先用 native__read_file 读取完整文件内容。",
+                snippet
+            )));
         }
         if count > 1 {
-            return Err(ToolError::InvalidArgs(
-                "old_str 在文件中出现多次，无法确定替换位置".into(),
-            ));
+            return Err(ToolError::InvalidArgs(format!(
+                "old_str 在文件中出现 {} 次，无法确定替换位置。当前文件实际内容前 800 字符如下，请据此修正 old_str 使其唯一后重试：\n---\n{}\n---\n提示：old_str 必须与文件中的文本完全一致（含缩进、空格、换行），且应只出现一次。",
+                count, snippet
+            )));
         }
         let updated = original.replace(old_str, new_str);
         let updated_bytes = updated.len();
@@ -1147,6 +1157,14 @@ impl AgentTool for ExecuteCommandTool {
 
 /* ----------------------------- run_python_sandbox ----------------------------- */
 
+/// 工作空间路径归一化：去掉 Windows 长路径前缀 `\\?\`，并把反斜杠统一为正斜杠。
+/// 注入到沙箱脚本后，模型无需再做 `WORKSPACE.replace(/^\\\\?\\/, '')` 之类的路径 mangling。
+fn normalize_workspace_path(ws: &std::path::Path) -> String {
+    let s = ws.to_string_lossy();
+    let s = s.strip_prefix(r"\\?\").unwrap_or(&s);
+    s.replace('\\', "/")
+}
+
 pub struct RunPythonSandboxTool {
     app: AppHandle,
 }
@@ -1173,7 +1191,8 @@ impl AgentTool for RunPythonSandboxTool {
              - 不要执行系统 python / python3 命令，不要用 where python、python --version 探测本机 Python；\n\
              - 绝对禁止用 winget / choco / brew / apt / pip 安装系统级 Python 或任何系统软件——\
              这会脱离沙箱并污染用户本机环境；缺库时交给运行时自动安装即可。\n\
-             本工具需用户审批，且要求该智能体已开启沙箱权限。",
+            本工具需用户审批，且要求该智能体已开启沙箱权限。\n\
+            脚本中已注入 `WORKSPACE` 变量（工作空间绝对路径字符串），文件操作请用 `os.path.join(WORKSPACE, '相对路径')` 拼接，不要使用相对路径直接 open。",
             json!({
                 "code": {
                     "type": "string",
@@ -1247,7 +1266,14 @@ impl AgentTool for RunPythonSandboxTool {
             std::fs::create_dir_all(&dir)
                 .map_err(|e| ToolError::ExecutionFailed(format!("创建脚本目录失败：{e}")))?;
             let p = dir.join(&safe_name);
-            std::fs::write(&p, code)
+            // 改动 2B：code 落盘前头部注入 WORKSPACE 常量（工作空间绝对路径），
+            // 模型脚本里可直接引用，避免相对路径解析到临时目录导致 ENOENT。
+            let injected = format!(
+                "WORKSPACE = r\"{}\"\n{}",
+                normalize_workspace_path(&ws),
+                code
+            );
+            std::fs::write(&p, &injected)
                 .map_err(|e| ToolError::ExecutionFailed(format!("写入脚本失败：{e}")))?;
             // 落盘后仍过 PathGuard，确保最终执行路径未逃逸工作空间（安全边界不降低）
             let abs = PathGuard::check(&p.to_string_lossy(), ctx)?;
@@ -1325,7 +1351,8 @@ impl AgentTool for RunNodeSandboxTool {
              - 不要执行系统 node / bun 命令，不要用 `node --version`、`bun --version` 探测本机运行时；\n\
              - 绝对禁止用 `npm install -g` / 系统包管理器安装全局 Node 环境或任何系统软件——\
              这会脱离沙箱并污染用户本机环境；缺包时交给运行时自动安装即可。\n\
-             本工具需用户审批，且要求该智能体已开启沙箱权限。",
+            本工具需用户审批，且要求该智能体已开启沙箱权限。\n\
+            脚本中已注入 `WORKSPACE` 常量（工作空间绝对路径），文件操作请用 `WORKSPACE + '/相对路径'` 拼接，不要使用相对路径直接 open。",
             json!({
                 "code": {
                     "type": "string",
@@ -1398,7 +1425,14 @@ impl AgentTool for RunNodeSandboxTool {
             std::fs::create_dir_all(&dir)
                 .map_err(|e| ToolError::ExecutionFailed(format!("创建脚本目录失败：{e}")))?;
             let p = dir.join(&safe_name);
-            std::fs::write(&p, code)
+            // 改动 2A：code 落盘前头部注入 WORKSPACE 常量（JSON 转义处理反斜杠/引号），
+            // 模型脚本里可直接引用，避免相对路径解析到临时目录导致 ENOENT。
+            let injected = format!(
+                "const WORKSPACE = {};\n{}",
+                serde_json::to_string(&normalize_workspace_path(&ws)).unwrap_or_default(),
+                code
+            );
+            std::fs::write(&p, &injected)
                 .map_err(|e| ToolError::ExecutionFailed(format!("写入脚本失败：{e}")))?;
             // 落盘后仍过 PathGuard，确保最终执行路径未逃逸工作空间。
             let abs = PathGuard::check(&p.to_string_lossy(), ctx)?;
@@ -2660,6 +2694,143 @@ impl AgentTool for HttpRequestTool {
     }
 }
 
+/* ----------------------------- 方案推荐：native__ask_user_choice ----------------------------- */
+
+/// 方案推荐挂起超时（秒）：用户不点选时避免工具调用永久挂起，超时回灌「未收到选择」。
+const CHOICE_TIMEOUT_SECS: u64 = 600;
+
+/// 方案推荐：Agent 主动询问用户（HITL Choice Chip）。
+///
+/// 挂起机制：emit `agent-choice-needed` 推前端渲染选项弹窗，同时通过 `ChoiceHub` oneshot
+/// 通道挂起当前工具调用，直到前端经 `submit_choice_decision` 回传所选 option_id 唤醒；
+/// 结果以可读文本（「用户选择了：<label>」）回传，agent 据此续写。与审批（RequireApproval）
+/// 区分：本工具是「信息不足/多分支决策」的主动询问，不执行危险动作，故 ReadSafe。
+pub struct AskUserChoiceTool {
+    app: AppHandle,
+}
+
+#[async_trait]
+impl AgentTool for AskUserChoiceTool {
+    fn name(&self) -> String {
+        "native__ask_user_choice".into()
+    }
+    fn tool_definition(&self) -> Value {
+        def(
+            "native__ask_user_choice",
+            "当需要用户在多个合理方案间做选择时调用（而非开放文本追问）。给出 2–5 个明确选项，用户点选后其结果（选中项文案/值）会作为本工具结果返回，供你据此续写。适用于：多分支路径决策、范围/格式确认、取舍对比。不要用于危险动作授权（那走审批弹窗）。",
+            json!({
+                "question": { "type": "string", "description": "向用户提出的问题" },
+                "options": {
+                    "type": "array",
+                    "description": "可选项列表（2–5 个）",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "id": { "type": "string", "description": "选项唯一 id（前端回传时用）" },
+                            "label": { "type": "string", "description": "展示文案" },
+                            "description": { "type": "string", "description": "补充说明（可选）" },
+                            "value": { "type": "string", "description": "机器语义值（可选，如具体路径/模型名；回传时一并带回）" }
+                        },
+                        "required": ["id", "label"]
+                    }
+                }
+            }),
+            &["question", "options"],
+        )
+    }
+    fn check_permission(&self, _args: &Value) -> PermissionLevel {
+        PermissionLevel::ReadSafe
+    }
+    async fn execute(&self, args: Value, ctx: &ToolContext) -> Result<String, ToolError> {
+        let question = args
+            .get("question")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| ToolError::InvalidArgs("ask_user_choice 缺少 question 参数".into()))?
+            .to_string();
+        let options = args
+            .get("options")
+            .and_then(|v| v.as_array())
+            .ok_or_else(|| ToolError::InvalidArgs("ask_user_choice 缺少 options 参数".into()))?;
+        if options.len() < 2 {
+            return Err(ToolError::InvalidArgs(
+                "ask_user_choice 的 options 至少需要 2 项".into(),
+            ));
+        }
+        let mut opts = Vec::with_capacity(options.len());
+        for (i, o) in options.iter().enumerate() {
+            let id = o
+                .get("id")
+                .and_then(|v| v.as_str())
+                .unwrap_or(&format!("opt_{i}"))
+                .to_string();
+            let label = o
+                .get("label")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            if label.trim().is_empty() {
+                return Err(ToolError::InvalidArgs(format!(
+                    "ask_user_choice 第 {i} 项缺少 label"
+                )));
+            }
+            let description = o
+                .get("description")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+            let value = o.get("value").and_then(|v| v.as_str()).map(|s| s.to_string());
+            opts.push(ChoiceOption {
+                id,
+                label,
+                description,
+                value,
+            });
+        }
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let choice_id = format!("choice-{}-{}", ctx.agent_id, nanos);
+        let req = ChoiceRequest {
+            choice_id: choice_id.clone(),
+            question,
+            options: opts,
+        };
+        events::emit_choice_needed(&self.app, &req);
+        let rx = self
+            .app
+            .state::<crate::agent::runtime::AgentRuntime>()
+            .choice
+            .suspend(req)
+            .await;
+        let outcome = match timeout(Duration::from_secs(CHOICE_TIMEOUT_SECS), rx).await {
+            Ok(Ok(o)) => o,
+            Ok(Err(_)) => {
+                // 通道关闭（停止触发 drop Sender）：回灌「已取消」，避免循环挂死。
+                self.app
+                    .state::<crate::agent::runtime::AgentRuntime>()
+                    .choice
+                    .cancel(&choice_id)
+                    .await;
+                return Ok("（用户已取消选择）".into());
+            }
+            Err(_) => {
+                // 超时：清理挂起项后回灌「未收到选择」。
+                self.app
+                    .state::<crate::agent::runtime::AgentRuntime>()
+                    .choice
+                    .cancel(&choice_id)
+                    .await;
+                return Ok("（用户选择超时，未收到选择）".into());
+            }
+        };
+        let text = match outcome.value {
+            Some(v) => format!("用户选择了：{}（值：{}）", outcome.label, v),
+            None => format!("用户选择了：{}", outcome.label),
+        };
+        Ok(text)
+    }
+}
+
 /* ----------------------------- register_native_tools ----------------------------- */
 
 pub fn register_native_tools(registry: &mut ToolRegistry, app: &AppHandle, sandbox_enabled: bool, memory_mode: &str) {
@@ -2686,6 +2857,8 @@ pub fn register_native_tools(registry: &mut ToolRegistry, app: &AppHandle, sandb
     // 首梯队补全（系统能力，沙箱开/关都注册）：正则替换 + HTTP 请求。
     registry.register(Arc::new(RegexReplaceTool));
     registry.register(Arc::new(HttpRequestTool));
+    // 方案推荐：Agent 主动询问用户（HITL Choice Chip），挂起等待选择后回传。
+    registry.register(Arc::new(AskUserChoiceTool { app: app.clone() }));
     if !sandbox_enabled {
         // 非沙箱（宿主）模式：提供宿主 shell 直接执行；沙箱运行时未启用，不注册。
         registry.register(Arc::new(ExecuteCommandTool));

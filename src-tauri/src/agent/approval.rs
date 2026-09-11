@@ -20,9 +20,11 @@ use crate::agent::types::ApprovalRequest;
 #[serde(rename_all = "camelCase")]
 pub struct ApprovalDecisionInput {
     pub approval_id: String,
-    pub approved: bool,
+    /// 决策：approve | skip | takeover。
+    pub decision: String,
+    /// 接管时携带的用户补充指示（takeover 时有效，空等价于 approve）。
     #[serde(default)]
-    pub reason: Option<String>,
+    pub guidance: Option<String>,
 }
 
 /// 单个挂起的审批：发送端（运行时持有，接收决策）。
@@ -31,10 +33,15 @@ struct Pending {
 }
 
 /// 审批结果（发回运行时）。
+///
+/// - `Approve`：授权执行；
+/// - `Skip`：跳过本次调用（不执行、不重试，按原计划继续下一步，记 skipped）；
+/// - `Takeover(guidance)`：授权执行 + 注入用户补充指示引导重跑（Mixed-initiative）。
 #[derive(Debug, Clone)]
-pub struct ApprovalOutcome {
-    pub approved: bool,
-    pub reason: Option<String>,
+pub enum ApprovalOutcome {
+    Approve,
+    Skip,
+    Takeover(String),
 }
 
 /// 审批管理器（托管于 Tauri State）。
@@ -73,27 +80,28 @@ impl ApprovalManager {
     /// 前端回传决策：唤醒对应挂起的任务。无匹配 id 时返回 false（已超时/不存在）。
     pub async fn resolve(&self, decision: ApprovalDecisionInput) -> bool {
         let approval_id = decision.approval_id.clone();
-        let approved = decision.approved;
-        let reason = decision.reason.clone();
+        let outcome = match decision.decision.to_lowercase().as_str() {
+            "approve" => ApprovalOutcome::Approve,
+            "skip" => ApprovalOutcome::Skip,
+            "takeover" => ApprovalOutcome::Takeover(decision.guidance.unwrap_or_default()),
+            other => {
+                tracing::info!("[agent] approval: 未知决策 {}，按跳过处理", other);
+                ApprovalOutcome::Skip
+            }
+        };
         let mut pending = self.pending.lock().await;
         if let Some(p) = pending.remove(&approval_id) {
             // 通道已关闭（接收方被 drop）则忽略。
-            let sent = p.tx.send(ApprovalOutcome {
-                approved,
-                reason,
-            }).is_ok();
+            let sent = p.tx.send(outcome).is_ok();
             tracing::info!(
-                "[agent] approval: 收到决策 approval_id={} approved={} sent={} 剩余pending={}个",
-                approval_id,
-                approved,
-                sent,
-                pending.len(),
+                "[agent] approval: 收到决策 approval_id={} sent={} 剩余pending={}个",
+                approval_id, sent, pending.len(),
             );
             sent
         } else {
             tracing::info!(
-                "[agent] approval: 未找到挂起项 approval_id={} approved={}（可能已超时/取消）",
-                approval_id, approved
+                "[agent] approval: 未找到挂起项 approval_id={}（可能已超时/取消）",
+                approval_id
             );
             false
         }

@@ -34,7 +34,6 @@ import {
   Box,
   Trash2,
   Square,
-  Sparkles,
   ChevronRight,
   ChevronLeft,
   Copy,
@@ -184,10 +183,9 @@ import { MarkdownRenderer } from '@/components/markdown/MarkdownRenderer'
 import { useAgentSession } from './session/useAgentSession'
 import { TracePanel } from './session/TracePanel'
 import { ArtifactCanvas } from './session/ArtifactCanvas'
-import { PlanToolTimeline } from './session/PlanToolTimeline'
-import { ApprovalNotify } from './session/ApprovalNotify'
-import { RecoveryPanel } from './session/RecoveryPanel'
-import type { ApprovalDecision, ToolStep, PlanStep, ChatAttachmentInput, ArtifactRef, ReadArtifactResult, BranchFromStepInput, BranchStep, PlanDAG } from './session/types'
+import { ToolStepLine } from './session/ToolStepLine'
+import { UserPromptPanel } from './session/UserPromptPanel'
+import type { ToolStep, PlanStep, ChatAttachmentInput, ArtifactRef, ReadArtifactResult, BranchFromStepInput, BranchStep, PlanDAG } from './session/types'
 import type {
   AgentInfo,
   AgentConversationSession,
@@ -361,64 +359,64 @@ async function resolveWorkspaceDir(agent: AgentInfo): Promise<string | null> {
 function useTypewriter(text: string, active: boolean, speed = 10) {
   const [displayed, setDisplayed] = useState('')
   const idxRef = useRef(0)
+  const textRef = useRef(text)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  // 始终持有最新目标文本，供自驱定时器读取，避免闭包捕获到旧文本
+  textRef.current = text
+
   useEffect(() => {
-    if (!active || !text) {
-      setDisplayed(text)
-      idxRef.current = text.length
-      if (timerRef.current) clearTimeout(timerRef.current)
+    if (!active) {
+      // 流式结束：直接展示完整文本
+      setDisplayed(textRef.current)
+      idxRef.current = textRef.current.length
+      if (timerRef.current) {
+        clearTimeout(timerRef.current)
+        timerRef.current = null
+      }
       return
     }
-    if (text.startsWith(displayed)) {
-      idxRef.current = displayed.length
-    } else {
-      setDisplayed('')
-      idxRef.current = 0
-    }
-    const step = () => {
-      const target = text
-      if (idxRef.current >= target.length) return
+    // 流式进行中：自驱定时器持续吐字，text 高频更新不再打断它
+    const tick = () => {
+      const target = textRef.current
+      if (idxRef.current > target.length) idxRef.current = target.length
+      if (idxRef.current >= target.length) {
+        timerRef.current = null
+        return
+      }
       const remaining = target.length - idxRef.current
       // 落后超过 200 字符时按比例追赶（约 50 步内追平），否则逐字符推进
       idxRef.current += remaining > 200 ? Math.ceil(remaining / 50) : 1
       setDisplayed(target.slice(0, idxRef.current))
-      timerRef.current = setTimeout(step, speed)
+      timerRef.current = setTimeout(tick, speed)
     }
-    timerRef.current = setTimeout(step, speed)
+    // 仅当没有正在运行的定时器时才启动，避免重复堆叠
+    if (timerRef.current == null) {
+      timerRef.current = setTimeout(tick, speed)
+    }
+    // 注意：此处不清理定时器，否则 text 高频更新会把打字机清停导致卡住
+  }, [text, active, speed])
+
+  // 组件卸载时清理定时器，避免向已卸载组件 setState
+  useEffect(() => {
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current)
     }
-  }, [text, active, speed, displayed])
+  }, [])
 
   return displayed
 }
 
-function ThoughtPanel({ thoughts }: { thoughts: string[] }) {
-  const [open, setOpen] = useState(false)
-  if (thoughts.length === 0) return null
+function ThoughtPanel({ thoughts, active = false }: { thoughts: string[]; active?: boolean }) {
+  // 思考内容不再用「胶囊」包裹，也不折叠：直接平铺到对话流，按打字机节奏逐字输出
+  // （与作答同款 useTypewriter；思考进行中带光标，结束后光标消失、内容保留）。
+  const joined = thoughts.join('\n')
+  const shown = useTypewriter(joined, active, 8)
+  if (!joined) return null
   return (
-    <div className="agent-chat__thinking-panel">
-      <button
-        type="button"
-        className="agent-chat__thinking-head"
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
-      >
-        <Sparkles size={14} />
-        <span>已深度思考（{thoughts.length} 步）</span>
-        <ChevronRight size={14} className={`agent-chat__thinking-caret${open ? ' is-open' : ''}`} />
-      </button>
-      {open && (
-        <div className="agent-chat__thinking-body">
-          {thoughts.map((t, i) => (
-            <div key={`n-${i}`} className="agent-chat__thinking-item">
-              <span className="agent-chat__thinking-dot" />
-              <span className="agent-chat__thinking-note">{t}</span>
-            </div>
-          ))}
-        </div>
-      )}
+    <div className="agent-chat__thinking-inline">
+      {shown}
+      {active && <span className="agent-chat__type-caret" />}
     </div>
   )
 }
@@ -714,12 +712,10 @@ function LiveTokenCounter({
 function MessageActions({
   msg,
   agent,
-  firstMessageAt,
   onRegenerate,
 }: {
   msg: ChatMessage
   agent: AgentInfo
-  firstMessageAt?: number
   onRegenerate: () => void
 }) {
   const { message } = useNotify()
@@ -744,8 +740,6 @@ function MessageActions({
     window.speechSynthesis.speak(u)
   }, [msg.content, message])
 
-  const conversationMs = msg.completedAt && firstMessageAt ? msg.completedAt - firstMessageAt : 0
-
   return (
     <div className="agent-chat__msg-footer">
       <div className="agent-chat__msg-actions">
@@ -760,20 +754,6 @@ function MessageActions({
         <button type="button" title="重新生成" onClick={onRegenerate}>
           <RefreshCw size={14} />
         </button>
-      </div>
-      <div className="agent-chat__msg-meta">
-        <span title="本次消耗 token 数">
-          <Coins size={13} />
-          {msg.tokenCount ?? estimateTokens(msg.content)} tokens
-        </span>
-        <span title="对话总时长">
-          <MessageSquare size={13} />
-          {formatConversationDuration(conversationMs)}
-        </span>
-        <span title="本轮耗时">
-          <Clock size={13} />
-          {formatDuration(msg.durationMs ?? 0)}
-        </span>
       </div>
     </div>
   )
@@ -1234,7 +1214,7 @@ export default function AgentChatPage() {
 
   // 会话状态机（必须早于任何引用 session.* 的回调/依赖数组，否则 TDZ）。
   const session = useAgentSession()
-  const { toolSteps, streamingText, isStreaming, statusText, thoughts, planSteps, isRunning, pendingApproval, run, submitDecision, reset, cancel, lastTaskUsage, liveTokenUsage, taskError, artifacts, recovery, resolveRecovery } =
+  const { toolSteps, streamingText, isStreaming, statusText, thoughts, planSteps, isRunning, pendingApproval, run, submitDecision, reset, cancel, lastTaskUsage, liveTokenUsage, taskError, artifacts, recovery, resolveRecovery, pendingChoice, submitChoice } =
     session
 
   const [agent, setAgent] = useState<AgentInfo | undefined>()
@@ -1305,7 +1285,8 @@ export default function AgentChatPage() {
   const [windowDrag, setWindowDrag] = useState(false)
   const dragDepth = useRef(0)
   // 右侧 Tab 面板（执行轨迹 / 产物）：Phase 3 §3.1 改为右栏 Tab 展示
-  const [rightOpen, setRightOpen] = useState(true)
+  // 右栏（执行轨迹/画布/产物）默认关闭，用户按需展开（避免默认挤占对话区）。
+  const [rightOpen, setRightOpen] = useState(false)
   const [rightTab, setRightTab] = useState<'trace' | 'canvas' | 'artifacts'>('trace')
   // 右栏宽度（可鼠标拖拽调节），默认 340px
   const [rightWidth, setRightWidth] = useState(340)
@@ -1917,15 +1898,10 @@ export default function AgentChatPage() {
     window.addEventListener('mouseup', onUp)
   }, [inputHeight])
 
-  const handleDecision = useCallback(
-    (approved: boolean, reason?: string) => {
+  const handleApproval = useCallback(
+    (decision: 'approve' | 'skip' | 'takeover', guidance?: string) => {
       if (!pendingApproval) return
-      const decision: ApprovalDecision = {
-        approvalId: pendingApproval.approvalId,
-        approved,
-        reason,
-      }
-      void submitDecision(decision)
+      void submitDecision({ approvalId: pendingApproval.approvalId, decision, guidance })
     },
     [pendingApproval, submitDecision],
   )
@@ -2627,8 +2603,15 @@ export default function AgentChatPage() {
         </div>
       )}
       {/* 审批授权：右下角通知形式，不再嵌入对话流 */}
-      <ApprovalNotify approval={pendingApproval} agentName={agent?.name ?? ''} onDecision={handleDecision} />
-      <RecoveryPanel recovery={recovery} agentName={agent?.name ?? ''} onResolve={resolveRecovery} />
+      <UserPromptPanel
+        approval={pendingApproval}
+        recovery={recovery}
+        choice={pendingChoice}
+        agentName={agent?.name ?? ''}
+        onApproval={handleApproval}
+        onResolve={resolveRecovery}
+        onSubmitChoice={submitChoice}
+      />
 
       {/* 左侧会话列表 */}
       <aside className="agent-chat__side">
@@ -2843,6 +2826,10 @@ export default function AgentChatPage() {
           {messages.map((m, idx) => {
             const isLastAgent = idx === messages.length - 1 && m.role === 'agent'
             const content = isLastAgent ? displayedContent : m.content
+            const conversationMs =
+              m.completedAt && messages[0]?.createdAt
+                ? m.completedAt - messages[0].createdAt
+                : 0
             return (
               <div key={m.id} className={`agent-chat__msg agent-chat__msg--${m.role}`}>
                 <div
@@ -2861,6 +2848,27 @@ export default function AgentChatPage() {
                   )}
                 </div>
                 <div className="agent-chat__content">
+                  {m.role === 'agent' && (
+                    <div className="agent-chat__msg-head">
+                      <span className="agent-chat__msg-name">{agent.name}</span>
+                      {m.completedAt && (
+                        <div className="agent-chat__msg-meta">
+                          <span title="本次消耗 token 数">
+                            <Coins size={13} />
+                            {m.tokenCount ?? estimateTokens(content)} tokens
+                          </span>
+                          <span title="对话总时长">
+                            <MessageSquare size={13} />
+                            {formatConversationDuration(conversationMs)}
+                          </span>
+                          <span title="本轮耗时">
+                            <Clock size={13} />
+                            {formatDuration(m.durationMs ?? 0)}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  )}
                   {m.attachments && m.attachments.length > 0 && (
                     <div className="agent-chat__imgs">
                       {m.attachments.map((att, i) =>
@@ -2901,15 +2909,18 @@ export default function AgentChatPage() {
                     </div>
                   )}
                   {(m.thought?.length ?? 0) > 0 && (
-                    <ThoughtPanel thoughts={m.thought ?? []} />
+                    <ThoughtPanel
+                      thoughts={m.thought ?? []}
+                      active={isLastAgent && (isStreaming || isRunning)}
+                    />
                   )}
-                  {m.role === 'agent' &&
-                    ((m.toolSteps?.length ?? 0) > 0 || (m.planSteps?.length ?? 0) > 0) && (
-                      <PlanToolTimeline
-                        planSteps={m.planSteps ?? (isLastAgent ? planSteps : undefined)}
-                        toolSteps={m.toolSteps}
-                      />
-                    )}
+                  {m.role === 'agent' && (m.toolSteps?.length ?? 0) > 0 && (
+                    <div className="agent-chat__tools">
+                      {m.toolSteps!.map((t) => (
+                        <ToolStepLine key={t.callId} step={t} />
+                      ))}
+                    </div>
+                  )}
                   <div className="agent-chat__bubble">
                     {m.role === 'agent' ? (
                       content ? (
@@ -2943,7 +2954,6 @@ export default function AgentChatPage() {
                     <MessageActions
                       msg={m}
                       agent={agent}
-                      firstMessageAt={messages[0]?.createdAt}
                       onRegenerate={() => handleRegenerate(m.id)}
                     />
                   )}

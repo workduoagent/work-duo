@@ -14,6 +14,7 @@ use crate::agent::memory::MemoryItem;
 use crate::agent::memory::SquadMemoryItem;
 use crate::agent::recovery::RecoveryRequest;
 use crate::agent::types::ApprovalRequest;
+use crate::agent::types::ChoiceRequest;
 use crate::agent::types::ArtifactRef;
 use crate::agent::types::IntentProfile;
 use crate::agent::types::ToolStep;
@@ -30,6 +31,8 @@ pub const EVT_TOKEN_UPDATE: &str = "agent-token-update";
 pub const EVT_ARTIFACT_CREATED: &str = "agent-artifact-created";
 /// 步骤级恢复：子任务自动重试耗尽仍失败，挂起等待用户决策（重试/跳过/接管）。
 pub const EVT_RECOVERY_NEEDED: &str = "agent-recovery-needed";
+/// 方案推荐：Agent 主动询问用户，挂起等待选择（选项列表）。
+pub const EVT_CHOICE_NEEDED: &str = "agent-choice-needed";
 /// 分支重规划：前端「从此步骤分支」触发的双分支对比结果（原尾段 vs 新分支），
 /// 供画布分支对比横幅渲染 + 「应用分支」按钮。
 pub const EVT_PLAN_BRANCH: &str = "agent-plan-branch";
@@ -212,6 +215,11 @@ pub fn emit_thinking_chunk(app: &AppHandle, text: &str, done: bool, layer: &str)
 /// 高危操作挂起（等待前端审批）。
 pub fn emit_awaiting_approval(app: &AppHandle, req: &ApprovalRequest) {
     emit(app, EVT_APPROVAL, req);
+}
+
+/// 方案推荐挂起（Agent 主动询问用户，等待前端选择）。
+pub fn emit_choice_needed(app: &AppHandle, req: &ChoiceRequest) {
+    emit(app, EVT_CHOICE_NEEDED, req);
 }
 
 /// 整轮任务结束载荷：携带本轮真实 token 用量（prompt + completion，跨所有 ReAct 轮累计）。

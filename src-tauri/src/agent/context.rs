@@ -542,16 +542,19 @@ pub(crate) async fn load_session_background(
             let mut graph_lines: Vec<String> = Vec::new();
             for n in g.session_tasks(sid) {
                 let st = n.props.get("status").and_then(|v| v.as_str()).unwrap_or("");
-                let summary = n.props.get("summary").and_then(|v| v.as_str()).unwrap_or("").trim();
-                if (st == "completed" || st == "obsolete") && !summary.is_empty() {
-                    graph_lines.push(format!("- {summary}"));
+                let title = n.props.get("title").and_then(|v| v.as_str()).unwrap_or("").trim();
+                // 只注入「步骤标题」，刻意不注入 verbose 的 summary（其中含完整文件名 phase5/phase6...）。
+                // 小模型会把 summary 里的文件名误当作当前任务目标，或把历史成果照抄进自己的回复。
+                // 跨轮感知只需知道「做过什么动作」即可，文件名由当前轮次的任务详述决定。
+                if (st == "completed" || st == "obsolete") && !title.is_empty() {
+                    graph_lines.push(format!("- [历史·前序轮次已完成] {title}"));
                 }
             }
             if !graph_lines.is_empty() {
                 if !bg.is_empty() {
                     bg.push_str("\n\n");
                 }
-                bg.push_str("【本会话已完成任务】\n");
+                bg.push_str("【本会话历史步骤（前序轮次已完成，仅供参考）】\n");
                 bg.push_str(&graph_lines.join("\n"));
             }
         }

@@ -21,7 +21,7 @@
  */
 
 import { isTauri } from '@/core/config'
-import { fetch as tauriFetch } from '@tauri-apps/plugin-http'
+import { invoke } from '@tauri-apps/api/core'
 import { testXfyun } from '@/core/model/iflytek'
 import type { ModelConfig } from '@/core/file/model-file'
 
@@ -33,6 +33,13 @@ export interface ModelTestResult {
   status?: number
   elapsedMs?: number
 }
+
+/**
+ * 探测超时（毫秒）。Ollama 等本地模型在「冷加载」（首次拉起尚未驻留显存的模型）时，
+ * 首包延迟可能远超普通云端 API；8s 过短会触发 AbortController 中断，plugin-http 把中断
+ * 表现为 "Request canceled"。放宽到 30s 以容纳冷加载与首 token 延迟。
+ */
+const PROBE_TIMEOUT_MS = 30000
 
 /** 直接使用用户填写的完整 URL，仅按末尾关键字选请求体与方法（不做路径拼接） */
 function resolveProbe(
@@ -76,25 +83,34 @@ function resolveProbe(
 }
 
 /**
- * 最小对话请求体——**严格对齐智能体 call_llm_stream_once 的真实可用请求**：
- *  - 基础体固定为 { model, messages, stream:true, stream_options:{include_usage:true} }
- *  - 额外注入模型选中分类的参数对象（即 DB 的 config 列内容，camelCase 如 maxTokens/
- *    temperature），与智能体从 llm_config 注入的行为一致（只跳过 model/messages/
- *    stream/stream_options，reasoning 归一化同 runtime.rs）。
- * 这样探针的请求就与「智能体实际挂载该模型发出的请求」完全一致，避免「测试 400、
- * 挂载后却正常」的假阴性（之前手写 max_tokens:1 与真实参数脱节正是 400 根因）。
+ * 最小对话请求体——**连通性探测使用非流式最小请求，与 Java ChatTestClient#test 对齐**：
+ *  - 基础体固定为 { model, messages, max_tokens }，不设 stream / stream_options，
+ *    不携带 Accept: text/event-stream。
+ *  - 目的仅是验证「网络可达 + 鉴权 + 模型可用」；流式 + stream_options 由智能体真实
+ *    调用（call_llm_stream_once）承担，探针不应引入 SSE 相关歧义或触发服务端对
+ *    stream_options 的不兼容（部分 Ollama 版本/网关对 stream_options 返回 502/400）。
+ *  - 额外注入模型选中分类的参数对象（DB 的 config 列，camelCase 如 maxTokens/
+ *    temperature），与智能体从 llm_config 注入一致，仅跳过基础体已固定的键
+ *    （model/messages/stream/stream_options/max_tokens/maxTokens），reasoning 归一化同 runtime.rs。
  */
 function chatBody(model: string, config?: Record<string, unknown>): string {
   const body: Record<string, unknown> = {
     model,
-    messages: [{ role: 'user', content: 'hi' }],
-    stream: true,
-    stream_options: { include_usage: true },
+    messages: [{ role: 'user', content: '模型测试，请回复 OK' }],
+    max_tokens: 10,
   }
   if (config) {
     for (const [k, v] of Object.entries(config)) {
-      // 与 runtime.rs 一致：这些键由基础体固定提供，配置里的同名键不覆盖
-      if (k === 'model' || k === 'messages' || k === 'stream' || k === 'stream_options') continue
+      // 基础体已固定提供，配置里的同名键不覆盖；max_tokens/maxTokens 始终用探测的 10
+      if (
+        k === 'model' ||
+        k === 'messages' ||
+        k === 'stream' ||
+        k === 'stream_options' ||
+        k === 'max_tokens' ||
+        k === 'maxTokens'
+      )
+        continue
       // reasoning 归一化：true → {}；false / 缺失 → 省略（对齐 runtime.rs）
       if (k === 'reasoning') {
         if (v === true) body['reasoning'] = {}
@@ -107,13 +123,10 @@ function chatBody(model: string, config?: Record<string, unknown>): string {
   return JSON.stringify(body)
 }
 
-/** 构造请求头——与智能体 call_llm_stream_once 对齐（含 Accept: text/event-stream） */
+/** 构造请求头——连通性探测为非流式，仅 Content-Type + 可选鉴权（与 Java ChatTestClient 对齐） */
 function buildHeaders(apiKey?: string): Record<string, string> {
   const h: Record<string, string> = {
     'Content-Type': 'application/json',
-    // 智能体在 call_llm_stream_once 中显式声明此头；部分严格网关据此决定 SSE 响应，
-    // 探针补齐以避免因缺头导致的非 2xx 误判。
-    Accept: 'text/event-stream',
   }
   if (apiKey) h['Authorization'] = `Bearer ${apiKey}`
   return h
@@ -126,48 +139,64 @@ function buildHeaders(apiKey?: string): Record<string, string> {
  * 失败，而是标注为 warn（可达但有提示）/ error（不可达或服务端错误），避免把
  * "服务已响应" 误读成 "连不上"。
  */
-function classify(code: number, elapsedMs: number): ModelTestResult {
+/** 尝试从 OpenAI 标准错误响应体中提取 error.message（对齐 Java ChatTestClient 的错误解析） */
+function parseOpenAIError(body?: string): string | undefined {
+  if (!body) return undefined
+  try {
+    const json = JSON.parse(body) as { error?: { message?: string } }
+    if (json?.error?.message) return json.error.message
+  } catch {
+    /* 非 JSON 体忽略 */
+  }
+  return undefined
+}
+
+function classify(code: number, elapsedMs: number, body?: string): ModelTestResult {
+  // 从响应体抽取服务端真实报错，拼接到提示里（Java 侧同样会把 error.message 透出）
+  const detail = parseOpenAIError(body)
+  const withDetail = (msg: string) => (detail ? `${msg}（服务端：${detail}）` : msg)
+
   // 2xx：真正连通成功（模型可正常响应）
   if (code >= 200 && code < 300) {
     return { ok: true, level: 'success', message: `连通成功（HTTP ${code}）`, status: code, elapsedMs }
   }
   // 3xx：重定向，仍视为可达
   if (code >= 300 && code < 400) {
-    return { ok: true, level: 'warn', message: `网络可达（重定向 HTTP ${code}）`, status: code, elapsedMs }
+    return { ok: true, level: 'warn', message: withDetail(`网络可达（重定向 HTTP ${code}）`), status: code, elapsedMs }
   }
   // 401 / 403：网络通，但鉴权失败
   if (code === 401 || code === 403) {
-    return { ok: false, level: 'warn', message: `网络可达，但鉴权失败（HTTP ${code}），请检查 API Key`, status: code, elapsedMs }
+    return { ok: false, level: 'warn', message: withDetail(`网络可达，但鉴权失败（HTTP ${code}），请检查 API Key`), status: code, elapsedMs }
   }
   // 404：接口路径不存在（URL 可能填错）
   if (code === 404) {
-    return { ok: false, level: 'warn', message: `网络可达，但接口路径不存在（HTTP 404），请检查 Base URL`, status: code, elapsedMs }
+    return { ok: false, level: 'warn', message: withDetail(`网络可达，但接口路径不存在（HTTP 404），请检查 Base URL`), status: code, elapsedMs }
   }
   // 405：方法不被允许（探测方式与服务端要求不符，网络仍可达）
   if (code === 405) {
-    return { ok: false, level: 'warn', message: `网络可达，该接口仅支持 POST（HTTP 405）`, status: code, elapsedMs }
+    return { ok: false, level: 'warn', message: withDetail(`网络可达，该接口仅支持 POST（HTTP 405）`), status: code, elapsedMs }
   }
   // 400 / 422：请求体格式不被服务端接受（服务已响应 ⇒ 网络可达、URL 正确；仅探测体的字段名不匹配）
   if (code === 400 || code === 422) {
-    return { ok: false, level: 'warn', message: `网络可达，服务已响应（HTTP ${code}，探测请求体格式不被接受，URL 正确即可）`, status: code, elapsedMs }
+    return { ok: false, level: 'warn', message: withDetail(`网络可达，服务已响应（HTTP ${code}，探测请求体格式不被接受，URL 正确即可）`), status: code, elapsedMs }
   }
   // 429：触发限流（网络可达）
   if (code === 429) {
-    return { ok: false, level: 'warn', message: `网络可达，触发限流（HTTP 429），请稍后重试`, status: code, elapsedMs }
+    return { ok: false, level: 'warn', message: withDetail(`网络可达，触发限流（HTTP 429），请稍后重试`), status: code, elapsedMs }
   }
   // 其它 4xx：客户端请求被服务端拒绝（网络通）
   if (code < 500) {
-    return { ok: false, level: 'warn', message: `网络可达，请求被拒绝（HTTP ${code}）`, status: code, elapsedMs }
+    return { ok: false, level: 'warn', message: withDetail(`网络可达，请求被拒绝（HTTP ${code}）`), status: code, elapsedMs }
   }
   // 5xx：服务端内部错误（网络可达但服务端异常）
-  return { ok: false, level: 'error', message: `服务错误（HTTP ${code}）`, status: code, elapsedMs }
+  return { ok: false, level: 'error', message: withDetail(`服务错误（HTTP ${code}）`), status: code, elapsedMs }
 }
 
 /** 网络/超时错误归类（未拿到任何状态码 ⇒ 不可达） */
 function handleErr(err: unknown, elapsedMs: number): ModelTestResult {
   const e = err as { name?: string; message?: string }
   if (e?.name === 'AbortError' || /timeout/i.test(e?.message ?? '')) {
-    return { ok: false, level: 'error', message: '连接超时（8 秒）', elapsedMs }
+    return { ok: false, level: 'error', message: `连接超时（${Math.round(PROBE_TIMEOUT_MS / 1000)} 秒）`, elapsedMs }
   }
   const msg = e?.message ?? ''
   // 浏览器/WebView 跨域拦截会表现为 TypeError / Failed to fetch
@@ -182,22 +211,34 @@ function handleErr(err: unknown, elapsedMs: number): ModelTestResult {
   return { ok: false, level: 'error', message: `连接失败：${msg}`, elapsedMs }
 }
 
-/** 发起探测：Tauri 走 plugin-http（Rust reqwest，无 CORS 限制），否则原生 fetch */
+/**
+ * 发起探测：Tauri 环境统一走 Rust 命令 `http_probe`，由后端按 app_config.network_proxy
+ * 三模式建客户端（direct 模式会 .no_proxy() 无视系统代理，开 VPN 也能直连 LAN / 本机模型，
+ * 根治此前「开 VPN 被系统代理劫持 → 502」的问题）；浏览器 / WebView 原生 fetch 受同源策略约束，
+ * 仅作为非 Tauri 开发期的回退。
+ */
 async function probe(
   url: string,
   method: 'POST' | 'GET',
   headers: Record<string, string>,
   body?: string,
-): Promise<number> {
+): Promise<{ status: number; body: string }> {
+  // Tauri：后端已按 network_proxy 建客户端，且天然无 CORS 限制
+  if (isTauri) {
+    return invoke<{ status: number; body: string }>('http_probe', {
+      url,
+      method,
+      headers,
+      body: body ?? null,
+    })
+  }
+  // 非 Tauri（浏览器开发）回退：受浏览器代理 / CORS 约束，仅开发期可用
   const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), 8000)
+  const timer = setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS)
   try {
-    if (isTauri) {
-      const res = await tauriFetch(url, { method, headers, body, signal: controller.signal })
-      return res.status
-    }
     const res = await fetch(url, { method, headers, body, signal: controller.signal })
-    return res.status
+    const text = await res.text().catch(() => '')
+    return { status: res.status, body: text }
   } finally {
     clearTimeout(timer)
   }
@@ -231,8 +272,8 @@ export async function testModelConnection(
   const start = performance.now()
 
   try {
-    const status = await probe(url, method, headers, body)
-    return classify(status, Math.round(performance.now() - start))
+    const { status, body: respBody } = await probe(url, method, headers, body)
+    return classify(status, Math.round(performance.now() - start), respBody)
   } catch (err) {
     return handleErr(err, Math.round(performance.now() - start))
   }

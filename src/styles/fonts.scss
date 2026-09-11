@@ -1,0 +1,59 @@
+/* ============================================================
+ * fonts.scss — 全局自定义字体 @font-face
+ * ------------------------------------------------------------
+ * 字体文件置于 public/fonts/（Vite 原样拷贝到产物根，按 /fonts/xxx 引用）。
+ *
+ * Sans（正文 + 标题）：阿里巴巴普惠体 2.0（开源免费、含中文 CJK）。
+ *   文件名约定：Sans-Regular.ttf / Sans-Medium.ttf / Sans-Bold.ttf
+ *   注：当前用 ttf 保证零依赖立即生效；如需减小体积，后续可用 fonttools 转 woff2
+ *       并做中文子集化（保留常用字 + ASCII）。
+ *
+ * Mono（代码 / 日志 / JSON / Monaco）：暂缺。AppMono 尚未定义，代码区经
+ *   --font-mono 的 fallback 栈（ui-monospace, SFMono-Regular, Consolas, ...）
+ *   兜底。待用户提供等宽中文字体（推荐更纱黑体 Sarasa Mono SC）后，按下方
+ *   注释模板补充 @font-face 并将文件命名为 Mono-Regular.ttf / Mono-Bold.ttf 即可。
+ *
+ * font-display: swap —— 字体未就绪时先用系统 fallback 渲染，避免白屏/闪烁。
+ * ============================================================ */
+
+@font-face {
+  font-family: "AppSans";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/Sans-Regular.ttf") format("truetype");
+}
+
+@font-face {
+  font-family: "AppSans";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("/fonts/Sans-Medium.ttf") format("truetype");
+}
+
+@font-face {
+  font-family: "AppSans";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("/fonts/Sans-Bold.ttf") format("truetype");
+}
+
+/* ---- Mono 等宽字体占位（待用户补充等宽中文字体后启用）----
+@font-face {
+  font-family: "AppMono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/Mono-Regular.ttf") format("truetype");
+}
+
+@font-face {
+  font-family: "AppMono";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("/fonts/Mono-Bold.ttf") format("truetype");
+}
+*/

@@ -70,7 +70,7 @@
   border: none !important;
   border-radius: 0 !important;
   resize: none;
-  font-family: ui-monospace, SFMono-Regular, 'JetBrains Mono', Consolas, monospace;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, 'JetBrains Mono', Consolas, monospace);
   font-size: 13px;
   line-height: 1.6;
   box-shadow: none !important;
