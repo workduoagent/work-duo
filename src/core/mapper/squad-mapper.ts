@@ -219,8 +219,8 @@ export async function upsertSquad(input: SquadUpsertInput): Promise<SquadInfo[]>
   const db = await getDb()
   await db.execute(
     `INSERT INTO agent_squad
-       (id, name, logo, description, mode, leader_agent_id, unique_id, global_mcp_ids, run_strategy, supports_file_input, workspace_dir, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       (id, name, logo, description, mode, leader_agent_id, unique_id, global_mcp_ids, global_mcp_tools, run_strategy, supports_file_input, workspace_dir, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET
        name            = excluded.name,
        logo            = excluded.logo,
@@ -243,6 +243,7 @@ export async function upsertSquad(input: SquadUpsertInput): Promise<SquadInfo[]>
       leaderAgentId,
       input.uniqueId?.trim() ?? null,
       toJson(input.globalMcpIds ?? []),
+      toJson(input.globalMcpTools ?? {}),
       toJson(input.runStrategy),
       input.supportsFileInput ? 1 : 0,
       input.workspaceDir ?? null,

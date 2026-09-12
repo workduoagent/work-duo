@@ -84,12 +84,20 @@ pub struct ChoiceRequest {
     pub options: Vec<ChoiceOption>,
 }
 
+/// 方案推荐：用户选择「其他 / 自定义」时前端回传的 option_id 哨兵值。
+/// 前端渲染自由文本输入框，用户提交自定义方案时以该 id 唤醒挂起，
+/// 真实文案经 `ChoiceOutcome::custom_text` 带回。
+pub const CHOICE_CUSTOM_ID: &str = "__custom__";
+
 /// 方案推荐结果（用户点选后回传，作为 `native__ask_user_choice` 工具结果注入 Agent 上下文）。
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ChoiceOutcome {
     pub option_id: String,
     pub label: String,
     pub value: Option<String>,
+    /// 用户自定义方案文本（仅当用户选择「其他 / 自定义」时填充）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub custom_text: Option<String>,
 }
 
 /// 聊天附件，由前端随 `run_agent_task` 传入，注入当前轮 user 消息。

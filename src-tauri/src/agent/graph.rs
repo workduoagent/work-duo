@@ -397,11 +397,6 @@ impl KnowledgeGraph {
             .collect()
     }
 
-    /// 会话任务总数（用于事件 step 序号上限）。
-    pub fn session_task_count(&self, session_id: &str) -> usize {
-        self.session_task_ids(session_id).len()
-    }
-
     /// 会话是否全部闭环（所有任务 status ∈ completed/skipped）。
     pub fn session_all_completed(&self, session_id: &str) -> bool {
         let ids = self.session_task_ids(session_id);

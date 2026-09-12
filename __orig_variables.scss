@@ -1,0 +1,144 @@
+﻿/* ============================================================
+ * variables.scss 鈥?椤圭洰绾ц璁′护鐗岋紙Design Tokens锛? * ------------------------------------------------------------
+ * 鏋佺畝銆佹竻鏂般€佽劚淇楃殑鐜颁唬 SaaS 涓婚銆? * 浜壊鎸傚湪 :root / .light锛屾殫鑹叉寕鍦?.dark銆? * ============================================================ */
+
+:root,
+.light {
+  /* 琛ㄩ潰 / 鏂囨湰 (闆呰嚧閿?Zinc 浣撶郴) */
+  --color-background: #ffffff;
+  --color-background-subtle: #fafafa; /* Zinc 50 - 鏋佹祬鐨勭弽鐝犵櫧 */
+  --color-background-muted: #f4f4f5; /* Zinc 100 */
+  --color-foreground: #27272a; /* Zinc 800 - 鏌斿拰鐨勬鏂囬粦 */
+  --color-foreground-muted: #71717a; /* Zinc 500 */
+  --color-foreground-intense: #18181b; /* Zinc 900 - 绾补鐨勬爣棰橀粦 */
+  --color-foreground-inverse: #ffffff;
+
+  /* 杈规 - 鏋佸害寮卞寲鐗╃悊鍒嗗壊绾?*/
+  --color-border: #e4e4e7; /* Zinc 200 */
+  --color-border-muted: #f4f4f5; /* Zinc 100 */
+
+  /* 浠ｇ爜锛堣鍐?code / 鍥存爮浠ｇ爜鍧楋級鈥斺€?鐙珛浠ょ墝锛?     琛屽唴浠ｇ爜蹇呴』鏈夈€岀湅寰楄鐨勫簳 + 鐪嬪緱娓呯殑瀛椼€嶏紝涓嶈兘鍙潬鏋佹祬鐏板簳鍖哄垎銆?*/
+  --color-code-bg: #f2f4f7; /* 鐣ュ亸鍐风殑娴呯伆锛屼笌绾櫧搴曞彲杈?*/
+  --color-code-border: #dbe1e9; /* 缁嗚竟妗嗭紝鎶婁唬鐮佸潡浠庢鏂囦腑"鎵?璧锋潵 */
+  --color-code-fg: #14304a; /* 娣辫摑澧細楂樺姣?+ 涓庢鏂囬粦鍖哄垎 */
+
+  /* highlight.js 璇硶楂樹寒浠ょ墝锛堣嚜寤轰富棰橈紝璺熼殢浜?鏆楀垏鎹紱閬垮厤寮曞叆澶栭儴涓婚鐗堟潈锛夈€?     鑳屾櫙缁熶竴浜ょ粰 .md-body pre锛岃繖閲屽彧瀹氫箟璇硶 token 棰滆壊銆?*/
+  --hljs-fg: #24292e;
+  --hljs-comment: #6a737d;
+  --hljs-keyword: #d73a49;
+  --hljs-string: #032f62;
+  --hljs-number: #005cc5;
+  --hljs-title: #6f42c1;
+  --hljs-attr: #005cc5;
+  --hljs-built_in: #e36209;
+  --hljs-tag: #22863a;
+  --hljs-meta: #6a737d;
+  --hljs-addition-fg: #22863a;
+  --hljs-addition-bg: #f0fff4;
+  --hljs-deletion-fg: #b31d28;
+  --hljs-deletion-bg: #ffeef0;
+
+  /* 鍝佺墝鑹?- 鏅寸┖钃?(Fresh Sky) 浣撶郴锛屾竻閫忕剷鏂?*/
+  --color-brand-50: #f0f9ff;
+  --color-brand-100: #e0f2fe;
+  --color-brand-200: #bae6fd;
+  --color-brand-300: #7dd3fc;
+  --color-brand-400: #38bdf8;
+  --color-brand-500: #0ea5e9;
+  --color-brand-600: #0284c7; /* 鏍稿績浜や簰鑹?*/
+  --color-brand-700: #0369a1;
+  --color-brand-800: #075985;
+  --color-brand-900: #0c4a6e;
+
+  /* 鍗遍櫓鑹?- 淇濇寔璀︾ず鎬т絾闄嶄綆鍒虹溂搴?*/
+  --color-danger: #ef4444;
+  --color-danger-bg: rgba(239, 68, 68, 0.08);
+  --color-danger-50: #fee2e2;
+
+  /* 鎴愬姛 / 璀﹀憡璇箟鑹诧紙杩為€氭€т笁鎬佺瓑浣跨敤锛?*/
+  --color-success: #16a34a;
+  --color-success-50: #dcfce7;
+  --color-warning: #d97706;
+  --color-warning-50: #fef3c7;
+
+  /* 闃村奖 - 鏋佺畝澶ф皵鐨勭伒榄傦紙浣庨€忔槑搴︼紝澶ф墿鏁ｏ級 */
+  --shadow-sm: 0 2px 12px rgba(0, 0, 0, 0.03);
+  --shadow-md: 0 8px 32px rgba(0, 0, 0, 0.04);
+  --shadow-pop: 0 16px 48px rgba(0, 0, 0, 0.06);
+}
+
+.dark {
+  /* 鏆楅粦妯″紡淇濇寔鍚岀瓑鐨勯珮绾ф劅锛岄伩鍏嶇函榛戞鐧?*/
+  --color-background: #09090b; /* Zinc 950 - 娣遍們鑳屾櫙 */
+  --color-background-subtle: #18181b; /* Zinc 900 */
+  --color-background-muted: #27272a; /* Zinc 800 */
+  --color-foreground: #e4e4e7; /* Zinc 200 */
+  --color-foreground-muted: #a1a1aa; /* Zinc 400 */
+  --color-foreground-intense: #fafafa; /* Zinc 50 */
+  --color-foreground-inverse: #09090b;
+
+  --color-border: #27272a; /* Zinc 800 */
+  --color-border-muted: #18181b; /* Zinc 900 */
+
+  /* 浠ｇ爜锛堟殫鑹诧級锛氭繁搴?+ 浜摑瀛楋紝淇濊瘉鏆楄壊涓嬪悓鏍锋竻鏅板彲杈?*/
+  --color-code-bg: #161f2b;
+  --color-code-border: #273240;
+  --color-code-fg: #9ecbff;
+
+  /* highlight.js 璇硶楂樹寒浠ょ墝锛堟殫鑹茬増锛岄厤娣卞簳锛屼繚璇佽娉曡壊鍙鲸锛?*/
+  --hljs-fg: #c9d1d9;
+  --hljs-comment: #8b949e;
+  --hljs-keyword: #ff7b72;
+  --hljs-string: #a5d6ff;
+  --hljs-number: #79c0ff;
+  --hljs-title: #d2a8ff;
+  --hljs-attr: #79c0ff;
+  --hljs-built_in: #ffa657;
+  --hljs-tag: #7ee787;
+  --hljs-meta: #8b949e;
+  --hljs-addition-fg: #7ee787;
+  --hljs-addition-bg: rgba(46, 160, 67, 0.15);
+  --hljs-deletion-fg: #ffa198;
+  --hljs-deletion-bg: rgba(248, 81, 73, 0.15);
+
+  /* 鏆楄壊涓嬪搧鐗岃壊鐣ュ井璋冩暣锛岀‘淇濆彂鍏夋劅涓庡姣斿害 */
+  --color-brand-50: #082f49;
+  --color-brand-100: #0c4a6e;
+  --color-brand-200: #075985;
+  --color-brand-300: #0369a1;
+  --color-brand-400: #0284c7;
+  --color-brand-500: #0ea5e9;
+  --color-brand-600: #38bdf8; /* 鏆楄壊涓嬬殑鏍稿績鎸夐挳鎻愪寒锛屼繚璇佽鲸璇嗗害 */
+  --color-brand-700: #7dd3fc;
+  --color-brand-800: #bae6fd;
+  --color-brand-900: #e0f2fe;
+
+  --color-danger: #f87171;
+  --color-danger-bg: rgba(248, 113, 113, 0.12);
+  --color-danger-50: rgba(248, 113, 113, 0.12);
+
+  /* 鎴愬姛 / 璀﹀憡璇箟鑹诧紙鏆楄壊涓嬫彁浜互淇濊瘉杈ㄨ瘑搴︼級 */
+  --color-success: #4ade80;
+  --color-success-50: rgba(74, 222, 128, 0.12);
+  --color-warning: #fbbf24;
+  --color-warning-50: rgba(251, 191, 36, 0.12);
+
+  /* 鏆楅粦妯″紡闇€瑕佹洿娣便€佹洿闆嗕腑鐨勯槾褰辨潵浣撶幇 Z 杞村眰绾?*/
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.5);
+  --shadow-pop: 0 16px 40px rgba(0, 0, 0, 0.6);
+}
+
+/* 灏哄 / 鍦嗚锛堥」鐩骇锛岄潪璇箟锛?*/
+:root {
+  --topbar-height: 56px;
+  /* 绋嶅井澧炲ぇ鍦嗚锛岄厤鍚堟煍鍜岄槾褰憋紝鐜颁唬鎰熸洿寮?*/
+  --radius-card: 16px;
+  /* 鍏ㄥ眬瀛椾綋锛歋ans 璧拌嚜瀹氫箟 AppSans锛堥樋閲屽反宸存櫘鎯犱綋锛岀粡 @font-face 寮曞叆锛夛紱
+     涓枃 fallback 鍒?PingFang SC / 寰蒋闆呴粦锛岀‘淇濆瓧浣撴湭灏辩华鏃朵笉宕┿€?*/
+  --font-sans: "AppSans", system-ui, -apple-system, "Segoe UI", Roboto,
+    "PingFang SC", "Microsoft YaHei", sans-serif;
+  /* 绛夊瀛椾綋锛氫唬鐮?鏃ュ織/JSON/Monaco 浣跨敤銆侫ppMono 寰呯敤鎴锋彁渚涚瓑瀹藉瓧浣撳悗鐢熸晥锛?     褰撳墠 fallback 鍒扮郴缁?ui-monospace 鏍堛€?*/
+  --font-mono: "AppMono", ui-monospace, SFMono-Regular, Consolas,
+    "PingFang SC", "Microsoft YaHei", monospace;
+}

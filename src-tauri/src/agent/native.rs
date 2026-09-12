@@ -1070,7 +1070,13 @@ impl AgentTool for ExecuteCommandTool {
         def(
             "native__execute_command",
             "在工作空间内执行一条系统命令（shell）。需用户审批。",
-            json!({ "command": { "type": "string", "description": "要执行的命令（含参数）" } }),
+            json!({
+                "command": { "type": "string", "description": "要执行的命令（含参数）" },
+                "fail_on_nonzero": {
+                    "type": "boolean",
+                    "description": "命令非零退出是否视为执行失败（默认 true，对齐 P2a「命令非 0→档A」契约；grep 无匹配等合法非 0 可传 false 关闭）"
+                }
+            }),
             &["command"],
         )
     }
@@ -1081,6 +1087,11 @@ impl AgentTool for ExecuteCommandTool {
         let command = args.get("command").and_then(|v| v.as_str()).ok_or_else(|| {
             ToolError::InvalidArgs("execute_command 缺少 command 参数".into())
         })?;
+        // 缺口 A：非零退出视为执行失败（默认开启，对齐 P2a 契约）。合法非 0（如 grep 无匹配）调用方传 false 关闭。
+        let fail_on_nonzero = args
+            .get("fail_on_nonzero")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true);
         let cwd = match ctx.workspace.clone() {
             Some(ws) => ws,
             None => {
@@ -1129,8 +1140,20 @@ impl AgentTool for ExecuteCommandTool {
                     crate::agent::runtime::clip(&stdout, 500),
                     crate::agent::runtime::clip(&stderr, 500),
                 );
+                let code = out.status.code();
+                // 缺口 A 修复：非零退出码按「执行失败」返回（对齐 P2a「命令非 0→档A」契约），
+                // 驱动 pipeline 连续错误计数→受阻弹窗。命令可能合法返回非 0（如 grep 无匹配）时，
+                // 调用方可传 fail_on_nonzero=false 关闭此行为。
+                if fail_on_nonzero && !out.status.success() {
+                    return Err(ToolError::ExecutionFailed(format!(
+                        "命令非零退出（code={:?}）：stdout={} stderr={}",
+                        code,
+                        crate::agent::runtime::clip(&stdout, 300),
+                        crate::agent::runtime::clip(&stderr, 300),
+                    )));
+                }
                 Ok(serde_json::to_string_pretty(&json!({
-                    "exit_code": out.status.code(),
+                    "exit_code": code,
                     "stdout": stdout,
                     "stderr": stderr,
                     "elapsed_ms": start.elapsed().as_millis() as u64
@@ -2717,7 +2740,7 @@ impl AgentTool for AskUserChoiceTool {
     fn tool_definition(&self) -> Value {
         def(
             "native__ask_user_choice",
-            "当需要用户在多个合理方案间做选择时调用（而非开放文本追问）。给出 2–5 个明确选项，用户点选后其结果（选中项文案/值）会作为本工具结果返回，供你据此续写。适用于：多分支路径决策、范围/格式确认、取舍对比。不要用于危险动作授权（那走审批弹窗）。",
+            "当需要用户在多个合理方案间做选择时调用（而非开放文本追问）。给出 2–5 个明确选项，用户点选后其结果（选中项文案/值）会作为本工具结果返回，供你据此续写。适用于：多分支路径决策、范围/格式确认、取舍对比。弹窗同时提供「其他 / 自定义」自由文本入口——若预设选项都不合适，用户可直接填写自己的方案，回传文案以「用户选择了（自定义）：<文本>」形式带回。不要用于危险动作授权（那走审批弹窗）。",
             json!({
                 "question": { "type": "string", "description": "向用户提出的问题" },
                 "options": {
@@ -2823,9 +2846,14 @@ impl AgentTool for AskUserChoiceTool {
                 return Ok("（用户选择超时，未收到选择）".into());
             }
         };
-        let text = match outcome.value {
-            Some(v) => format!("用户选择了：{}（值：{}）", outcome.label, v),
-            None => format!("用户选择了：{}", outcome.label),
+        let text = if let Some(custom) = outcome.custom_text {
+            // 用户走「其他 / 自定义」自由文本入口：以自定义文案回传。
+            format!("用户选择了（自定义）：{}", custom)
+        } else {
+            match outcome.value {
+                Some(v) => format!("用户选择了：{}（值：{}）", outcome.label, v),
+                None => format!("用户选择了：{}", outcome.label),
+            }
         };
         Ok(text)
     }

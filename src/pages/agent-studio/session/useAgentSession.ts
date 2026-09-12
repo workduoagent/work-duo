@@ -83,11 +83,11 @@ export interface AgentSessionState {
   /** 步骤级恢复：子任务自动重试耗尽仍失败时挂起，等待用户决策（重试/跳过/接管）；非 null 时渲染恢复面板。 */
   recovery: RecoveryRequest | null
   /** 回传步骤级恢复决策（retry / skip / takeover；takeover 时携带补充指示）。 */
-  resolveRecovery: (decision: 'retry' | 'skip' | 'takeover', guidance?: string) => Promise<void>
+  resolveRecovery: (decision: 'retry' | 'skip' | 'takeover' | 'change-approach', guidance?: string) => Promise<void>
   /** 方案推荐：Agent 主动询问用户（HITL Choice Chip），非 null 时渲染选项弹窗。 */
   pendingChoice: ChoiceRequest | null
   /** 回传方案推荐选择（用户点选的 optionId 唤醒后台挂起的 `native__ask_user_choice`）。 */
-  submitChoice: (optionId: string) => Promise<void>
+  submitChoice: (optionId: string, customText?: string) => Promise<void>
 }
 
 function labelOf(toolName: string): string {
@@ -414,15 +414,15 @@ export function useAgentSession(): AgentSessionState {
     }
   }, [isTauri, startTaskTimeout])
 
-  // 方案推荐：回传用户所选 optionId，唤醒后台挂起的 `native__ask_user_choice`。
+  // 方案推荐：回传用户所选 optionId（或自定义文本），唤醒后台挂起的 `native__ask_user_choice`。
   const submitChoice = useCallback(
-    async (optionId: string) => {
+    async (optionId: string, customText?: string) => {
       const choice = pendingChoiceRef.current
       setPendingChoice(null)
       if (!isTauri || !choice) return
       try {
         await invoke('submit_choice_decision', {
-          input: { choiceId: choice.choiceId, optionId },
+          input: { choiceId: choice.choiceId, optionId, customText: customText ?? null },
         })
       } catch (e) {
         console.error('[agent] submit_choice_decision failed', e)
@@ -470,7 +470,7 @@ export function useAgentSession(): AgentSessionState {
   // 或 step_finished（skip），或本轮以 agent-task-done/error 结束，这些事件统一清面板；
   // 若网络异常未复位，面板保留、后端仍在挂起等待，用户可再次点击，避免死锁。
   const resolveRecovery = useCallback(
-    async (decision: 'retry' | 'skip' | 'takeover', guidance?: string) => {
+    async (decision: 'retry' | 'skip' | 'takeover' | 'change-approach', guidance?: string) => {
       if (!isTauri) return
       try {
         await invoke('resolve_subtask', {

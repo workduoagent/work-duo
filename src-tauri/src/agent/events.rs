@@ -390,6 +390,12 @@ pub struct RecoveryNeededPayload {
     pub title: String,
     pub reason: String,
     pub summary: String,
+    /// 异常分档：A=可恢复（3 键：跳过|重试|接管）/ B=高风险歧义（4 键，含改方案）。2a 恒为 "A"。
+    pub tier: String,
+    /// 失败命令（接管面板展示用，2a 可空）。
+    pub failed_command: Option<String>,
+    /// 已改动文件（接管面板展示用，2a 可空）。
+    pub changed_files: Option<Vec<String>>,
 }
 
 /// 子任务自动重试耗尽仍失败：登记受阻步骤并推前端渲染恢复面板（重试/跳过/接管）。
@@ -403,6 +409,9 @@ pub fn emit_recovery_needed(app: &AppHandle, req: &RecoveryRequest) {
             title: req.title.clone(),
             reason: req.reason.clone(),
             summary: req.summary.clone(),
+            tier: req.tier.clone(),
+            failed_command: req.failed_command.clone(),
+            changed_files: req.changed_files.clone(),
         },
     );
 }

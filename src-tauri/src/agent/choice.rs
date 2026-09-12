@@ -45,29 +45,48 @@ impl ChoiceHub {
     }
 
     /// 前端回传所选 option_id：按 id 找回 label/value 后唤醒对应挂起的工具调用。
-    /// 找不到 id 时回退为「以 option_id 作为 label」的结果，保证工具调用不挂死。
-    pub async fn resolve(&self, choice_id: &str, option_id: &str) -> bool {
+    /// `custom_text` 非空表示用户走「其他 / 自定义」自由文本入口（option_id 为 `__custom__`），
+    /// 此时以自定义文本作为 label 回传。找不到 id（且非自定义）时回退为「以 option_id 作为 label」，
+    /// 保证工具调用不挂死。
+    pub async fn resolve(
+        &self,
+        choice_id: &str,
+        option_id: &str,
+        custom_text: Option<String>,
+    ) -> bool {
         let mut pending = self.pending.lock().await;
         if let Some(p) = pending.remove(choice_id) {
-            let outcome = p
-                .req
-                .options
-                .iter()
-                .find(|o| o.id == option_id)
-                .map(|o| ChoiceOutcome {
-                    option_id: o.id.clone(),
-                    label: o.label.clone(),
-                    value: o.value.clone(),
-                })
-                .unwrap_or_else(|| ChoiceOutcome {
+            let outcome = if option_id == crate::agent::types::CHOICE_CUSTOM_ID {
+                let text = custom_text.unwrap_or_default();
+                ChoiceOutcome {
                     option_id: option_id.to_string(),
-                    label: option_id.to_string(),
+                    label: text.clone(),
                     value: None,
-                });
+                    custom_text: Some(text),
+                }
+            } else {
+                p.req
+                    .options
+                    .iter()
+                    .find(|o| o.id == option_id)
+                    .map(|o| ChoiceOutcome {
+                        option_id: o.id.clone(),
+                        label: o.label.clone(),
+                        value: o.value.clone(),
+                        custom_text: None,
+                    })
+                    .unwrap_or_else(|| ChoiceOutcome {
+                        option_id: option_id.to_string(),
+                        label: option_id.to_string(),
+                        value: None,
+                        custom_text: None,
+                    })
+            };
+            let has_custom = outcome.custom_text.is_some();
             let sent = p.tx.send(outcome).is_ok();
             tracing::info!(
-                "[agent] choice: 收到选择 choice_id={} option_id={} sent={}",
-                choice_id, option_id, sent
+                "[agent] choice: 收到选择 choice_id={} option_id={} custom={} sent={}",
+                choice_id, option_id, has_custom, sent
             );
             sent
         } else {

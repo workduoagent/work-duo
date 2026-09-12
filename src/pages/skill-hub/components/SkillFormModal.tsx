@@ -1,13 +1,21 @@
 /**
  * 新建 / 编辑技能弹窗（仿 nexus-web skill-hub 的设计，但落盘到本地 $APPDATA/.skills）。
  *
- * 三个 Tab：
- *  1) 基础信息：标识符 / 名称 / 描述 / 分类 / 标签；
- *  2) 指令内容：instruction（技能级指令，与 SKILL.md 是**不同字段**）；
- *  3) 文件资源：SKILL.md 正文（独立字段，落盘为 <identifier>/SKILL.md）+ 脚本编辑（可选语言）
- *     + 资源文件上传（scripts / references / assets / templates / 自定义目录）。
+ * 四个 Tab：
+ *  1) 基础信息：头像（点击上传）/ 标识符 / 名称 / 分类 / 标签 / 描述；
+ *  2) Agent 指令：instruction 字段（独立字段，仅存数据库，可选，供智能体注入使用）；
+ *  3) 文件资源：SKILL.md 正文（独立字段，落盘为 <identifier>/SKILL.md）
+ *     + 脚本编辑（可选语言）+ 资源文件上传（scripts / references / assets / templates / 自定义目录）；
+ *  4) 目录结构：编辑态只读展示磁盘文件树。
  *
- * 保存时回传 SkillFormData（元数据 + 脚本 + 资源），由页面负责入库并落盘。
+ * ★ 关键约定：instruction（Agent 指令）与 skillMarkdown（SKILL.md 正文）是**两个独立字段**：
+ *  - skillMarkdown → 落盘为 <identifier>/SKILL.md，是标准的技能说明文档；
+ *  - instruction   → 仅存入数据库（skill_info.instruction 列），不写文件，可选；
+ *  二者请勿混用。历史上曾错误地把 SKILL.md 内容复制进 instruction（见 SkillImportModal），
+ *  已在导入链路修正：导入只填 skillMarkdown，instruction 保持为空、留待用户显式填写。
+ *
+ * 编辑态从磁盘目录回显：脚本（scripts/ 下可识别扩展名）、资源、头像、SKILL.md 一并载入表单，
+ * 保证导入带脚本的技能再次打开时能正确显示。
  */
 import { useEffect, useState } from 'react'
 import {
@@ -16,22 +24,32 @@ import {
   FilePlus2,
   Upload as UploadIcon,
   FileCode2,
-  Code2,
+  Bot,
+  X,
 } from 'lucide-react'
 import { Button, Input, Field, FieldLabel, Modal, Select } from '@/components/ui'
-import { Tabs, Upload, Alert, Radio, Divider } from 'antd'
+import { Tabs, Upload, Radio, Divider, Alert } from 'antd'
 import { useNotify } from '@/components/ui/notify'
 import { MarkdownEditor } from '@/components/markdown/MarkdownEditor'
 import { MonacoJsonEditor } from '@/components/code-editor'
 import {
   SCRIPT_LANGUAGE_OPTIONS,
   createEmptySkill,
+  extToLang,
+  isScriptExt,
   type SkillInfo,
   type ScriptFile,
   type ResourceFile,
   type SkillFormData,
 } from '@/core/file/skill-file'
-import { readSkillFileTree, type SkillFileTreeNode } from '@/core/file/skillFs'
+import {
+  readSkillFileTree,
+  readSkillDirFlat,
+  removeSkillLogos,
+  uint8ToBase64,
+  LOGO_EXTS,
+  type SkillFileTreeNode,
+} from '@/core/file/skillFs'
 import { ScenarioSelect } from '@/components/scenario'
 import { SkillFileTree } from './SkillFileTree'
 
@@ -97,13 +115,89 @@ export function SkillFormModal({
     setLogo(null)
     setExpandedScriptId(null)
     setFileTree(null)
-    // 编辑已有技能时，异步读取磁盘目录结构用于展示
+    // 编辑已有技能时，异步读取磁盘目录结构用于展示与表单回显
     if (skill) {
-      void readSkillFileTree(skill.identifier)
+      void readSkillFileTree(skill.identifier, skill.path)
         .then(setFileTree)
         .catch(() => setFileTree(null))
+      void loadFromDisk(skill)
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, skill])
+
+  /** 从磁盘目录回显：脚本 / 资源 / 头像 / SKILL.md */
+  async function loadFromDisk(s: SkillInfo) {
+    const files = await readSkillDirFlat(s.identifier, s.path)
+    if (!files || files.length === 0) return
+    const decoder = new TextDecoder()
+    const loadedScripts: ScriptFile[] = []
+    const loadedResources: ResourceFile[] = []
+    let md = ''
+    let mdFound = false
+    // 头像候选：技能根目录下的 logo.*（任意扩展名，如 logo.svg / logo.png / logo.ico）。
+    // 同一技能目录可能存在多个 logo 文件，先全部收集，循环结束后再按固定优先级择优，
+    // 避免被目录遍历顺序随机覆盖。
+    const logoCandidates = new Map<string, { data: Uint8Array; url: string }>()
+    for (const f of files) {
+      const norm = f.relPath.replace(/\\/g, '/')
+      const base = norm.split('/').pop() || ''
+      const lower = base.toLowerCase()
+      // 头像：logo.* —— 直接读取磁盘文件字节并编码为 data URL，
+      // 与 SkillAvatar 的 readSkillLogoBase64 行为一致（非 blob 临时链接）。
+      if (/^logo\.[^/]+$/i.test(lower)) {
+        const ext = lower.split('.').pop() as string
+        const mime = ext === 'jpg' ? 'jpeg' : ext === 'svg' ? 'svg+xml' : ext
+        const url = `data:image/${mime};base64,${uint8ToBase64(f.data)}`
+        logoCandidates.set(ext, { data: f.data, url })
+        continue
+      }
+      // SKILL.md 正文（若有则优先用磁盘内容）
+      if (lower === 'skill.md') {
+        md = decoder.decode(f.data)
+        mdFound = true
+        continue
+      }
+      const slash = norm.lastIndexOf('/')
+      const dir = slash >= 0 ? norm.slice(0, slash) : ''
+      // scripts/ 下、可识别扩展名的文件归类为「脚本」
+      if (dir === 'scripts') {
+        const ext = base.includes('.') ? base.split('.').pop()!.toLowerCase() : ''
+        if (isScriptExt(ext)) {
+          loadedScripts.push({
+            id: uid(),
+            name: base.replace(/\.[^.]+$/, ''),
+            language: extToLang(ext),
+            content: decoder.decode(f.data),
+          })
+          continue
+        }
+      }
+      // 其余文件作为「资源」，保留相对目录
+      loadedResources.push({ id: uid(), name: base, dir, data: f.data })
+    }
+    setScripts(loadedScripts)
+    setResources(loadedResources)
+    // 按固定优先级（png > jpg > jpeg > gif > webp > svg）择优，
+    // 其余非标准扩展名（如 logo.ico）作为兜底也纳入候选。
+    // 这样位图头像永远优先于模板遗留的 svg，且不会被目录遍历顺序随机覆盖。
+    let logoState: { file: ResourceFile; url: string } | null = null
+    const logoPriority = [
+      ...LOGO_EXTS,
+      ...[...logoCandidates.keys()].filter((e) => !LOGO_EXTS.includes(e)),
+    ]
+    for (const ext of logoPriority) {
+      const found = logoCandidates.get(ext)
+      if (found) {
+        logoState = {
+          file: { id: uid(), name: `logo.${ext}`, dir: '', data: found.data },
+          url: found.url,
+        }
+        break
+      }
+    }
+    if (logoState) setLogo(logoState)
+    if (mdFound) patch({ skillMarkdown: md })
+  }
 
   function patch(part: Partial<SkillInfo>) {
     setDraft((prev) => ({ ...prev, ...part }))
@@ -146,15 +240,13 @@ export function SkillFormModal({
       return false
     }
     const buf = await file.arrayBuffer()
+    const bytes = new Uint8Array(buf)
     const ext = file.name.split('.').pop()!.toLowerCase()
     const mime = ext === 'jpg' ? 'jpeg' : ext === 'svg' ? 'svg+xml' : ext
-    const url = URL.createObjectURL(new Blob([buf], { type: `image/${mime}` }))
-    setLogo((prev) => {
-      if (prev) URL.revokeObjectURL(prev.url) // 释放上一张预览，避免泄漏
-      return {
-        file: { id: uid(), name: `logo.${ext}`, dir: '', data: new Uint8Array(buf) },
-        url,
-      }
+    const url = `data:image/${mime};base64,${uint8ToBase64(bytes)}`
+    setLogo({
+      file: { id: uid(), name: `logo.${ext}`, dir: '', data: bytes },
+      url,
     })
     message.success(`已选择头像（将落盘为 logo.${ext}）`)
   }
@@ -168,6 +260,10 @@ export function SkillFormModal({
     }
     setSaving(true)
     try {
+      // 编辑态且头像有变更时，先清理磁盘上的旧头像：
+      //  - 用户移除了头像：确保旧 logo 文件被删除，避免再次编辑时回显；
+      //  - 用户更换了头像/扩展名：删除旧扩展名文件，避免读取到错误的旧头像。
+      if (skill) await removeSkillLogos(skill.identifier, skill.path)
       await onSave({
         skill: { ...draft, updatedAt: new Date().toISOString() },
         scripts,
@@ -188,7 +284,7 @@ export function SkillFormModal({
     <Modal
       open={open}
       onOpenChange={onOpenChange}
-      width={860}
+      width={920}
       title={skill ? '编辑技能' : '新建技能'}
       style={{ maxWidth: '94vw' }}
       footer={
@@ -210,7 +306,51 @@ export function SkillFormModal({
             key: 'base',
             label: '基础信息',
             children: (
-              <div className="sk__grid">
+              <div className="sk__tab-panel">
+                <div className="sk__grid">
+                {/* 头像：顶部独立区块，点击即可上传 / 更换，无独立按钮 */}
+                <Field className="sk__span-2">
+                  <FieldLabel>技能头像</FieldLabel>
+                  <div className="sk__logo-block">
+                    <div className="sk__logo-thumb">
+                      <Upload
+                        accept=".png,.jpg,.jpeg,.gif,.webp,.svg"
+                        maxCount={1}
+                        showUploadList={false}
+                        beforeUpload={(file) => {
+                          void handleLogoUpload(file as unknown as File)
+                          return false
+                        }}
+                      >
+                        <div
+                          className={`sk__logo-preview sk__logo-click${
+                            logo ? ' is-set' : ''
+                          }`}
+                        >
+                          {logo ? (
+                            <img src={logo.url} alt="logo" className="sk__logo-img" />
+                          ) : (
+                            <UploadIcon size={22} className="sk__logo-empty-icon" />
+                          )}
+                          <span className="sk__logo-mask">
+                            {logo ? '更换头像' : '点击上传'}
+                          </span>
+                        </div>
+                      </Upload>
+                      {logo && (
+                        <button
+                          type="button"
+                          className="sk__logo-remove"
+                          aria-label="移除头像"
+                          onClick={() => setLogo(null)}
+                        >
+                          <X size={13} />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </Field>
+
                 <Field>
                   <FieldLabel>
                     标识符<span className="sk__required">*</span>
@@ -245,16 +385,6 @@ export function SkillFormModal({
                   />
                 </Field>
 
-                <Field className="sk__span-2">
-                  <FieldLabel>描述</FieldLabel>
-                  <Input.TextArea
-                    rows={2}
-                    value={draft.description ?? ''}
-                    placeholder="一句话描述这个技能的能力"
-                    onChange={(e) => patch({ description: e.target.value })}
-                  />
-                </Field>
-
                 <Field>
                   <FieldLabel>技能分类</FieldLabel>
                   <ScenarioSelect
@@ -265,77 +395,68 @@ export function SkillFormModal({
                   />
                 </Field>
 
-        <Field>
-          <FieldLabel>标签</FieldLabel>
-          <Select
-            mode="tags"
-            value={draft.tags ?? []}
-            placeholder="输入后回车，如 文档润色"
-            tokenSeparators={[',']}
-            onChange={(v) => patch({ tags: v as string[] })}
-          />
-        </Field>
+                <Field>
+                  <FieldLabel>标签</FieldLabel>
+                  <Select
+                    mode="tags"
+                    maxTagCount="responsive"
+                    value={draft.tags ?? []}
+                    placeholder="输入后回车，如 文档润色"
+                    tokenSeparators={[',']}
+                    onChange={(v) => patch({ tags: v as string[] })}
+                  />
+                </Field>
 
-        <Field className="sk__span-2">
-          <FieldLabel>技能头像</FieldLabel>
-          <div className="sk__logo-row">
-            <div className="sk__logo-preview">
-              {logo ? (
-                <img src={logo.url} alt="logo" className="sk__logo-img" />
-              ) : (
-                <span className="sk__logo-placeholder">
-                  <UploadIcon size={20} />
-                </span>
-              )}
-            </div>
-            <div className="sk__logo-actions">
-              <Upload
-                accept=".png,.jpg,.jpeg,.gif,.webp,.svg"
-                maxCount={1}
-                showUploadList={false}
-                beforeUpload={(file) => {
-                  void handleLogoUpload(file as unknown as File)
-                  return false
-                }}
-              >
-                <Button icon={<UploadIcon size={14} />}>
-                  {logo ? '更换头像' : '上传头像'}
-                </Button>
-              </Upload>
-              {logo && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  icon={<Trash2 size={14} />}
-                  onClick={() => setLogo(null)}
-                >
-                  移除
-                </Button>
-              )}
-            </div>
-          </div>
-        </Field>
-      </div>
+                {/* 描述放最底，行高更高 */}
+                <Field className="sk__span-2">
+                  <FieldLabel>技能描述</FieldLabel>
+                  <Input.TextArea
+                    rows={8}
+                    value={draft.description ?? ''}
+                    placeholder="一句话描述这个技能的能力"
+                    onChange={(e) => patch({ description: e.target.value })}
+                  />
+                </Field>
+              </div>
+              </div>
             ),
           },
 
-          /* ============ Tab 2：指令内容（与 SKILL.md 不同字段） ============ */
+          /* ============ Tab 2：Agent 指令（独立字段，与 SKILL.md 区分） ============ */
           {
             key: 'instruction',
-            label: '指令内容',
+            label: 'Agent 指令',
             children: (
-              <Field>
-                <FieldLabel>
-                  <Code2 size={14} className="sk__inline-icon" />
-                  指令内容
-                </FieldLabel>
-                <MarkdownEditor
-                  value={draft.instruction ?? ''}
-                  height={300}
-                  placeholder="编写技能的主体指令 / 工作流（支持 Markdown）"
-                  onChange={(v) => patch({ instruction: v })}
+              <div className="sk__tab-panel">
+                <div className="sk__instruction-wrap">
+                <Alert
+                  type="warning"
+                  showIcon
+                  className="sk__instruction-alert"
+                  message="Agent 指令 与 SKILL.md 正文是两个完全独立的字段"
+                  description={
+                    <span>
+                      左侧「文件资源」里的 <code>SKILL.md 正文</code> 会落盘为技能目录下的标准说明文档，供阅读与引擎载入；
+                      本处的 <b>Agent 指令（instruction）</b> 是可选的、直接注入给智能体的补充指令，
+                      仅存于数据库、<b>不写入任何文件</b>。两者请分别维护，切勿当作同一份内容。
+                    </span>
+                  }
                 />
-              </Field>
+                <Field className="sk__span-2 sk__instruction-field">
+                  <FieldLabel>
+                    <Bot size={14} className="sk__inline-icon" />
+                    Agent 指令（instruction）
+                    <span className="sk__optional">可选</span>
+                  </FieldLabel>
+                  <MarkdownEditor
+                    value={draft.instruction ?? ''}
+                    height={420}
+                    placeholder="填写希望智能体在调用本技能时额外遵循的指令（可选）。留空则引擎仅使用 SKILL.md 正文。"
+                    onChange={(v) => patch({ instruction: v })}
+                  />
+                </Field>
+              </div>
+              </div>
             ),
           },
 
@@ -344,22 +465,8 @@ export function SkillFormModal({
             key: 'files',
             label: '文件资源',
             children: (
-              <>
-                <Alert
-                  type="info"
-                  showIcon
-                  style={{ marginBottom: 14 }}
-                  message={
-                    <>
-                      资源将存放于{' '}
-                      <code>{`{skill_path}/{identifier}/`}</code> 下：SKILL.md /
-                      脚本 scripts / 参考资料 references / 静态资源 assets /
-                      模板 templates / 自定义目录。
-                    </>
-                  }
-                />
-
-                {/* SKILL.md 正文（独立字段） */}
+              <div className="sk__tab-panel">
+                {/* SKILL.md 正文（独立字段，落盘为 <identifier>/SKILL.md） */}
                 <Field>
                   <FieldLabel>
                     <FileCode2 size={14} className="sk__inline-icon" />
@@ -525,7 +632,7 @@ export function SkillFormModal({
                     ))}
                   </div>
                 )}
-              </>
+              </div>
             ),
           },
 
@@ -534,11 +641,13 @@ export function SkillFormModal({
             key: 'tree',
             label: '目录结构',
             children: (
-              <div className="sk__tree-wrap">
+              <div className="sk__tab-panel sk__tab-panel--tree">
                 <p className="sk__tree-tip">
                   当前技能在磁盘上的目录与文件（只读预览，修改请通过上方「文件资源」或编辑脚本）。
                 </p>
-                <SkillFileTree tree={fileTree} />
+                <div className="sk__tree-body">
+                  <SkillFileTree tree={fileTree} />
+                </div>
               </div>
             ),
           },

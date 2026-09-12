@@ -317,7 +317,7 @@ pub async fn run_pipeline(
                     title: title.clone(),
                     reason: out.summary.clone(),
                     summary: String::new(),
-                    tier: "A".into(),
+                    tier: crate::agent::recovery::classify_tier(attempts, &out.summary, &None).to_string(),
                     failed_command: None,
                     changed_files: None,
                 };
@@ -933,7 +933,9 @@ async fn run_subtask(
         // 但模型把全部预算花在工具调用上、没机会发终态汇报」的子任务不会被误判未闭环。
         if outcome.tool_calls.is_empty() {
             let summary = outcome.content.trim().to_string();
-            let mut success = !summary.is_empty();
+            // 漏洞 B 修复：若最近一轮工具调用失败且未恢复（last_tool_error 仍 Some），
+            // 即便模型产出总结性文本也判为未闭环，进入恢复链路（对齐「命令非 0→档A」契约）。
+            let mut success = !summary.is_empty() && last_tool_error.is_none();
             // L0/L1 确定性校验（#9）：子任务声明了 success_criteria 时，无论模型是否自报成功，
             // 都必须通过文件/内容层面的客观校验，否则判为未闭环（进入恢复链路）。
             let mut verify_detail = String::new();
@@ -964,14 +966,17 @@ async fn run_subtask(
             } else {
                 Vec::new()
             };
-            let final_summary = if !summary.is_empty() {
-                if !success && !verify_detail.is_empty() {
-                    format!("校验未通过（{verify_detail}）：{summary}")
-                } else {
-                    summary
-                }
-            } else {
+            let final_summary = if summary.is_empty() {
                 "子任务未产出有效结果（空响应）".to_string()
+            } else if !success && !verify_detail.is_empty() {
+                format!("校验未通过（{verify_detail}）：{summary}")
+            } else if !success && last_tool_error.is_some() {
+                format!(
+                    "执行未闭环（最近工具错误：{}）：{summary}",
+                    last_tool_error.clone().unwrap_or_default()
+                )
+            } else {
+                summary
             };
             return (
                 SubTaskOutput {
@@ -1053,6 +1058,11 @@ async fn run_subtask(
         // 连续错误即时拦截：连续 2 轮工具全失败即判定子任务受阻。
         if stats.had_success {
             consecutive_errors = 0;
+            // 漏洞 B 配套：本轮工具调用全部成功（无失败），说明之前某轮的临时错误已恢复，
+            // 清空 last_tool_error，避免终态轮 line 938 `&& last_tool_error.is_none()` 误杀正常任务。
+            if !stats.had_error {
+                last_tool_error = None;
+            }
         } else if stats.had_error {
             consecutive_errors += 1;
         }

@@ -24,7 +24,7 @@ export function SkillAvatar({ skill, size = 36 }: SkillAvatarProps) {
 
   useEffect(() => {
     let active = true
-    void readSkillLogoBase64(skill.identifier)
+    void readSkillLogoBase64(skill.identifier, skill.path)
       .then((url) => {
         if (active) setLogo(url)
       })

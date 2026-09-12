@@ -10,6 +10,7 @@
 
 import type { ProxyMode } from '@/types/core'
 import { getAllRawConfig, setRawConfig } from '@/core/mapper/config-mapper'
+import type { AccentTheme } from '@/core/store/slices/themeSlice'
 
 /** 网络代理配置（对应 app_config.network_proxy，JSON 序列化）。 */
 export interface ProxyConfig {
@@ -42,6 +43,8 @@ export interface AppSettings {
   sessionIdleHours: number
   /** HTTP 请求主机白名单（对应 app_config.http_allowed_hosts）；空数组 = 不限制，非空 = 仅允许命中主机（含其子域） */
   httpAllowedHosts: string[]
+  /** 主品牌色调（对应 app_config.accent）：minimal / sky / mint / lilac，默认 minimal（简约） */
+  accent: AccentTheme
 }
 
 /** app_config 中各设置项的 key（与 init.sql 种子、config-mapper 保持一致）。 */
@@ -55,6 +58,7 @@ export const CONFIG_KEYS = {
   sessionAutoNew: 'session_auto_new',
   sessionIdleHours: 'session_idle_hours',
   httpAllowedHosts: 'http_allowed_hosts',
+  accent: 'accent',
 } as const
 
 /** 各设置的出厂默认值（缺失时回退）。 */
@@ -68,6 +72,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   sessionAutoNew: false,
   sessionIdleHours: 24,
   httpAllowedHosts: [],
+  accent: 'minimal',
 }
 
 /** 网络代理模式下拉选项（运行期）。 */
@@ -126,6 +131,14 @@ function parseHostAllowlist(raw: string | undefined): string[] {
     .filter(Boolean)
 }
 
+const ACCENT_VALUES: AccentTheme[] = ['minimal', 'sky', 'mint', 'lilac']
+
+/** 解析 app_config.accent：仅允许 minimal/sky/mint/lilac，非法值回退默认 minimal。 */
+function parseAccent(raw: string | undefined): AccentTheme {
+  if (raw && (ACCENT_VALUES as string[]).includes(raw)) return raw as AccentTheme
+  return 'minimal'
+}
+
 /* ------------------------------------------------------------------ *
  * 对外读取 / 落库
  * ------------------------------------------------------------------ */
@@ -162,6 +175,7 @@ export async function loadSettings(): Promise<AppSettings> {
       DEFAULT_SETTINGS.sessionIdleHours,
     ),
     httpAllowedHosts: parseHostAllowlist(all[k.httpAllowedHosts]),
+    accent: parseAccent(all[k.accent]),
   }
 }
 
@@ -186,6 +200,7 @@ export async function saveSettings(next: AppSettings): Promise<void> {
       k.sessionIdleHours,
       serializeValue(k.sessionIdleHours, next.sessionIdleHours),
     ),
+    setRawConfig(k.accent, serializeValue(k.accent, next.accent)),
   ])
 }
 

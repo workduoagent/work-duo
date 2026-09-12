@@ -11,7 +11,7 @@
  *   skill_path/<identifier>/{scripts,references,assets,templates,SKILL.md}。
  */
 import { useEffect, useState } from 'react'
-import { Inbox, FolderUp, Upload as UploadIcon, Trash2 } from 'lucide-react'
+import { Inbox, FolderUp, Upload as UploadIcon, X } from 'lucide-react'
 import { Button, Modal, Input, Field, FieldLabel, Select } from '@/components/ui'
 import { Upload, Tag, Divider, Alert } from 'antd'
 import { useNotify } from '@/components/ui/notify'
@@ -21,6 +21,7 @@ import {
   type SkillFormData,
   type ResourceFile,
 } from '@/core/file/skill-file'
+import { uint8ToBase64 } from '@/core/file/skillFs'
 import { ScenarioSelect } from '@/components/scenario'
 import { isTauri } from '@/core/config'
 import { open as openDialog } from '@tauri-apps/plugin-dialog'
@@ -246,15 +247,13 @@ export function SkillImportModal({
       return false
     }
     const buf = await file.arrayBuffer()
+    const bytes = new Uint8Array(buf)
     const ext = file.name.split('.').pop()!.toLowerCase()
     const mime = ext === 'jpg' ? 'jpeg' : ext === 'svg' ? 'svg+xml' : ext
-    const url = URL.createObjectURL(new Blob([buf], { type: `image/${mime}` }))
-    setLogo((prev) => {
-      if (prev) URL.revokeObjectURL(prev.url)
-      return {
-        file: { id: crypto.randomUUID(), name: `logo.${ext}`, dir: '', data: new Uint8Array(buf) },
-        url,
-      }
+    const url = `data:image/${mime};base64,${uint8ToBase64(bytes)}`
+    setLogo({
+      file: { id: crypto.randomUUID(), name: `logo.${ext}`, dir: '', data: bytes },
+      url,
     })
     message.success(`已选择头像（将落盘为 logo.${ext}）`)
   }
@@ -303,8 +302,10 @@ export function SkillImportModal({
         description: description.trim() || undefined,
         scenario,
         tags: tags.length ? tags : undefined,
-        // 导入时 SKILL.md 即作为正文；instruction 一并初始化（两字段独立，可后续分别编辑）
-        instruction: skillMarkdown,
+        // 导入时只把 SKILL.md 内容落为 skillMarkdown 正文。
+        // 注意：instruction（Agent 指令）是与 SKILL.md 完全独立的字段，
+        // 绝不要用 SKILL.md 内容去填充它（历史上曾错误地把两者画等号）。
+        instruction: undefined,
         skillMarkdown,
       }
       await onImported({ skill, scripts: [], resources })
@@ -469,6 +470,49 @@ export function SkillImportModal({
 
       {/* 3) 基础信息表单（由用户填写） */}
       <div className="sk__grid">
+        {/* 技能头像：置于基础信息最前 */}
+        <Field className="sk__span-2">
+          <FieldLabel>技能头像</FieldLabel>
+          <div className="sk__logo-block">
+            <div className="sk__logo-thumb">
+              <Upload
+                accept=".png,.jpg,.jpeg,.gif,.webp,.svg"
+                maxCount={1}
+                showUploadList={false}
+                beforeUpload={(file) => {
+                  void handleLogoUpload(file as unknown as File)
+                  return false
+                }}
+              >
+                <div
+                  className={`sk__logo-preview sk__logo-click${
+                    logo ? ' is-set' : ''
+                  }`}
+                >
+                  {logo ? (
+                    <img src={logo.url} alt="logo" className="sk__logo-img" />
+                  ) : (
+                    <UploadIcon size={22} className="sk__logo-empty-icon" />
+                  )}
+                  <span className="sk__logo-mask">
+                    {logo ? '更换头像' : '点击上传'}
+                  </span>
+                </div>
+              </Upload>
+              {logo && (
+                <button
+                  type="button"
+                  className="sk__logo-remove"
+                  aria-label="移除头像"
+                  onClick={() => setLogo(null)}
+                >
+                  <X size={13} />
+                </button>
+              )}
+            </div>
+          </div>
+        </Field>
+
         <Field>
           <FieldLabel>
             标识符<span className="sk__required">*</span>
@@ -502,16 +546,6 @@ export function SkillImportModal({
           />
         </Field>
 
-        <Field className="sk__span-2">
-          <FieldLabel>描述</FieldLabel>
-          <Input.TextArea
-            rows={2}
-            value={description}
-            placeholder="一句话描述这个技能的能力"
-            onChange={(e) => setDescription(e.target.value)}
-          />
-        </Field>
-
         <Field>
           <FieldLabel>技能分类</FieldLabel>
           <ScenarioSelect
@@ -533,45 +567,17 @@ export function SkillImportModal({
           />
         </Field>
 
+        {/* 技能描述：置于基础信息最底部 */}
         <Field className="sk__span-2">
-          <FieldLabel>技能头像</FieldLabel>
-          <div className="sk__logo-row">
-            <div className="sk__logo-preview">
-              {logo ? (
-                <img src={logo.url} alt="logo" className="sk__logo-img" />
-              ) : (
-                <span className="sk__logo-placeholder">
-                  <UploadIcon size={20} />
-                </span>
-              )}
-            </div>
-            <div className="sk__logo-actions">
-              <Upload
-                accept=".png,.jpg,.jpeg,.gif,.webp,.svg"
-                maxCount={1}
-                showUploadList={false}
-                beforeUpload={(file) => {
-                  void handleLogoUpload(file as unknown as File)
-                  return false
-                }}
-              >
-                <Button icon={<UploadIcon size={14} />}>
-                  {logo ? '更换头像' : '上传头像'}
-                </Button>
-              </Upload>
-              {logo && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  icon={<Trash2 size={14} />}
-                  onClick={() => setLogo(null)}
-                >
-                  移除
-                </Button>
-              )}
-            </div>
-          </div>
+          <FieldLabel>技能描述</FieldLabel>
+          <Input.TextArea
+            rows={8}
+            value={description}
+            placeholder="一句话描述这个技能的能力"
+            onChange={(e) => setDescription(e.target.value)}
+          />
         </Field>
+
       </div>
     </Modal>
   )

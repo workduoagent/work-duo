@@ -7,8 +7,9 @@ import { store } from '@/core/store'
 import { Provider } from 'react-redux'
 import { ThemeProvider, InitProvider } from '@/core/contexts'
 import { THEME_STORAGE_KEY } from '@/core/config/theme'
-import { setTheme } from '@/core/store/slices/themeSlice'
+import { setTheme, setAccent } from '@/core/store/slices/themeSlice'
 import type { ThemeMode } from '@/core/store/slices/themeSlice'
+import { loadSettings } from '@/core/file/settings-file'
 import { initScrollbarAutoHide } from '@/utils/scrollbar-autohide'
 
 // 启动即把持久化的主题模式注入 Redux（旧值键名保持 work-duo-theme 不变）。
@@ -20,6 +21,13 @@ try {
 } catch {
   /* ignore */
 }
+
+// 启动即把持久化的主品牌色调（app_config.accent）注入 Redux，使 ThemeProvider 启动即生效。
+void loadSettings()
+  .then((s) => store.dispatch(setAccent(s.accent)))
+  .catch(() => {
+    /* ignore */
+  })
 
 // 全局滚动条：滚动/悬浮时出现，失焦隐藏
 initScrollbarAutoHide()

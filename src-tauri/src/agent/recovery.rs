@@ -17,7 +17,10 @@ use std::sync::atomic::Ordering;
 
 use tokio::sync::Notify;
 
-/// 步骤级恢复决策（由前端回传）。
+/// 步骤级恢复决策（由前端回传，经 `commands::resolve_subtask` 的 decision 字段映射）。
+///
+/// `ChangeApproach` 为 Phase 2b-1 启用：前端档 B 恢复面板第 4 键「改方案」回传，
+/// 要求 Agent 换思路重规划（见 `pipeline.rs` 中对应 match 臂）。
 #[derive(Debug, Clone)]
 pub enum RecoveryDecision {
     /// 重试当前受阻子任务（从头再跑一遍）。
@@ -26,7 +29,7 @@ pub enum RecoveryDecision {
     Skip,
     /// 接管：注入用户补充指示，作为「引导式重试」重跑当前子任务（空指引等价于 Retry）。
     Takeover(String),
-    /// 改方案：把错误摘要 + 已试路径回灌，要求 Agent 换思路重规划（Phase 2b 启用，此处预留）。
+    /// 改方案：把错误摘要 + 已试路径回灌，要求 Agent 换思路重规划（Phase 2b-1 启用）。
     ChangeApproach(String),
     /// 取消（用户在等待期间点击了取消）。
     Cancel,
@@ -49,6 +52,56 @@ pub struct RecoveryRequest {
     pub failed_command: Option<String>,
     /// 已改动文件（接管面板展示用，2a 可空）。
     pub changed_files: Option<Vec<String>>,
+}
+
+/// 异常分档分类器（Phase 2b-1）。
+///
+/// 返回 `"A"`（可恢复，3 键：跳过|重试|接管）或 `"B"`（高风险歧义，4 键，含改方案）。
+/// 升档为 B 的条件（任一命中即 B）：
+///  - `attempts >= 2`：同一子任务已至少经历过一次恢复（即用户已重试 ≥1 次仍失败），
+///    触发「自动升档」——默认引导用户换思路而非继续无脑重试；
+///  - 失败文本命中高风险关键词：写系统路径 / 改 CI·配置文件 / 改依赖锁文件等，
+///    这类操作即便首次失败也值得让用户确认是否要换方案。
+pub fn classify_tier(attempts: usize, reason: &str, failed_command: &Option<String>) -> &'static str {
+    if attempts >= 2 {
+        return "B";
+    }
+    let cmd = failed_command.as_deref().unwrap_or("");
+    let hay = format!("{}\n{}", reason, cmd).to_lowercase();
+    const RISKY: &[&str] = &[
+        // 系统路径
+        "c:\\windows",
+        "c:\\program files",
+        "c:\\programdata",
+        "/etc/",
+        "/system/",
+        "/usr/",
+        "/proc/",
+        "/sys/",
+        "appdata",
+        "localappdata",
+        // CI / 配置
+        ".github/workflows",
+        ".gitlab-ci",
+        "jenkinsfile",
+        "azure-pipelines",
+        "tsconfig",
+        "vite.config",
+        "webpack.config",
+        "package-lock.json",
+        "yarn.lock",
+        "pnpm-lock.yaml",
+        ".env",
+        "cargo.toml",
+        "pyproject.toml",
+        ".npmrc",
+        "/.git/",
+        ".git/",
+    ];
+    if RISKY.iter().any(|k| hay.contains(k)) {
+        return "B";
+    }
+    "A"
 }
 
 /// 步骤级恢复挂起中枢（托管于 `AgentRuntime` 共享状态，后端任务与命令跨任务访问）。

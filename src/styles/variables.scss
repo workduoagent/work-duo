@@ -1,137 +1,157 @@
 /* ============================================================
  * variables.scss — 项目级设计令牌（Design Tokens）
  * ------------------------------------------------------------
- * 极简、清新、脱俗的现代 SaaS 主题。
+ * 基于新 Logo 的「深海蓝绿（Ocean）」三色环调色盘：
+ *   - 天青蓝 Sky   #38BDF8 → #60CFFA：主品牌色（按钮、选中、焦点）
+ *   - 薄荷绿 Mint  #34D399 → #5CDFB5：成功 / 运行中 / 知识库连接态
+ *   - 淡紫 Lilac  #A78BFA → #C4A8FE：强调 / 点缀
+ *   - 深海背景：#071018（底）/ #0B1A2E（elevated / 升层）
+ *   - 中性色：#E8F6FC（主文字）/ #9EC9DB（次文字）
+ *   - 边框：rgba(56, 189, 248, 0.25)
+ * ------------------------------------------------------------
  * 亮色挂在 :root / .light，暗色挂在 .dark。
+ * 语义映射：
+ *   --color-brand-*  → Sky 品牌色（随色调可切换为 Mint / Lilac）
+ *   --color-success-*→ Mint 成功/运行态
+ *   --color-danger-* → 柔和红 危险/强调态
  * ============================================================ */
 
 :root,
 .light {
-  /* 表面 / 文本 (雅致锌 Zinc 体系) */
-  --color-background: #ffffff;
-  --color-background-subtle: #fafafa; /* Zinc 50 - 极浅的珍珠白 */
-  --color-background-muted: #f4f4f5; /* Zinc 100 */
-  --color-foreground: #27272a; /* Zinc 800 - 柔和的正文黑 */
-  --color-foreground-muted: #71717a; /* Zinc 500 */
-  --color-foreground-intense: #18181b; /* Zinc 900 - 纯粹的标题黑 */
-  --color-foreground-inverse: #ffffff;
+  /* 表面 / 文本（浅色调：淡海蓝，避免纯白死白） */
+  --color-background: #f0f8fc;
+  --color-background-subtle: #e8f4fa; /* 卡片/浮层 */
+  --color-background-muted: #dceff7; /* hover/压条 */
 
-  /* 边框 - 极度弱化物理分割线 */
-  --color-border: #e4e4e7; /* Zinc 200 */
-  --color-border-muted: #f4f4f5; /* Zinc 100 */
+  --color-foreground: #0b2030; /* 深海军：柔和正文 */
+  --color-foreground-muted: #4a6b7c; /* 淡海蓝灰：次级文字 */
+  --color-foreground-intense: #07202f; /* 标题 */
+  --color-foreground-inverse: #f0f8fc;
 
-  /* 代码（行内 code / 围栏代码块）—— 独立令牌：
-     行内代码必须有「看得见的底 + 看得清的字」，不能只靠极浅灰底区分。 */
-  --color-code-bg: #f2f4f7; /* 略偏冷的浅灰，与纯白底可辨 */
-  --color-code-border: #dbe1e9; /* 细边框，把代码块从正文中"托"起来 */
-  --color-code-fg: #14304a; /* 深蓝墨：高对比 + 与正文黑区分 */
+  /* 边框 - 淡海蓝，与背景融洽 */
+  --color-border: #cfe6f0;
+  --color-border-muted: #e8f4fa;
 
-  /* highlight.js 语法高亮令牌（自建主题，跟随亮/暗切换；避免引入外部主题版权）。
-     背景统一交给 .md-body pre，这里只定义语法 token 颜色。 */
-  --hljs-fg: #24292e;
-  --hljs-comment: #6a737d;
-  --hljs-keyword: #d73a49;
-  --hljs-string: #032f62;
-  --hljs-number: #005cc5;
-  --hljs-title: #6f42c1;
-  --hljs-attr: #005cc5;
-  --hljs-built_in: #e36209;
-  --hljs-tag: #22863a;
-  --hljs-meta: #6a737d;
-  --hljs-addition-fg: #22863a;
-  --hljs-addition-bg: #f0fff4;
-  --hljs-deletion-fg: #b31d28;
-  --hljs-deletion-bg: #ffeef0;
+  /* 代码（行内 code / 围栏代码块） */
+  --color-code-bg: #eaf6fc;
+  --color-code-border: #cfe6f0;
+  --color-code-fg: #0b4a63; /* 深青墨 */
 
-  /* 品牌色 - 晴空蓝 (Fresh Sky) 体系，清透焕新 */
-  --color-brand-50: #f0f9ff;
-  --color-brand-100: #e0f2fe;
-  --color-brand-200: #bae6fd;
-  --color-brand-300: #7dd3fc;
-  --color-brand-400: #38bdf8;
-  --color-brand-500: #0ea5e9;
-  --color-brand-600: #0284c7; /* 核心交互色 */
-  --color-brand-700: #0369a1;
-  --color-brand-800: #075985;
-  --color-brand-900: #0c4a6e;
+  /* highlight.js 语法高亮令牌（亮色版） */
+  --hljs-fg: #0b2030;
+  --hljs-comment: #4a6b7c;
+  --hljs-keyword: #0ea5e9; /* Sky 600 */
+  --hljs-string: #059669; /* Mint 600 */
+  --hljs-number: #38bdf8; /* Sky 500 */
+  --hljs-title: #7c3aed; /* Lilac 600 */
+  --hljs-attr: #059669;
+  --hljs-built_in: #0ea5e9;
+  --hljs-tag: #059669;
+  --hljs-meta: #4a6b7c;
+  --hljs-addition-fg: #059669;
+  --hljs-addition-bg: #ecfdf5;
+  --hljs-deletion-fg: #f87171;
+  --hljs-deletion-bg: #fef2f2;
 
-  /* 危险色 - 保持警示性但降低刺眼度 */
-  --color-danger: #ef4444;
-  --color-danger-bg: rgba(239, 68, 68, 0.08);
-  --color-danger-50: #fee2e2;
+  /* 品牌色 - Sky（Logo 主色 / 默认色调） */
+  --color-brand-50: #eaf8fe;
+  --color-brand-100: #cfeffb;
+  --color-brand-200: #a2e2f8;
+  --color-brand-300: #6fd2f3;
+  --color-brand-400: #4ccbf8;
+  --color-brand-500: #38bdf8; /* Logo Sky 起点 / 核心交互色 */
+  --color-brand-600: #0ea5e9; /* 浅色模式主按钮（更深的 Sky 600 保证对比度） */
+  --color-brand-700: #0284c7;
+  --color-brand-800: #0369a1;
+  --color-brand-900: #075985;
 
-  /* 成功 / 警告语义色（连通性三态等使用） */
-  --color-success: #16a34a;
-  --color-success-50: #dcfce7;
+  /* 危险色 - 柔和红（Logo 无红色，取通用危险语义色） */
+  --color-danger: #f87171;
+  --color-danger-bg: rgba(248, 113, 113, 0.10);
+  --color-danger-50: #fef2f2;
+
+  /* 成功色 - Mint（Logo 第二环，用于成功/运行中/连接态） */
+  --color-success: #34d399; /* Logo Mint 起点 */
+  --color-success-50: #ecfdf5;
+  --color-success-bg: rgba(52, 211, 153, 0.10);
+
+  /* 警告色 - 保留暖琥珀，不与 Mint 混淆 */
   --color-warning: #d97706;
   --color-warning-50: #fef3c7;
 
-  /* 阴影 - 极简大气的灵魂（低透明度，大扩散） */
-  --shadow-sm: 0 2px 12px rgba(0, 0, 0, 0.03);
-  --shadow-md: 0 8px 32px rgba(0, 0, 0, 0.04);
-  --shadow-pop: 0 16px 48px rgba(0, 0, 0, 0.06);
+  /* 品牌渐变（强调按钮底：Sky → Mint） */
+  --color-brand-gradient: linear-gradient(135deg, #38bdf8, #34d399);
+
+  /* 阴影 - 深海军低透明度，柔和扩散 */
+  --shadow-sm: 0 2px 12px rgba(7, 30, 48, 0.06);
+  --shadow-md: 0 8px 32px rgba(7, 30, 48, 0.08);
+  --shadow-pop: 0 16px 48px rgba(7, 30, 48, 0.12);
 }
 
 .dark {
-  /* 暗黑模式保持同等的高级感，避免纯黑死白 */
-  --color-background: #09090b; /* Zinc 950 - 深邃背景 */
-  --color-background-subtle: #18181b; /* Zinc 900 */
-  --color-background-muted: #27272a; /* Zinc 800 */
-  --color-foreground: #e4e4e7; /* Zinc 200 */
-  --color-foreground-muted: #a1a1aa; /* Zinc 400 */
-  --color-foreground-intense: #fafafa; /* Zinc 50 */
-  --color-foreground-inverse: #09090b;
+  /* 深海背景（Logo 主背景） */
+  --color-background: #071018;
+  --color-background-subtle: #0b1a2e; /* elevated 卡片/浮层（略亮） */
+  --color-background-muted: #0e2238; /* hover/压条 */
 
-  --color-border: #27272a; /* Zinc 800 */
-  --color-border-muted: #18181b; /* Zinc 900 */
+  --color-foreground: #e8f6fc; /* Logo 主文字 */
+  --color-foreground-muted: #9ec9db; /* Logo 次文字 */
+  --color-foreground-intense: #ffffff;
+  --color-foreground-inverse: #071018;
 
-  /* 代码（暗色）：深底 + 亮蓝字，保证暗色下同样清晰可辨 */
-  --color-code-bg: #161f2b;
-  --color-code-border: #273240;
-  --color-code-fg: #9ecbff;
+  --color-border: rgba(56, 189, 248, 0.25); /* Logo 分割线 */
+  --color-border-muted: rgba(56, 189, 248, 0.15);
 
-  /* highlight.js 语法高亮令牌（暗色版，配深底，保证语法色可辨） */
-  --hljs-fg: #c9d1d9;
-  --hljs-comment: #8b949e;
-  --hljs-keyword: #ff7b72;
-  --hljs-string: #a5d6ff;
-  --hljs-number: #79c0ff;
-  --hljs-title: #d2a8ff;
-  --hljs-attr: #79c0ff;
-  --hljs-built_in: #ffa657;
-  --hljs-tag: #7ee787;
-  --hljs-meta: #8b949e;
-  --hljs-addition-fg: #7ee787;
-  --hljs-addition-bg: rgba(46, 160, 67, 0.15);
-  --hljs-deletion-fg: #ffa198;
-  --hljs-deletion-bg: rgba(248, 81, 73, 0.15);
+  /* 代码（暗色）：深海底 + 亮青字 */
+  --color-code-bg: #0b1a2e;
+  --color-code-border: rgba(56, 189, 248, 0.20);
+  --color-code-fg: #cfeaf5;
 
-  /* 暗色下品牌色略微调整，确保发光感与对比度 */
-  --color-brand-50: #082f49;
-  --color-brand-100: #0c4a6e;
-  --color-brand-200: #075985;
-  --color-brand-300: #0369a1;
-  --color-brand-400: #0284c7;
-  --color-brand-500: #0ea5e9;
-  --color-brand-600: #38bdf8; /* 暗色下的核心按钮提亮，保证辨识度 */
-  --color-brand-700: #7dd3fc;
-  --color-brand-800: #bae6fd;
-  --color-brand-900: #e0f2fe;
+  /* highlight.js 语法高亮令牌（暗色版） */
+  --hljs-fg: #e8f6fc;
+  --hljs-comment: #9ec9db;
+  --hljs-keyword: #7fd9fb; /* Sky bright */
+  --hljs-string: #5cdfb5; /* Mint bright */
+  --hljs-number: #38bdf8; /* Sky 500 */
+  --hljs-title: #c4a8fe; /* Lilac bright */
+  --hljs-attr: #5cdfb5;
+  --hljs-built_in: #7fd9fb;
+  --hljs-tag: #5cdfb5;
+  --hljs-meta: #9ec9db;
+  --hljs-addition-fg: #5cdfb5;
+  --hljs-addition-bg: rgba(52, 211, 153, 0.15);
+  --hljs-deletion-fg: #fca5a5;
+  --hljs-deletion-bg: rgba(248, 113, 113, 0.15);
 
-  --color-danger: #f87171;
-  --color-danger-bg: rgba(248, 113, 113, 0.12);
+  /* 暗色下品牌色：提亮 500，保证按钮/焦点辨识度 */
+  --color-brand-50: #07293d;
+  --color-brand-100: #0a3a57;
+  --color-brand-200: #0e4c70;
+  --color-brand-300: #1e6c92;
+  --color-brand-400: #38bdf8; /* Logo Sky 起点 */
+  --color-brand-500: #5ccffa; /* Sky 渐变终点（更亮，暗底更跳） */
+  --color-brand-600: #7fd9fb; /* 暗色核心按钮色 */
+  --color-brand-700: #a6e6fc;
+  --color-brand-800: #ccf2fe;
+  --color-brand-900: #eaf9ff;
+
+  --color-danger: #fca5a5;
+  --color-danger-bg: rgba(248, 113, 113, 0.15);
   --color-danger-50: rgba(248, 113, 113, 0.12);
 
-  /* 成功 / 警告语义色（暗色下提亮以保证辨识度） */
-  --color-success: #4ade80;
-  --color-success-50: rgba(74, 222, 128, 0.12);
+  --color-success: #5cdfb5; /* Mint bright */
+  --color-success-50: rgba(52, 211, 153, 0.12);
+  --color-success-bg: rgba(52, 211, 153, 0.12);
+
   --color-warning: #fbbf24;
   --color-warning-50: rgba(251, 191, 36, 0.12);
 
-  /* 暗黑模式需要更深、更集中的阴影来体现 Z 轴层级 */
-  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.4);
-  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.5);
-  --shadow-pop: 0 16px 40px rgba(0, 0, 0, 0.6);
+  --color-brand-gradient: linear-gradient(135deg, #38bdf8, #34d399);
+
+  /* 暗色下更深、更集中的阴影 */
+  --shadow-sm: 0 2px 8px rgba(3, 10, 18, 0.45);
+  --shadow-md: 0 8px 24px rgba(3, 10, 18, 0.55);
+  --shadow-pop: 0 16px 40px rgba(3, 10, 18, 0.65);
 }
 
 /* 尺寸 / 圆角（项目级，非语义） */
@@ -147,4 +167,208 @@
      当前 fallback 到系统 ui-monospace 栈。 */
   --font-mono: "AppMono", ui-monospace, SFMono-Regular, Consolas,
     "PingFang SC", "Microsoft YaHei", monospace;
+}
+
+/* ============================================================
+ * 色调（accent）覆盖：
+ * - .accent-minimal（默认）= 完整还原应用原始主题（Zinc 灰阶 + 晴空蓝），覆盖全部令牌；
+ * - .accent-sky/.accent-mint/.accent-lilac = 在 Ocean 深底基础上仅重映射主品牌色 --color-brand-*。
+ * 由 ThemeProvider 在 <html> 上切换 .accent-sky/.accent-mint/.accent-lilac/.accent-minimal。
+ * ============================================================ */
+
+/* 简约 Minimal（出厂默认）：还原应用原始主题（雅致 Zinc 灰阶 + 晴空蓝 Fresh Sky），
+ * 即改三色主题之前的版本；中性、克制、清爽。覆盖完整令牌，避免出现 Ocean 残留色。 */
+.accent-minimal.light {
+  --color-background: #ffffff;
+  --color-background-subtle: #fafafa;
+  --color-background-muted: #f4f4f5;
+  --color-foreground: #27272a;
+  --color-foreground-muted: #71717a;
+  --color-foreground-intense: #18181b;
+  --color-foreground-inverse: #ffffff;
+
+  --color-border: #e4e4e7;
+  --color-border-muted: #f4f4f5;
+
+  --color-code-bg: #f2f4f7;
+  --color-code-border: #dbe1e9;
+  --color-code-fg: #14304a;
+
+  --hljs-fg: #24292e;
+  --hljs-comment: #6a737d;
+  --hljs-keyword: #d73a49;
+  --hljs-string: #032f62;
+  --hljs-number: #005cc5;
+  --hljs-title: #6f42c1;
+  --hljs-attr: #005cc5;
+  --hljs-built_in: #e36209;
+  --hljs-tag: #22863a;
+  --hljs-meta: #6a737d;
+  --hljs-addition-fg: #22863a;
+  --hljs-addition-bg: #f0fff4;
+  --hljs-deletion-fg: #b31d28;
+  --hljs-deletion-bg: #ffeef0;
+
+  --color-brand-50: #f0f9ff;
+  --color-brand-100: #e0f2fe;
+  --color-brand-200: #bae6fd;
+  --color-brand-300: #7dd3fc;
+  --color-brand-400: #38bdf8;
+  --color-brand-500: #0ea5e9;
+  --color-brand-600: #0284c7;
+  --color-brand-700: #0369a1;
+  --color-brand-800: #075985;
+  --color-brand-900: #0c4a6e;
+
+  --color-danger: #ef4444;
+  --color-danger-bg: rgba(239, 68, 68, 0.08);
+  --color-danger-50: #fee2e2;
+
+  --color-success: #16a34a;
+  --color-success-50: #dcfce7;
+  --color-success-bg: rgba(22, 163, 74, 0.10);
+  --color-warning: #d97706;
+  --color-warning-50: #fef3c7;
+
+  --color-brand-gradient: linear-gradient(135deg, #0ea5e9, #38bdf8);
+
+  --shadow-sm: 0 2px 12px rgba(0, 0, 0, 0.03);
+  --shadow-md: 0 8px 32px rgba(0, 0, 0, 0.04);
+  --shadow-pop: 0 16px 48px rgba(0, 0, 0, 0.06);
+}
+.accent-minimal.dark {
+  --color-background: #09090b;
+  --color-background-subtle: #18181b;
+  --color-background-muted: #27272a;
+  --color-foreground: #e4e4e7;
+  --color-foreground-muted: #a1a1aa;
+  --color-foreground-intense: #fafafa;
+  --color-foreground-inverse: #09090b;
+
+  --color-border: #27272a;
+  --color-border-muted: #18181b;
+
+  --color-code-bg: #161f2b;
+  --color-code-border: #273240;
+  --color-code-fg: #9ecbff;
+
+  --hljs-fg: #c9d1d9;
+  --hljs-comment: #8b949e;
+  --hljs-keyword: #ff7b72;
+  --hljs-string: #a5d6ff;
+  --hljs-number: #79c0ff;
+  --hljs-title: #d2a8ff;
+  --hljs-attr: #79c0ff;
+  --hljs-built_in: #ffa657;
+  --hljs-tag: #7ee787;
+  --hljs-meta: #8b949e;
+  --hljs-addition-fg: #7ee787;
+  --hljs-addition-bg: rgba(46, 160, 67, 0.15);
+  --hljs-deletion-fg: #ffa198;
+  --hljs-deletion-bg: rgba(248, 81, 73, 0.15);
+
+  --color-brand-50: #082f49;
+  --color-brand-100: #0c4a6e;
+  --color-brand-200: #075985;
+  --color-brand-300: #0369a1;
+  --color-brand-400: #0284c7;
+  --color-brand-500: #0ea5e9;
+  --color-brand-600: #38bdf8;
+  --color-brand-700: #7dd3fc;
+  --color-brand-800: #bae6fd;
+  --color-brand-900: #e0f2fe;
+
+  --color-danger: #f87171;
+  --color-danger-bg: rgba(248, 113, 113, 0.12);
+  --color-danger-50: rgba(248, 113, 113, 0.12);
+
+  --color-success: #4ade80;
+  --color-success-50: rgba(74, 222, 128, 0.12);
+  --color-success-bg: rgba(74, 222, 128, 0.12);
+  --color-warning: #fbbf24;
+  --color-warning-50: rgba(251, 191, 36, 0.12);
+
+  --color-brand-gradient: linear-gradient(135deg, #0ea5e9, #38bdf8);
+
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.5);
+  --shadow-pop: 0 16px 40px rgba(0, 0, 0, 0.6);
+}
+
+/* 天青蓝 Sky（与基础变量一致，显式声明以便切换回退） */
+.accent-sky.light {
+  --color-brand-50: #eaf8fe;
+  --color-brand-100: #cfeffb;
+  --color-brand-200: #a2e2f8;
+  --color-brand-300: #6fd2f3;
+  --color-brand-400: #4ccbf8;
+  --color-brand-500: #38bdf8;
+  --color-brand-600: #0ea5e9;
+  --color-brand-700: #0284c7;
+  --color-brand-800: #0369a1;
+  --color-brand-900: #075985;
+}
+.accent-sky.dark {
+  --color-brand-50: #07293d;
+  --color-brand-100: #0a3a57;
+  --color-brand-200: #0e4c70;
+  --color-brand-300: #1e6c92;
+  --color-brand-400: #38bdf8;
+  --color-brand-500: #5ccffa;
+  --color-brand-600: #7fd9fb;
+  --color-brand-700: #a6e6fc;
+  --color-brand-800: #ccf2fe;
+  --color-brand-900: #eaf9ff;
+}
+
+/* 薄荷绿 Mint */
+.accent-mint.light {
+  --color-brand-50: #ecfdf5;
+  --color-brand-100: #d1fae5;
+  --color-brand-200: #a7f3d0;
+  --color-brand-300: #6ee7b7;
+  --color-brand-400: #34d399;
+  --color-brand-500: #10b981;
+  --color-brand-600: #059669;
+  --color-brand-700: #047857;
+  --color-brand-800: #065f46;
+  --color-brand-900: #064e3b;
+}
+.accent-mint.dark {
+  --color-brand-50: #06352a;
+  --color-brand-100: #0a4a3a;
+  --color-brand-200: #0e624c;
+  --color-brand-300: #138460;
+  --color-brand-400: #34d399;
+  --color-brand-500: #5cdfb5;
+  --color-brand-600: #84e8c7;
+  --color-brand-700: #abf0d9;
+  --color-brand-800: #d2f7ea;
+  --color-brand-900: #effbf4;
+}
+
+/* 淡紫 Lilac */
+.accent-lilac.light {
+  --color-brand-50: #f5f0ff;
+  --color-brand-100: #ede9fe;
+  --color-brand-200: #ddd6fe;
+  --color-brand-300: #c4b5fd;
+  --color-brand-400: #a78bfa;
+  --color-brand-500: #8b5cf6;
+  --color-brand-600: #7c3aed;
+  --color-brand-700: #6d28d9;
+  --color-brand-800: #5b21b6;
+  --color-brand-900: #4c1d95;
+}
+.accent-lilac.dark {
+  --color-brand-50: #2a1a5e;
+  --color-brand-100: #3b206e;
+  --color-brand-200: #4c2b8a;
+  --color-brand-300: #6d28d9;
+  --color-brand-400: #a78bfa;
+  --color-brand-500: #c4a8fe;
+  --color-brand-600: #d4bcfe;
+  --color-brand-700: #e2d2fe;
+  --color-brand-800: #eedcff;
+  --color-brand-900: #f7f0ff;
 }

@@ -194,7 +194,7 @@ export function TopBar() {
         <header className="app-topbar" data-tauri-drag-region>
             {/* 左侧：品牌区 */}
             <div className="app-topbar__brand no-drag-region">
-                <img src="/tauri.svg" alt="Work Duo" className="app-brand-logo"/>
+                <img src="/app.png" alt="Work Duo" className="app-brand-logo"/>
                 <span className="app-topbar__brand-name">Work Duo</span>
                 <div className="app-version-tag" title="当前版本">
                     <span className="app-version-tag__text">v{version}</span>

@@ -130,6 +130,32 @@ export function withLangExt(name: string, language: string): string {
   return `${name.replace(/\.+$/, '')}.${ext}`
 }
 
+/** 文件扩展名 -> 脚本语言 key（从磁盘回显脚本时推断编辑语言）。 */
+const EXT_TO_LANG: Record<string, string> = {
+  py: 'python',
+  js: 'javascript',
+  ts: 'typescript',
+  sh: 'bash',
+  bash: 'bash',
+  zsh: 'bash',
+  go: 'go',
+  rs: 'rust',
+  java: 'java',
+  rb: 'ruby',
+  ps1: 'powershell',
+  lua: 'lua',
+}
+
+/** 扩展名 -> 脚本语言 key；未知扩展名回退 python（编辑器内可手动改语言）。 */
+export function extToLang(ext: string): string {
+  return EXT_TO_LANG[ext.toLowerCase()] ?? 'python'
+}
+
+/** 是否为可识别的脚本扩展名（决定磁盘文件归类为「脚本」还是「资源」）。 */
+export function isScriptExt(ext: string): boolean {
+  return ext.toLowerCase() in EXT_TO_LANG
+}
+
 /* ------------------------------------------------------------------ *
  * 4. 草稿工厂
  * ------------------------------------------------------------------ */

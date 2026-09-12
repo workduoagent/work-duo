@@ -457,3 +457,67 @@
     display: none;
   }
 }
+
+/* ---------------- 外观 · 主题色 Radio ---------------- */
+.set-radio-icon {
+  margin-right: 6px;
+  vertical-align: -2px;
+}
+
+/* ---------------- 外观 · 主品牌色调选择 ---------------- */
+.accent-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.accent-swatch {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  width: 96px;
+  padding: 12px 8px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: var(--color-background-subtle);
+  cursor: pointer;
+  transition: border-color 0.18s ease, transform 0.12s ease, box-shadow 0.18s ease;
+}
+
+.accent-swatch:hover {
+  transform: translateY(-2px);
+  border-color: var(--color-foreground-muted);
+}
+
+.accent-swatch.is-active {
+  border-color: var(--color-brand-600);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-brand-600) 22%, transparent);
+}
+
+.accent-swatch__chip {
+  width: 44px;
+  height: 44px;
+  border-radius: 999px;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+}
+
+.accent-swatch__label {
+  font-size: 0.75rem;
+  color: var(--color-foreground-muted);
+  white-space: nowrap;
+}
+
+.accent-swatch__hint {
+  font-style: normal;
+  margin-left: 2px;
+  font-size: 0.6875rem;
+  color: var(--color-brand-600);
+}
+
+.accent-swatch.is-active .accent-swatch__label {
+  color: var(--color-foreground-intense);
+  font-weight: 600;
+}
+

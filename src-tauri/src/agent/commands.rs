@@ -164,6 +164,9 @@ pub async fn submit_approval_decision(
 pub struct SubmitChoiceInput {
     pub choice_id: String,
     pub option_id: String,
+    /// 用户走「其他 / 自定义」自由文本入口时填写的方案文本（可选）。
+    #[serde(default)]
+    pub custom_text: Option<String>,
 }
 
 #[tauri::command]
@@ -171,7 +174,10 @@ pub async fn submit_choice_decision(
     runtime: State<'_, AgentRuntime>,
     input: SubmitChoiceInput,
 ) -> Result<bool, String> {
-    Ok(runtime.choice.resolve(&input.choice_id, &input.option_id).await)
+    Ok(runtime
+        .choice
+        .resolve(&input.choice_id, &input.option_id, input.custom_text)
+        .await)
 }
 
 /// 取消当前任务（最佳努力）：置位共享取消标志，后台 run_task 流水线与流式拉取循环
@@ -195,9 +201,9 @@ pub async fn cancel_agent_task(runtime: State<'_, AgentRuntime>) -> Result<(), S
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ResolveSubtaskInput {
-    /// 决策：retry | skip | takeover。
+    /// 决策：retry | skip | takeover | change-approach。
     pub decision: String,
-    /// 接管时用户的补充指示（可空；空等价于 retry）。
+    /// 接管 / 改方案时用户的补充指示或新方案（可空；空等价于各自默认回灌诊断重试）。
     #[serde(default)]
     pub guidance: Option<String>,
 }
@@ -236,7 +242,12 @@ pub async fn resolve_subtask(
         "retry" => RecoveryDecision::Retry,
         "skip" => RecoveryDecision::Skip,
         "takeover" => RecoveryDecision::Takeover(input.guidance.unwrap_or_default()),
-        other => return Err(format!("未知恢复决策：{other}（应为 retry/skip/takeover）")),
+        "change-approach" => RecoveryDecision::ChangeApproach(input.guidance.unwrap_or_default()),
+        other => {
+            return Err(format!(
+                "未知恢复决策：{other}（应为 retry/skip/takeover/change-approach）"
+            ))
+        }
     };
     runtime.recovery.resolve(decision);
     Ok(true)

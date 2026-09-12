@@ -42,6 +42,25 @@ export async function resolveRealSkillBasePath(rawBase: string): Promise<string>
   return base
 }
 
+/**
+ * 解析技能目录的绝对路径（最终把占位符解析为真实目录）。
+ *
+ * 优先使用 DB 记录的 skill.path（技能本地物理路径，可能含 $APPDATA/$RESOURCE 占位），
+ * 它是落盘时写入的权威路径；仅在缺失时按约定用 skill_path 配置 + identifier 拼接兜底。
+ * 编辑态回显头像 / 脚本 / 资源时必须走这里，才能正确处理「用户改过存储路径」或
+ * 「导入技能 path 与当前 base 不一致」的情况。
+ */
+async function resolveSkillDir(
+  identifier: string,
+  skillPath?: string | null,
+): Promise<string> {
+  const raw =
+    skillPath && skillPath.trim()
+      ? skillPath
+      : `${await resolveSkillBasePath()}/${identifier}`
+  return resolveRealSkillBasePath(raw)
+}
+
 /** 计算技能目录绝对路径 <base>/<identifier>。 */
 export async function getSkillDir(
   basePath: string,
@@ -107,7 +126,7 @@ export async function writeResourceFile(
 }
 
 /** Uint8Array -> base64（分块避免大文件调用栈溢出）。 */
-function uint8ToBase64(bytes: Uint8Array): string {
+export function uint8ToBase64(bytes: Uint8Array): string {
   let bin = ''
   const chunk = 0x8000
   for (let i = 0; i < bytes.length; i += chunk) {
@@ -120,12 +139,13 @@ function uint8ToBase64(bytes: Uint8Array): string {
  * 读取技能头像（固定为技能根目录下的 logo.<ext>）。
  * 依次尝试 LOGO_EXTS，找到即返回 data URL；都不存在或出错返回 null（由 UI 回退为名称首字）。
  */
-export async function readSkillLogoBase64(identifier: string): Promise<string | null> {
+export async function readSkillLogoBase64(
+  identifier: string,
+  skillPath?: string | null,
+): Promise<string | null> {
   if (!isTauri) return null
   try {
-    const rawBase = await resolveSkillBasePath()
-    const base = await resolveRealSkillBasePath(rawBase)
-    const dir = await getSkillDir(base, identifier)
+    const dir = await resolveSkillDir(identifier, skillPath)
     for (const ext of LOGO_EXTS) {
       try {
         const data = (await readFile(await join(dir, `logo.${ext}`))) as Uint8Array
@@ -139,6 +159,30 @@ export async function readSkillLogoBase64(identifier: string): Promise<string | 
     /* 路径解析失败等，统一回退 */
   }
   return null
+}
+
+/**
+ * 删除技能根目录下所有 logo.<ext> 头像文件。
+ * 用于：用户移除头像、或上传新头像前清理旧扩展名文件，避免磁盘残留导致回显混乱。
+ * 非 Tauri 或文件不存在则静默。
+ */
+export async function removeSkillLogos(
+  identifier: string,
+  skillPath?: string | null,
+): Promise<void> {
+  if (!isTauri) return
+  try {
+    const dir = await resolveSkillDir(identifier, skillPath)
+    for (const ext of LOGO_EXTS) {
+      try {
+        await remove(await join(dir, `logo.${ext}`))
+      } catch {
+        /* 文件不存在或删除失败，继续尝试下一个扩展名 */
+      }
+    }
+  } catch {
+    /* 路径解析失败等，统一静默 */
+  }
 }
 
 /** 删除技能目录（删除技能时同步清理磁盘）。非 Tauri 或已不存在则静默。 */
@@ -168,12 +212,11 @@ export interface SkillFileTreeNode {
  */
 export async function readSkillFileTree(
   identifier: string,
+  skillPath?: string | null,
 ): Promise<SkillFileTreeNode | null> {
   if (!isTauri) return null
   try {
-    const rawBase = await resolveSkillBasePath()
-    const base = await resolveRealSkillBasePath(rawBase)
-    const dir = await getSkillDir(base, identifier)
+    const dir = await resolveSkillDir(identifier, skillPath)
     const root: SkillFileTreeNode = {
       name: identifier,
       relPath: '',
@@ -214,6 +257,51 @@ export async function readSkillFileTree(
   }
 }
 
+/** 技能目录下的单个扁平文件（相对技能根目录的路径 + 原始字节）。 */
+export interface SkillFlatFile {
+  /** 相对技能根目录的路径（不含根目录名），如 scripts/main.py / references/a.md */
+  relPath: string
+  /** 原始字节 */
+  data: Uint8Array
+}
+
+/**
+ * 递归读取技能根目录下的全部文件（扁平列表，含相对路径与字节内容）。
+ * 用于「编辑技能」时把磁盘上已落盘的脚本 / 资源 / 头像 / SKILL.md 回显到表单。
+ * 非 Tauri 或路径不可读返回 null（由 UI 回退为空白表单）。
+ */
+export async function readSkillDirFlat(
+  identifier: string,
+  skillPath?: string | null,
+): Promise<SkillFlatFile[] | null> {
+  if (!isTauri) return null
+  try {
+    const dir = await resolveSkillDir(identifier, skillPath)
+    const out: SkillFlatFile[] = []
+    const walk = async (d: string, relBase: string): Promise<void> => {
+      let entries
+      try {
+        entries = await readDir(d)
+      } catch {
+        return
+      }
+      for (const e of entries) {
+        const rel = relBase ? `${relBase}/${e.name}` : e.name
+        if (e.isDirectory) {
+          await walk(await join(d, e.name), rel)
+        } else {
+          const data = (await readFile(await join(d, e.name))) as Uint8Array
+          out.push({ relPath: rel, data })
+        }
+      }
+    }
+    await walk(dir, '')
+    return out
+  } catch {
+    return null
+  }
+}
+
 /** 单个技能文件的字节内容（供详情页查看文件内容用）。 */
 export interface SkillFileContent {
   /** 相对技能根目录的路径 */
@@ -232,12 +320,11 @@ export interface SkillFileContent {
 export async function readSkillFileContent(
   identifier: string,
   relPath: string,
+  skillPath?: string | null,
 ): Promise<SkillFileContent | null> {
   if (!isTauri) return null
   try {
-    const rawBase = await resolveSkillBasePath()
-    const base = await resolveRealSkillBasePath(rawBase)
-    const dir = await getSkillDir(base, identifier)
+    const dir = await resolveSkillDir(identifier, skillPath)
     const target = await join(dir, relPath)
     const data = (await readFile(target)) as Uint8Array
     return { relPath, name: relPath.split('/').pop() || relPath, data }
@@ -254,12 +341,11 @@ export async function writeSkillFileContent(
   identifier: string,
   relPath: string,
   content: string,
+  skillPath?: string | null,
 ): Promise<boolean> {
   if (!isTauri) return false
   try {
-    const rawBase = await resolveSkillBasePath()
-    const base = await resolveRealSkillBasePath(rawBase)
-    const dir = await getSkillDir(base, identifier)
+    const dir = await resolveSkillDir(identifier, skillPath)
     const target = await join(dir, relPath)
     await writeTextFile(target, content)
     return true
@@ -274,12 +360,13 @@ export async function writeSkillFileContent(
  * 与导入时「按公共顶层目录剥离」的逻辑一致，便于再次导入还原。
  * 非 Tauri 或读取失败返回 null（由调用方提示）。
  */
-export async function zipSkillDir(identifier: string): Promise<Uint8Array | null> {
+export async function zipSkillDir(
+  identifier: string,
+  skillPath?: string | null,
+): Promise<Uint8Array | null> {
   if (!isTauri) return null
   try {
-    const rawBase = await resolveSkillBasePath()
-    const base = await resolveRealSkillBasePath(rawBase)
-    const dir = await getSkillDir(base, identifier)
+    const dir = await resolveSkillDir(identifier, skillPath)
     const JSZip = (await import('jszip')).default
     const zip = new JSZip()
     const walk = async (d: string, relBase: string): Promise<void> => {

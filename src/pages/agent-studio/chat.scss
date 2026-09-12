@@ -1722,11 +1722,27 @@
     margin-top: 4px;
     width: 100%;
   }
+  &__change {
+    margin-top: 8px;
+    padding: 8px;
+    border: 1px dashed var(--color-border, #e0e0e0);
+    border-radius: 6px;
+    background: var(--color-fill-quaternary, #fafafa);
+  }
+  &__change-input {
+    margin-top: 4px;
+    width: 100%;
+  }
+  &__change-btn {
+    // 档 B 默认高亮（引导用户换思路）
+    order: 3;
+  }
   &__actions {
     display: flex;
     justify-content: flex-end;
     gap: 8px;
     flex-wrap: wrap;
+    margin-top: 8px;
   }
 
   .dark & {
@@ -1738,6 +1754,10 @@
     }
     &__value {
       color: #d0d0d0;
+    }
+    &__change {
+      border-color: #3a3a3a;
+      background: #1f1f1f;
     }
   }
 }
@@ -1790,6 +1810,39 @@
     line-height: 1.4;
   }
 
+  // 其他 / 自定义自由文本入口
+  &__custom {
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px dashed var(--color-border, #e5e7eb);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  &__custom-divider {
+    display: flex;
+    align-items: center;
+    font-size: 0.72rem;
+    color: var(--color-muted, #999);
+    &::before,
+    &::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: var(--color-border, #eee);
+    }
+    span {
+      padding: 0 8px;
+    }
+  }
+  &__custom-input {
+    width: 100%;
+    font-size: 0.8rem;
+  }
+  &__custom-submit {
+    align-self: flex-end;
+  }
+
   .dark & {
     &__question {
       color: #e6e6e6;
@@ -1807,6 +1860,16 @@
     }
     &__desc {
       color: #999;
+    }
+    &__custom {
+      border-top-color: #333;
+    }
+    &__custom-divider {
+      color: #888;
+      &::before,
+      &::after {
+        background: #333;
+      }
     }
   }
 }

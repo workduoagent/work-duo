@@ -21,6 +21,7 @@
     "core:window:allow-set-decorations",
     "dialog:default",
     "dialog:allow-save",
+    "notification:default",
     "opener:default",
     {
       "identifier": "opener:allow-open-path",
@@ -67,6 +68,9 @@
     {
       "identifier": "fs:allow-read-file",
       "allow": [
+        {
+          "path": "**"
+        },
         {
           "path": "$APPCONFIG/**"
         },
@@ -192,6 +196,9 @@
       "identifier": "fs:allow-read-text-file",
       "allow": [
         {
+          "path": "**"
+        },
+        {
           "path": "$APPCONFIG/**"
         },
         {
@@ -316,6 +323,9 @@
       "identifier": "fs:allow-read-dir",
       "allow": [
         {
+          "path": "**"
+        },
+        {
           "path": "$APPCONFIG/**"
         },
         {
@@ -377,6 +387,9 @@
     {
       "identifier": "fs:allow-exists",
       "allow": [
+        {
+          "path": "**"
+        },
         {
           "path": "$APPCONFIG/**"
         },

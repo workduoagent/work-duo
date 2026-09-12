@@ -6,7 +6,7 @@
  * - 所有配置经 src/core/file/settings-file.ts 落库到 app_config 表。
  */
 import { useCallback, useEffect, useState } from 'react'
-import { SlidersHorizontal, Brain, ShieldCheck, Info } from 'lucide-react'
+import { SlidersHorizontal, Brain, ShieldCheck, Info, Palette } from 'lucide-react'
 import { Spin } from 'antd'
 import { PythonLogo } from '@/components/icons/PythonLogo'
 import { NodeLogo } from '@/components/icons/NodeLogo'
@@ -21,9 +21,17 @@ import {
 import { SystemSettingsPanel } from './components/SystemSettingsPanel'
 import { SecurityPanel } from './components/SecurityPanel'
 import { AboutPanel } from './components/AboutPanel'
+import { AppearancePanel } from './components/AppearancePanel'
 import './index.scss'
 
-type SectionId = 'system' | 'memory' | 'security' | 'about' | 'sandbox-python' | 'sandbox-node'
+type SectionId =
+  | 'system'
+  | 'appearance'
+  | 'memory'
+  | 'security'
+  | 'about'
+  | 'sandbox-python'
+  | 'sandbox-node'
 
 interface FlatNavItem {
   id: SectionId
@@ -38,6 +46,7 @@ interface NavGroup {
 
 const SECTIONS: FlatNavItem[] = [
   { id: 'system', label: '系统设置', icon: <SlidersHorizontal size={18} /> },
+  { id: 'appearance', label: '外观', icon: <Palette size={18} /> },
   { id: 'memory', label: '记忆宫殿', icon: <Brain size={18} /> },
   { id: 'security', label: '安全中心', icon: <ShieldCheck size={18} /> },
   { id: 'about', label: '关于我们', icon: <Info size={18} /> },
@@ -119,6 +128,9 @@ export default function SettingsPage() {
       <main className="settings__content">
         {active === 'system' && (
           <SystemSettingsPanel settings={settings} onChange={commit} />
+        )}
+        {active === 'appearance' && (
+          <AppearancePanel settings={settings} onChange={commit} />
         )}
         {active === 'memory' && <MemoryPalace />}
         {active === 'security' && (
