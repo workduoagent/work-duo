@@ -259,13 +259,18 @@ pub async fn run_pipeline(
                         "completedAt": now_ms(),
                     }),
                 );
-                // 成功闭环：产物写图（ArtifactNode + Produced 边，画廊产物）。
-                graph.add_produced_artifacts(task_node_id, &out.artifacts);
-                // 成功闭环：本步工具实际写出的文件写图（FileRef 节点 + Wrote 边），
+                // 成功闭环：本步工具实际写出的文件写图（FileRef 节点 + Wrote 边），先于 Produced 以便去冗余判断。
                 // 作为图驱动约束的权威产出来源（与 register_artifacts 从 summary 抽取互补）。
                 graph.add_wrote_files(
                     task_node_id,
                     out.changed_files.as_deref().unwrap_or(&[]),
+                    cfg.workspace.as_deref().map(std::path::Path::new),
+                );
+                // 成功闭环：产物写图（ArtifactNode + Produced 边，画廊产物）；已是 FileRef 的代码/数据文件
+                // 在上方已登记 Wrote 边，此处跳过 Produced 边（去冗余，避免同一文件双节点）。
+                graph.add_produced_artifacts(
+                    task_node_id,
+                    &out.artifacts,
                     cfg.workspace.as_deref().map(std::path::Path::new),
                 );
                 // 成功闭环：本步工具实际读取的文件写图（FileRef 节点 + Read 边），

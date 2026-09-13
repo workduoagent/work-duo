@@ -599,8 +599,23 @@ impl KnowledgeGraph {
     }
 
     /// 把成功闭环产物写图：每个 ArtifactRef → ArtifactNode + Produced 边。
-    pub fn add_produced_artifacts(&mut self, task_node_id: &str, artifacts: &[ArtifactRef]) {
+    /// 去冗余：若产物路径已是 `FileRef` 节点（即本步 `add_wrote_files` 已登记 Wrote 边，代码/数据文件归 Wrote），
+    /// 则跳过 Produced 边 + Artifact 节点——同一文件只挂 Wrote，避免双节点。画廊产物由
+    /// `agent-artifact-created` 事件驱动（与图节点无关），`read_artifact` 按路径读文件，均不受此跳过影响。
+    pub fn add_produced_artifacts(
+        &mut self,
+        task_node_id: &str,
+        artifacts: &[ArtifactRef],
+        workspace: Option<&Path>,
+    ) {
         for ar in artifacts {
+            let abs = Self::resolve_abs_path(&ar.path, workspace);
+            if self.has_file_ref(&abs) {
+                tracing::debug!(
+                    "[agent] graph: 产物 {abs} 已是 FileRef（Wrote 边），跳过 Produced 边（去冗余）"
+                );
+                continue;
+            }
             let session_id = self
                 .nodes
                 .get(task_node_id)
@@ -620,9 +635,8 @@ impl KnowledgeGraph {
         }
     }
 
-    /// 抽取：为某路径确保一个 `FileRef` 节点存在（同路径复用同一节点，避免重复建点），返回节点 id。
-    /// 阶段二图驱动：读/写文件都登记到同一 `FileRef` 节点，便于后续查询「某文件被哪些步骤读/写」。
-    fn ensure_file_ref(&mut self, raw: &str, session_id: &str, workspace: Option<&Path>) -> String {
+    /// 把路径归一化为绝对字符串（相对路径按 workspace 拼接），供 `FileRef` / 产物去重比较。
+    fn resolve_abs_path(raw: &str, workspace: Option<&Path>) -> String {
         let p = Path::new(raw.trim());
         let abs = if p.is_absolute() {
             p.to_path_buf()
@@ -632,7 +646,20 @@ impl KnowledgeGraph {
                 None => p.to_path_buf(),
             }
         };
-        let abs_str = abs.to_string_lossy().to_string();
+        abs.to_string_lossy().to_string()
+    }
+
+    /// 该绝对路径是否已是 `FileRef` 节点（写文件已登记 Wrote 边）。
+    fn has_file_ref(&self, abs: &str) -> bool {
+        self.nodes.values().any(|n| {
+            n.kind == NodeKind::FileRef && n.props.get("path").and_then(|v| v.as_str()) == Some(abs)
+        })
+    }
+
+    /// 抽取：为某路径确保一个 `FileRef` 节点存在（同路径复用同一节点，避免重复建点），返回节点 id。
+    /// 阶段二图驱动：读/写文件都登记到同一 `FileRef` 节点，便于后续查询「某文件被哪些步骤读/写」。
+    fn ensure_file_ref(&mut self, raw: &str, session_id: &str, workspace: Option<&Path>) -> String {
+        let abs_str = Self::resolve_abs_path(raw, workspace);
         for n in self.nodes.values() {
             if n.kind == NodeKind::FileRef
                 && n.props.get("path").and_then(|v| v.as_str()) == Some(&abs_str)

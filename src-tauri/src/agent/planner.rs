@@ -97,6 +97,9 @@ text_contains 的 value 建议用 `|` 分隔多个同义措辞（例如「风险
                         apply_user_explicit_output_path(&mut plan, &explicit);
                         tracing::info!("[agent] planner: 检测到用户显式输出路径 {explicit}，已强制覆盖规划写文件路径");
                     }
+                    // 方案 C（图驱动收尾）：用户要求「读取/修改/编辑已有文件」时，确保规划含对应显式步骤，
+                    // 避免小模型把「读+改现有文件」吞成不可见步骤（TC-1 实测：读 runtime.rs 改注释被丢）。确定性注入。
+                    ensure_existing_file_edit_steps(&mut plan, prompt);
                     if plan.tasks.is_empty() {
                         tracing::info!("[agent] planner: 规划结果为空，降级 Single-Task Fallback");
                         return (single_task_fallback(prompt), usage, content.clone());
@@ -345,6 +348,83 @@ fn is_placeholder_target(s: &str) -> bool {
     low.contains("generated_code") || low.contains("placeholder") || low.trim().is_empty()
 }
 
+/// 提取用户要求「读取/修改/编辑已有文件」的路径（方案 C 显式步骤注入用）。
+/// 与 `extract_user_write_path` 互补：后者抓「创建新文件」的**写**路径，本函数抓「读/改现有文件」。
+/// 确定性字符串提取（不引 regex，与现有风格一致）：动作词 + 其后首个路径 token。
+fn extract_user_edit_paths(prompt: &str) -> Vec<String> {
+    const KW: &[&str] = &["读取", "修改", "编辑", "改动", "更新", "修正", "改", "读"];
+    let mut out: Vec<String> = Vec::new();
+    for &k in KW {
+        let mut start = 0;
+        while let Some(pos) = prompt[start..].find(k) {
+            let abs = start + pos;
+            let rest = &prompt[abs + k.len()..];
+            let token = rest
+                .split(|c: char| {
+                    c.is_whitespace()
+                        || matches!(
+                            c,
+                            '，' | ',' | '。' | '；' | ';' | '：' | ':' | '（' | '(' | '）' | ')' | '”'
+                                | '"' | '\'' | '`'
+                        )
+                })
+                .find(|t| !t.is_empty())
+                .unwrap_or("")
+                .trim()
+                .trim_matches(|c| matches!(c, '`' | '"' | '\'' | '“' | '”'));
+            if !token.is_empty() && looks_like_path(token) && !out.iter().any(|e| e == token) {
+                out.push(token.to_string());
+            }
+            start = abs + k.len();
+        }
+    }
+    out
+}
+
+/// 方案 C（图驱动收尾）：用户要求「读取/修改/编辑已有文件」时，确保规划含对应显式步骤，
+/// 避免小模型把「读+改现有文件」吞成不可见步骤（TC-1 实测：读 runtime.rs 改注释被丢）。
+/// 确定性提取 + 注入，不依赖模型自律：把未被任何步骤覆盖的编辑路径补成末尾显式步骤
+/// `teN`（依赖最后一步），不重排已有步骤以保持 `depends_on` 引用安全；空 `success_criteria`
+/// 避免纯修改步骤被客观校验误判未闭环。已超 `MAX_PLAN_STEPS` 则跳过（不破坏既有规划上限）。
+fn ensure_existing_file_edit_steps(plan: &mut PlanDAG, prompt: &str) {
+    if plan.tasks.is_empty() || plan.tasks.len() >= MAX_PLAN_STEPS {
+        return;
+    }
+    let edit_paths = extract_user_edit_paths(prompt);
+    if edit_paths.is_empty() {
+        return;
+    }
+    for ep in edit_paths {
+        // 已存在覆盖该路径的步骤（标题/描述含该路径，含创建类步骤）→ 跳过，避免重复注入。
+        let covered = plan
+            .tasks
+            .iter()
+            .any(|t| t.title.contains(&ep) || t.description.contains(&ep));
+        if covered {
+            continue;
+        }
+        let new_step = plan.tasks.len() + 1;
+        let depends_on = plan
+            .tasks
+            .last()
+            .map(|t| vec![t.task_id.clone()])
+            .unwrap_or_default();
+        plan.tasks.push(PlanSubTask {
+            step: new_step,
+            task_id: format!("te{new_step}"),
+            title: format!("读取并修改 {ep}"),
+            description: format!(
+                "读取 {ep} 并按用户要求修改其内容（如改注释/微调），不新建其它文件"
+            ),
+            success_criteria: vec![],
+            depends_on,
+        });
+        tracing::warn!(
+            "[agent] planner: 检测到用户要求修改已有文件 {ep}，已补显式步骤 te{new_step}"
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -368,5 +448,45 @@ mod tests {
             extract_user_write_path("请读取 src/utils/foo.ts 并修复其中的 bug"),
             None
         );
+    }
+
+    #[test]
+    fn extract_user_edit_paths_detects_existing_file() {
+        let p = extract_user_edit_paths(
+            "读取 src/agent/runtime.rs 改一处注释，再新建 src/views/demo.tsx",
+        );
+        assert!(p.contains(&"src/agent/runtime.rs".to_string()));
+        // 创建类「写到」路径不应被当作编辑路径提取
+        assert!(extract_user_edit_paths("帮我新建页面，写到 src/views/a.tsx 即可").is_empty());
+        // 无路径的动作词不误提
+        assert!(extract_user_edit_paths("改进代码质量").is_empty());
+    }
+
+    #[test]
+    fn ensure_existing_file_edit_steps_injects() {
+        let mut plan = PlanDAG {
+            goal_summary: "x".into(),
+            tasks: vec![PlanSubTask {
+                step: 1,
+                task_id: "t1".into(),
+                title: "新建 demo".into(),
+                description: "写到 src/views/demo.tsx".into(),
+                success_criteria: vec![],
+                depends_on: vec![],
+            }],
+        };
+        ensure_existing_file_edit_steps(
+            &mut plan,
+            "读取 src-tauri/src/agent/runtime.rs 改一处注释，再新建 src/views/demo.tsx",
+        );
+        assert_eq!(plan.tasks.len(), 2);
+        let injected = plan
+            .tasks
+            .iter()
+            .find(|t| t.title.contains("runtime.rs"))
+            .expect("应注入 runtime.rs 步骤");
+        assert_eq!(injected.task_id, "te2");
+        assert_eq!(injected.depends_on, vec!["t1".to_string()]);
+        assert!(injected.success_criteria.is_empty());
     }
 }
