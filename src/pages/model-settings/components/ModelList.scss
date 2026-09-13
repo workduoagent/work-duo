@@ -198,7 +198,7 @@
   white-space: nowrap;
 }
 
-/* 标签行（服务商 / 分类） */
+/* 标签行（服务商 / 分类）——自然高度，不设 min-height 避免标签被拉伸变形 */
 .model-card__tags {
   display: flex;
   flex-wrap: wrap;
@@ -232,6 +232,7 @@
 
 .model-card__desc {
   margin: 0;
+  margin-top: auto; /* 关键：把描述区推到剩余空间底部，锁定 Y 坐标不受标签数量影响 */
   font-size: 12px;
   line-height: 1.6;
   color: var(--color-foreground-muted);
@@ -239,6 +240,8 @@
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+  /* 始终占据 2 行高度，避免无描述时卡片布局塌陷 */
+  min-height: calc(12px * 1.6 * 2);
 }
 
 /* 连通性测试结果 */

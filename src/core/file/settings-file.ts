@@ -4,7 +4,7 @@
  * 约定：
  *  - 所有「运行期选项 / 文案 / 默认值」集中在此（types/core.d.ts 只放编译期类型，如 ProxyMode）；
  *  - 配置最终全部落库到 app_config 表（key-value），读写经 src/core/mapper/config-mapper.ts；
- *  - 结构化配置以 JSON 字符串落库，skill_path 作为历史兼容键保留原始字符串（不 JSON 包裹）；
+ *  - 结构化配置以 JSON 字符串落库，路径类 key（workspace_path / skill_path / knowledge_base_path）保留原始字符串（不 JSON 包裹，避免 Rust / chat.tsx 裸读时拿到带引号的路径）；
  *  - 页面只调用 loadSettings / saveSettings，不直接操作 app_config。
  */
 
@@ -88,6 +88,7 @@ export const PROXY_MODE_OPTIONS: { value: ProxyMode; label: string }[] = [
 
 /** 原始字符串存储的 key（不 JSON 包裹，保持与历史种子一致）。 */
 const RAW_STRING_KEYS = new Set<string>([
+  CONFIG_KEYS.workspacePath,
   CONFIG_KEYS.skillPath,
   CONFIG_KEYS.knowledgeBasePath,
   CONFIG_KEYS.httpAllowedHosts,

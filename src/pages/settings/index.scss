@@ -228,6 +228,69 @@
   max-width: 100%;
 }
 
+/* ---------------- 存储目录选择 ---------------- */
+.set-dir {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 100%;
+}
+
+.set-dir__path {
+  max-width: 340px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: var(--color-surface-muted);
+  border: 1px solid var(--color-border-muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--color-foreground-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.set-dir__btn {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-foreground-intense);
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, opacity 0.15s;
+}
+
+.set-dir__btn:hover:not(:disabled) {
+  border-color: var(--color-brand-500);
+  color: var(--color-brand-600);
+}
+
+.set-dir__btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.set-dir__spinner {
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  border: 2px solid var(--color-border-muted);
+  border-top-color: var(--color-brand-500);
+  animation: set-dir-spin 0.7s linear infinite;
+}
+
+@keyframes set-dir-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .set-item__body {
   margin-top: 14px;
 }

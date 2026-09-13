@@ -1,13 +1,27 @@
-import type { ChangeEvent, ReactNode } from 'react'
-import { Power, Globe, FolderOpen, Boxes, Bell, MessagesSquare, BookOpen } from 'lucide-react'
+import { useEffect, useState, useCallback, type ReactNode } from 'react'
+import {
+  Power,
+  Globe,
+  FolderOpen,
+  Boxes,
+  Bell,
+  MessagesSquare,
+  BookOpen,
+} from 'lucide-react'
 import { Input, Switch, InputNumber } from '@/components/ui'
 import { Radio } from 'antd'
 import { SettingItem } from './SettingItem'
+import { useNotify } from '@/components/ui/notify'
 import {
   PROXY_MODE_OPTIONS,
   type AppSettings,
   type ProxyConfig,
 } from '@/core/file/settings-file'
+import { open } from '@tauri-apps/plugin-dialog'
+import { basename, join } from '@tauri-apps/api/path'
+import { invoke } from '@tauri-apps/api/core'
+import { resolveStorageBasePath } from '@/core/file/storage-path'
+import { rewriteSkillPaths } from '@/core/mapper/skill-mapper'
 
 interface Props {
   settings: AppSettings
@@ -23,17 +37,103 @@ function Title({ icon, children }: { icon: ReactNode; children: ReactNode }) {
   )
 }
 
+type StorageKey = 'workspacePath' | 'skillPath' | 'knowledgeBasePath'
+
+/** 存储目录选择行：展示当前真实路径 + 「选择目录」按钮（迁移中显示转圈并禁用）。 */
+function StorageDirRow({
+  icon,
+  title,
+  description,
+  value,
+  migrating,
+  onPick,
+}: {
+  icon: ReactNode
+  title: ReactNode
+  description: ReactNode
+  value: string
+  migrating: boolean
+  onPick: () => void
+}) {
+  const [real, setReal] = useState(value)
+  useEffect(() => {
+    let alive = true
+    void resolveStorageBasePath(value).then((p) => {
+      if (alive) setReal(p)
+    })
+    return () => {
+      alive = false
+    }
+  }, [value])
+
+  return (
+    <SettingItem
+      title={<Title icon={icon}>{title}</Title>}
+      description={description}
+      control={
+        <div className="set-dir">
+          <code className="set-dir__path" title={real}>
+            {real || value}
+          </code>
+          <button type="button" className="set-dir__btn" onClick={onPick} disabled={migrating}>
+            {migrating && <span className="set-dir__spinner" aria-hidden />}
+            {migrating ? '迁移中…' : '选择目录'}
+          </button>
+        </div>
+      }
+    />
+  )
+}
+
 /** 系统设置分区：开机自启 / 网络代理 / 工作空间 / Skill 目录 / 客户端通知 / 会话管理。 */
 export function SystemSettingsPanel({ settings, onChange }: Props) {
-  const commitText =
-    (key: 'workspacePath' | 'skillPath' | 'knowledgeBasePath') =>
-    (e: ChangeEvent<HTMLInputElement>) =>
-      onChange({ [key]: e.target.value } as Partial<AppSettings>)
+  const { message } = useNotify()
+  const [migrating, setMigrating] = useState<StorageKey | null>(null)
 
   const setProxy = (patch: Partial<ProxyConfig>) =>
     onChange({ networkProxy: { ...settings.networkProxy, ...patch } })
 
   const proxyManual = settings.networkProxy.mode === 'manual'
+
+  const pickDir = useCallback(
+    async (key: StorageKey, expectedSeg: string) => {
+      if (migrating) return
+      const selected = await open({ directory: true, multiple: false })
+      if (!selected || typeof selected !== 'string') return
+      const trimmed = selected.replace(/[\\/]+$/, '')
+      const base =
+        (await basename(trimmed)) === expectedSeg ? trimmed : await join(trimmed, expectedSeg)
+
+      const oldReal = await resolveStorageBasePath(settings[key])
+      if (base === oldReal) return // 未变化，无需迁移
+
+      const oldRaw = settings[key]
+      setMigrating(key)
+      try {
+        const report = await invoke<{ moved: number; skipped: boolean }>('migrate_storage_dir', {
+          oldPath: oldReal,
+          newPath: base,
+        })
+        if (report.skipped || report.moved === 0) {
+          message.success('已更新存储目录')
+        } else {
+          message.success(`已将 ${report.moved} 个项目迁移至新目录`)
+        }
+        // Skill 存储目录变更：skill_info.path 落库为旧基址/<identifier>，需整列改写为新基址，
+        // 否则前端 skillFs 与 Rust skill_adapter 仍读旧目录（知识库 path 现算不落库，无需处理）。
+        if (key === 'skillPath') {
+          await rewriteSkillPaths(oldRaw, base)
+        }
+      } catch (e) {
+        message.error(`迁移失败：${typeof e === 'string' ? e : String(e)}`)
+        return
+      } finally {
+        setMigrating(null)
+      }
+      onChange({ [key]: base })
+    },
+    [migrating, settings, onChange, message],
+  )
 
   return (
     <div className="set-section">
@@ -100,40 +200,31 @@ export function SystemSettingsPanel({ settings, onChange }: Props) {
 
       <h3 className="set-section__title">存储</h3>
 
-      <SettingItem
-        title={<Title icon={<FolderOpen size={15} />}>默认工作空间存储路径</Title>}
-        description="新建任务、工作空间时将自动存放在该路径下；修改后不影响已有数据。"
-        control={
-          <Input
-            className="set-item__input"
-            defaultValue={settings.workspacePath}
-            onBlur={commitText('workspacePath')}
-          />
-        }
+      <StorageDirRow
+        icon={<FolderOpen size={15} />}
+        title="默认工作空间存储路径"
+        description="新建任务、工作空间时将自动存放在该路径下；修改后不影响已有数据。选择父目录会自动补 .workspace 子目录。"
+        value={settings.workspacePath}
+        migrating={migrating === 'workspacePath'}
+        onPick={() => void pickDir('workspacePath', '.workspace')}
       />
 
-      <SettingItem
-        title={<Title icon={<Boxes size={15} />}>Skill 存储目录</Title>}
-        description="本地自建或导入的 Skill 存放的根目录（对应 app_config.skill_path）。"
-        control={
-          <Input
-            className="set-item__input"
-            defaultValue={settings.skillPath}
-            onBlur={commitText('skillPath')}
-          />
-        }
+      <StorageDirRow
+        icon={<Boxes size={15} />}
+        title="Skill 存储目录"
+        description="本地自建或导入的 Skill 存放的根目录（对应 app_config.skill_path）；选择父目录会自动补 .skills 子目录。"
+        value={settings.skillPath}
+        migrating={migrating === 'skillPath'}
+        onPick={() => void pickDir('skillPath', '.skills')}
       />
 
-      <SettingItem
-        title={<Title icon={<BookOpen size={15} />}>知识库存储目录</Title>}
-        description="知识库文件存放的根目录（对应 app_config.knowledge_base_path）；每个知识库对应其下一个子目录。"
-        control={
-          <Input
-            className="set-item__input"
-            defaultValue={settings.knowledgeBasePath}
-            onBlur={commitText('knowledgeBasePath')}
-          />
-        }
+      <StorageDirRow
+        icon={<BookOpen size={15} />}
+        title="知识库存储目录"
+        description="知识库文件存放的根目录（对应 app_config.knowledge_base_path）；每个知识库对应其下一个子目录。选择父目录会自动补 .knowledge_base 子目录。"
+        value={settings.knowledgeBasePath}
+        migrating={migrating === 'knowledgeBasePath'}
+        onPick={() => void pickDir('knowledgeBasePath', '.knowledge_base')}
       />
 
       <h3 className="set-section__title">会话</h3>

@@ -32,6 +32,18 @@ void loadSettings()
 // 全局滚动条：滚动/悬浮时出现，失焦隐藏
 initScrollbarAutoHide()
 
+// 全局禁用右键菜单（桌面客户端不允许出现浏览器默认右键）
+document.addEventListener('contextmenu', (e) => e.preventDefault())
+
+// 生产环境禁用开发者工具快捷键（开发环境保留 Ctrl+Shift+I / F12）
+if (import.meta.env.PROD) {
+  document.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey && e.shiftKey && e.key === 'I') || e.key === 'F12') {
+      e.preventDefault()
+    }
+  })
+}
+
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
   <React.StrictMode>
     <Provider store={store}>

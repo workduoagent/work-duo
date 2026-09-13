@@ -67,6 +67,9 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
+  /* 模型很多时内部滚动，避免撑爆弹窗高度 */
+  max-height: 220px;
+  overflow-y: auto;
 }
 
 .import-modal__preview li {
@@ -92,5 +95,5 @@
 }
 
 .import-modal__more {
-  color: var(--color-foreground-muted);
+  display: none;
 }

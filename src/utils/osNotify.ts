@@ -10,6 +10,7 @@
  *  - 仅在主窗口未聚焦时发送，窗口聚焦时不打扰。
  *  - 首次调用惰性初始化聚焦追踪（isFocused + onFocusChanged），之后实时同步。
  *  - 权限申请做了兜底（首次请求一次，失败则跳过），不阻塞主流程。
+ *  - 受「设置 → 系统设置 → 客户端通知」开关控制（clientNotify），关闭时不发送。
  */
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import {
@@ -18,6 +19,7 @@ import {
   requestPermission,
 } from '@tauri-apps/plugin-notification'
 import { isTauri } from '@/core/config'
+import { loadSettings } from '@/core/file/settings-file'
 
 // 主窗口当前是否聚焦（在桌面最前）。默认 true，避免启动早期误发。
 let focused = true
@@ -76,6 +78,13 @@ export async function notifyOSWhenHidden(title: string, body?: string): Promise<
   await initWindowFocusTracker()
   // 窗口就在最前：应用内通知已足够，不发系统通知避免打扰。
   if (focused) return
+  // 受「设置 → 客户端通知」开关控制，关闭时不发系统通知（每次直读库，确保实时）。
+  try {
+    const s = await loadSettings()
+    if (!s.clientNotify) return
+  } catch {
+    /* 读失败默认开启，不阻断 */
+  }
   if (!(await ensurePermission())) return
   try {
     sendNotification({ title, body: body ?? '' })

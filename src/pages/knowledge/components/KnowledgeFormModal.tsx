@@ -115,6 +115,41 @@ export function KnowledgeFormModal({ open, onOpenChange, editing, onSaved }: Kno
     >
       <div className="kb-form__grid">
         <Field>
+          <FieldLabel>Logo（可选）</FieldLabel>
+          <div className="kb-form__logo">
+            {logo ? (
+              <img
+                src={logo}
+                alt="logo"
+                className="kb-form__logo-img"
+                onClick={() => fileRef.current?.click()}
+              />
+            ) : (
+              <div className="kb-form__logo-empty" onClick={() => fileRef.current?.click()}>
+                <ImagePlus size={18} />
+              </div>
+            )}
+            {logo && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="kb-form__logo-del"
+                onClick={() => setLogo(undefined)}
+              >
+                <Trash2 size={14} />
+                移除
+              </Button>
+            )}
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/*"
+              hidden
+              onChange={(e) => pickLogo(e.target.files?.[0])}
+            />
+          </div>
+        </Field>
+        <Field>
           <FieldLabel htmlFor="kb-name">名称</FieldLabel>
           <Input
             id="kb-name"
@@ -143,42 +178,6 @@ export function KnowledgeFormModal({ open, onOpenChange, editing, onSaved }: Kno
             onChange={(v) => setScenario(v ?? undefined)}
             placeholder="选择或搜索分类，可回车新建"
           />
-        </Field>
-        <Field>
-          <FieldLabel>Logo（可选）</FieldLabel>
-          <div className="kb-form__logo">
-            {logo ? (
-              <img src={logo} alt="logo" className="kb-form__logo-img" />
-            ) : (
-              <div className="kb-form__logo-empty">
-                <ImagePlus size={18} />
-                <span>未设置</span>
-              </div>
-            )}
-            <div className="kb-form__logo-actions">
-              <Button variant="soft" size="sm" onClick={() => fileRef.current?.click()}>
-                选择图片
-              </Button>
-              {logo && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="kb-form__logo-del"
-                  onClick={() => setLogo(undefined)}
-                >
-                  <Trash2 size={14} />
-                  移除
-                </Button>
-              )}
-            </div>
-            <input
-              ref={fileRef}
-              type="file"
-              accept="image/*"
-              hidden
-              onChange={(e) => pickLogo(e.target.files?.[0])}
-            />
-          </div>
         </Field>
         <Field className="kb-form__field--full">
           <FieldLabel htmlFor="kb-desc">简介（可选）</FieldLabel>

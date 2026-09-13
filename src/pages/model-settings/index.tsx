@@ -27,7 +27,7 @@ import './index.scss'
 
 export default function ModelSettingsPage() {
   const { message } = useNotify()
-  const [category, setCategory] = useState<string>('text')
+  const [category, setCategory] = useState<string>('all')
   const [models, setModels] = useState<ModelConfig[]>([])
   const [loading, setLoading] = useState(true)
   const [modalOpen, setModalOpen] = useState(false)
@@ -61,7 +61,7 @@ export default function ModelSettingsPage() {
   const categoryOptions = [...MODEL_CATEGORY_OPTIONS]
 
   const visibleModels = useMemo(
-    () => models.filter((m) => m.category === category),
+    () => (category === 'all' ? models : models.filter((m) => m.category === category)),
     [models, category],
   )
 

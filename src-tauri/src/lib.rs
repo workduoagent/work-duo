@@ -95,7 +95,8 @@ pub fn run() {
             agent::commands::recall_memory,
             agent::wd_mem::wd_mem_read_project_memory,
             agent::wd_mem::wd_mem_write_project_memory,
-            fs_helper::canonicalize_path
+            fs_helper::canonicalize_path,
+            fs_helper::migrate_storage_dir
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useRef, useState } from 'react'
 import { Spin } from 'antd'
 import { getDb, initTables, updateTables } from '@/core/db/SqlService'
 import { isTauri } from '@/core/config'
+import { normalizeSkillPaths } from '@/core/mapper/skill-mapper'
 
 /**
  * 数据库初始化上下文。
@@ -62,6 +63,17 @@ export const InitProvider: React.FC<{ children: React.ReactNode }> = ({ children
         // 4. 版本迁移脚本（当前为空，安全跳过）；首启与非首启都执行，确保补丁不遗漏
         setLoadingTip('检查数据库版本更新…')
         await updateTables(db)
+
+        // 4.5 存储目录迁移兜底：校正 skill_info.path 为「当前 skill_path/<identifier>」。
+        //     修复迁移前落地的脏数据（path 仍指向旧目录 / 占位符与真实路径混用）。
+        //     仅改写不相等的行，幂等，可每次启动安全执行。
+        setLoadingTip('校正技能存储路径…')
+        try {
+          const fixed = await normalizeSkillPaths()
+          if (fixed > 0) console.info(`[InitContext] 已校正 ${fixed} 条 skill_info.path`)
+        } catch (e) {
+          console.error('[InitContext] skill_info.path 归一失败', e)
+        }
 
         // 5. 首启完成后置标记，供应用层判断「是否首次运行」
         if (isFirstLoad) {

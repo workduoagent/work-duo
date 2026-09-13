@@ -223,7 +223,9 @@ export function TopBar() {
                                         type="button"
                                         data-nav-value={node.key}
                                         className={`app-nav-pills__item${
-                                            selected === node.key ? ' app-nav-pills__item--active' : ''
+                                            selected === node.key || PARENT_OF[selected] === node.key
+                                                ? ' app-nav-pills__item--active'
+                                                : ''
                                         }${openKey === node.key ? ' app-nav-pills__item--open' : ''}`}
                                         onClick={() => handleSelect(node)}
                                         aria-haspopup="true"

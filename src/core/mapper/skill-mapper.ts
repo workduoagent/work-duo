@@ -220,3 +220,68 @@ export async function deleteSkill(id: string): Promise<SkillInfo[]> {
   await db.execute('DELETE FROM skill_info WHERE id = ?', [id])
   return listSkills()
 }
+
+/**
+ * 存储目录迁移后，重写 skill_info.path 整列（旧基址 → 新基址）。
+ *
+ * 背景：skill_info.path 落库为 `${base}/${identifier}`（base 可能含 $APPDATA/$RESOURCE 占位或真实路径），
+ * 用户变更 skill_path（迁移存储目录）时，migrate_storage_dir 只搬了磁盘文件，DB 这条权威路径仍指向旧目录，
+ * 导致 skillFs 与 Rust skill_adapter 都读不到正确目录。
+ *
+ * 做法（健壮版）：直接以 `newBase || '/' || identifier` 重建每一行的 path。
+ *  - 不依赖「旧前缀是否匹配」：旧数据可能用 $APPDATA 占位、配置却已被归一为真实路径，前缀比对会静默漏改；
+ *    改为基于 identifier 重建，与落库约定 path === base/identifier 完全一致，彻底规避占位符/真实路径混用问题。
+ *  - WHERE 仅改写实际不相等的行（含 NULL），幂等、不会误伤。
+ *  - oldBase 仅用于「新旧相同则跳过」的提前返回（迁移无变化时无需写库）。
+ */
+export async function rewriteSkillPaths(
+  oldBase: string,
+  newBase: string,
+): Promise<void> {
+  if (!isTauri) return
+  const oldTrim = oldBase.replace(/[\\/]+$/, '')
+  const newTrim = newBase.replace(/[\\/]+$/, '')
+  if (!newTrim || oldTrim === newTrim) return
+  try {
+    const db = await getDb()
+    await db.execute(
+      `UPDATE skill_info
+         SET path = ? || '/' || identifier,
+             updated_at = ?
+       WHERE path IS NULL OR path != ? || '/' || identifier`,
+      [newTrim, Date.now(), newTrim],
+    )
+  } catch (e) {
+    console.error('[skill-mapper] 重写 skill_info.path 失败', e)
+  }
+}
+
+/**
+ * 启动期兜底归一：把 skill_info.path 全部校正为「当前 skill_path 配置 / identifier」。
+ *
+ * 用途：修复历史遗留的脏数据（例如迁移存储目录发生在 DB 重写逻辑落地之前，
+ * 导致 skill_info.path 仍指向旧目录；或占位符/真实路径混用）。
+ *  - base 取 resolveSkillBasePath() 的原始值（与 upsertSkill 落库口径一致，可能含 $APPDATA 占位）；
+ *  - 仅改写不相等的行，幂等、可每次启动安全执行，不影响正常数据。
+ *
+ * @returns 被更正的行数
+ */
+export async function normalizeSkillPaths(): Promise<number> {
+  if (!isTauri) return 0
+  const base = (await resolveSkillBasePath()).replace(/[\\/]+$/, '')
+  if (!base) return 0
+  try {
+    const db = await getDb()
+    const res = await db.execute(
+      `UPDATE skill_info
+         SET path = ? || '/' || identifier,
+             updated_at = ?
+       WHERE path IS NULL OR path != ? || '/' || identifier`,
+      [base, Date.now(), base],
+    )
+    return res?.rowsAffected ?? 0
+  } catch (e) {
+    console.error('[skill-mapper] 归一 skill_info.path 失败', e)
+    return 0
+  }
+}

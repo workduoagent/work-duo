@@ -103,7 +103,7 @@ export function ImportModal({ open, onOpenChange, onImported }: ImportModalProps
     <Modal
       open={open}
       onOpenChange={onOpenChange}
-      width="40%"
+      width="68%"
       title="导入模型配置"
       description="支持 JSON 文件或粘贴文本；可为单个对象或对象数组，缺失字段将用默认值补齐。"
       footer={
@@ -140,7 +140,7 @@ export function ImportModal({ open, onOpenChange, onImported }: ImportModalProps
           className="import-modal__editor"
           mode="code"
           language="json"
-          height={360}
+          height={480}
           value={text}
           onChange={(v) => setText(typeof v === 'string' ? v : '')}
         />
@@ -166,7 +166,7 @@ export function ImportModal({ open, onOpenChange, onImported }: ImportModalProps
             )}
             {parsed.models.length > 0 && (
               <ul className="import-modal__preview">
-                {parsed.models.slice(0, 5).map((m) => (
+                {parsed.models.map((m) => (
                   <li key={m.id}>
                     <span className="import-modal__name">{m.name || '(未命名)'}</span>
                     <span className="import-modal__meta">
@@ -175,9 +175,6 @@ export function ImportModal({ open, onOpenChange, onImported }: ImportModalProps
                     </span>
                   </li>
                 ))}
-                {parsed.models.length > 5 && (
-                  <li className="import-modal__more">… 其余 {parsed.models.length - 5} 条</li>
-                )}
               </ul>
             )}
           </div>

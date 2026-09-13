@@ -60,7 +60,7 @@ export function ModelFormModal({
                                    onSave,
                                }: ModelFormModalProps) {
     const [draft, setDraft] = useState<ModelConfig>(() =>
-        model ? structuredClone(model) : createEmptyModel(category),
+        model ? structuredClone(model) : createEmptyModel(category === 'all' ? 'text' : category),
     )
     const [errors, setErrors] = useState<Set<string>>(new Set())
     const [saving, setSaving] = useState(false)
@@ -70,7 +70,7 @@ export function ModelFormModal({
     // 每次打开时重置草稿（编辑 → 深拷贝原值；新增 → 该分类的默认参数）
     useEffect(() => {
         if (!open) return
-        setDraft(model ? structuredClone(model) : createEmptyModel(category))
+        setDraft(model ? structuredClone(model) : createEmptyModel(category === 'all' ? 'text' : category))
         setErrors(new Set())
         setTestResult(null)
     }, [open, model, category])

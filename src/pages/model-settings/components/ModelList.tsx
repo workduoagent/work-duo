@@ -171,11 +171,9 @@ export function ModelList({
                                     )}
                                 </div>
 
-                                {m.description && (
-                                    <p className="model-card__desc" title={m.description}>
-                                        {m.description}
-                                    </p>
-                                )}
+                                <p className="model-card__desc" title={m.description ?? ''}>
+                                    {m.description || '\u00A0'}
+                                </p>
                             </div>
 
                             {result && (
