@@ -14,7 +14,7 @@
 import { useRef } from 'react'
 import { ImagePlus, RefreshCw, Trash2 } from 'lucide-react'
 import { Button, Field, FieldLabel, Input, Segmented, Switch } from '@/components/ui'
-import type { MemoryMode } from '@/types/core'
+import type { MemoryMode, PlanApprovalMode } from '@/types/core'
 import { ScenarioSelect } from '@/components/scenario'
 import { MarkdownEditor } from '@/components/markdown/MarkdownEditor'
 import { generateAgentIdentifier } from '@/core/mapper/agent-mapper'
@@ -192,6 +192,22 @@ export function StepBasic({ draft, patch, errors, clearError }: StepBasicProps) 
             />
             <em className="agent-wizard__hint">
               关闭=不记忆；主动=模型在对话中自主沉淀可复用信息；强制=每次任务结束引擎必沉淀（确定性，不依赖模型是否主动调用工具）
+            </em>
+          </label>
+          <label className="agent-wizard__switch-row">
+            <span className="agent-wizard__switch-label">计划审批</span>
+            <Segmented
+              size="small"
+              value={draft.planAutoApproveMode}
+              onChange={(v) => patch({ planAutoApproveMode: v as PlanApprovalMode })}
+              options={[
+                { label: '总是审批', value: 'always' },
+                { label: '仅敏感任务', value: 'sensitive' },
+                { label: '从不审批', value: 'never' },
+              ]}
+            />
+            <em className="agent-wizard__hint">
+              总是审批=复合任务规划后都需你确认；仅敏感任务=只有含命令执行/删除/部署等危险操作的计划才审批，纯文件创建类自动放行；从不审批=规划后直接执行（默认总是审批）
             </em>
           </label>
         </div>

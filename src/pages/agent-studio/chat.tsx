@@ -32,6 +32,7 @@ import {
   Send,
   Bot,
   Box,
+  Hand,
   Trash2,
   Square,
   ChevronRight,
@@ -185,6 +186,7 @@ import { TracePanel } from './session/TracePanel'
 import { ArtifactCanvas } from './session/ArtifactCanvas'
 import { ToolStepLine } from './session/ToolStepLine'
 import { UserPromptPanel } from './session/UserPromptPanel'
+import { TakeoverPanel } from './session/TakeoverPanel'
 import type { ToolStep, PlanStep, ChatAttachmentInput, ArtifactRef, ReadArtifactResult, BranchFromStepInput, BranchStep, PlanDAG } from './session/types'
 import type {
   AgentInfo,
@@ -1214,7 +1216,7 @@ export default function AgentChatPage() {
 
   // 会话状态机（必须早于任何引用 session.* 的回调/依赖数组，否则 TDZ）。
   const session = useAgentSession()
-  const { toolSteps, streamingText, isStreaming, statusText, thoughts, planSteps, isRunning, pendingApproval, run, submitDecision, reset, cancel, lastTaskUsage, liveTokenUsage, taskError, artifacts, recovery, resolveRecovery, pendingChoice, submitChoice } =
+  const { toolSteps, streamingText, isStreaming, statusText, thoughts, planSteps, isRunning, pendingApproval, run, submitDecision, reset, cancel, lastTaskUsage, liveTokenUsage, taskError, artifacts, recovery, resolveRecovery, pendingChoice, submitChoice, planApproval, resolvePlanApproval } =
     session
 
   const [agent, setAgent] = useState<AgentInfo | undefined>()
@@ -1287,7 +1289,7 @@ export default function AgentChatPage() {
   // 右侧 Tab 面板（执行轨迹 / 产物）：Phase 3 §3.1 改为右栏 Tab 展示
   // 右栏（执行轨迹/画布/产物）默认关闭，用户按需展开（避免默认挤占对话区）。
   const [rightOpen, setRightOpen] = useState(false)
-  const [rightTab, setRightTab] = useState<'trace' | 'canvas' | 'artifacts'>('trace')
+  const [rightTab, setRightTab] = useState<'trace' | 'canvas' | 'artifacts' | 'takeover'>('trace')
   // 右栏宽度（可鼠标拖拽调节），默认 340px
   const [rightWidth, setRightWidth] = useState(340)
   const resizingRef = useRef(false)
@@ -1343,6 +1345,15 @@ export default function AgentChatPage() {
       setArtifactLoading(false)
     }
   }, [isTauri, workspaceDir])
+
+  // 接管上下文侧栏（2b-2）：步骤受阻（recovery 非空）时自动展开右栏并切到「接管」Tab，
+  // 让用户接管决策前能直接看到工具栈 / 已改文件 / 失败命令。
+  useEffect(() => {
+    if (recovery) {
+      setRightOpen(true)
+      setRightTab('takeover')
+    }
+  }, [recovery])
 
   // 右键「从此步骤分支」→ 调 branch_from_step 命令，后端生成新分支并推 plan_branch 事件
   const handleBranchFromStep = useCallback(async (fromStep: number) => {
@@ -2607,10 +2618,13 @@ export default function AgentChatPage() {
         approval={pendingApproval}
         recovery={recovery}
         choice={pendingChoice}
+        planApproval={planApproval}
         agentName={agent?.name ?? ''}
         onApproval={handleApproval}
         onResolve={resolveRecovery}
         onSubmitChoice={submitChoice}
+        onResolvePlanApproval={resolvePlanApproval}
+        compact={rightOpen && rightTab === 'takeover'}
       />
 
       {/* 左侧会话列表 */}
@@ -3284,6 +3298,14 @@ export default function AgentChatPage() {
             </button>
             <button
               type="button"
+              className={`agent-chat__right-tab ${rightTab === 'takeover' ? 'is-active' : ''}`}
+              onClick={() => setRightTab('takeover')}
+            >
+              <Hand size={13} />
+              接管
+            </button>
+            <button
+              type="button"
               className="agent-chat__right-collapse"
               title="收起面板"
               onClick={() => setRightOpen(false)}
@@ -3309,6 +3331,8 @@ export default function AgentChatPage() {
                 onApplyBranch={handleApplyBranch}
                 onDismissBranch={handleDismissBranch}
               />
+            ) : rightTab === 'takeover' ? (
+              <TakeoverPanel recovery={recovery} onPreviewArtifact={handlePreviewArtifact} />
             ) : (
               <ArtifactGallery artifacts={artifacts} isTauri={isTauri} />
             )}

@@ -193,6 +193,8 @@ pub async fn cancel_agent_task(runtime: State<'_, AgentRuntime>) -> Result<(), S
     // `rx.await` 走拒绝分支），否则「停止」无法跳出审批挂起、任务永久卡住。
     runtime.approval.cancel_all().await;
     runtime.choice.cancel_all().await;
+    // 若后台流水线正挂在计划审批门禁上，唤醒（否则「停止」无法跳出等待、任务永久卡住）。
+    runtime.plan_approval.cancel();
     tracing::info!("[agent] cancel_agent_task: 已置位取消标志，后台任务将尽快终止");
     Ok(())
 }
@@ -250,6 +252,41 @@ pub async fn resolve_subtask(
         }
     };
     runtime.recovery.resolve(decision);
+    Ok(true)
+}
+
+/// 计划审批决策入参（submit_plan_decision 使用）。
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SubmitPlanApprovalInput {
+    /// 决策：approve | reject | revise。
+    pub decision: String,
+    /// 修改意见（revise 时携带，可空；空等价于 approve）。
+    #[serde(default)]
+    pub guidance: Option<String>,
+}
+
+/// 计划审批门禁决策入口（Phase 2b-3）：decision ∈ {approve, reject, revise}。
+/// 前端「计划确认」弹窗统一经此下发；后端 `run_task` 在规划完成后、执行前挂起等待。
+#[tauri::command]
+pub async fn submit_plan_decision(
+    runtime: State<'_, AgentRuntime>,
+    input: SubmitPlanApprovalInput,
+) -> Result<bool, String> {
+    if !runtime.plan_approval.is_blocked() {
+        return Ok(false);
+    }
+    let decision = match input.decision.to_lowercase().as_str() {
+        "approve" => crate::agent::plan_approval::PlanApprovalDecision::Approve,
+        "reject" => crate::agent::plan_approval::PlanApprovalDecision::Reject,
+        "revise" => crate::agent::plan_approval::PlanApprovalDecision::Revise(input.guidance.unwrap_or_default()),
+        other => {
+            return Err(format!(
+                "未知计划审批决策：{other}（应为 approve/reject/revise）"
+            ))
+        }
+    };
+    runtime.plan_approval.resolve(decision);
     Ok(true)
 }
 
@@ -1022,6 +1059,14 @@ async fn load_config(
             m
         }
     };
+    let plan_auto_approve_mode = {
+        let m = get_str(&row, "plan_auto_approve_mode");
+        if m.is_empty() {
+            "always".to_string()
+        } else {
+            m
+        }
+    };
 
     tracing::info!(
         "[agent] load_config 完成: llm_id={} model={} mcp_tools={} skill_tools={} auto_exec={} sandbox={} system_prompt={}字符 附件数={}",
@@ -1173,6 +1218,7 @@ category 取值：decision（决策）/ code_pattern（代码模式）/ user_pre
         auto_tool_exec_mode: get_i64(&row, "auto_tool_exec_mode") == 1,
         allow_sandbox: get_i64(&row, "allow_sandbox") == 1,
         memory_mode,
+        plan_auto_approve_mode,
         workspace,
         mcp_tools,
         skill_tools,
@@ -1404,7 +1450,7 @@ async fn load_squad_memory_block(
     let rows = match rows {
         Ok(r) => r,
         Err(e) => {
-            tracing::info!("[agent] load_squad_memory_block: 查询失败：{e}");
+            tracing::warn!("[agent] load_squad_memory_block: 查询失败：{e}");
             return String::new();
         }
     };

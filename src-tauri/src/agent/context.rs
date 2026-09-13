@@ -256,7 +256,7 @@ fn inject_attachments(
                             names.push(name);
                         }
                         Err(e) => {
-                            tracing::info!("[agent] context: 文件附件落盘失败（{}）：{}", name, e);
+                            tracing::warn!("[agent] context: 文件附件落盘失败（{}）：{}", name, e);
                             text_blocks.push(format!(
                                 "\n\n[附件文件：{} 落盘失败：{} ]\n无法读取该文件内容。",
                                 name, e
@@ -458,7 +458,7 @@ pub(crate) async fn load_session_background(
     let pool = match get_pool(app).await {
         Ok(p) => p,
         Err(e) => {
-            tracing::info!("[agent] context: 背景摘要读取失败（DB 未连接）：{e}");
+            tracing::warn!("[agent] context: 背景摘要读取失败（DB 未连接）：{e}");
             return None;
         }
     };

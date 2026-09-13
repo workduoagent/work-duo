@@ -23,6 +23,7 @@ import type {
   AgentSkillRef,
   AgentUpsertInput,
   MemoryMode,
+  PlanApprovalMode,
 } from '@/types/core'
 import type {
   AgentInfoRow,
@@ -70,6 +71,7 @@ function rowToAgent(r: AgentInfoRow): AgentInfo {
     autoToolExecMode: r.auto_tool_exec_mode === 1,
     allowSandbox: r.allow_sandbox === 1,
     memoryMode: (r.memory_mode as MemoryMode) ?? 'off',
+    planAutoApproveMode: (r.plan_auto_approve_mode as PlanApprovalMode) ?? 'always',
     createdAt: safeIso(r.created_at),
     updatedAt: safeIso(r.updated_at),
   }
@@ -260,6 +262,7 @@ export async function upsertAgent(input: AgentUpsertInput): Promise<AgentInfo[]>
       autoToolExecMode: input.autoToolExecMode ?? false,
       allowSandbox: input.allowSandbox ?? false,
       memoryMode: input.memoryMode ?? 'off',
+      planAutoApproveMode: input.planAutoApproveMode ?? 'always',
       createdAt: isUpdate
         ? list.find((a) => a.id === id)?.createdAt ?? new Date(now).toISOString()
         : new Date(now).toISOString(),
@@ -304,8 +307,8 @@ export async function upsertAgent(input: AgentUpsertInput): Promise<AgentInfo[]>
     `INSERT INTO agent_info
        (id, logo, scenario, name, identifier, description, system_prompt, welcome_message,
         llm_id, llm_config, tts_id, tts_config, stt_id, stt_config,
-        is_active, auto_tool_exec_mode, allow_sandbox, memory_mode, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        is_active, auto_tool_exec_mode, allow_sandbox, memory_mode, plan_auto_approve_mode, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET
         logo                = excluded.logo,
         scenario            = excluded.scenario,
@@ -324,6 +327,7 @@ export async function upsertAgent(input: AgentUpsertInput): Promise<AgentInfo[]>
         auto_tool_exec_mode = excluded.auto_tool_exec_mode,
         allow_sandbox       = excluded.allow_sandbox,
         memory_mode         = excluded.memory_mode,
+        plan_auto_approve_mode = excluded.plan_auto_approve_mode,
         updated_at          = excluded.updated_at`,
     [
       id,
@@ -344,6 +348,7 @@ export async function upsertAgent(input: AgentUpsertInput): Promise<AgentInfo[]>
       (input.autoToolExecMode ?? false) ? 1 : 0,
       (input.allowSandbox ?? false) ? 1 : 0,
       input.memoryMode ?? 'off',
+      input.planAutoApproveMode ?? 'always',
       now,
       now,
     ],

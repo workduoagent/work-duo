@@ -14,6 +14,7 @@ import type {
   AgentSkillRef,
   AgentUpsertInput,
   MemoryMode,
+  PlanApprovalMode,
 } from '@/types/core'
 
 /** 智能体配置上限（新建 / 编辑统一校验，选择时实时拦截 + 保存时硬校验共用） */
@@ -44,6 +45,8 @@ export interface AgentDraft {
   allowSandbox: boolean
   /** 记忆模式：off=关闭 / active=主动 / forced=强制每次任务末沉淀（默认 off，兼容旧数据） */
   memoryMode: MemoryMode
+  /** 计划审批策略：always=每次复合任务都走人工审批 / sensitive=仅敏感任务审批（纯低风险自动放行）/ never=从不审批（默认 always） */
+  planAutoApproveMode: PlanApprovalMode
   /** 已勾选的 MCP 工具（最小单元 = toolId，mcpId 仅作分组冗余） */
   mcpTools: Array<{ mcpId: string; toolId: string }>
   /** 已编排的技能 id */
@@ -59,6 +62,7 @@ export function createEmptyDraft(identifier: string): AgentDraft {
     autoToolExecMode: false,
     allowSandbox: true,
     memoryMode: 'off',
+    planAutoApproveMode: 'always',
     mcpTools: [],
     skillIds: [],
   }
@@ -88,6 +92,7 @@ export function draftFromAgent(
     autoToolExecMode: agent.autoToolExecMode,
     allowSandbox: agent.allowSandbox,
     memoryMode: agent.memoryMode ?? 'off',
+    planAutoApproveMode: agent.planAutoApproveMode ?? 'always',
     mcpTools: mcpRefs.map((r) => ({ mcpId: r.mcpId, toolId: r.toolId })),
     skillIds: skillRefs.map((r) => r.skillId),
   }
@@ -115,6 +120,8 @@ export function draftToInput(draft: AgentDraft, id?: string): AgentUpsertInput {
     allowSandbox: draft.allowSandbox,
     // 记忆模式必须随草稿提交，否则提交对象丢失该字段、落库恒为默认 'off'（新建/编辑都受影响）。
     memoryMode: draft.memoryMode,
+    // 计划审批策略同上：必须随草稿提交，否则落库恒为默认 'always'。
+    planAutoApproveMode: draft.planAutoApproveMode,
     mcpTools: draft.mcpTools,
     skillIds: draft.skillIds,
   }

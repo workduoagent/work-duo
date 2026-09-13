@@ -64,6 +64,8 @@ pub struct AgentRuntime {
     pub recovery: Arc<crate::agent::recovery::RecoveryHub>,
     /// 方案推荐挂起中枢（Agent 调 `native__ask_user_choice` 后等待用户选择）。
     pub choice: Arc<ChoiceHub>,
+    /// 计划审批挂起中枢（Phase 2b-3：DAG 规划完成后、执行前等待用户确认/修改/拒绝）。
+    pub plan_approval: Arc<crate::agent::plan_approval::PlanApprovalHub>,
 }
 
 /// 并发互斥守卫：生命周期结束（正常退出 / 取消 / 异常 / panic）时自动复位 `running`。
@@ -88,6 +90,7 @@ impl AgentRuntime {
             running: Arc::new(AtomicBool::new(false)),
             recovery: crate::agent::recovery::RecoveryHub::new(),
             choice: Arc::new(ChoiceHub::new()),
+            plan_approval: crate::agent::plan_approval::PlanApprovalHub::new(),
         }
     }
 
@@ -231,7 +234,8 @@ impl AgentRuntime {
         // §3.2 分支重跑：若前端已提供 plan_override，直接采用（跳过 LLM 规划，token 计 0）。
         // 注：不再向前端推送「正在规划任务步骤…」状态（用户不需要该提示），仅保留后端日志。
         tracing::info!("[agent] run_task: 进入复合任务规划阶段");
-        let (plan, plan_usage, plan_raw) = if let Some(po) = plan_override {
+        let is_branch_rerun = plan_override.is_some();
+        let (mut plan, mut plan_usage, mut plan_raw) = if let Some(po) = plan_override {
             tracing::info!(
                 "[agent] run_task: 采用前端分支计划（共 {} 步，其中 {} 步预完成跳过），跳过 LLM 规划",
                 po.tasks.len(),
@@ -249,6 +253,93 @@ impl AgentRuntime {
             events::emit_task_done(app, plan_usage.0, plan_usage.1);
             return;
         }
+
+        // ── Phase 2b-3 计划审批门禁 + allow 规则层 ──
+        // 分支重跑（plan_override 已存在）视为用户已确认，跳过门禁；
+        // 否则根据 `plan_auto_approve_mode` 策略决定挂起还是自动放行：
+        //   - "always"（默认）：规划完成后挂起，等待用户「批准 / 拒绝 / 修改意见」；
+        //   - "sensitive"：仅含敏感操作的计划挂起，纯低风险计划自动放行；
+        //   - "never"：一律不审批，规划后直接执行。
+        // 手动模式（agent-studio 后台任务）下 "always"/"sensitive" 保持永久阻塞，直到用户决策。
+        let auto_approve_mode = cfg.plan_auto_approve_mode.clone();
+        let auto_skip = if is_branch_rerun {
+            false
+        } else {
+            match auto_approve_mode.as_str() {
+                "never" => true,
+                "sensitive" => !crate::agent::plan_approval::plan_requires_approval(&plan),
+                _ => false, // "always" 及其它未知值：保持最严格，走门禁
+            }
+        };
+        if auto_skip {
+            tracing::info!(
+                "[agent] run_task: 计划审批策略={} 自动放行（无需人工确认），直接执行",
+                auto_approve_mode
+            );
+            events::emit_status(app, "✅ 计划审批策略：自动放行（无需人工确认），直接执行");
+        } else if !is_branch_rerun {
+            loop {
+                if self.cancel_flag.load(Ordering::SeqCst) {
+                    tracing::info!("[agent] run_task: 计划审批等待期间检测到取消信号，终止任务");
+                    events::emit_status(app, "⛔ 任务已被用户取消");
+                    events::emit_task_done(app, plan_usage.0, plan_usage.1);
+                    return;
+                }
+                let req = crate::agent::plan_approval::PlanApprovalRequest {
+                    goal_summary: plan.goal_summary.clone(),
+                    plan: plan.clone(),
+                };
+                events::emit_plan_approval_needed(app, &req);
+                self.plan_approval.request(req);
+                let decision = self.plan_approval.wait(&self.cancel_flag).await;
+                match decision {
+                    crate::agent::plan_approval::PlanApprovalDecision::Approve => {
+                        self.plan_approval.reset();
+                        break;
+                    }
+                    crate::agent::plan_approval::PlanApprovalDecision::Reject => {
+                        self.plan_approval.reset();
+                        tracing::info!("[agent] run_task: 计划被用户拒绝，整体终止任务");
+                        events::emit_status(app, "✋ 任务计划已被用户拒绝，已终止");
+                        events::emit_task_done(app, plan_usage.0, plan_usage.1);
+                        return;
+                    }
+                    crate::agent::plan_approval::PlanApprovalDecision::Revise(guidance) => {
+                        self.plan_approval.reset();
+                        // 空指引等价于 Approve：直接放行，避免无意义死循环。
+                        if guidance.trim().is_empty() {
+                            tracing::info!("[agent] run_task: 计划审批收到空修改意见，按批准处理");
+                            break;
+                        }
+                        tracing::info!("[agent] run_task: 计划审批收到修改意见，重新规划：{}", clip(&guidance, 200));
+                        events::emit_status(app, "🔄 已收到修改意见，正在重新规划…");
+                        let revised_prompt = format!("{}\n\n用户修改意见：{}", prompt, guidance);
+                        let (np, nu, nr) =
+                            crate::agent::planner::build_plan(&cfg, &revised_prompt, cfg.workspace.as_deref()).await;
+                        plan = np;
+                        plan_usage.0 += nu.0;
+                        plan_usage.1 += nu.1;
+                        plan_raw = nr;
+                        // 重新规划期间可能取消：完成即重新进入门禁循环。
+                        if self.cancel_flag.load(Ordering::SeqCst) {
+                            tracing::info!("[agent] run_task: 重新规划期间检测到取消信号，终止任务");
+                            events::emit_status(app, "⛔ 任务已被用户取消");
+                            events::emit_task_done(app, plan_usage.0, plan_usage.1);
+                            return;
+                        }
+                        continue;
+                    }
+                    crate::agent::plan_approval::PlanApprovalDecision::Cancel => {
+                        self.plan_approval.reset();
+                        tracing::info!("[agent] run_task: 计划审批等待期间用户取消，终止任务");
+                        events::emit_status(app, "⛔ 任务已被用户取消");
+                        events::emit_task_done(app, plan_usage.0, plan_usage.1);
+                        return;
+                    }
+                }
+            }
+        }
+
         events::emit_plan_generated(app, &plan);
         // 规划阶段模型原始输出作为 plan 层思考推送给轨迹视图（与执行期 exec / 收尾 selfcheck 分层区分）。
         if !plan_raw.trim().is_empty() {
@@ -262,7 +353,7 @@ impl AgentRuntime {
         let mut graph = match KnowledgeGraph::open(cfg.workspace.as_deref()) {
             Ok(g) => g,
             Err(e) => {
-                tracing::info!("[agent] run_task: 打开实体图失败：{e}");
+                tracing::error!("[agent] run_task: 打开实体图失败：{e}");
                 events::emit_task_error(app, &format!("打开实体图失败：{e}"));
                 return;
             }
@@ -375,7 +466,7 @@ impl AgentRuntime {
                     );
                     crate::agent::round_compactor::persist_round_raw(app, round_id, &raw_json).await;
                 }
-                Err(e) => tracing::info!("[agent] run_task: 序列化精简 raw_messages_json 失败：{e}"),
+                Err(e) => tracing::error!("[agent] run_task: 序列化精简 raw_messages_json 失败：{e}"),
             }
             if let Some(sid) = &cfg.session_id {
                 crate::agent::round_compactor::bump_session_turns(app, sid).await;
@@ -451,12 +542,12 @@ impl AgentRuntime {
                     .await
                     {
                         Ok(_) => count += 1,
-                        Err(e) => tracing::info!("[agent] forced_memory_settle: 锚定失败（key={}）：{e}", key),
+                        Err(e) => tracing::warn!("[agent] forced_memory_settle: 锚定失败（key={}）：{e}", key),
                     }
                 }
                 tracing::info!("[agent] forced_memory_settle: 强制沉淀 {} 条记忆", count);
             }
-            Err(e) => tracing::info!("[agent] forced_memory_settle: 总结 LLM 调用失败：{e}"),
+            Err(e) => tracing::warn!("[agent] forced_memory_settle: 总结 LLM 调用失败：{e}"),
         }
     }
 
@@ -473,7 +564,7 @@ impl AgentRuntime {
         let mut messages = match crate::agent::context::build_context_messages(app, cfg, prompt).await {
             Ok(m) => m,
             Err(e) => {
-                tracing::info!("[agent] run_simple_chat: 上下文组装失败：{e}");
+                tracing::error!("[agent] run_simple_chat: 上下文组装失败：{e}");
                 events::emit_task_error(app, &format!("上下文组装失败：{e}"));
                 return;
             }
@@ -526,7 +617,7 @@ impl AgentRuntime {
                 messages.push(json!({ "role": "assistant", "content": content }));
             }
             Err(e) => {
-                tracing::info!("[agent] run_simple_chat: LLM 调用失败：{e}");
+                tracing::error!("[agent] run_simple_chat: LLM 调用失败：{e}");
                 events::emit_task_error(app, &format!("LLM 调用失败：{e}"));
                 return;
             }
@@ -542,7 +633,7 @@ impl AgentRuntime {
                 Ok(raw_json) => {
                     crate::agent::round_compactor::persist_round_raw(app, round_id, &raw_json).await;
                 }
-                Err(e) => tracing::info!("[agent] run_simple_chat: 序列化 raw_messages_json 失败：{e}"),
+                Err(e) => tracing::error!("[agent] run_simple_chat: 序列化 raw_messages_json 失败：{e}"),
             }
             if let Some(sid) = &cfg.session_id {
                 crate::agent::round_compactor::bump_session_turns(app, sid).await;
@@ -558,6 +649,15 @@ pub(crate) struct ToolRoundStats {
     pub had_error: bool,
     /// 本轮最后一个失败工具的错误文本（供恢复面板回显真实受阻原因）。
     pub last_error: Option<String>,
+    /// 本轮最后一个失败工具的命令文本（沙箱 code / execute_command 的 command / 路径类字段），
+    /// 供 `classify_tier` 风险词匹配（命中 package-lock.json / /etc/ 等升档 B）。
+    pub last_failed_command: Option<String>,
+    /// 本轮文件变更类工具实际触碰过的路径（write/edit/delete/move 的 path 去重），
+    /// 供 `run_subtask` 聚合为 `SubTaskOutput.changed_files`，驱动接管面板「已改文件」区（2b-2）。
+    pub changed_files: std::collections::HashSet<String>,
+    /// 本轮文件读取类工具实际读过的路径（read_file 的 path 去重），
+    /// 供 `run_subtask` 聚合为 `SubTaskOutput.read_files`，阶段二图驱动写 `Read` 边（记录「哪步读了哪些文件」）。
+    pub read_files: std::collections::HashSet<String>,
 }
 
 /// 工具「操作类型」：供前端一行式工具行展示动词。
@@ -603,6 +703,35 @@ fn tool_path(args: &Value) -> Option<String> {
 fn is_file_mutating(tool_name: &str) -> bool {
     let leaf = tool_name.rsplit("__").next().unwrap_or(tool_name);
     matches!(leaf, "write_file" | "edit_file" | "delete_path" | "move_path")
+}
+
+/// 文件读取类工具判定（阶段二图驱动：read_file 执行成功后登记 `Read` 边）。
+fn is_file_reading(tool_name: &str) -> bool {
+    let leaf = tool_name.rsplit("__").next().unwrap_or(tool_name);
+    matches!(leaf, "read_file")
+}
+
+/// 从失败工具入参提取「命令文本」：沙箱 `code` > `command` > 路径类字段 > 整段 args（截断），
+/// 供 `classify_tier` 风险词匹配（如 `package-lock.json` / `/etc/` 命中升档 B）。
+/// 优先取真正会被执行的命令体（`code` / `command`），避免把整段 JSON 参数灌进风险匹配。
+fn tool_command(args: &Value) -> Option<String> {
+    for k in ["code", "command"] {
+        if let Some(s) = args.get(k).and_then(|v| v.as_str()) {
+            let s = s.trim();
+            if !s.is_empty() {
+                return Some(s.to_string());
+            }
+        }
+    }
+    if let Some(p) = tool_path(args) {
+        return Some(p);
+    }
+    let full = serde_json::to_string(args).unwrap_or_default();
+    if full.len() > 800 {
+        Some(format!("{}…", &full[..800]))
+    } else {
+        Some(full)
+    }
 }
 
 /// 精确行级 diff（LCS）：返回 (新增行数, 删除行数)。
@@ -663,13 +792,16 @@ pub(crate) async fn run_tool_calls_round(
     let mut iter_had_error = false;
     let mut iter_had_success = false;
     let mut last_err: Option<String> = None;
+    let mut last_failed_command: Option<String> = None;
+    let mut iter_changed_files: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut iter_read_files: std::collections::HashSet<String> = std::collections::HashSet::new();
 
     for tc in &outcome.tool_calls {
         let (call_id, tool_name, args) = match parse_tool_call(tc) {
             ParseOutcome::Ready { call_id, name, args } => (call_id, name, args),
             ParseOutcome::ParseError { call_id, name, error } => {
                 // 幻觉自愈：把 JSON 解析错误作为 ToolResult 回传，强制模型下一轮纠错。
-                tracing::info!(
+                tracing::error!(
                     "[agent] tool_round: 工具参数 JSON 解析失败 name={} err={}",
                     name,
                     clip(&error, 300),
@@ -684,7 +816,7 @@ pub(crate) async fn run_tool_calls_round(
                 continue;
             }
             ParseOutcome::Skip => {
-                tracing::info!(
+                tracing::warn!(
                     "[agent] tool_round: 工具调用字段缺失，跳过 raw_tool_call={}",
                     clip(&tc.to_string(), 500),
                 );
@@ -696,7 +828,7 @@ pub(crate) async fn run_tool_calls_round(
         let tool = match registry.get(&tool_name) {
             Some(t) => t,
             None => {
-                tracing::info!("[agent] tool_round: 注册表找不到模型请求的工具 name={}", tool_name);
+                tracing::error!("[agent] tool_round: 注册表找不到模型请求的工具 name={}", tool_name);
                 events::emit_error(app, &format!("未知工具：{tool_name}"));
                 continue;
             }
@@ -827,6 +959,7 @@ pub(crate) async fn run_tool_calls_round(
                 iter_had_error = true;
                 let t = truncate_tool_output(m.as_str());
                 last_err = Some(t.clone());
+                last_failed_command = tool_command(&args);
                 ("failed".into(), t)
             }
             Err(ToolError::ExecutionFailed(m)) | Err(ToolError::PermissionDenied(m)) => {
@@ -835,6 +968,7 @@ pub(crate) async fn run_tool_calls_round(
                 iter_had_error = true;
                 let t = truncate_tool_output(m.as_str());
                 last_err = Some(t.clone());
+                last_failed_command = tool_command(&args);
                 ("failed".into(), t)
             }
         };
@@ -849,6 +983,18 @@ pub(crate) async fn run_tool_calls_round(
         } else {
             (None, None)
         };
+        // 文件变更类工具：收集实际触碰过的路径，供接管面板「已改文件」区展示（2b-2）。
+        if is_file_mutating(&tool_name) {
+            if let Some(p) = &path_arg {
+                iter_changed_files.insert(p.clone());
+            }
+        }
+        // 文件读取类工具（read_file）：执行成功后收集实际读过的路径，阶段二图驱动写 `Read` 边。
+        if is_file_reading(&tool_name) && result.is_ok() {
+            if let Some(p) = &path_arg {
+                iter_read_files.insert(p.clone());
+            }
+        }
         events::emit_tool_finished(app, &ToolStep {
             call_id: step_id.clone(),
             tool_name: tool_name.clone(),
@@ -891,6 +1037,9 @@ pub(crate) async fn run_tool_calls_round(
         had_success: iter_had_success,
         had_error: iter_had_error,
         last_error: last_err,
+        last_failed_command,
+        changed_files: iter_changed_files,
+        read_files: iter_read_files,
     }
 }
 
@@ -1075,7 +1224,7 @@ pub(crate) async fn call_llm_stream(
                 // 重试一次避免浪费已喂的 prompt 却拿不到任何 token。
                 let is_empty = o.content.trim().is_empty() && o.tool_calls.is_empty();
                 if is_empty {
-                    tracing::info!(
+                    tracing::warn!(
                         "[agent] call_llm_stream: 第{}次流式返回空响应（疑似网关断流），{}",
                         attempt + 1,
                         if attempt < MAX_RETRY { "重试一次" } else { "已达上限，按空响应返回" }

@@ -56,7 +56,7 @@ async fn run_due_squads(app: &AppHandle) {
     let pool = match get_pool(app).await {
         Ok(p) => p,
         Err(e) => {
-            tracing::info!("[scheduler] 获取数据库失败：{e}");
+            tracing::warn!("[scheduler] 获取数据库失败：{e}");
             return;
         }
     };
@@ -67,7 +67,7 @@ async fn run_due_squads(app: &AppHandle) {
     {
         Ok(r) => r,
         Err(e) => {
-            tracing::info!("[scheduler] 查询小分队失败：{e}");
+            tracing::warn!("[scheduler] 查询小分队失败：{e}");
             return;
         }
     };
@@ -104,7 +104,7 @@ async fn run_due_squads(app: &AppHandle) {
         let schedule = match CronSchedule::parse(&cron) {
             Some(s) => s,
             None => {
-                tracing::info!("[scheduler] 小分队 {} 的 cron 解析失败，跳过：{}", id, cron);
+                tracing::warn!("[scheduler] 小分队 {} 的 cron 解析失败，跳过：{}", id, cron);
                 continue;
             }
         };
@@ -141,7 +141,7 @@ async fn run_due_squads(app: &AppHandle) {
                     tracing::info!("[scheduler] 触发小分队 {}（cron={}）", sid, cron);
                     run_squad_task(&app2, cfg, prompt).await;
                 }
-                Err(e) => tracing::info!("[scheduler] load_squad 失败 {}: {e}", sid),
+                Err(e) => tracing::warn!("[scheduler] load_squad 失败 {}: {e}", sid),
             }
         });
     }

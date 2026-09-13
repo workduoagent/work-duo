@@ -77,7 +77,7 @@ pub async fn run_squad_task(app: &AppHandle, squad: SquadRuntimeConfig, prompt: 
     let pool = match get_pool(app).await {
         Ok(p) => p,
         Err(e) => {
-            tracing::info!("[squad] run_squad_task: 获取数据库失败：{e}");
+            tracing::warn!("[squad] run_squad_task: 获取数据库失败：{e}");
             return;
         }
     };
@@ -345,7 +345,7 @@ async fn plan_squad_delegation(
             parse_delegation(&content)
         }
         Err(e) => {
-            tracing::info!("[squad] plan_squad_delegation: LLM 调用失败：{e}");
+            tracing::warn!("[squad] plan_squad_delegation: LLM 调用失败：{e}");
             Vec::new()
         }
     }
@@ -422,7 +422,7 @@ async fn summarize(leader_cfg: &AgentRuntimeConfig, prompt: &str, context: &str)
             }
         }
         Err(e) => {
-            tracing::info!("[squad] summarize: LLM 调用失败：{e}");
+            tracing::warn!("[squad] summarize: LLM 调用失败：{e}");
             None
         }
     }
@@ -451,7 +451,7 @@ async fn run_member_subtask(
     let mut graph = match KnowledgeGraph::open(Some(workspace)) {
         Ok(g) => g,
         Err(e) => {
-            tracing::info!("[squad] 打开成员实体图失败：{e}");
+            tracing::warn!("[squad] 打开成员实体图失败：{e}");
             return Err(format!("成员子任务图初始化失败：{e}"));
         }
     };
@@ -648,7 +648,7 @@ async fn run_squad_pipeline(
         match build_dag_plan(&squad.members) {
             Ok(p) => p,
             Err(e) => {
-                tracing::info!("[squad] pipeline: DAG 构建失败，会话 {}：{e}", session_id);
+                tracing::warn!("[squad] pipeline: DAG 构建失败，会话 {}：{e}", session_id);
                 let _ = sqlx::query(
                     "INSERT INTO agent_squad_round (id, squad_id, session_id, speaker_agent_id, role, content, kind, created_at) \
                      VALUES (?, ?, ?, NULL, '系统', ?, 'system', ?)",
@@ -856,7 +856,7 @@ async fn run_squad_chat(
             let content = match crate::agent::runtime::call_llm(&member.agent, &messages, &[]).await {
                 Ok((resp, _)) => extract_llm_text(&resp),
                 Err(e) => {
-                    tracing::info!("[squad] chat 成员 {} 第 {} 轮发言失败：{e}", member.agent.agent_id, r + 1);
+                    tracing::warn!("[squad] chat 成员 {} 第 {} 轮发言失败：{e}", member.agent.agent_id, r + 1);
                     format!("（成员 {} 发言失败：{e}）", member.agent.agent_id)
                 }
             };
@@ -899,7 +899,7 @@ async fn run_squad_chat(
     let sum_cfg = match summarizer {
         Some(m) => &m.agent,
         None => {
-            tracing::info!("[squad] chat: 无可用汇总主笔");
+            tracing::warn!("[squad] chat: 无可用汇总主笔");
             events::emit_squad_session_done(
                 app,
                 &events::SquadSessionDonePayload {
@@ -931,7 +931,7 @@ async fn run_squad_chat(
             }
         }
         Err(e) => {
-            tracing::info!("[squad] chat: 汇总主笔调用失败：{e}");
+            tracing::warn!("[squad] chat: 汇总主笔调用失败：{e}");
             blackboard.clone()
         }
     };

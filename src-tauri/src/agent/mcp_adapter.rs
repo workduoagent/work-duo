@@ -127,7 +127,7 @@ impl AgentTool for McpRemoteTool {
             Ok(resp.raw)
         } else {
             let err = resp.error.unwrap_or_else(|| "MCP 调用失败".into());
-            tracing::info!("[agent] MCP 工具 {} 返回失败：{}", self.original_name, err);
+            tracing::warn!("[agent] MCP 工具 {} 返回失败：{}", self.original_name, err);
             Err(ToolError::ExecutionFailed(err))
         }
     }

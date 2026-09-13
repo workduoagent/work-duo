@@ -332,4 +332,12 @@ ALTER TABLE agent_squad ADD COLUMN workspace_dir TEXT;
 -- 与 global_mcp_ids（启用的服务列表）配合实现「按服务总开关 + 按工具子开关」。
 -- 存量库（建表时无该列）通过本语句补齐；重复执行会被 updateTables 安全跳过（duplicate column name）。
 ALTER TABLE agent_squad ADD COLUMN global_mcp_tools TEXT;
+
+-- ---------- v22：智能体表新增「计划审批策略模式」开关字段 ----------
+-- 对应 init.sql 已建表即含该列；存量库（在 plan_auto_approve_mode 加入建表语句之前已创建）实际表结构缺少该列，
+-- 新建/更新智能体时 INSERT 含 plan_auto_approve_mode 会报 "table agent_info has no column named plan_auto_approve_mode"。
+-- 存量库通过本语句补齐；重复执行会被 updateTables 安全跳过（duplicate column name）。
+-- 取值：always=每次复合任务都走人工审批 / sensitive=仅含敏感操作的计划才审批（纯低风险任务自动放行）/ never=从不审批。默认 always。
+ALTER TABLE agent_info ADD COLUMN plan_auto_approve_mode TEXT NOT NULL DEFAULT 'always';
+
 -- ============================================================

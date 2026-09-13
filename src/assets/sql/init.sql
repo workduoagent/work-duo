@@ -206,6 +206,7 @@ CREATE TABLE IF NOT EXISTS agent_info
     auto_tool_exec_mode INTEGER NOT NULL DEFAULT 0,
     allow_sandbox       INTEGER NOT NULL DEFAULT 0,
     memory_mode         TEXT    NOT NULL DEFAULT 'off',  -- 记忆模式：off=关闭 / active=主动 / forced=强制每次任务末沉淀
+    plan_auto_approve_mode TEXT NOT NULL DEFAULT 'always',  -- 计划审批策略：always=每次都审批 / sensitive=仅敏感任务审批 / never=从不审批
     created_at          INTEGER NOT NULL,
     updated_at          INTEGER NOT NULL,
     CONSTRAINT uk_agent_identifier UNIQUE (identifier)

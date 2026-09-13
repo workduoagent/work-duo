@@ -183,7 +183,7 @@ pub(crate) async fn persist_round_raw(app: &AppHandle, round_id: &str, raw_messa
     let pool = match get_pool(app).await {
         Ok(p) => p,
         Err(e) => {
-            tracing::info!("[agent] persist_round_raw: 取池失败：{e}");
+            tracing::warn!("[agent] persist_round_raw: 取池失败：{e}");
             return;
         }
     };
@@ -196,7 +196,7 @@ pub(crate) async fn persist_round_raw(app: &AppHandle, round_id: &str, raw_messa
     .execute(&pool)
     .await
     {
-        tracing::info!("[agent] persist_round_raw: 写 raw_messages_json 失败：{e}");
+        tracing::warn!("[agent] persist_round_raw: 写 raw_messages_json 失败：{e}");
     }
 }
 
@@ -205,7 +205,7 @@ pub(crate) async fn bump_session_turns(app: &AppHandle, session_id: &str) {
     let pool = match get_pool(app).await {
         Ok(p) => p,
         Err(e) => {
-            tracing::info!("[agent] bump_session_turns: 取池失败：{e}");
+            tracing::warn!("[agent] bump_session_turns: 取池失败：{e}");
             return;
         }
     };
@@ -218,7 +218,7 @@ pub(crate) async fn bump_session_turns(app: &AppHandle, session_id: &str) {
     .execute(&pool)
     .await
     {
-        tracing::info!("[agent] bump_session_turns: 失败：{e}");
+        tracing::warn!("[agent] bump_session_turns: 失败：{e}");
     }
 }
 
@@ -255,7 +255,7 @@ pub(crate) async fn persist_tools_tokens(
     .execute(&pool)
     .await
     {
-        tracing::info!("[agent] persist_tools_tokens: 写 tools_tokens 失败：{e}");
+        tracing::warn!("[agent] persist_tools_tokens: 写 tools_tokens 失败：{e}");
     }
 }
 
@@ -273,11 +273,11 @@ pub(crate) async fn persist_session_tokens(
     let pool = match get_pool(app).await {
         Ok(p) => p,
         Err(e) => {
-            tracing::info!("[agent] persist_session_tokens: 取池失败：{e}");
+            tracing::warn!("[agent] persist_session_tokens: 取池失败：{e}");
             return;
         }
     };
-    tracing::info!(
+    tracing::warn!(
         "[agent] persist_session_tokens: session={} prompt+={} completion+={}",
         session_id, prompt_delta, completion_delta
     );
@@ -295,7 +295,7 @@ pub(crate) async fn persist_session_tokens(
     .execute(&pool)
     .await
     {
-        tracing::info!("[agent] persist_session_tokens: 写会话 token 失败：{e}");
+        tracing::warn!("[agent] persist_session_tokens: 写会话 token 失败：{e}");
     }
 }
 
@@ -311,7 +311,7 @@ pub(crate) async fn persist_artifact(
     let pool = match get_pool(app).await {
         Ok(p) => p,
         Err(e) => {
-            tracing::info!("[agent] persist_artifact: 取池失败：{e}");
+            tracing::warn!("[agent] persist_artifact: 取池失败：{e}");
             return;
         }
     };
@@ -336,7 +336,7 @@ pub(crate) async fn persist_artifact(
     .execute(&pool)
     .await
     {
-        tracing::info!("[agent] persist_artifact: 写库失败（artifact_id={}）：{e}", ar.artifact_id);
+        tracing::warn!("[agent] persist_artifact: 写库失败（artifact_id={}）：{e}", ar.artifact_id);
     }
 }
 
@@ -356,7 +356,7 @@ pub(crate) async fn trigger_background_compaction(
     let pool = match get_pool(app).await {
         Ok(p) => p,
         Err(e) => {
-            tracing::info!("[agent] trigger_background_compaction: 取池失败：{e}");
+            tracing::warn!("[agent] trigger_background_compaction: 取池失败：{e}");
             return;
         }
     };
@@ -416,7 +416,7 @@ pub(crate) async fn trigger_background_compaction(
         let pool = match get_pool(&app_bg).await {
             Ok(p) => p,
             Err(e) => {
-                tracing::info!("[Compactor] 取池失败：{e}");
+                tracing::warn!("[Compactor] 取池失败：{e}");
                 return;
             }
         };
@@ -436,7 +436,7 @@ pub(crate) async fn trigger_background_compaction(
         {
             Ok(r) => r,
             Err(e) => {
-                tracing::info!("[Compactor] 读取待压缩轮次失败：{e}");
+                tracing::warn!("[Compactor] 读取待压缩轮次失败：{e}");
                 return;
             }
         };
@@ -478,7 +478,7 @@ pub(crate) async fn trigger_background_compaction(
                 .execute(&pool)
                 .await
                 {
-                    tracing::info!("[Compactor] 写回 summary 失败：{e}");
+                    tracing::warn!("[Compactor] 写回 summary 失败：{e}");
                     return;
                 }
                 tracing::info!(
@@ -489,7 +489,7 @@ pub(crate) async fn trigger_background_compaction(
                 // 双轨落盘：若会话绑定工程，额外将摘要写入 .wd_mem/sessions/{id}.summary.md。
                 if let Some(root) = resolve_project_root(&pool, &sid).await {
                     if let Err(e) = wd_mem::write_session_summary(&root, &sid, &new_summary) {
-                        tracing::info!("[Compactor] 写会话摘要文件失败（仅影响文件轨）：{e}");
+                        tracing::warn!("[Compactor] 写会话摘要文件失败（仅影响文件轨）：{e}");
                     }
                 }
 

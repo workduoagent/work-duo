@@ -159,8 +159,33 @@ export interface RecoveryRequest {
   tier?: string
   /** 失败命令（接管面板展示用，2a 可空）。 */
   failedCommand?: string
-  /** 已改动文件（接管面板展示用，2a 可空）。 */
+  /** 已改动文件（接管面板展示用，2b-2 起真实采集）。 */
   changedFiles?: string[]
+  /** 工具栈快照（接管面板展示用，2b-2 新增）：原生工具 + MCP 工具 + 技能 + 沙箱开关。 */
+  toolStack?: {
+    nativeTools?: string[]
+    mcpTools?: string[]
+    skills?: string[]
+    sandboxEnabled?: boolean
+  }
+}
+
+/** 计划审批请求中的单个步骤（对应 Rust `agent-plan-approval-needed` 事件载荷中的 tasks 项）。 */
+export interface PlanApprovalStep {
+  step: number
+  taskId?: string
+  title: string
+  description?: string
+  /** 前置依赖的步骤 task_id 列表。 */
+  dependsOn?: string[]
+}
+
+/** 计划审批请求（对应 Rust `agent-plan-approval-needed` 事件，渲染「计划确认」弹窗）。 */
+export interface PlanApprovalRequest {
+  /** 任务一句话目标。 */
+  goalSummary: string
+  /** DAG 步骤清单。 */
+  tasks: PlanApprovalStep[]
 }
 
 /** 意图分类结果（intent_classified 事件携带，对应 Rust `IntentProfile` 经 camelCase 序列化）。 */

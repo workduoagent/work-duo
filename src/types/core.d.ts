@@ -215,12 +215,17 @@ export interface AgentInfo {
   allowSandbox: boolean
   /** 记忆模式：off=关闭 / active=主动 / forced=强制每次任务末沉淀 */
   memoryMode: MemoryMode
+  /** 计划审批策略：always=每次复合任务都走人工审批 / sensitive=仅含敏感操作的计划才审批（纯低风险任务自动放行）/ never=从不审批 */
+  planAutoApproveMode: PlanApprovalMode
   createdAt: string
   updatedAt: string
 }
 
 /** 智能体记忆模式（对应 agent_info.memory_mode）。 */
 export type MemoryMode = 'off' | 'active' | 'forced'
+
+/** 计划审批策略模式（对应 agent_info.plan_auto_approve_mode，Phase 2b-3 allow 规则层）。 */
+export type PlanApprovalMode = 'always' | 'sensitive' | 'never'
 
 /**
  * 智能体绑定的 MCP 工具（对应 agent_mcp_ref 表）。
@@ -278,6 +283,8 @@ export interface AgentUpsertInput {
   allowSandbox?: boolean
   /** 记忆模式：off=关闭 / active=主动 / forced=强制每次任务末沉淀 */
   memoryMode?: MemoryMode
+  /** 计划审批策略：always=每次复合任务都走人工审批 / sensitive=仅敏感任务审批（纯低风险自动放行）/ never=从不审批 */
+  planAutoApproveMode?: PlanApprovalMode
   /** 绑定的 MCP 工具（最小单元 = toolId；mcpId 为冗余分组信息） */
   mcpTools: Array<{ mcpId: string; toolId: string }>
   /** 编排的技能 id */

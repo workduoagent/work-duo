@@ -28,6 +28,7 @@ use tokio::time::timeout;
 use tokio::time::Duration;
 
 use crate::agent::events;
+use crate::agent::graph::{KnowledgeGraph, NodeKind};
 use crate::agent::tools::AgentTool;
 use crate::agent::tools::PathGuard;
 use crate::agent::tools::PermissionLevel;
@@ -2885,6 +2886,8 @@ pub fn register_native_tools(registry: &mut ToolRegistry, app: &AppHandle, sandb
     // 首梯队补全（系统能力，沙箱开/关都注册）：正则替换 + HTTP 请求。
     registry.register(Arc::new(RegexReplaceTool));
     registry.register(Arc::new(HttpRequestTool));
+    // 阶段二图驱动：实体图检索工具（ReadSafe，始终注册），让智能体基于真实图数据决策（替代从 summary 猜）。
+    registry.register(Arc::new(QueryGraphTool));
     // 方案推荐：Agent 主动询问用户（HITL Choice Chip），挂起等待选择后回传。
     registry.register(Arc::new(AskUserChoiceTool { app: app.clone() }));
     if !sandbox_enabled {
@@ -2896,5 +2899,83 @@ pub fn register_native_tools(registry: &mut ToolRegistry, app: &AppHandle, sandb
         // 保持「提示与能力同源」。两种隔离运行时并存，供模型按任务自选语言。
         registry.register(Arc::new(RunPythonSandboxTool::new(app.clone())));
         registry.register(Arc::new(RunNodeSandboxTool::new(app.clone())));
+    }
+}
+
+/* ----------------------------- query_graph (阶段二图驱动) ----------------------------- */
+
+/// 把工具参数 `kind` 字符串映射为图节点类型（NodeKind）。
+fn parse_node_kind(s: &str) -> Option<NodeKind> {
+    match s.to_ascii_lowercase().as_str() {
+        "session" => Some(NodeKind::Session),
+        "task" => Some(NodeKind::Task),
+        "artifact" => Some(NodeKind::Artifact),
+        "file_ref" | "file" => Some(NodeKind::FileRef),
+        "memory" => Some(NodeKind::Memory),
+        "prompt" => Some(NodeKind::Prompt),
+        _ => None,
+    }
+}
+
+/// 实体图检索工具：智能体运行时查询「某步产出了哪些文件 / 某文件被哪些步骤读写 / 历史任务链」
+/// 等真实图数据，替代从模型 summary 文本猜测（对齐图驱动约束铁律：约束必须读真实图数据）。
+/// 只读，ReadSafe 始终注册。
+pub struct QueryGraphTool;
+
+#[async_trait]
+impl AgentTool for QueryGraphTool {
+    fn name(&self) -> String {
+        "native__query_graph".into()
+    }
+    fn tool_definition(&self) -> Value {
+        def(
+            "native__query_graph",
+            "检索当前工作区的实体图（任务/文件/产物/记忆节点），用于查询「某步产出了哪些文件」「某文件被哪些步骤读写」「历史任务链」等真实图数据，辅助后续决策。只读，无需审批。",
+            json!({
+                "keyword": { "type": "string", "description": "模糊匹配关键词（标题/描述/路径）" },
+                "kind": { "type": "string", "enum": ["session", "task", "artifact", "file_ref", "memory", "prompt"], "description": "可选节点类型过滤" },
+                "limit": { "type": "integer", "description": "返回上限，默认 20" }
+            }),
+            &["keyword"],
+        )
+    }
+    fn check_permission(&self, _args: &Value) -> PermissionLevel {
+        PermissionLevel::ReadSafe
+    }
+    async fn execute(&self, args: Value, ctx: &ToolContext) -> Result<String, ToolError> {
+        let keyword = args
+            .get("keyword")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        if keyword.is_empty() {
+            return Err(ToolError::InvalidArgs("query_graph 缺少 keyword 参数".into()));
+        }
+        let kind = args.get("kind").and_then(|v| v.as_str()).and_then(parse_node_kind);
+        let limit = args
+            .get("limit")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(20) as usize;
+
+        let workspace = ctx.workspace.as_ref().and_then(|p| p.to_str());
+        let graph = KnowledgeGraph::open(workspace)
+            .map_err(|e| ToolError::ExecutionFailed(format!("打开实体图失败：{e}")))?;
+
+        let nodes = graph.search(&keyword, kind, limit);
+        let mut out: Vec<Value> = Vec::new();
+        for n in nodes {
+            out.push(json!({
+                "id": n.id,
+                "kind": serde_json::to_value(n.kind).unwrap_or(Value::Null),
+                "title": n.props.get("title").and_then(|v| v.as_str()),
+                "status": n.props.get("status").and_then(|v| v.as_str()),
+                "path": n.props.get("path").and_then(|v| v.as_str()),
+                "step": n.props.get("step").and_then(|v| v.as_u64()),
+                "description": n.props.get("description").and_then(|v| v.as_str()),
+            }));
+        }
+        serde_json::to_string(&out)
+            .map_err(|e| ToolError::ExecutionFailed(format!("序列化检索结果失败：{e}")))
     }
 }

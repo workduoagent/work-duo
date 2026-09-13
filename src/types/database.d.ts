@@ -105,6 +105,7 @@ export interface AgentInfoRow {
   auto_tool_exec_mode: number // SQLite 布尔：0 / 1
   allow_sandbox: number // SQLite 布尔：0 / 1
   memory_mode: string // 记忆模式：off / active / forced
+  plan_auto_approve_mode: string // 计划审批策略：always / sensitive / never
   created_at: number
   updated_at: number
 }

@@ -75,6 +75,7 @@ pub fn run() {
             agent::commands::set_squad_api_config,
             agent::commands::submit_approval_decision,
             agent::commands::submit_choice_decision,
+            agent::commands::submit_plan_decision,
             agent::commands::cancel_agent_task,
             net::http_probe,
             agent::commands::retry_subtask,

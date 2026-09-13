@@ -165,6 +165,11 @@ pub struct AgentRuntimeConfig {
     pub allow_sandbox: bool,
     /// 记忆模式：off=关闭 / active=主动 / forced=强制。驱动能力层是否注册 anchor 工具、提示层是否注入沉淀引导、流水线末是否强制总结沉淀。
     pub memory_mode: String,
+    /// 计划审批策略模式（Phase 2b-3 `allow` 规则层）：
+    /// - "always"：所有复合任务规划后都走人工审批门禁（默认，保持最严格）；
+    /// - "sensitive"：仅含敏感操作的计划走审批，纯低风险计划（文件创建/编辑/UI 等）自动放行；
+    /// - "never"：复合任务一律不审批，规划后直接执行。
+    pub plan_auto_approve_mode: String,
     pub workspace: Option<String>,
     pub mcp_tools: Vec<MountedMcpTool>, // 已挂载 MCP 工具（含真实 tool_code 与描述）
     pub skill_tools: Vec<SkillToolWrapper>, // 已绑定技能包装
@@ -394,6 +399,16 @@ pub struct SubTaskOutput {
     /// 本子任务成功闭环后登记的文件产物（注册进 artifacts 表，驱动前端「产物画廊」）。
     #[allow(dead_code)]
     pub artifacts: Vec<ArtifactRef>,
+    /// 最近一次失败工具的命令文本（沙箱 code / execute_command 的 command / 路径类字段），
+    /// 供 `run_pipeline` 恢复块传给 `classify_tier` 做风险词匹配（决定档 A/B）。
+    /// 仅在子任务以失败收场时才有意义；取消 / LLM 失败等无工具错误的路径为 `None`。
+    pub failed_command: Option<String>,
+    /// 本子任务执行期间实际改动过的文件路径（write/edit/delete/move 的 path 参数去重聚合），
+    /// 供 `run_pipeline` 恢复块填 `RecoveryRequest.changed_files`，驱动接管面板「已改文件」区。
+    pub changed_files: Option<Vec<String>>,
+    /// 本子任务执行期间实际读取过的文件路径（read_file 的 path 参数去重聚合），
+    /// 供 `run_pipeline` 成功闭环写图（FileRef + Read 边），记录「哪一步读了哪些文件」（阶段二图驱动）。
+    pub read_files: Option<Vec<String>>,
 }
 
 /* ================= 小分队（Squad）协作引擎类型 ================= */

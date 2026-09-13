@@ -356,6 +356,84 @@ impl KnowledgeGraph {
         }
     }
 
+    /// 生成「仅可见、不负责约束」的图摘要，供注入 system prompt（体积受控）。
+    ///
+    /// 设计铁律（图驱动约束）：图摘要只让模型「看到」工作区已有哪些文件/步骤，
+    /// **不作为执行约束**——是否写文件、写到哪一律以用户指令 + 工具返回 + pipeline 硬校验为准。
+    /// 故此处绝不全量注入 `_index.json`（会随历史膨胀），只含：
+    ///   1. 全局 stats（节点/边/会话计数，恒定小）；
+    ///   2. 当前 session 任务链（该会话的 Task 节点 + 其 Wrote/Read/Produced 文件），按会话隔离、天然有界。
+    pub fn system_prompt_digest(&self, session_id: Option<&str>) -> String {
+        let sessions = self
+            .nodes
+            .values()
+            .filter(|n| n.kind == NodeKind::Session)
+            .count();
+        let mut body = String::from(
+            "### 工作区实体图摘要（仅可见参考，非约束指令）\n\
+             以下是当前工作区统一实体图的精简视图，仅供你了解「已有哪些文件 / 步骤」。\n\
+             它不构成执行约束：是否创建 / 修改文件、写到哪一路径，一律以用户指令与工具实际返回为准。",
+        );
+        body.push_str(&format!(
+            "\n全局图统计：节点数={}，边数={}，会话数={}",
+            self.nodes.len(),
+            self.edges.len(),
+            sessions,
+        ));
+        if let Some(sid) = session_id {
+            let tasks: Vec<&GraphNode> = self
+                .nodes
+                .values()
+                .filter(|n| n.kind == NodeKind::Task)
+                .filter(|n| n.props.get("sessionId").and_then(|v| v.as_str()) == Some(sid))
+                .collect();
+            if !tasks.is_empty() {
+                body.push_str(&format!("\n\n当前会话任务链（{} 个步骤）：", tasks.len()));
+                for t in tasks.iter().take(16) {
+                    let title = t.props.get("title").and_then(|v| v.as_str()).unwrap_or("(无标题)");
+                    let status = t.props.get("status").and_then(|v| v.as_str()).unwrap_or("?");
+                    let step = t.props.get("step").and_then(|v| v.as_i64()).unwrap_or(0);
+                    body.push_str(&format!("\n  - 步骤{} [{}] {}：", step, status, title));
+                    let mut files: Vec<String> = Vec::new();
+                    if let Some(outs) = self.adj_from.get(&t.id) {
+                        for eid in outs {
+                            if let Some(e) = self.edges.get(eid) {
+                                let rel = match e.relation {
+                                    EdgeRelation::Wrote => "写",
+                                    EdgeRelation::Read => "读",
+                                    EdgeRelation::Produced => "产物",
+                                    _ => continue,
+                                };
+                                if let Some(target) = self.nodes.get(&e.to) {
+                                    let path = target
+                                        .props
+                                        .get("path")
+                                        .and_then(|v| v.as_str())
+                                        .or_else(|| target.props.get("title").and_then(|v| v.as_str()))
+                                        .unwrap_or("?");
+                                    files.push(format!("{}{}", rel, path));
+                                }
+                            }
+                        }
+                    }
+                    if files.is_empty() {
+                        body.push_str("（暂无文件记录）");
+                    } else {
+                        body.push_str(&files.join("，"));
+                    }
+                }
+            }
+        }
+        // 体积保护：超长截断（历史非本会话节点不入，正常不会触发；兜底防异常膨胀）。
+        let cap = 1500usize;
+        if body.chars().count() > cap {
+            let truncated: String = body.chars().take(cap).collect();
+            format!("{}\n...（摘要已截断，完整图见 .wd_mem/graph/）", truncated)
+        } else {
+            body
+        }
+    }
+
     /// 读取节点（纯内存，不读盘）。
     pub fn get_node(&self, id: &str) -> Option<&GraphNode> {
         self.nodes.get(id)
@@ -539,6 +617,63 @@ impl KnowledgeGraph {
             });
             let art_id = self.create_node(NodeKind::Artifact, props);
             self.create_edge(task_node_id, &art_id, EdgeRelation::Produced);
+        }
+    }
+
+    /// 抽取：为某路径确保一个 `FileRef` 节点存在（同路径复用同一节点，避免重复建点），返回节点 id。
+    /// 阶段二图驱动：读/写文件都登记到同一 `FileRef` 节点，便于后续查询「某文件被哪些步骤读/写」。
+    fn ensure_file_ref(&mut self, raw: &str, session_id: &str, workspace: Option<&Path>) -> String {
+        let p = Path::new(raw.trim());
+        let abs = if p.is_absolute() {
+            p.to_path_buf()
+        } else {
+            match workspace {
+                Some(w) => w.join(p),
+                None => p.to_path_buf(),
+            }
+        };
+        let abs_str = abs.to_string_lossy().to_string();
+        for n in self.nodes.values() {
+            if n.kind == NodeKind::FileRef
+                && n.props.get("path").and_then(|v| v.as_str()) == Some(&abs_str)
+            {
+                return n.id.clone();
+            }
+        }
+        let props = json!({ "path": abs_str, "sessionId": session_id });
+        self.create_node(NodeKind::FileRef, props)
+    }
+
+    /// 把本步工具实际写出的文件（write_file/edit_file 的真实落盘路径）写图：
+    /// 每个路径 → FileRef 节点（复用 ensure_file_ref）+ Wrote 边。
+    /// 与 `add_produced_artifacts`（画廊产物，Produced 边）区分：代码/数据文件归 Wrote，画廊产物归 Produced。
+    /// 此处用的是工具执行层的真实产出，是「图驱动约束」的权威来源（非模型 summary 文本抽取）。
+    pub fn add_wrote_files(&mut self, task_node_id: &str, files: &[String], workspace: Option<&Path>) {
+        let session_id = self
+            .nodes
+            .get(task_node_id)
+            .and_then(|n| n.props.get("sessionId").and_then(|v| v.as_str()))
+            .unwrap_or("")
+            .to_string();
+        for raw in files {
+            let fid = self.ensure_file_ref(raw, &session_id, workspace);
+            self.create_edge(task_node_id, &fid, EdgeRelation::Wrote);
+        }
+    }
+
+    /// 把本步工具实际读取的文件（read_file 的真实路径）写图：
+    /// 每个路径 → FileRef 节点（复用 ensure_file_ref）+ Read 边。
+    /// 记录「哪一步读了哪些文件」，为阶段二 `native__query_graph` 检索与跨步上下文提供真实数据。
+    pub fn add_read_files(&mut self, task_node_id: &str, files: &[String], workspace: Option<&Path>) {
+        let session_id = self
+            .nodes
+            .get(task_node_id)
+            .and_then(|n| n.props.get("sessionId").and_then(|v| v.as_str()))
+            .unwrap_or("")
+            .to_string();
+        for raw in files {
+            let fid = self.ensure_file_ref(raw, &session_id, workspace);
+            self.create_edge(task_node_id, &fid, EdgeRelation::Read);
         }
     }
 

@@ -14,7 +14,7 @@ import { AlertTriangle, Check, X, RotateCcw, SkipForward, Hand, HelpCircle } fro
 import { Button, Input } from '@/components/ui'
 import { useNotify } from '@/components/ui/notify'
 import { notifyOSWhenHidden } from '@/utils/osNotify'
-import type { ApprovalRequest, ChoiceRequest, RecoveryRequest } from './types'
+import type { ApprovalRequest, ChoiceRequest, PlanApprovalRequest, RecoveryRequest } from './types'
 
 interface UserPromptPanelProps {
   /** 授权类请求（非 null 时弹窗）。 */
@@ -23,6 +23,8 @@ interface UserPromptPanelProps {
   recovery: RecoveryRequest | null
   /** 方案推荐类请求（非 null 时弹窗）。 */
   choice: ChoiceRequest | null
+  /** 计划审批类请求（非 null 时弹窗）：复合任务规划完成后、执行前挂起，等待用户批准/修改。 */
+  planApproval: PlanApprovalRequest | null
   /** 触发交互的智能体名称（用于「哪个智能体」）。 */
   agentName: string
   /** 授权决策回调：approve=授权执行 / skip=跳过 / takeover=授权+补充指示。 */
@@ -31,6 +33,13 @@ interface UserPromptPanelProps {
   onResolve: (decision: 'retry' | 'skip' | 'takeover' | 'change-approach', guidance?: string) => void
   /** 方案推荐回调：用户点选的 optionId；走「其他 / 自定义」时携带 customText。 */
   onSubmitChoice: (optionId: string, customText?: string) => void
+  /** 计划审批回调：approve=批准执行 / reject=拒绝终止 / revise=按修改意见重规划（携带意见）。 */
+  onResolvePlanApproval: (decision: 'approve' | 'reject' | 'revise', guidance?: string) => void
+  /**
+   * 紧凑模式：右侧「接管」Tab 已展开时，底部弹窗压为纯操作横幅
+   * （仅一行原因 + 决策按钮，不含输入框/改方案/详情——这些已在侧栏）。
+   */
+  compact?: boolean
 }
 
 /** 从入参中提取最关键的授权内容行（避免把整段 JSON 堆进通知）。 */
@@ -58,10 +67,13 @@ export function UserPromptPanel({
   approval,
   recovery,
   choice,
+  planApproval,
   agentName,
   onApproval,
   onResolve,
   onSubmitChoice,
+  onResolvePlanApproval,
+  compact = false,
 }: UserPromptPanelProps) {
   const { notification } = useNotify()
   // 用 ref 持有最新回调与补充指示，避免其在 effect 依赖里变化导致通知反复重开。
@@ -71,6 +83,8 @@ export function UserPromptPanel({
   resolveRef.current = onResolve
   const choiceRef = useRef(onSubmitChoice)
   choiceRef.current = onSubmitChoice
+  const planApprovalRef = useRef(onResolvePlanApproval)
+  planApprovalRef.current = onResolvePlanApproval
   const approvalGuidanceRef = useRef('')
 
   // 授权弹窗（approve / skip / takeover）
@@ -191,7 +205,7 @@ export function UserPromptPanel({
         </span>
       ),
       message: '步骤受阻 · 需要你的决策',
-      description: <RecoveryContent recovery={recovery} onResolve={doResolve} agentName={agentName} />,
+      description: <RecoveryContent recovery={recovery} onResolve={doResolve} agentName={agentName} compact={compact} />,
     })
       // 主窗口未在桌面最前时，额外弹系统原生通知提醒用户步骤受阻需决策。
       notifyOSWhenHidden(
@@ -233,6 +247,36 @@ export function UserPromptPanel({
     }
   }, [choice, notification])
 
+  // 计划审批门禁（Phase 2b-3）：复合任务规划完成后、执行前挂起，等待用户批准/修改/拒绝。
+  useEffect(() => {
+    if (!planApproval) return
+    const key = 'plan-approval'
+    const doResolve = (decision: 'approve' | 'reject' | 'revise', guidance?: string) => {
+      notification.destroy(key)
+      planApprovalRef.current(decision, guidance)
+    }
+    notification.open({
+      key,
+      placement: 'bottomRight',
+      duration: 0, // 不自动关闭，必须由用户决策
+      icon: (
+        <span className="agent-plan-note__icon">
+          <HelpCircle size={16} />
+        </span>
+      ),
+      message: '计划已生成 · 请审批',
+      description: <PlanApprovalContent planApproval={planApproval} onResolve={doResolve} />,
+    })
+      // 主窗口未在桌面最前时，额外弹系统原生通知提醒用户需要审批计划。
+      notifyOSWhenHidden(
+        '计划已生成 · 请审批',
+        `智能体 ${agentName || '未知智能体'} 已完成任务拆解（${planApproval.tasks.length} 步），等待你批准执行`,
+      ).catch(() => {})
+    return () => {
+      notification.destroy(key)
+    }
+  }, [planApproval, agentName, notification])
+
   return null
 }
 
@@ -247,16 +291,67 @@ function RecoveryContent({
   recovery,
   onResolve,
   agentName,
+  compact = false,
 }: {
   recovery: RecoveryRequest
   onResolve: (decision: 'retry' | 'skip' | 'takeover' | 'change-approach', guidance?: string) => void
   agentName: string
+  compact?: boolean
 }) {
   const [takeoverText, setTakeoverText] = useState('')
   const [approachText, setApproachText] = useState('')
   const isB = recovery.tier === 'B'
   const reason = recovery.reason || '（无）'
   const summary = recovery.summary || '（无）'
+
+  // 紧凑模式：右侧接管 Tab 已展开，底部只保留一行原因 + 操作按钮（不含输入框/改方案）
+  if (compact) {
+    return (
+      <div className="agent-recovery-note agent-recovery-note--compact">
+        <span className="agent-recovery-note__compact-reason">
+          <AlertTriangle size={14} />
+          {reason}
+        </span>
+        <div className="agent-recovery-note__actions">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="agent-recovery-note__skip"
+            onClick={() => onResolve('skip')}
+          >
+            跳过
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="agent-recovery-note__retry"
+            onClick={() => onResolve('retry')}
+          >
+            重试
+          </Button>
+          {isB && (
+            <Button
+              variant="solid"
+              size="sm"
+              className="agent-recovery-note__change-btn"
+              onClick={() => onResolve('change-approach')}
+            >
+              改方案
+            </Button>
+          )}
+          <Button
+            variant={isB ? 'outline' : 'solid'}
+            size="sm"
+            className="agent-recovery-note__takeover"
+            onClick={() => onResolve('takeover')}
+          >
+            接管并继续
+          </Button>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="agent-recovery-note">
       <p className="agent-recovery-note__line">
@@ -270,22 +365,13 @@ function RecoveryContent({
         <span className="agent-recovery-note__label">受阻原因：</span>
         <span className="agent-recovery-note__value">{reason}</span>
       </div>
+      <div className="agent-recovery-note__tip">
+        工具栈 / 已改动文件 / 失败命令详情见右侧「接管」面板
+      </div>
       {summary !== '（无）' && (
         <div className="agent-recovery-note__summary">
           <span className="agent-recovery-note__label">已产出：</span>
           <span className="agent-recovery-note__value">{summary}</span>
-        </div>
-      )}
-      {recovery.failedCommand && (
-        <div className="agent-recovery-note__reason">
-          <span className="agent-recovery-note__label">失败命令：</span>
-          <code className="agent-recovery-note__value">{recovery.failedCommand}</code>
-        </div>
-      )}
-      {recovery.changedFiles && recovery.changedFiles.length > 0 && (
-        <div className="agent-recovery-note__summary">
-          <span className="agent-recovery-note__label">已改动文件：</span>
-          <span className="agent-recovery-note__value">{recovery.changedFiles.join('、')}</span>
         </div>
       )}
       {isB && (
@@ -403,6 +489,88 @@ function ChoiceContent({
           onClick={() => onSubmit('__custom__', trimmed)}
         >
           提交自定义方案
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * 计划审批弹窗内容（Phase 2b-3）：展示规划生成的任务步骤清单（序号 / 标题 / 描述 / 依赖），
+ * 提供三个决策：批准执行 / 拒绝终止 / 修改意见（按意见重规划）。
+ * 抽成独立组件以便受控输入框持有自己的 state（notification description 只挂载一次）。
+ */
+function PlanApprovalContent({
+  planApproval,
+  onResolve,
+}: {
+  planApproval: PlanApprovalRequest
+  onResolve: (decision: 'approve' | 'reject' | 'revise', guidance?: string) => void
+}) {
+  const [reviseText, setReviseText] = useState('')
+  const trimmed = reviseText.trim()
+  // depends_on 存的是 task_id，列表按 step 编号渲染；映射成 step 编号展示依赖，避免「依赖：步骤 abc-123」的困惑。
+  const stepByTaskId = new Map<number, number>()
+  planApproval.tasks.forEach((t) => {
+    if (t.taskId) stepByTaskId.set(Number(t.taskId) || t.step, t.step)
+  })
+  return (
+    <div className="agent-plan-note">
+      <p className="agent-plan-note__summary">{planApproval.goalSummary || '（无目标描述）'}</p>
+      <ul className="agent-plan-note__steps">
+        {planApproval.tasks.map((t) => (
+          <li key={t.step} className="agent-plan-note__step">
+            <span className="agent-plan-note__step-idx">{t.step}</span>
+            <div className="agent-plan-note__step-body">
+              <span className="agent-plan-note__step-title">{t.title}</span>
+              {t.description && <span className="agent-plan-note__step-desc">{t.description}</span>}
+              {t.dependsOn && t.dependsOn.length > 0 && (
+                <span className="agent-plan-note__step-dep">
+                  依赖：步骤{' '}
+                  {t.dependsOn
+                    .map((id) => stepByTaskId.get(Number(id)) ?? id)
+                    .join('、')}
+                </span>
+              )}
+            </div>
+          </li>
+        ))}
+      </ul>
+      <Input.TextArea
+        className="agent-plan-note__revise-input"
+        value={reviseText}
+        onChange={(e) => setReviseText(e.target.value)}
+        placeholder="（可选）点「修改意见」时填写调整要求，例如：第 3 步改为优先用 mock 数据、合并第 2/4 步…"
+        autoSize={{ minRows: 2, maxRows: 4 }}
+        maxLength={500}
+      />
+      <div className="agent-plan-note__actions">
+        <Button
+          variant="ghost"
+          size="sm"
+          className="agent-plan-note__reject"
+          onClick={() => onResolve('reject')}
+        >
+          <X size={14} />
+          拒绝
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          className="agent-plan-note__revise"
+          disabled={!trimmed}
+          onClick={() => onResolve('revise', trimmed)}
+        >
+          修改意见
+        </Button>
+        <Button
+          variant="solid"
+          size="sm"
+          className="agent-plan-note__approve"
+          onClick={() => onResolve('approve')}
+        >
+          <Check size={14} />
+          批准执行
         </Button>
       </div>
     </div>

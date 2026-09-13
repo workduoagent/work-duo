@@ -15,6 +15,7 @@ use std::sync::Mutex;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 
+use serde::Serialize;
 use tokio::sync::Notify;
 
 /// 步骤级恢复决策（由前端回传，经 `commands::resolve_subtask` 的 decision 字段映射）。
@@ -35,6 +36,22 @@ pub enum RecoveryDecision {
     Cancel,
 }
 
+/// 接管面板展示用的工具栈快照（Phase 2b-2）。
+///
+/// 让用户在接管决策前清楚「当前 Agent 手里有哪些能力可调用」，覆盖原生工具 / MCP 工具 / 技能 / 沙箱开关。
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentToolStack {
+    /// 原生工具（叶子名，如 write_file / native__run_python_sandbox）。
+    pub native_tools: Vec<String>,
+    /// 已启用 MCP 服务器的工具（tool_code 列表）。
+    pub mcp_tools: Vec<String>,
+    /// 已加载技能名（驱动领域能力的关键闸门）。
+    pub skills: Vec<String>,
+    /// 沙箱执行是否开启。
+    pub sandbox_enabled: bool,
+}
+
 /// 子任务受阻时记录的可恢复请求（推前端渲染恢复面板）。
 #[derive(Debug, Clone)]
 pub struct RecoveryRequest {
@@ -48,10 +65,12 @@ pub struct RecoveryRequest {
     /// 异常分档：A=可恢复（3 键：跳过|重试|接管）/ B=高风险歧义（4 键，含改方案）。
     /// Phase 2a 恒为 "A"，档 B 与自动升档留 2b。
     pub tier: String,
-    /// 失败命令（接管面板展示用，2a 可空）。
+    /// 失败命令（接管面板展示用，2b-1 起从真实失败工具调用采集）。
     pub failed_command: Option<String>,
-    /// 已改动文件（接管面板展示用，2a 可空）。
+    /// 已改动文件（接管面板展示用，2b-2 起从工具轮真实采集）。
     pub changed_files: Option<Vec<String>>,
+    /// 工具栈快照（接管面板展示用，2b-2 新增）。
+    pub tool_stack: Option<AgentToolStack>,
 }
 
 /// 异常分档分类器（Phase 2b-1）。

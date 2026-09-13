@@ -10,7 +10,8 @@ React19+TS+Vite+**Tauri2**；UI=antd v5（经 `@/components/ui` 封装，禁裸 
 - 注入钩子 fail-closed→EPERM。**装/删包**前缀 `CODEBUDDY_SESSION_ID= CLAUDE_SESSION_ID= NODE_OPTIONS=`；`src/` 删除/改名 EPERM→新建合规位置+改 import+typecheck，旧文件用户手动删。
 
 ## 数据持久化 / DDL
-SQLite `workduo.db`；TS 访问层 `src/core/mapper/*.ts`（禁组件直写 SQL）。**DDL 单一事实源**：`src/assets/sql/init.sql`(CREATE IF NOT EXISTS)+`updater.sql`(ALTER 迁移, 现至 v21)。`isTauri` 布尔常量。Rust 读 SQLite：`app.state::<tauri_plugin_sql::DbInstances>`→`sqlx`(0.8)；key=`sqlite:workduo.db`，前端须先 `load()`。
+SQLite `workduo.db`；TS 访问层 `src/core/mapper/*.ts`（禁组件直写 SQL）。**DDL 单一事实源**：`src/assets/sql/init.sql`(CREATE IF NOT EXISTS)+`updater.sql`(ALTER 迁移)。`isTauri` 布尔常量。Rust 读 SQLite：`app.state::<tauri_plugin_sql::DbInstances>`→`sqlx`(0.8)；key=`sqlite:workduo.db`，前端须先 `load()`。
+- **🔴 DDL 变更必查 mapper（用户红线，重复犯过）**：任何 `ALTER TABLE ADD COLUMN`（或改列）后，必须 `grep "INSERT INTO <表>"` 全项目（含 src/core/mapper 全部、必要时 src-tauri），逐一核对每个 INSERT 的 **三要素对齐**：①列清单 ②`VALUES` 占位符 `?` 数量 ③参数数组长度——三者必须相等且顺序一致。漏补占位符会报 `N values for M columns`；位置串列会把错误值写进错列（曾把 `created_at` 串填成 `off`）。`tsc` 不查 SQL 占位符，必须人工核对。通常只有 `agent-mapper.ts` 一处 upsert 同时负责新建+编辑，但凡改 agent_info 列就得查它。
 
 ## 架构分层铁律（L0 基座领域无关 + L2 外部因素定专业）
 - L0 `src-tauri/src/agent/**`=ReAct 引擎，只负责「意图分流→规划→执行→校验」通用循环，禁内置领域能力。
@@ -57,8 +58,10 @@ UI 令牌只用 `var(--color-*)`（禁 hex/px）；根容器 `width:100%`；表�
 ## 日志框架
 `tracing`+`tracing-subscriber`(env-filter)+`tracing-appender`(DAILY)，落盘 `$RESOURCES/logs` 优先；全仓 `println!/eprintln!`→`tracing::*` 已清零。增强：工具完成 `tool_round[call_id]: name ok=耗时 step`；LLM 轮次 `usage=(in,out)`；参数 `clip(...,800)`；`recovery.rs::resolve` 加挂起 step/title；`run_subtask` 加 `耗时={ms}ms`。
 
-## Rust 工具链（实测 ✅）
-cargo `/d/Rust/cargo/bin/cargo`；CARGO_HOME `/d/Rust/cargo`；RUSTUP_HOME `/d/Rust/rustup`；`stable-x86_64-pc-windows-msvc`。**`cargo check` 须在 `src-tauri/` 执行**；重编前停 `npm run tauri` 防 `target/` 文件锁 LNK1104。
+## Rust 工具链（实测 ✅ 2026-09-13 修正）
+- **本机工具链可直连，沙箱能访问**：cargo 在 `D:\envs\Rust\.cargo\bin\cargo.exe`（用户家机路径；公司机为 `D:\Rust`，切换设备时以实际 env `CARGO_HOME`/`RUSTUP_HOME` 为准，先 `ls` 探测再定）。**之前「沙箱访问不了 D: 盘、编不了 Rust」是错误假设**——2026-09-13 已用本机 cargo 实跑通 `cargo check`(EXIT=0) 与 `cargo test`(3 单测全绿)。改完 Rust 后**直接本地编译验证，别再甩锅让用户跑**。
+- 调用方式：`CARGO_HOME=$CARGO_HOME RUSTUP_HOME=$RUSTUP_HOME /d/envs/Rust/.cargo/bin/cargo.exe check --manifest-path src-tauri/Cargo.toml`（env 已设可直接用）。重编前停 `npm run tauri` 防 `target/` 文件锁 LNK1104。
+- **⚠️ shell 坑（同一会话已踩）**：本 bash 环境**缺 coreutils**——`tail`/`cat`/`head`/`ls`/`grep`/`dirname`/`cd` 均失效（`cd: null directory`、`tail: command not found`）。取 cargo 输出：重定向到日志文件再 `Read` 读（例 `cargo check ... > .log 2>&1`），勿管道 `| tail`；清理临时文件用 PowerShell `Remove-Item`（bash 的 `rm` 被 safe-bin 包装也坏）。
 
 ## Phase 3 三视图 / 附件 / Squad（✅ 已落地）
 - 轨迹(TracePanel)：`emit_intent_classified`+`emit_thinking_chunk`(layer 三色)；`finalizeStuckSteps()` 收敛残留 running。

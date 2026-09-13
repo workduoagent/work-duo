@@ -12,6 +12,7 @@ use tauri::Emitter;
 
 use crate::agent::memory::MemoryItem;
 use crate::agent::memory::SquadMemoryItem;
+use crate::agent::plan_approval::PlanApprovalRequest;
 use crate::agent::recovery::RecoveryRequest;
 use crate::agent::types::ApprovalRequest;
 use crate::agent::types::ChoiceRequest;
@@ -33,6 +34,8 @@ pub const EVT_ARTIFACT_CREATED: &str = "agent-artifact-created";
 pub const EVT_RECOVERY_NEEDED: &str = "agent-recovery-needed";
 /// 方案推荐：Agent 主动询问用户，挂起等待选择（选项列表）。
 pub const EVT_CHOICE_NEEDED: &str = "agent-choice-needed";
+/// 计划审批门禁（Phase 2b-3）：DAG 规划完成后、流水线执行前，挂起等待用户确认/修改/拒绝。
+pub const EVT_PLAN_APPROVAL_NEEDED: &str = "agent-plan-approval-needed";
 /// 分支重规划：前端「从此步骤分支」触发的双分支对比结果（原尾段 vs 新分支），
 /// 供画布分支对比横幅渲染 + 「应用分支」按钮。
 pub const EVT_PLAN_BRANCH: &str = "agent-plan-branch";
@@ -76,7 +79,7 @@ pub struct StreamChunk {
 
 fn emit(app: &AppHandle, event: &str, payload: &impl Serialize) {
     if let Err(e) = app.emit(event, payload) {
-        tracing::info!("[agent] emit `{event}` failed: {e}");
+        tracing::warn!("[agent] emit `{event}` failed: {e}");
     } else {
         tracing::info!("[agent] emit `{event}` ok");
     }
@@ -305,6 +308,32 @@ pub fn emit_plan_generated(app: &AppHandle, plan: &crate::agent::types::PlanDAG)
     );
 }
 
+/// 计划审批门禁（Phase 2b-3）：规划完成后、执行前推计划清单，前端渲染「计划确认」弹窗等待决策。
+pub fn emit_plan_approval_needed(app: &AppHandle, req: &PlanApprovalRequest) {
+    let tasks: Vec<serde_json::Value> = req
+        .plan
+        .tasks
+        .iter()
+        .map(|t| {
+            serde_json::json!({
+                "step": t.step,
+                "taskId": t.task_id,
+                "title": t.title,
+                "description": t.description,
+                "dependsOn": t.depends_on,
+            })
+        })
+        .collect();
+    emit(
+        app,
+        EVT_PLAN_APPROVAL_NEEDED,
+        &serde_json::json!({
+            "goalSummary": req.goal_summary,
+            "tasks": tasks,
+        }),
+    );
+}
+
 /// 子任务开始：进度条对应步骤置为 running。
 pub fn emit_step_started(app: &AppHandle, step: usize, total: usize, title: &str) {
     emit(
@@ -394,8 +423,10 @@ pub struct RecoveryNeededPayload {
     pub tier: String,
     /// 失败命令（接管面板展示用，2a 可空）。
     pub failed_command: Option<String>,
-    /// 已改动文件（接管面板展示用，2a 可空）。
+    /// 已改动文件（接管面板展示用，2b-2 起真实采集）。
     pub changed_files: Option<Vec<String>>,
+    /// 工具栈快照（接管面板展示用，2b-2 新增）。
+    pub tool_stack: Option<crate::agent::recovery::AgentToolStack>,
 }
 
 /// 子任务自动重试耗尽仍失败：登记受阻步骤并推前端渲染恢复面板（重试/跳过/接管）。
@@ -412,6 +443,7 @@ pub fn emit_recovery_needed(app: &AppHandle, req: &RecoveryRequest) {
             tier: req.tier.clone(),
             failed_command: req.failed_command.clone(),
             changed_files: req.changed_files.clone(),
+            tool_stack: req.tool_stack.clone(),
         },
     );
 }

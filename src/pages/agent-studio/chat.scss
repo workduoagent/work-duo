@@ -1759,6 +1759,52 @@
       border-color: #3a3a3a;
       background: #1f1f1f;
     }
+    &__tip {
+      color: #7a7a7a;
+    }
+    // 紧凑横幅暗色
+    &--compact {
+      .agent-recovery-note__compact-reason {
+        color: #d0d0d0;
+      }
+    }
+  }
+  &__tip {
+    margin: 0 0 6px;
+    font-size: 0.74rem;
+    line-height: 1.5;
+    color: var(--color-muted, #999);
+    border-left: 2px solid var(--color-border, #e0e0e0);
+    padding-left: 6px;
+  }
+
+  // 紧凑横幅模式（右侧接管 Tab 已展开时，底部弹窗压为纯操作栏）
+  &--compact {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 8px 12px;
+
+    .agent-recovery-note__compact-reason {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.8rem;
+      color: var(--color-foreground, #333);
+      flex: 1;
+      min-width: 0;
+
+      svg {
+        flex-shrink: 0;
+        color: var(--color-warning, #fa8c16);
+      }
+    }
+
+    .agent-recovery-note__actions {
+      margin-top: 0;
+      flex-shrink: 0;
+    }
   }
 }
 
@@ -1870,6 +1916,105 @@
       &::after {
         background: #333;
       }
+    }
+  }
+}
+
+/* Phase 2b-3：计划审批门禁弹窗 */
+.agent-plan-note {
+  &__icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--color-info, #1677ff);
+  }
+  &__summary {
+    margin: 0 0 8px;
+    font-size: 0.82rem;
+    line-height: 1.5;
+    color: var(--color-muted, #666);
+  }
+  &__steps {
+    list-style: none;
+    margin: 0 0 10px;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-height: 240px;
+    overflow-y: auto;
+  }
+  &__step {
+    display: flex;
+    gap: 8px;
+    padding: 7px 9px;
+    border: 1px solid var(--color-border, #e5e7eb);
+    border-radius: 8px;
+    background: var(--color-bg, #fff);
+  }
+  &__step-idx {
+    flex: 0 0 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: var(--color-primary-bg, #eef4ff);
+    color: var(--color-primary, #1677ff);
+    font-size: 0.74rem;
+    font-weight: 700;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  &__step-body {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+  &__step-title {
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: var(--color-foreground, #222);
+  }
+  &__step-desc {
+    font-size: 0.74rem;
+    color: var(--color-muted, #888);
+    line-height: 1.4;
+  }
+  &__step-dep {
+    font-size: 0.7rem;
+    color: var(--color-warning, #b26a00);
+  }
+  &__revise-input {
+    width: 100%;
+    margin-bottom: 8px;
+    font-size: 0.8rem;
+  }
+  &__actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+
+  .dark & {
+    &__summary {
+      color: #999;
+    }
+    &__step {
+      background: #1f1f1f;
+      border-color: #333;
+    }
+    &__step-idx {
+      background: #16243a;
+      color: var(--color-primary, #1677ff);
+    }
+    &__step-title {
+      color: #e6e6e6;
+    }
+    &__step-desc {
+      color: #999;
+    }
+    &__step-dep {
+      color: #d9a441;
     }
   }
 }
@@ -2527,6 +2672,262 @@
   .dark & {
     border-color: #2f2f2f;
     background: #1a1a1a;
+  }
+}
+
+// ── 接管上下文侧栏（Phase 2b-2）：工具栈 / 已改文件 / 失败命令 ──
+.agent-takeover {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px;
+
+  &__empty {
+    color: var(--color-muted, #999);
+    font-size: 0.82rem;
+    line-height: 1.6;
+    padding: 16px 8px;
+  }
+
+  &__head {
+    margin-bottom: 10px;
+  }
+  &__head-title {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--color-foreground, #222);
+  }
+  &__head-sub {
+    margin-top: 2px;
+    font-size: 0.76rem;
+    color: var(--color-muted, #999);
+  }
+
+  &__section {
+    border: 1px solid var(--color-border, #e8e8e8);
+    border-radius: 8px;
+    background: var(--color-background, #fff);
+    margin-bottom: 10px;
+    overflow: hidden;
+  }
+  &__section-head {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 9px 12px;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    color: var(--color-foreground, #222);
+    font-size: 0.84rem;
+    font-weight: 600;
+    text-align: left;
+  }
+  &__section-icon {
+    display: inline-flex;
+    color: var(--color-primary, #1677ff);
+  }
+  &__section-title {
+    flex: 1 1 auto;
+  }
+  &__chevron {
+    transition: transform 0.15s ease;
+    color: var(--color-muted, #999);
+    &.is-open {
+      transform: rotate(180deg);
+    }
+  }
+  &__section-body {
+    padding: 4px 12px 12px;
+    border-top: 1px solid var(--color-border, #f0f0f0);
+  }
+
+  &__hint {
+    font-size: 0.78rem;
+    color: var(--color-muted, #999);
+  }
+
+  &__stack {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  &__stack-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+  }
+  &__stack-label {
+    flex: 0 0 64px;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 0.76rem;
+    color: var(--color-muted, #888);
+    padding-top: 2px;
+  }
+  &__tags {
+    flex: 1 1 auto;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+  }
+  &__tag {
+    font-family: var(--font-mono, monospace);
+    font-size: 0.72rem;
+    line-height: 1.4;
+    padding: 2px 7px;
+    border-radius: 5px;
+    background: var(--color-fill-quaternary, #f3f3f5);
+    color: var(--color-foreground, #333);
+    border: 1px solid var(--color-border, #ececec);
+    word-break: break-all;
+    &--mcp {
+      background: rgba(45, 212, 191, 0.12);
+      border-color: rgba(45, 212, 191, 0.4);
+      color: #0f9b8a;
+    }
+    &--skill {
+      background: rgba(124, 92, 255, 0.12);
+      border-color: rgba(124, 92, 255, 0.4);
+      color: #6d4dff;
+    }
+  }
+  &__badge {
+    font-size: 0.74rem;
+    padding: 2px 9px;
+    border-radius: 999px;
+    &.is-on {
+      background: rgba(45, 212, 191, 0.16);
+      color: #0f9b8a;
+      border: 1px solid rgba(45, 212, 191, 0.45);
+    }
+    &.is-off {
+      background: var(--color-fill-quaternary, #f3f3f5);
+      color: var(--color-muted, #999);
+      border: 1px solid var(--color-border, #ececec);
+    }
+  }
+
+  &__files {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  &__file-btn {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 8px;
+    border: 1px solid var(--color-border, #ececec);
+    border-radius: 6px;
+    background: var(--color-background, #fff);
+    cursor: pointer;
+    color: var(--color-foreground, #333);
+    font-family: var(--font-mono, monospace);
+    font-size: 0.74rem;
+    text-align: left;
+    word-break: break-all;
+    transition: background 0.12s ease, border-color 0.12s ease;
+    &:hover {
+      background: var(--color-fill-quaternary, #f6f6f8);
+      border-color: var(--color-primary, #1677ff);
+    }
+  }
+  &__file-path {
+    flex: 1 1 auto;
+  }
+
+  &__cmd {
+    margin: 0 0 8px;
+    padding: 8px 10px;
+    background: var(--color-fill-quaternary, #f6f6f8);
+    border: 1px solid var(--color-border, #ececec);
+    border-radius: 6px;
+    font-family: var(--font-mono, monospace);
+    font-size: 0.74rem;
+    line-height: 1.5;
+    color: var(--color-foreground, #333);
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+  &__reason {
+    font-size: 0.78rem;
+    line-height: 1.55;
+  }
+  &__reason-label {
+    color: var(--color-muted, #888);
+  }
+  &__reason-text {
+    color: var(--color-foreground, #333);
+  }
+
+  .dark & {
+    &__head-title {
+      color: #e6e6e6;
+    }
+    &__section {
+      border-color: #2f2f2f;
+      background: #1a1a1a;
+    }
+    &__section-head {
+      color: #e6e6e6;
+    }
+    &__section-body {
+      border-color: #2a2a2a;
+    }
+    &__stack-label {
+      color: #888;
+    }
+    &__tag {
+      background: #262626;
+      color: #d0d0d0;
+      border-color: #333;
+      &--mcp {
+        background: rgba(45, 212, 191, 0.14);
+        color: #4fd6c4;
+        border-color: rgba(45, 212, 191, 0.4);
+      }
+      &--skill {
+        background: rgba(124, 92, 255, 0.14);
+        color: #b3a0ff;
+        border-color: rgba(124, 92, 255, 0.4);
+      }
+    }
+    &__badge {
+      &.is-on {
+        background: rgba(45, 212, 191, 0.16);
+        color: #4fd6c4;
+        border-color: rgba(45, 212, 191, 0.45);
+      }
+      &.is-off {
+        background: #262626;
+        color: #888;
+        border-color: #333;
+      }
+    }
+    &__file-btn {
+      background: #1a1a1a;
+      border-color: #333;
+      color: #d0d0d0;
+      &:hover {
+        background: #222;
+        border-color: var(--color-primary, #1677ff);
+      }
+    }
+    &__cmd {
+      background: #222;
+      border-color: #333;
+      color: #d0d0d0;
+    }
+    &__reason-text {
+      color: #d0d0d0;
+    }
   }
 }
 

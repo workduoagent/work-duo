@@ -28,6 +28,7 @@ import type {
   ArtifactRef,
   ChoiceRequest,
   IntentClassified,
+  PlanApprovalRequest,
   PlanBranchGenerated,
   PlanStep,
   RecoveryRequest,
@@ -84,6 +85,10 @@ export interface AgentSessionState {
   recovery: RecoveryRequest | null
   /** 回传步骤级恢复决策（retry / skip / takeover；takeover 时携带补充指示）。 */
   resolveRecovery: (decision: 'retry' | 'skip' | 'takeover' | 'change-approach', guidance?: string) => Promise<void>
+  /** 计划审批门禁（Phase 2b-3）：DAG 规划完成后、执行前挂起，等待用户确认/修改/拒绝；非 null 时渲染计划确认弹窗。 */
+  planApproval: PlanApprovalRequest | null
+  /** 回传计划审批决策（approve / reject / revise；revise 时携带修改意见）。 */
+  resolvePlanApproval: (decision: 'approve' | 'reject' | 'revise', guidance?: string) => Promise<void>
   /** 方案推荐：Agent 主动询问用户（HITL Choice Chip），非 null 时渲染选项弹窗。 */
   pendingChoice: ChoiceRequest | null
   /** 回传方案推荐选择（用户点选的 optionId 唤醒后台挂起的 `native__ask_user_choice`）。 */
@@ -127,6 +132,8 @@ export function useAgentSession(): AgentSessionState {
   const [recovery, setRecovery] = useState<RecoveryRequest | null>(null)
   // 方案推荐：Agent 主动询问用户（HITL Choice Chip），挂起等待选择。
   const [pendingChoice, setPendingChoice] = useState<ChoiceRequest | null>(null)
+  // 计划审批门禁（Phase 2b-3）：DAG 规划完成后、执行前挂起，等待用户确认/修改/拒绝。
+  const [planApproval, setPlanApproval] = useState<PlanApprovalRequest | null>(null)
 
   // 统一消息实例：启动拦截（并发互斥）等需要「显式提示」的场景走 modal，
   // 不走通用 toast（连点「运行」被后端主闸门拦截时，用户应明确看到原因）。
@@ -414,6 +421,27 @@ export function useAgentSession(): AgentSessionState {
     }
   }, [isTauri, startTaskTimeout])
 
+  // 计划审批门禁（Phase 2b-3）：回传决策（approve / reject / revise）给后台挂起的计划审批中枢。
+  // 不在下发时乐观收起面板——后端接到决策后会 emit plan_generated（approve）或本轮以
+  // task-done/error 结束（reject/cancel），这些事件统一清面板；若网络异常未复位，面板保留、
+  // 后端仍在挂起等待，用户可再次点击，避免死锁。
+  const resolvePlanApproval = useCallback(
+    async (decision: 'approve' | 'reject' | 'revise', guidance?: string) => {
+      if (!isTauri) return
+      try {
+        await invoke('submit_plan_decision', {
+          input: {
+            decision,
+            guidance: guidance ?? null,
+          },
+        })
+      } catch (e) {
+        console.error('[agent] submit_plan_decision failed', e)
+      }
+    },
+    [isTauri],
+  )
+
   // 方案推荐：回传用户所选 optionId（或自定义文本），唤醒后台挂起的 `native__ask_user_choice`。
   const submitChoice = useCallback(
     async (optionId: string, customText?: string) => {
@@ -446,6 +474,7 @@ export function useAgentSession(): AgentSessionState {
     setTraceThinking([])
     setPlanBranch(null)
     setRecovery(null)
+    setPlanApproval(null)
     pendingChoiceRef.current = null
     setPendingChoice(null)
     clearTaskTimeout()
@@ -557,6 +586,8 @@ export function useAgentSession(): AgentSessionState {
             if (e.plan?.tasks) {
               setPlanSteps(e.plan.tasks)
             }
+            // 计划审批门禁已通过（approve/带意见修改后批准）：收起计划确认弹窗。
+            setPlanApproval(null)
             break
           case 'step_started':
             if (typeof e.plan?.step === 'number') {
@@ -625,6 +656,7 @@ export function useAgentSession(): AgentSessionState {
           setIsStreaming(false)
           setStatusText('')
           setRecovery(null)
+          setPlanApproval(null)
           // 终态清扫：收敛残留的 running 步骤（见 finalizeStuckSteps 注释）
           finalizeStuckSteps()
           // 完成后保留思考过程，方便回看智能体做了什么（新一轮 run 时在入口清空）
@@ -636,6 +668,7 @@ export function useAgentSession(): AgentSessionState {
         setIsStreaming(false)
         setStatusText(`任务异常：${ev.payload}`)
         setRecovery(null)
+        setPlanApproval(null)
         // 终态清扫：异常结束时同样收敛残留的 running 步骤
         finalizeStuckSteps()
         // 异常时也保留已产生的思考过程，便于排查失败原因
@@ -655,6 +688,16 @@ export function useAgentSession(): AgentSessionState {
         (ev) => {
           pendingChoiceRef.current = ev.payload
           setPendingChoice(ev.payload)
+        },
+      )
+      // 计划审批门禁（Phase 2b-3）：DAG 规划完成后、执行前推计划清单，挂起等待用户确认/修改/拒绝。
+      const offPlanApproval = await listen<PlanApprovalRequest>(
+        'agent-plan-approval-needed',
+        (ev) => {
+          // 审批挂起：暂停 20 分钟安全定时器（合法暂停，非后端异常），并给出明确等待态。
+          clearTaskTimeout()
+          setPlanApproval(ev.payload)
+          setStatusText('⏸ 计划待确认：请在弹窗中批准 / 修改 / 拒绝，任务已暂停')
         },
       )
       // 实时 token 用量增量（运行中累计推送，驱动顶栏计数卡跳数）。
@@ -693,10 +736,11 @@ export function useAgentSession(): AgentSessionState {
         offArtifact()
         offRecovery()
         offChoice()
+        offPlanApproval()
         offPlanBranch()
         return
       }
-      unlistenRef.current = [offEvent, offApproval, offDone, offErr, offToken, offArtifact, offRecovery, offChoice, offPlanBranch]
+      unlistenRef.current = [offEvent, offApproval, offDone, offErr, offToken, offArtifact, offRecovery, offChoice, offPlanApproval, offPlanBranch]
     }
 
     void reg()
@@ -726,6 +770,8 @@ export function useAgentSession(): AgentSessionState {
     artifacts,
     recovery,
     resolveRecovery,
+    planApproval,
+    resolvePlanApproval,
     pendingChoice,
     submitChoice,
     trace: { intent: traceIntent, thinking: traceThinking },

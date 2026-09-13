@@ -90,7 +90,7 @@ risk_level（low/medium/high/critical，涉及删除/安装/执行/改系统/部
                     p
                 }
                 None => {
-                    tracing::info!(
+                    tracing::warn!(
                         "[agent] intent: 分类结果解析失败，降级 COMPOSITE_TASK content={}",
                         runtime::clip(&content, 300),
                     );
@@ -99,7 +99,7 @@ risk_level（low/medium/high/critical，涉及删除/安装/执行/改系统/部
             }
         }
         Err(e) => {
-            tracing::info!("[agent] intent: 分类调用失败：{e}，降级 COMPOSITE_TASK");
+            tracing::warn!("[agent] intent: 分类调用失败：{e}，降级 COMPOSITE_TASK");
             fallback("分类调用失败", prompt)
         }
     }

@@ -88,6 +88,11 @@ impl ToolRegistry {
         self.tools.get(name).cloned()
     }
 
+    /// 列出已注册工具名（接管面板展示原生工具栈用，2b-2）。
+    pub fn tool_names(&self) -> Vec<String> {
+        self.tools.keys().cloned().collect()
+    }
+
     /// 生成给 LLM 的 tools 数组（OpenAI function-calling 格式）。
     pub fn get_tools_for_llm(&self) -> Vec<serde_json::Value> {
         self.tools

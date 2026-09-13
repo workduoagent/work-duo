@@ -187,7 +187,7 @@ pub async fn run_pipeline(
                 "任务存在无法解决的步骤依赖（疑似循环依赖或引用了不存在的步骤），受阻步骤：{}",
                 stuck,
             );
-            tracing::info!("[agent] pipeline: 依赖死锁，中止：{}", report);
+            tracing::error!("[agent] pipeline: 依赖死锁，中止：{}", report);
             return PipelineResult {
                 final_text: report,
                 usage: total_usage,
@@ -259,8 +259,26 @@ pub async fn run_pipeline(
                         "completedAt": now_ms(),
                     }),
                 );
-                // 成功闭环：产物写图（ArtifactNode + Produced 边）。
+                // 成功闭环：产物写图（ArtifactNode + Produced 边，画廊产物）。
                 graph.add_produced_artifacts(task_node_id, &out.artifacts);
+                // 成功闭环：本步工具实际写出的文件写图（FileRef 节点 + Wrote 边），
+                // 作为图驱动约束的权威产出来源（与 register_artifacts 从 summary 抽取互补）。
+                graph.add_wrote_files(
+                    task_node_id,
+                    out.changed_files.as_deref().unwrap_or(&[]),
+                    cfg.workspace.as_deref().map(std::path::Path::new),
+                );
+                // 成功闭环：本步工具实际读取的文件写图（FileRef 节点 + Read 边），
+                // 记录「哪一步读了哪些文件」（阶段二图驱动，供 native__query_graph 检索）。
+                if let Some(rf) = &out.read_files {
+                    if !rf.is_empty() {
+                        graph.add_read_files(
+                            task_node_id,
+                            rf,
+                            cfg.workspace.as_deref().map(std::path::Path::new),
+                        );
+                    }
+                }
                 // 成功闭环：补发 step_finished(ok=true)。否则前端步骤状态停在 running，
                 // 任务结束时会被 useAgentSession.finalizeStuckSteps 兜底误判为失败。
                 events::emit_step_finished(app, step, total, &title, true, &out.summary);
@@ -311,15 +329,27 @@ pub async fn run_pipeline(
                     events::emit_step_finished(app, step, total, &title, true, "（自动跳过：恢复次数达上限）");
                     continue;
                 }
+                // 接管面板工具栈快照（2b-2）：原生工具 + MCP 工具 + 技能 + 沙箱开关。
+                let tool_stack = crate::agent::recovery::AgentToolStack {
+                    native_tools: registry.tool_names(),
+                    mcp_tools: cfg
+                        .mcp_tools
+                        .iter()
+                        .map(|t| format!("{}.{}", t.mcp_id, t.tool_name))
+                        .collect(),
+                    skills: cfg.skill_tools.iter().map(|s| s.skill_name.clone()).collect(),
+                    sandbox_enabled: cfg.allow_sandbox,
+                };
                 let req = RecoveryRequest {
                     step,
                     task_id: task_node_id.clone(),
                     title: title.clone(),
                     reason: out.summary.clone(),
                     summary: String::new(),
-                    tier: crate::agent::recovery::classify_tier(attempts, &out.summary, &None).to_string(),
-                    failed_command: None,
-                    changed_files: None,
+                    tier: crate::agent::recovery::classify_tier(attempts, &out.summary, &out.failed_command).to_string(),
+                    failed_command: out.failed_command.clone(),
+                    changed_files: out.changed_files.clone(),
+                    tool_stack: Some(tool_stack),
                 };
                 events::emit_recovery_needed(app, &req);
                 // 提前克隆失败原因：下面 `recovery.request(req)` 会 move 走 `req`，
@@ -747,8 +777,26 @@ async fn run_subtask(
             format!("{}\n\n{}", skill_guidance, bg)
         }
     };
+    // C 块：图驱动「仅可见」摘要注入 system prompt（体积受控，非约束指令）。
+    // 从磁盘只读重开图，避开与 run_pipeline 的 &mut graph 借用冲突，并反映已落盘的最新边。
+    let graph_digest = ctx
+        .workspace
+        .as_ref()
+        .and_then(|p| p.to_str())
+        .map(|ws| {
+            KnowledgeGraph::open(Some(ws))
+                .ok()
+                .map(|g| g.system_prompt_digest(cfg.session_id.as_deref()))
+                .unwrap_or_default()
+        })
+        .unwrap_or_default();
+    let system_prompt = if graph_digest.is_empty() {
+        cfg.system_prompt.clone()
+    } else {
+        format!("{}\n\n{}", cfg.system_prompt, graph_digest)
+    };
     let mut messages: Vec<Value> = vec![
-        json!({ "role": "system", "content": &cfg.system_prompt }),
+        json!({ "role": "system", "content": &system_prompt }),
         json!({
             "role": "user",
             "content": user_content
@@ -770,6 +818,9 @@ async fn run_subtask(
     let mut round = 0usize; // 总 LLM 轮次（仅日志用）
     let mut tool_iterations = 0usize; // 工具轮次（计入预算；终态汇报轮不计入）
     let mut last_tool_error: Option<String> = None; // 最近一次工具失败的错误（回显到恢复面板原因）
+    let mut last_failed_command: Option<String> = None; // 最近一次失败工具的命令文本（供 classify_tier 风险词匹配）
+    let mut changed_files: Vec<String> = Vec::new(); // 本子任务实际改动过的文件（2b-2 接管面板展示）
+    let mut read_files: Vec<String> = Vec::new(); // 本子任务实际读取过的文件（阶段二图驱动 Read 边）
 
     loop {
         // 每轮开始前检查取消：用户点击「停止」后，下一轮边界立即终止本子任务，
@@ -787,6 +838,17 @@ async fn run_subtask(
                     success: false,
                     cancelled: true,
                     skipped: false,
+                    failed_command: last_failed_command.clone(),
+                    changed_files: if changed_files.is_empty() {
+                        None
+                    } else {
+                        Some(changed_files.clone())
+                    },
+                    read_files: if read_files.is_empty() {
+                        None
+                    } else {
+                        Some(read_files.clone())
+                    },
                     artifacts: vec![],
                 },
                 usage,
@@ -820,6 +882,17 @@ async fn run_subtask(
                                 success: false,
                                 cancelled: true,
                                 skipped: false,
+                                failed_command: last_failed_command.clone(),
+                    changed_files: if changed_files.is_empty() {
+                        None
+                    } else {
+                        Some(changed_files.clone())
+                    },
+                    read_files: if read_files.is_empty() {
+                        None
+                    } else {
+                        Some(read_files.clone())
+                    },
                                 artifacts: vec![],
                             },
                             usage,
@@ -839,6 +912,17 @@ async fn run_subtask(
                                 success: false,
                                 cancelled: false,
                                 skipped: false,
+                                failed_command: last_failed_command.clone(),
+                    changed_files: if changed_files.is_empty() {
+                        None
+                    } else {
+                        Some(changed_files.clone())
+                    },
+                    read_files: if read_files.is_empty() {
+                        None
+                    } else {
+                        Some(read_files.clone())
+                    },
                                 artifacts: vec![],
                             },
                             usage,
@@ -870,6 +954,17 @@ async fn run_subtask(
                     success: false,
                     cancelled: true,
                     skipped: false,
+                    failed_command: last_failed_command.clone(),
+                    changed_files: if changed_files.is_empty() {
+                        None
+                    } else {
+                        Some(changed_files.clone())
+                    },
+                    read_files: if read_files.is_empty() {
+                        None
+                    } else {
+                        Some(read_files.clone())
+                    },
                     artifacts: vec![],
                 },
                 usage,
@@ -908,6 +1003,17 @@ async fn run_subtask(
                             success: false,
                             cancelled: false,
                             skipped: false,
+                            failed_command: last_failed_command.clone(),
+                    changed_files: if changed_files.is_empty() {
+                        None
+                    } else {
+                        Some(changed_files.clone())
+                    },
+                    read_files: if read_files.is_empty() {
+                        None
+                    } else {
+                        Some(read_files.clone())
+                    },
                             artifacts: vec![],
                         },
                         usage,
@@ -940,7 +1046,25 @@ async fn run_subtask(
             // 都必须通过文件/内容层面的客观校验，否则判为未闭环（进入恢复链路）。
             let mut verify_detail = String::new();
             if success && !task.success_criteria.is_empty() {
-                let result = crate::agent::verifier::verify_task(&task, ctx.workspace.as_deref());
+                // 图驱动兜底：把本步 write_file/edit_file 实际写出的路径（changed_files，已聚合自工具执行轮）
+                // 作为「真实产物」传入校验器，使 planner 把 target 瞎填成占位名（如 generated_code_content）
+                // 时，仍以模型实际落盘的文件通过客观校验，不再误判未闭环。
+                let actual_written: Vec<std::path::PathBuf> = changed_files
+                    .iter()
+                    .filter_map(|p| {
+                        let pb = std::path::Path::new(p.trim());
+                        if pb.is_absolute() {
+                            Some(pb.to_path_buf())
+                        } else {
+                            ctx.workspace.as_ref().map(|w| w.join(pb))
+                        }
+                    })
+                    .collect();
+                let result = crate::agent::verifier::verify_task(
+                    &task,
+                    ctx.workspace.as_deref(),
+                    &actual_written,
+                );
                 if !result.met {
                     success = false;
                     verify_detail = result.details;
@@ -986,6 +1110,17 @@ async fn run_subtask(
                     success,
                     cancelled: false,
                     skipped: false,
+                    failed_command: last_failed_command.clone(),
+                    changed_files: if changed_files.is_empty() {
+                        None
+                    } else {
+                        Some(changed_files.clone())
+                    },
+                    read_files: if read_files.is_empty() {
+                        None
+                    } else {
+                        Some(read_files.clone())
+                    },
                     artifacts,
                 },
                 usage,
@@ -1015,6 +1150,17 @@ async fn run_subtask(
                     success: false,
                     cancelled: false,
                     skipped: false,
+                    failed_command: last_failed_command.clone(),
+                    changed_files: if changed_files.is_empty() {
+                        None
+                    } else {
+                        Some(changed_files.clone())
+                    },
+                    read_files: if read_files.is_empty() {
+                        None
+                    } else {
+                        Some(read_files.clone())
+                    },
                     artifacts: vec![],
                 },
                 usage,
@@ -1049,6 +1195,22 @@ async fn run_subtask(
         if let Some(e) = stats.last_error.clone() {
             last_tool_error = Some(e);
         }
+        // 采集本轮最后失败的命令文本，供恢复块 classify_tier 风险词匹配（决定档 A/B）。
+        if let Some(c) = stats.last_failed_command.clone() {
+            last_failed_command = Some(c);
+        }
+        // 采集本轮文件变更类工具触碰过的路径（2b-2 接管面板「已改文件」区；改动是既成事实，不因后续成功轮清空）。
+        for p in &stats.changed_files {
+            if !changed_files.contains(p) {
+                changed_files.push(p.clone());
+            }
+        }
+        // 采集本轮文件读取类工具触碰过的路径（阶段二图驱动 Read 边；读取是既成事实，不因后续成功轮清空）。
+        for p in &stats.read_files {
+            if !read_files.contains(p) {
+                read_files.push(p.clone());
+            }
+        }
 
         // 在-flight 上下文压缩：保留最近 2 条 tool 结果完整，更早的压缩为单行摘要，
         // 抑制微 ReAct 长链路上每轮回填的全量工具报文持续撑大 input token。
@@ -1062,6 +1224,7 @@ async fn run_subtask(
             // 清空 last_tool_error，避免终态轮 line 938 `&& last_tool_error.is_none()` 误杀正常任务。
             if !stats.had_error {
                 last_tool_error = None;
+                last_failed_command = None;
             }
         } else if stats.had_error {
             consecutive_errors += 1;
@@ -1086,6 +1249,17 @@ async fn run_subtask(
                     success: false,
                     cancelled: false,
                     skipped: false,
+                    failed_command: last_failed_command.clone(),
+                    changed_files: if changed_files.is_empty() {
+                        None
+                    } else {
+                        Some(changed_files.clone())
+                    },
+                    read_files: if read_files.is_empty() {
+                        None
+                    } else {
+                        Some(read_files.clone())
+                    },
                     artifacts: vec![],
                 },
                 usage,

@@ -47,7 +47,9 @@ pub async fn build_plan(
 可选 check 类型：file_exists / file_nonempty / directory_exists / json_valid / text_contains / text_min_lines / excel_row_count（暂以文件存在+非空代理）；\
 text_contains 需带 value，text_min_lines / excel_row_count 需带 threshold（行数）。\
 text_contains 的 value 建议用 `|` 分隔多个同义措辞（例如「风险提示|主要风险|风险」），执行器与校验器任一命中即通过，\
-避免只写单一死板字面（如只写「风险提示」）而被散文措辞卡死、误判步骤未闭环。
+避免只写单一死板字面（如只写「风险提示」）而被散文措辞卡死、误判步骤未闭环。\
+\n注意：success_criteria 一旦声明必须字段完整（text_contains 须同时带 target 与 value，其余类型须带 target）；\
+字段不完整的残缺条件执行器会直接忽略、等于没声明，所以残缺条件不要写——要么写完整的，要么干脆不声明。
 \n6. `depends_on`：本步骤开始前必须已完成的步骤 task_id 列表（仅可引用编号更小的步骤；无依赖填空数组）。\
 存在依赖的步骤会**等待其前置步骤成功后才执行**，无共同依赖的步骤**可并行**；严禁出现循环依赖（A 依赖 B 且 B 依赖 A）。\
 \n7. 只输出如下结构的 JSON，不要任何多余文本或 markdown 代码块：\
@@ -89,6 +91,12 @@ text_contains 的 value 建议用 `|` 分隔多个同义措辞（例如「风险
                             t.task_id = format!("t{}", i + 1);
                         }
                     }
+                    // 方案 B：用户显式指定输出路径（如「写到 src/views/Profile.tsx」）→ 强制覆盖规划的写文件路径，
+                    // 消除小模型路径漂移（用户要 Profile.tsx 却写到 Login/index.tsx）。确定性提取，不依赖模型自律。
+                    if let Some(explicit) = extract_user_write_path(prompt) {
+                        apply_user_explicit_output_path(&mut plan, &explicit);
+                        tracing::info!("[agent] planner: 检测到用户显式输出路径 {explicit}，已强制覆盖规划写文件路径");
+                    }
                     if plan.tasks.is_empty() {
                         tracing::info!("[agent] planner: 规划结果为空，降级 Single-Task Fallback");
                         return (single_task_fallback(prompt), usage, content.clone());
@@ -116,7 +124,7 @@ text_contains 的 value 建议用 `|` 分隔多个同义措辞（例如「风险
             }
         }
         Err(e) => {
-            tracing::info!("[agent] planner: 规划调用失败：{e}，降级 Single-Task Fallback");
+            tracing::warn!("[agent] planner: 规划调用失败：{e}，降级 Single-Task Fallback");
             (single_task_fallback(prompt), (0, 0), String::new())
         }
     }
@@ -226,4 +234,139 @@ fn extract_json_str(s: &str) -> String {
 
 fn parse_plan_json(s: &str) -> Option<PlanDAG> {
     serde_json::from_str(extract_json_str(s).as_str()).ok()
+}
+
+/// 方案 B：从用户提示中**确定性**提取其显式指定的输出文件路径。
+///
+/// 仅匹配高精度的「动作关键词 + 路径」结构（写到 / 写入 / 保存到 / 输出到 …），
+/// 不靠模型自律，也不对提示里任何路径都下手（避免误伤「读取某现有文件」这类引用路径）。
+/// 例如「…写到 src/views/Profile.tsx，含表单」→ `src/views/Profile.tsx`。
+fn extract_user_write_path(prompt: &str) -> Option<String> {
+    const KW: &[&str] = &["写到", "写入", "保存到", "保存至", "输出到", "落地到"];
+    for &k in KW {
+        if let Some(pos) = prompt.find(k) {
+            let rest = &prompt[pos + k.len()..];
+            // 截到空白或常见中英文标点为止，即为该路径 token
+            let token = rest
+                .split(|c: char| {
+                    c.is_whitespace()
+                        || matches!(
+                            c,
+                            '，' | ',' | '。' | '；' | ';' | '：' | ':' | '（' | '(' | '）' | ')' | '”'
+                                | '"' | '\'' | '`'
+                        )
+                })
+                .find(|t| !t.is_empty())
+                .unwrap_or("")
+                .trim()
+                .trim_matches(|c| matches!(c, '`' | '"' | '\'' | '“' | '”'));
+            if !token.is_empty() && looks_like_path(token) {
+                return Some(token.to_string());
+            }
+        }
+    }
+    None
+}
+
+/// 路径形态判定：含分隔符，或含 ≤5 字符的扩展名。
+fn looks_like_path(s: &str) -> bool {
+    if s.contains('/') || s.contains('\\') {
+        return true;
+    }
+    if let Some(dot) = s.rfind('.') {
+        let ext = &s[dot + 1..];
+        return !ext.is_empty() && ext.len() <= 5 && ext.chars().all(|c| c.is_ascii_alphanumeric());
+    }
+    false
+}
+
+/// 方案 B：把用户显式路径覆盖进规划的写文件步骤（`success_criteria.target` + 描述），
+/// 使 planner 的「垃圾占位名 / 路径漂移」目标被确定性纠正，而非依赖模型自律。
+fn apply_user_explicit_output_path(plan: &mut PlanDAG, explicit: &str) {
+    const FILE_TYPES: &[&str] = &[
+        "file_exists",
+        "file_nonempty",
+        "directory_exists",
+        "json_valid",
+        "text_contains",
+        "text_min_lines",
+        "excel_row_count",
+    ];
+    let is_file = |ct: &str| FILE_TYPES.contains(&ct.to_lowercase().as_str());
+    let fp: Vec<usize> = plan
+        .tasks
+        .iter()
+        .enumerate()
+        .filter(|(_, t)| t.success_criteria.iter().any(|c| is_file(&c.check_type)))
+        .map(|(i, _)| i)
+        .collect();
+    if fp.is_empty() {
+        return;
+    }
+    let apply = |t: &mut PlanSubTask| {
+        for c in t.success_criteria.iter_mut() {
+            if is_file(&c.check_type) {
+                c.target = Some(explicit.to_string());
+            }
+        }
+        if !t.description.contains(explicit) {
+            t.description = format!("{}（必须写到 {}）", t.description, explicit);
+        }
+    };
+    if fp.len() == 1 {
+        // 单文件产出（最常见：生成单页）→ 直接覆盖该步
+        apply(&mut plan.tasks[fp[0]]);
+    } else {
+        // 多文件步骤：仅覆盖占位名/缺失的 target；若都合法则覆盖最后一步（最终交付物假设）
+        let mut patched = false;
+        for &i in &fp {
+            let needs = plan.tasks[i]
+                .success_criteria
+                .iter()
+                .any(|c| c.target.as_deref().map(is_placeholder_target).unwrap_or(true));
+            if needs {
+                apply(&mut plan.tasks[i]);
+                patched = true;
+            }
+        }
+        if !patched {
+            apply(&mut plan.tasks[*fp.last().unwrap()]);
+            tracing::warn!(
+                "[agent] planner: 多文件步骤存在，已把用户显式路径 {} 覆盖到最后一步产出（多交付物场景请人工核对）",
+                explicit
+            );
+        }
+    }
+}
+
+/// 占位名判定（精准，避免误伤 `output/data.csv` 等合法目标）。
+fn is_placeholder_target(s: &str) -> bool {
+    let low = s.to_lowercase();
+    low.contains("generated_code") || low.contains("placeholder") || low.trim().is_empty()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extract_user_write_path_detects_explicit() {
+        assert_eq!(
+            extract_user_write_path("帮我新建登录页，写到 src/views/Profile.tsx，含表单"),
+            Some("src/views/Profile.tsx".to_string())
+        );
+        assert_eq!(
+            extract_user_write_path("保存到 src/pages/Login.tsx 即可"),
+            Some("src/pages/Login.tsx".to_string())
+        );
+        assert_eq!(
+            extract_user_write_path("输出到 `output/report.csv` 中"),
+            Some("output/report.csv".to_string())
+        );
+        // 无显式写路径关键词 -> None（不误伤引用现有文件路径）
+        assert_eq!(
+            extract_user_write_path("请读取 src/utils/foo.ts 并修复其中的 bug"),
+            None
+        );
+    }
 }
