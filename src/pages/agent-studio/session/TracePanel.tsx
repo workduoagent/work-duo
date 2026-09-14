@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { Bot, GitBranch, Sparkles, Wrench, ShieldAlert, CheckCircle2, XCircle, Loader2, ChevronRight } from 'lucide-react'
+import { Bot, GitBranch, Sparkles, Wrench, ShieldAlert, CheckCircle2, XCircle, Loader2, ChevronRight, ChevronDown } from 'lucide-react'
+import { MarkdownRenderer } from '@/components/markdown/MarkdownRenderer'
 import type { IntentClassified, PlanStep, ThinkingChunk, ToolStep } from './types'
 
 interface TracePanelProps {
@@ -32,7 +33,13 @@ function StepStatusIcon({ status }: { status?: PlanStep['status'] }) {
 export function TracePanel({ intent, thinking, planSteps, toolSteps }: TracePanelProps) {
   // 工具调用默认折叠：工具调用很多时全部展开会撑高右栏，默认收起、点击标题展开。
   const [toolsOpen, setToolsOpen] = useState(false)
+  // 规划步骤默认全部展开（让用户看到每步详情）；单步可独立收叠。
+  const [stepCollapsed, setStepCollapsed] = useState<Record<number, boolean>>({})
   const hasData = intent || thinking.length > 0 || planSteps.length > 0 || toolSteps.length > 0
+
+  const toggleStep = (step: number) => {
+    setStepCollapsed((prev) => ({ ...prev, [step]: !prev[step] }))
+  }
 
   if (!hasData) {
     return (
@@ -93,7 +100,7 @@ export function TracePanel({ intent, thinking, planSteps, toolSteps }: TracePane
         </section>
       )}
 
-      {/* 规划 DAG */}
+      {/* 规划步骤（响应式卡片 + 可收叠 + Markdown 内容） */}
       {planSteps.length > 0 && (
         <section className="agent-trace__section">
           <div className="agent-trace__section-head">
@@ -101,13 +108,37 @@ export function TracePanel({ intent, thinking, planSteps, toolSteps }: TracePane
             <span>规划步骤（{planSteps.filter((s) => s.status === 'success').length}/{planSteps.length}）</span>
           </div>
           <div className="agent-trace__plan">
-            {planSteps.map((s) => (
-              <div key={s.step} className="agent-trace__plan-item">
-                <StepStatusIcon status={s.status} />
-                <span className="agent-trace__plan-title">{s.title}</span>
-                {s.summary && <span className="agent-trace__plan-sum">{s.summary}</span>}
-              </div>
-            ))}
+            {planSteps.map((s) => {
+              const collapsed = stepCollapsed[s.step] ?? false
+              const hasContent = !!(s.summary || s.description)
+              return (
+                <div key={s.step} className={`agent-trace__plan-card agent-trace__plan-card--${s.status}`}>
+                  <button
+                    type="button"
+                    className="agent-trace__plan-card-head"
+                    onClick={() => toggleStep(s.step)}
+                    aria-expanded={!collapsed}
+                  >
+                    <span className="agent-trace__plan-card-num">{s.step}</span>
+                    <StepStatusIcon status={s.status} />
+                    <span className="agent-trace__plan-card-title">{s.title}</span>
+                    {hasContent && (
+                      <span className="agent-trace__plan-card-caret">
+                        {collapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
+                      </span>
+                    )}
+                  </button>
+                  {!collapsed && hasContent && (
+                    <div className="agent-trace__plan-card-body">
+                      <MarkdownRenderer
+                        content={s.description ? `**${s.description}**\n\n${s.summary ?? ''}` : (s.summary ?? '')}
+                        className="agent-trace__plan-card-md"
+                      />
+                    </div>
+                  )}
+                </div>
+              )
+            })}
           </div>
         </section>
       )}

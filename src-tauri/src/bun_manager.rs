@@ -36,6 +36,7 @@ use tauri::Manager;
 use tauri::State;
 use tauri_plugin_shell::process::CommandEvent;
 use tauri_plugin_shell::ShellExt;
+use crate::agent::tools::ScriptRunResult;
 
 /// 默认受管环境名：Node 仅此一个，调用方未指定 `env_name` 时使用。
 const DEFAULT_ENV: &str = "default";
@@ -399,7 +400,7 @@ async fn run_script_with_selfheal(
     bun_root: &Path,
     tmp_path: &Path,
     cwd: Option<&Path>,
-) -> Result<String, String> {
+) -> Result<ScriptRunResult, String> {
     let args = vec![tmp_path.to_string_lossy().to_string()];
     let (stdout, stderr, code) = run_bun_sidecar(app, bun_root, args, cwd).await?;
     if code != Some(0) {
@@ -414,7 +415,7 @@ async fn run_script_with_selfheal(
                     let args2 = vec![tmp_path.to_string_lossy().to_string()];
                     let (o2, e2, c2) = run_bun_sidecar(app, bun_root, args2, cwd).await?;
                     return match c2 {
-                        Some(0) => Ok(o2),
+                        Some(0) => Ok(ScriptRunResult { stdout: o2, exit_code: c2 }),
                         Some(c) => Err(format!("脚本执行失败（退出码 {c}）：\n{e2}")),
                         None => Err(format!("脚本进程异常终止，未收到退出码：\n{e2}")),
                     };
@@ -424,7 +425,7 @@ async fn run_script_with_selfheal(
         }
     }
     match code {
-        Some(0) => Ok(stdout),
+        Some(0) => Ok(ScriptRunResult { stdout, exit_code: code }),
         Some(c) => Err(format!("脚本执行失败（退出码 {c}）：\n{stderr}")),
         None => Err(format!("脚本进程异常终止，未收到退出码：\n{stderr}")),
     }
@@ -454,7 +455,9 @@ pub async fn run_node_script(
     // 已安装依赖（bun_root/node_modules）的解析由 run_bun_sidecar 注入的 NODE_PATH 兜底。
     // cwd 设为原脚本所在目录，便于脚本内相对路径文件操作仍按原位置解析。
     let result = run_script_with_selfheal(&app, &bun_root, &script, original_parent.as_deref()).await;
-    result
+    // 用户侧 Tauri 命令保持「返回 stdout 字符串」契约不变（前端 invoke 依赖），
+    // 退出码/结构化结果仅供 agent 运行时（run_node_in_sandbox）使用。
+    result.map(|r| r.stdout)
 }
 
 /// 供智能体运行时直接调用的沙箱执行入口（**非 Tauri 命令**，供 `agent::native` 复用）。
@@ -464,7 +467,7 @@ pub async fn run_node_in_sandbox(
     env_name: Option<String>,
     script_path: String,
     cwd: Option<&Path>,
-) -> Result<String, String> {
+) -> Result<ScriptRunResult, String> {
     let (bun_root, _pkg) = mgr.setup(app)?;
     let _env = env_name.unwrap_or_else(|| DEFAULT_ENV.to_string());
 

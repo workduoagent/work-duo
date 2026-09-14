@@ -1327,13 +1327,21 @@ impl AgentTool for RunPythonSandboxTool {
         let mgr = self.app.state::<MambaManager>();
         match run_python_in_sandbox(&self.app, &*mgr, env_name, resolved_script, ctx.workspace.as_deref()).await {
             Ok(out) => {
+                // 透传退出码给 verifier：command_succeeded 直接读 exit_code（通用判定，与输出措辞无关）。
+                if let Ok(mut g) = ctx.run_outcomes.lock() {
+                    g.push(crate::agent::tools::RunOutcome {
+                        output: out.stdout.clone(),
+                        exit_code: out.exit_code,
+                    });
+                }
                 tracing::info!(
-                    "[agent] native__run_python_sandbox: 成功 result={}字符 耗时={}ms 内容={}",
-                    out.chars().count(),
+                    "[agent] native__run_python_sandbox: 成功 result={}字符 耗时={}ms 退出码={:?} 内容={}",
+                    out.stdout.chars().count(),
                     started.elapsed().as_millis(),
-                    crate::agent::runtime::clip(&out, 500),
+                    out.exit_code,
+                    crate::agent::runtime::clip(&out.stdout, 500),
                 );
-                Ok(out)
+                Ok(out.stdout)
             }
             Err(e) => {
                 tracing::info!(
@@ -1483,13 +1491,21 @@ impl AgentTool for RunNodeSandboxTool {
         let mgr = self.app.state::<BunManager>();
         match run_node_in_sandbox(&self.app, &*mgr, env_name, resolved_script, ctx.workspace.as_deref()).await {
             Ok(out) => {
+                // 透传退出码给 verifier：command_succeeded 直接读 exit_code（通用判定，与输出措辞无关）。
+                if let Ok(mut g) = ctx.run_outcomes.lock() {
+                    g.push(crate::agent::tools::RunOutcome {
+                        output: out.stdout.clone(),
+                        exit_code: out.exit_code,
+                    });
+                }
                 tracing::info!(
-                    "[agent] native__run_node_sandbox: 成功 result={}字符 耗时={}ms 内容={}",
-                    out.chars().count(),
+                    "[agent] native__run_node_sandbox: 成功 result={}字符 耗时={}ms 退出码={:?} 内容={}",
+                    out.stdout.chars().count(),
                     started.elapsed().as_millis(),
-                    crate::agent::runtime::clip(&out, 500),
+                    out.exit_code,
+                    crate::agent::runtime::clip(&out.stdout, 500),
                 );
-                Ok(out)
+                Ok(out.stdout)
             }
             Err(e) => {
                 tracing::info!(

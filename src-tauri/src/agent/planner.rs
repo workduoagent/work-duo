@@ -30,7 +30,7 @@ pub async fn build_plan(
         .map(|w| format!("\n当前工作空间目录：{w}（所有文件产物都必须落在该目录内）"))
         .unwrap_or_default();
     // JSON 输出示例（独立普通字符串，避免 format! 内花括号转义负担）。
-    let json_example = "{\"goal_summary\":\"一句话目标\",\"tasks\":[{\"step\":1,\"task_id\":\"t1\",\"title\":\"短标题\",\"description\":\"这一步具体做什么、产出什么文件或结果\",\"success_criteria\":[{\"type\":\"file_nonempty\",\"target\":\"output/data.csv\"}],\"depends_on\":[]},{\"step\":2,\"task_id\":\"t2\",\"title\":\"基于数据生成报表\",\"description\":\"读取 t1 的 data.csv 生成报表\",\"success_criteria\":[{\"type\":\"stdout_contains\",\"value\":\"报表生成成功\"}],\"depends_on\":[\"t1\"]}]}";
+    let json_example = "{\"goal_summary\":\"一句话目标\",\"tasks\":[{\"step\":1,\"task_id\":\"t1\",\"title\":\"短标题\",\"description\":\"这一步具体做什么、产出什么文件或结果\",\"success_criteria\":[{\"type\":\"file_nonempty\",\"target\":\"output/data.csv\"}],\"depends_on\":[]},{\"step\":2,\"task_id\":\"t2\",\"title\":\"运行校验脚本验证\",\"description\":\"读取 t1 的 data.csv 跑校验脚本，确认数据处理正确（进程退出码 0 即成功）\",\"success_criteria\":[{\"type\":\"command_succeeded\"}],\"depends_on\":[\"t1\"]}]}";
     let sys = format!(
         "你是一名任务规划架构师。把用户的宏观目标拆解为可顺序执行的原子步骤。\
 \n\n当前系统具备以下原子能力：\
@@ -45,14 +45,14 @@ pub async fn build_plan(
 \n5. 每个步骤可附带 `success_criteria` 数组声明「成功判定标准」（确定性、可由文件/内容客观核验，\
 不依赖主观判断）；**仅当该步骤确实产出可核验文件/结果时才声明**，纯分析或无产物的步骤不要声明。\
 可选 check 类型：\
-file_exists / file_nonempty / directory_exists / json_valid / text_contains / text_min_lines / excel_row_count（暂以文件存在+非空代理）；\
-stdout_contains / tool_output_contains（校验**工具运行输出流**，如沙箱 stdout 是否包含某关键词）。\
+file_exists / file_nonempty / directory_exists / json_valid / text_contains / text_min_lines / excel_row_count（暂以文件存在+非空代理）；command_succeeded（运行类工具**退出码为 0 即成功**，通用、与输出措辞/语言/emoji 无关，专门用于「运行脚本/测试是否成功」判定）。\
+stdout_contains / tool_output_contains（校验**工具运行输出流**是否包含某段指定文字，如沙箱 stdout 是否出现「报表生成成功」）——仅用于「输出必须出现某具体文字」的显式内容断言，**不用于**判定运行是否成功（那请用 command_succeeded）。\
 text_contains 需带 value，text_min_lines / excel_row_count 需带 threshold（行数）；\
-stdout_contains / tool_output_contains 只需带 value（期望在工具输出流中匹配的关键词），target 可留空——它校验的是运行类工具的 stdout，**不是文件**，禁止为了「输出须包含 X」去 text_contains 一个名叫 `stdout` 的文件（那文件不存在会永久判失败、陷入恢复死循环）。；特别地，对「运行测试脚本并通过」这类判定，value 应取测试框架的**稳定成功标记**（unittest 末行为 `OK`、pytest 为 `passed`），禁止写 `Ran N tests in` 这种带具体测试数量的字面——测试数量随脚本写法变化（可能是 1 个也可能是 5 个），会稳定误判未闭环；可多家 `|` 容错，如 `OK|passed`。\
+stdout_contains / tool_output_contains 只需带 value（期望在工具输出流中匹配的关键词），target 可留空——它校验的是运行类工具的 stdout，**不是文件**，禁止为了「输出须包含 X」去 text_contains 一个名叫 `stdout` 的文件（那文件不存在会永久判失败、陷入恢复死循环）。；特别地，「运行测试脚本 / 跑命令是否成功」这类判定**不要**用 stdout_contains 去 stdout 里猜（易受输出措辞、语言、emoji 影响而误判），应直接用 `command_succeeded`：它由执行器读取进程**退出码**（0=成功），与语言/框架/输出文字/emoji 完全无关，通用且零误判；stdout_contains 仅保留给「输出必须出现某段具体文字」的显式内容断言（如 `报表生成成功`），此时 value 可用 `|` 容错（如 `报表生成成功|报表已生成`）。\
 text_contains 的 value 建议用 `|` 分隔多个同义措辞（例如「风险提示|主要风险|风险」），执行器与校验器任一命中即通过，\
 避免只写单一死板字面（如只写「风险提示」）而被散文措辞卡死、误判步骤未闭环。\
 \n注意：success_criteria 一旦声明必须字段完整：text_contains 须同时带 target 与 value；\
-file*/directory_exists/json_valid/excel_row_count 须带 target；stdout_contains / tool_output_contains 须带 value（target 可省）。\
+file*/directory_exists/json_valid/excel_row_count 须带 target；stdout_contains / tool_output_contains 须带 value（target 可省）；command_succeeded 无需额外字段（直接读退出码）。\
 字段不完整的残缺条件执行器会直接忽略、等于没声明，所以残缺条件不要写——要么写完整的，要么干脆不声明。
 \n6. `depends_on`：本步骤开始前必须已完成的步骤 task_id 列表（仅可引用编号更小的步骤；无依赖填空数组）。\
 存在依赖的步骤会**等待其前置步骤成功后才执行**，无共同依赖的步骤**可并行**；严禁出现循环依赖（A 依赖 B 且 B 依赖 A）。\

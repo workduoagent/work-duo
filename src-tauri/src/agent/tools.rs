@@ -35,6 +35,10 @@ pub struct ToolContext {
     /// HTTP 请求主机白名单（由 app_config.http_allowed_hosts 解析后透传）：空 = 不限制；
     /// 非空 = native__http_request 仅放行命中列表中的主机（含其子域）。
     pub http_allowed_hosts: Vec<String>,
+    /// 本子任务运行类工具（`native__run_python_sandbox` / `native__run_node_sandbox`）的
+    /// 执行结果（含退出码），供 verifier 的 `command_succeeded` 通用判定。仅运行工具写入，
+    /// 串行执行下安全累积；流水线每轮结束后统一 drain 进 `session_tool_outputs`。
+    pub run_outcomes: std::sync::Arc<std::sync::Mutex<Vec<RunOutcome>>>,
 }
 
 /// 工具执行错误。
@@ -46,6 +50,28 @@ pub enum ToolError {
     ExecutionFailed(String),
     /// 权限不足（如未授权沙箱却请求 run_sandbox）。
     PermissionDenied(String),
+}
+
+/// 一次「运行类」工具执行的结构化结果（退出码为通用判定真相源）。
+///
+/// 替代原先只回 stdout 裸字符串的做法：进程退出码 0 = 运行成功，与语言 / 框架 /
+/// 输出措辞 / emoji 完全无关（同 `cargo check` 退出 0 即通过的契约）。verifier 的
+/// `command_succeeded` 直接读 `exit_code`，不再去 stdout 文本里猜「过了没」。
+/// 失败信息（含 stderr）由 `run_script_with_selfheal` 以 `Err(String)` 返回，故此处只留成功路径字段。
+#[derive(Debug, Clone, Default)]
+pub struct ScriptRunResult {
+    pub stdout: String,
+    pub exit_code: Option<i32>,
+}
+
+/// 单个工具（运行类）在本子任务内的执行结果摘要，供 verifier 通用判定使用。
+/// - `output`：工具 stdout（供 `stdout_contains` 精确子串匹配）；
+/// - `exit_code`：进程退出码（`Some(0)` = 成功），供 `command_succeeded` 判定；
+///   非运行类工具不写入此列表，故其 `exit_code` 恒为 `None`。
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct RunOutcome {
+    pub output: String,
+    pub exit_code: Option<i32>,
 }
 
 /// 统一工具契约。

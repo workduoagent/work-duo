@@ -333,6 +333,7 @@ pub async fn read_artifact(
         agent_id: String::new(),
         session_id: None,
         http_allowed_hosts: Vec::new(),
+        run_outcomes: Default::default(),
     };
     let abs = match PathGuard::check(&path, &ctx) {
         Ok(p) => p,

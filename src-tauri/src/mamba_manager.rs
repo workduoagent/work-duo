@@ -33,6 +33,7 @@ use tauri::Manager;
 use tauri::State;
 use tauri_plugin_shell::process::CommandEvent;
 use tauri_plugin_shell::ShellExt;
+use crate::agent::tools::ScriptRunResult;
 
 /// 默认受管环境名：调用方未指定 `env_name` 时使用。
 const DEFAULT_ENV: &str = "default";
@@ -583,7 +584,7 @@ async fn run_script_with_selfheal(
     tmp_path: &Path,
     cwd: Option<&Path>,
     extra_envs: &[(String, String)],
-) -> Result<String, String> {
+) -> Result<ScriptRunResult, String> {
     let args = build_run_args(mamba_root, rc, env, tmp_path);
     let (stdout, stderr, code) = run_sidecar(app, args, cwd, extra_envs).await?;
     if code != Some(0) {
@@ -598,7 +599,7 @@ async fn run_script_with_selfheal(
                     let args2 = build_run_args(mamba_root, rc, env, tmp_path);
                     let (o2, e2, c2) = run_sidecar(app, args2, cwd, extra_envs).await?;
                     return match c2 {
-                        Some(0) => Ok(o2),
+                        Some(0) => Ok(ScriptRunResult { stdout: o2, exit_code: c2 }),
                         Some(c) => Err(format!("脚本执行失败（退出码 {c}）：\n{e2}")),
                         None => Err(format!("脚本进程异常终止，未收到退出码：\n{e2}")),
                     };
@@ -608,7 +609,7 @@ async fn run_script_with_selfheal(
         }
     }
     match code {
-        Some(0) => Ok(stdout),
+        Some(0) => Ok(ScriptRunResult { stdout, exit_code: code }),
         Some(c) => Err(format!("脚本执行失败（退出码 {c}）：\n{stderr}")),
         None => Err(format!("脚本进程异常终止，未收到退出码：\n{stderr}")),
     }
@@ -681,7 +682,9 @@ pub async fn run_python_script(
     )
     .await;
     let _ = std::fs::remove_file(&tmp_path);
-    result
+    // 用户侧 Tauri 命令保持「返回 stdout 字符串」契约不变（前端 invoke 依赖），
+    // 退出码/结构化结果仅供 agent 运行时（run_python_in_sandbox）使用。
+    result.map(|r| r.stdout)
 }
 
 /// 供智能体运行时直接调用的沙箱执行入口（**非 Tauri 命令**，供 `agent::native` 模块复用）。
@@ -694,7 +697,7 @@ pub async fn run_python_in_sandbox(
     env_name: Option<String>,
     script_path: String,
     cwd: Option<&Path>,
-) -> Result<String, String> {
+) -> Result<ScriptRunResult, String> {
     let (mamba_root, rc) = mgr.setup(app)?;
 
     let env = env_name.unwrap_or_else(|| DEFAULT_ENV.to_string());

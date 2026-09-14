@@ -1338,9 +1338,11 @@ export default function AgentChatPage() {
   // 右栏宽度（可鼠标拖拽调节），默认 340px
   const [rightWidth, setRightWidth] = useState(340)
   const resizingRef = useRef(false)
+  const resizeElRef = useRef<HTMLDivElement>(null)
   const startResize = (e: React.MouseEvent) => {
     e.preventDefault()
     resizingRef.current = true
+    resizeElRef.current?.classList.add('is-dragging')
     const onMove = (ev: MouseEvent) => {
       if (!resizingRef.current) return
       // 右栏右侧留 14px margin；按指针位置反推右栏宽度
@@ -1349,6 +1351,7 @@ export default function AgentChatPage() {
     }
     const onUp = () => {
       resizingRef.current = false
+      resizeElRef.current?.classList.remove('is-dragging')
       document.removeEventListener('mousemove', onMove)
       document.removeEventListener('mouseup', onUp)
       document.body.style.userSelect = ''
@@ -3343,7 +3346,7 @@ export default function AgentChatPage() {
       {/* 右侧投影面板：图（本轮 DAG）/ 过程 / 产物（方案 C Graph-first） */}
       {rightOpen ? (
         <>
-          <div className="agent-chat__resize" onMouseDown={startResize} title="拖拽调节宽度" />
+          <div className="agent-chat__resize" ref={resizeElRef} onMouseDown={startResize} title="拖拽调节宽度" />
           <aside className="agent-chat__right" style={{ width: rightWidth }}>
           <div className="agent-chat__right-tabs">
             <button

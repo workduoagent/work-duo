@@ -31,6 +31,7 @@ use crate::agent::recovery::RecoveryDecision;
 use crate::agent::recovery::RecoveryHub;
 use crate::agent::recovery::RecoveryRequest;
 use crate::agent::runtime;
+use crate::agent::tools::RunOutcome;
 use crate::agent::tools::ToolContext;
 use crate::agent::tools::ToolRegistry;
 use crate::agent::types::AgentRuntimeConfig;
@@ -150,7 +151,7 @@ pub async fn run_pipeline(
     // 用于「运行测试」类步骤的客观校验——当模型把测试运行合并进更早的文件创建步骤时，
     // 后续「运行单元测试」步骤自身的工具输出为空，但仍应以会话内已有的「passed」证据判定闭环，
     // 避免误判「未闭环」→ 自动重试 → 最终标 skipped 的假失败（见 #20260914016）。
-    let session_tool_outputs: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+    let session_tool_outputs: Arc<Mutex<Vec<RunOutcome>>> = Arc::new(Mutex::new(Vec::new()));
 
     // 单 Agent 强制串行（问题修复）：同一时刻仅执行一个子任务，消除多步并行导致的
     // 文件写入冲突、上下文黑域、恢复面板弹窗风暴、工具调用步骤归属错乱等问题。
@@ -734,9 +735,9 @@ async fn run_subtask(
     // P2-1 滚动会话背景（来自 load_session_background）：非空时作为「会话背景摘要」段注入 user 消息，
     // 让工具型子任务感知「用户说过什么 / 已确认什么结论」，但不感知工具报文。空则不注入（保持现状）。
     background: &str,
-    // 跨步骤累积工具输出流（会话级，见 run_pipeline）。校验「运行结果须包含 X」类判定时，
-    // 与当前步骤自身输出合并传入校验器，使更早步骤已跑出的测试通过证据可被后续步骤复用。
-    session_tool_outputs: &Arc<Mutex<Vec<String>>>,
+    // 跨步骤累积运行类工具结构化结果（会话级，见 run_pipeline）。校验 `command_succeeded` / `stdout_contains` 时，
+    // 与当前步骤自身结果合并传入校验器，使更早步骤已跑出的测试通过证据（退出码/输出）可被后续步骤复用。
+    session_tool_outputs: &Arc<Mutex<Vec<RunOutcome>>>,
 ) -> (SubTaskOutput, (u64, u64)) {
     // 认知上下文绝对隔离：崭新的 messages，0 历史包袱。
     let t0 = Instant::now(); // 子任务级耗时基准（闭环日志用）
@@ -911,7 +912,7 @@ async fn run_subtask(
     let mut last_failed_command: Option<String> = None; // 最近一次失败工具的命令文本（供 classify_tier 风险词匹配）
     let mut changed_files: Vec<String> = Vec::new(); // 本子任务实际改动过的文件（2b-2 接管面板展示）
     let mut read_files: Vec<String> = Vec::new(); // 本子任务实际读取过的文件（阶段二图驱动 Read 边）
-    let mut tool_outputs: Vec<String> = Vec::new(); // 本子任务工具输出流聚合（校验器 stdout_contains 用）
+    let mut tool_outputs: Vec<RunOutcome> = Vec::new(); // 本子任务运行类工具结果聚合（含退出码，供 verifier 通用判定）
 
     loop {
         // 每轮开始前检查取消：用户点击「停止」后，下一轮边界立即终止本子任务，
@@ -1330,11 +1331,13 @@ async fn run_subtask(
                 read_files.push(p.clone());
             }
         }
-        // 采集本轮工具输出流（运行类工具 stdout 等），供校验器 stdout_contains 核验
-        // 「运行结果须包含 X」类判定，避免误判成文件导致恢复死循环。
-        for o in &stats.tool_outputs {
-            if !tool_outputs.contains(o) {
-                tool_outputs.push(o.clone());
+        // 采集本轮运行类工具的结构化结果（含退出码）：drain 共享槽，避免跨轮重复累积。
+        // 退出码是 verifier `command_succeeded` 的通用判定真相源，stdout 仍供 stdout_contains 精确子串匹配。
+        if let Ok(mut g) = ctx.run_outcomes.lock() {
+            for o in g.drain(..) {
+                if !tool_outputs.iter().any(|x| x.output == o.output) {
+                    tool_outputs.push(o);
+                }
             }
         }
 

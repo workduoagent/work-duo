@@ -11,11 +11,15 @@
 //!  - `text_min_lines`：文件行数 ≥ 阈值（L1）；
 //!  - `excel_row_count`：xlsx 行数 ≥ 阈值（**暂以「文件存在且非空」代理**，不引入 Excel 解析依赖）；
 //!  - `stdout_contains` / `tool_output_contains`：工具**运行输出流**（如沙箱 stdout）包含指定片段（L1）。
-//!    用于「运行结果须包含 X / stdout 须包含 X」这类判定——planner 不应再把流误生成成
+//!    用于「运行结果须包含 X / stdout 须包含 X」这类**显式内容断言**——planner 不应再把流误生成成
 //!    `text_contains` 指向一个名为 `stdout` 的**文件**，否则该校验永不命中、陷入恢复死循环。
+//!  - `command_succeeded`：**运行类工具进程退出码为 0**（通用判定真相源）。与语言 / 框架 / 输出措辞 /
+//!    emoji 完全无关（同 `cargo check` 退出 0 即通过的契约）；替代「去 stdout 文本里猜测试过没」的脆弱做法。
+//!    本步未执行运行类工具（无退出码）时降级为通过，避免对破碎条件死循环。
 
 use std::path::{Path, PathBuf};
 
+use crate::agent::tools::RunOutcome;
 use crate::agent::types::PlanSubTask;
 use crate::agent::types::SuccessCriterion;
 
@@ -326,47 +330,49 @@ fn check_one(c: &SuccessCriterion, workspace: Option<&Path>, extra: &[PathBuf]) 
     }
 }
 
-/// 准则值是否像「测试运行器摘要（带数量）」：含 `ran` 与 `test`，如 `Ran 4 tests in`。
-/// 用于识别「运行测试并通过」类判定，触发下方数量无关的通过标记弹性兜底。
-fn is_test_summary_criterion(keywords: &[&str]) -> bool {
-    keywords
+/// 通用「运行成功」判定：直接读运行类工具的退出码（进程退出码 0 = 运行成功）。
+/// 与语言 / 框架 / 输出措辞 / emoji 完全无关（同 `cargo check` 退出 0 即通过的契约）。
+///
+/// 语义（与用户确认的「通用方式」一致）：
+///  - 本步执行过运行类工具（run_outcomes 非空）且存在退出码为 0 的结果 → 通过；
+///  - 存在非零退出码、且没有任何 0 → 未通过（命令确实失败）；
+///  - 本步未执行任何运行类工具（无退出码信息）→ 条件无法被客观评估，降级为通过，
+///    避免对破碎条件无限重试（与 `degraded` 一致）。
+fn check_command_succeeded(run_outcomes: &[RunOutcome]) -> (bool, String) {
+    if run_outcomes.is_empty() {
+        return degraded(
+            "command_succeeded",
+            "本步未执行任何运行类工具（无退出码信息），降级为以模型自报为准",
+        );
+    }
+    let codes: Vec<String> = run_outcomes
         .iter()
-        .any(|kw| {
-            let k = kw.to_lowercase();
-            k.contains("ran") && k.contains("test")
+        .map(|o| match o.exit_code {
+            Some(c) => c.to_string(),
+            None => "无".to_string(),
         })
-}
-
-/// 工具输出流是否呈现测试运行器的**通过**信号（与具体测试数量无关）：
-///  - unittest：`Ran N test(s) in ... OK`
-///  - pytest：`N passed` / `passed` / `All tests passed`
-/// 仅在 `is_test_summary_criterion` 为真（准则本身是测试数量摘要）时才被采信，
-/// 不会对普通准则产生误判。
-fn is_test_runner_pass(output: &str) -> bool {
-    let o = output.to_lowercase();
-    (o.contains("ran ") && o.contains("test") && o.contains("ok"))
-        || o.contains("all tests passed")
-        || o.contains(" passed")
-        || o.trim_end().ends_with("passed")
+        .collect();
+    if run_outcomes.iter().any(|o| o.exit_code == Some(0)) {
+        (true, format!("运行命令退出码为 0（成功）：{:?}", codes))
+    } else {
+        (false, format!("运行命令退出码非 0（失败）：{:?}", codes))
+    }
 }
 
 /// 校验「工具运行输出流」是否包含指定关键词（`stdout_contains` / `tool_output_contains`）。
 ///
-/// 与文件类检查不同：本类判定针对**工具 stdout / 返回文本**，不读任何文件，`target` 字段被忽略。
-/// `value` 以 `|` 分隔多个候选关键词，任一命中即通过（语义包含即算过）。
+/// 与文件类检查不同：本类判定针对**工具 stdout 文本**，不读任何文件，`target` 字段被忽略。
+/// `value` 以 `|` 分隔多个候选关键词，任一命中即通过（语义包含即算过）——这是**显式内容契约**：
+/// planner 应填「输出必须出现的具体文字」（如 `测试通过`），而非去猜运行是否成功。
+/// 「运行是否成功」请用 `command_succeeded`（读退出码，通用、与措辞无关），不要塞进此处的 value。
 /// 工具输出为空（本步未执行运行类工具，或输出被截断）时判未命中。
-///
-/// 弹性兜底：若准则值是「Ran N tests in」这类带具体测试数量的测试运行器摘要，而实际输出
-/// 的测试数量（M）与准则数量（N）不同（数量随测试脚本写法变化，可能是 1 也可能是 5），
-/// 但只要输出含测试运行器的**通过标记**（unittest 末行 OK / pytest passed / All tests passed），
-/// 即判定测试已通过，不因数量字面不匹配误判未闭环、陷入恢复死循环。
 fn check_tool_output(c: &SuccessCriterion, output: &str) -> (bool, String) {
     let value = match &c.value {
         Some(v) if !v.trim().is_empty() => v,
         _ => {
             return degraded(
                 "stdout_contains",
-                "缺 value（期望在工具输出流中匹配的关键词，如「Ran 1 test」）",
+                "缺 value（期望在工具输出流中匹配的关键词，如「测试通过」）",
             )
         }
     };
@@ -385,18 +391,7 @@ fn check_tool_output(c: &SuccessCriterion, output: &str) -> (bool, String) {
         );
     }
     if keywords.iter().any(|kw| output.contains(kw)) {
-        (
-            true,
-            format!("工具输出流包含「{}」之一", value),
-        )
-    } else if is_test_summary_criterion(&keywords) && is_test_runner_pass(output) {
-        (
-            true,
-            format!(
-                "工具输出流含测试通过标记（Ran N test … OK / passed），视为通过：「{}」",
-                value
-            ),
-        )
+        (true, format!("工具输出流包含「{}」之一", value))
     } else {
         (
             false,
@@ -414,13 +409,14 @@ fn check_tool_output(c: &SuccessCriterion, output: &str) -> (bool, String) {
 ///     （如 `generated_code_content`）导致客观校验恒判未闭环、误弹恢复窗。
 ///
 /// 流类判定（`stdout_contains` / `tool_output_contains`）单独走 `check_tool_output`，
-/// 直接对本步 `tool_output`（运行类工具 stdout 聚合文本）做包含匹配，彻底绕开文件系统。
+/// 直接对本步运行输出聚合文本做包含匹配，彻底绕开文件系统。
+/// 运行成功通用判定（`command_succeeded`）走 `check_command_succeeded`，直接读退出码。
 #[tracing::instrument(skip_all)]
 pub fn verify_task(
     task: &PlanSubTask,
     workspace: Option<&Path>,
     actual_written: &[PathBuf],
-    tool_output: &[String],
+    run_outcomes: &[RunOutcome],
 ) -> VerificationResult {
     if task.success_criteria.is_empty() {
         return VerificationResult {
@@ -428,10 +424,24 @@ pub fn verify_task(
             details: String::new(),
         };
     }
-    let joined_output = tool_output.join("\n");
+    // 工具运行输出流聚合文本：供 stdout_contains / tool_output_contains 精确子串匹配。
+    let joined_output = run_outcomes
+        .iter()
+        .map(|o| o.output.as_str())
+        .collect::<Vec<&str>>()
+        .join("\n");
     let mut failed: Vec<String> = Vec::new();
     for c in &task.success_criteria {
         let ct = c.check_type.to_lowercase();
+        // 运行成功通用判定：直接读退出码，与输出措辞 / 语言 / emoji 无关（同 cargo check 契约）。
+        if ct == "command_succeeded" {
+            let (ok, detail) = check_command_succeeded(run_outcomes);
+            if ok {
+                continue;
+            }
+            failed.push(detail);
+            continue;
+        }
         // 流类判定：直接对工具输出流做包含匹配，不读文件、不进两阶段文件兜底。
         if ct == "stdout_contains" || ct == "tool_output_contains" {
             let (ok, detail) = check_tool_output(c, &joined_output);
@@ -473,6 +483,7 @@ pub fn verify_task(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::agent::tools::RunOutcome;
     use crate::agent::types::{PlanSubTask, SuccessCriterion};
 
     /// 方案 A 确定性验证（Q8）：planner 把 `success_criteria.target` 填成垃圾占位名
@@ -551,7 +562,10 @@ mod tests {
             depends_on: vec![],
         };
         // 工具输出流命中 → 判通过（即便没有任何落盘文件，也不应误弹恢复窗）。
-        let out_ok = vec!["...\nRan 1 test in 0.001s\nOK\n".to_string()];
+        let out_ok = vec![RunOutcome {
+            output: "...\nRan 1 test in 0.001s\nOK\n".into(),
+            exit_code: None,
+        }];
         let r1 = verify_task(&task, None, &[], &out_ok);
         assert!(r1.met, "工具输出含 'Ran 1 test' 应判通过：{}", r1.details);
 
@@ -560,7 +574,10 @@ mod tests {
         assert!(!r2.met, "无工具输出流时应判未闭环");
 
         // 输出流不含关键词 → 判未闭环。
-        let out_miss = vec!["Traceback (most recent call last): ...".to_string()];
+        let out_miss = vec![RunOutcome {
+            output: "Traceback (most recent call last): ...".into(),
+            exit_code: None,
+        }];
         let r3 = verify_task(&task, None, &[], &out_miss);
         assert!(!r3.met, "输出不含关键词时应判未闭环");
 
@@ -582,32 +599,116 @@ mod tests {
         assert!(r4.met, "stdout_contains 缺 value 应降级通过");
     }
 
-    /// 弹性兜底：准则值带具体测试数量「Ran 4 tests in」，但实际输出为「Ran 1 test in 0.001s OK」
-    /// （数量随脚本写法变化），只要输出含 unittest 通过标记 OK，仍应判通过、不因数量字面不匹配
-    /// 误判未闭环。修复「planner 按用户『验证 4 个函数』猜数量、实际只收集到 1 个 test」的误报。
+    /// 通用运行成功判定：退出码 0 即通过，与输出措辞 / 语言 / emoji 完全无关。
+    /// 覆盖英文 OK、中文「测试✅通过」、纯计数「PASSED 4/4」等任意输出形式——均零改动判对，
+    /// 不再依赖任何关键词补丁（修复「去 stdout 文本里猜测试过没」的无底洞式打补丁）。
     #[test]
-    fn verify_task_stdout_contains_resilient_to_test_count_mismatch() {
+    fn verify_task_command_succeeded_passes_on_exit_zero_any_output() {
         let task = PlanSubTask {
             step: 3,
             task_id: "t3".into(),
-            title: "运行测试脚本并验证结果".into(),
+            title: "运行测试脚本".into(),
             description: String::new(),
             success_criteria: vec![SuccessCriterion {
-                check_type: "stdout_contains".into(),
+                check_type: "command_succeeded".into(),
                 target: None,
-                value: Some("Ran 4 tests in".into()),
+                value: None,
                 threshold: None,
             }],
             depends_on: vec![],
         };
-        // 数量（1）与准则数量（4）不同，但含 unittest 通过标记 OK → 应判通过。
-        let out = vec!["...\nRan 1 test in 0.001s\nOK\n".to_string()];
-        let r = verify_task(&task, None, &[], &out);
-        assert!(r.met, "数量不匹配但输出含 OK 应判通过：{}", r.details);
+        // 英文 unittest 输出，exit 0 → 通过。
+        let r1 = verify_task(
+            &task,
+            None,
+            &[],
+            &[RunOutcome {
+                output: "Ran 1 test in 0.001s\nOK\n".into(),
+                exit_code: Some(0),
+            }],
+        );
+        assert!(r1.met, "exit 0 应判通过：{}", r1.details);
+        // 中文 + emoji 输出「测试✅通过」，exit 0 → 通过（不读文本）。
+        let r2 = verify_task(
+            &task,
+            None,
+            &[],
+            &[RunOutcome {
+                output: "运行结果：\n测试✅通过\n".into(),
+                exit_code: Some(0),
+            }],
+        );
+        assert!(r2.met, "中文 / emoji 输出 exit 0 应判通过：{}", r2.details);
+        // 纯计数输出「PASSED 4/4」，exit 0 → 通过。
+        let r3 = verify_task(
+            &task,
+            None,
+            &[],
+            &[RunOutcome {
+                output: "PASSED 4/4\n".into(),
+                exit_code: Some(0),
+            }],
+        );
+        assert!(r3.met, "PASSED 4/4 exit 0 应判通过：{}", r3.details);
+    }
 
-        // 反例：准则值是测试数量摘要，但实际输出是失败（FAILED，无 OK）→ 仍应判未闭环。
-        let out_fail = vec!["Ran 1 test in 0.001s\nFAILED (failures=1)\n".to_string()];
-        let r2 = verify_task(&task, None, &[], &out_fail);
-        assert!(!r2.met, "测试失败（FAILED）应判未闭环");
+    /// 反例：运行类工具退出码非 0 → 判未闭环（不因输出文本里恰好有「通过」字样而误过）。
+    #[test]
+    fn verify_task_command_succeeded_fails_on_nonzero_exit() {
+        let task = PlanSubTask {
+            step: 3,
+            task_id: "t3".into(),
+            title: "运行测试脚本".into(),
+            description: String::new(),
+            success_criteria: vec![SuccessCriterion {
+                check_type: "command_succeeded".into(),
+                target: None,
+                value: None,
+                threshold: None,
+            }],
+            depends_on: vec![],
+        };
+        // 输出含「测试通过」字样但 exit 1 → 应判未闭环。
+        let r1 = verify_task(
+            &task,
+            None,
+            &[],
+            &[RunOutcome {
+                output: "测试未通过（1/4）\n".into(),
+                exit_code: Some(1),
+            }],
+        );
+        assert!(!r1.met, "exit 非0 应判未闭环：{}", r1.details);
+        // 英文 unittest FAILED，exit 1 → 应判未闭环。
+        let r2 = verify_task(
+            &task,
+            None,
+            &[],
+            &[RunOutcome {
+                output: "Ran 1 test in 0.001s\nFAILED (failures=1)\n".into(),
+                exit_code: Some(1),
+            }],
+        );
+        assert!(!r2.met, "FAILED exit 非0 应判未闭环：{}", r2.details);
+    }
+
+    /// 本步未执行任何运行类工具（无退出码）→ 条件无法客观评估，降级为通过（避免死循环）。
+    #[test]
+    fn verify_task_command_succeeded_degrades_without_run() {
+        let task = PlanSubTask {
+            step: 3,
+            task_id: "t3".into(),
+            title: "运行测试脚本".into(),
+            description: String::new(),
+            success_criteria: vec![SuccessCriterion {
+                check_type: "command_succeeded".into(),
+                target: None,
+                value: None,
+                threshold: None,
+            }],
+            depends_on: vec![],
+        };
+        let r = verify_task(&task, None, &[], &[]);
+        assert!(r.met, "无运行工具应降级通过");
     }
 }
