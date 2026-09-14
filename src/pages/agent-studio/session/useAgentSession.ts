@@ -470,6 +470,11 @@ export function useAgentSession(): AgentSessionState {
     setLiveTokenUsage(null)
     setTaskError(null)
     setArtifacts([])
+    // 关键：新建 / 切换会话时必须显式清空「图(planSteps)」与「过程(toolSteps)」轨迹，
+    // 否则上一个会话的 DAG 与工具流水会残留显示在右侧轨迹面板（run() 只在发消息时清，
+    // 新建子对话尚未发消息时旧数据会直接泄漏）。planSteps 为独立 state，reset 历史未覆盖。
+    setPlanSteps([])
+    setToolSteps([])
     setTraceIntent(undefined)
     setTraceThinking([])
     setPlanBranch(null)

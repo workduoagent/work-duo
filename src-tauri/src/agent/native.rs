@@ -2819,6 +2819,33 @@ impl AgentTool for AskUserChoiceTool {
             question,
             options: opts,
         };
+        // 任务已完成后的「推荐」不弹阻塞弹窗：把建议作为工具结果回传，由模型写入最终回复。
+        // 判定：会话计划步骤中至少已有一步闭环（任务已推进），且最多只有「最后一步」仍开口，
+        // 说明主体工作已完成，此询问只是收尾推荐——不应再以弹窗打断用户（符合「推荐追加到最终回复」设定）。
+        if let (Some(ws), Some(sid)) = (
+            ctx.workspace.as_ref().and_then(|p| p.to_str()),
+            ctx.session_id.as_deref(),
+        ) {
+            if let Ok(g) = KnowledgeGraph::open(Some(ws)) {
+                if is_post_completion_recommendation(&g, sid) {
+                    let opts_text = req
+                        .options
+                        .iter()
+                        .enumerate()
+                        .map(|(i, o)| format!("{}. {}", i + 1, o.label))
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    let rec = format!(
+                        "（任务主体已完成，以下后续方向为可选建议，已记入最终回复，无需通过弹窗选择）\n\n{}\n{}",
+                        req.question, opts_text
+                    );
+                    tracing::info!(
+                        "[agent] ask_user_choice: 任务已完成，按「推荐」非阻塞处理（不弹窗），建议已回传模型写入最终回复"
+                    );
+                    return Ok(rec);
+                }
+            }
+        }
         events::emit_choice_needed(&self.app, &req);
         let rx = self
             .app
@@ -2857,6 +2884,46 @@ impl AgentTool for AskUserChoiceTool {
             }
         };
         Ok(text)
+    }
+}
+
+/// 判定当前 `ask_user_choice` 是否属于「任务已完成后的推荐」而非「任务进行中必须拍板的歧义分支」。
+///
+/// 规则：会话计划步骤中**至少已有一步闭环**（任务已实质推进），且未闭环步骤至多一个、
+/// 且该步骤恰为最后一步（或已全部闭环）。满足则视为收尾推荐——后端应走非阻塞分支，
+/// 把建议作为工具结果回传、由模型写入最终回复，而非弹出阻塞式选择窗。
+fn is_post_completion_recommendation(graph: &KnowledgeGraph, session_id: &str) -> bool {
+    let tasks = graph.session_tasks(session_id);
+    if tasks.is_empty() {
+        return false;
+    }
+    let max_step = tasks
+        .iter()
+        .filter_map(|n| n.props.get("step").and_then(|v| v.as_u64()))
+        .max()
+        .unwrap_or(0);
+    let mut terminal_count = 0usize;
+    let mut non_terminal: Vec<u64> = Vec::new();
+    for n in &tasks {
+        let s = n
+            .props
+            .get("status")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        if matches!(s, "completed" | "skipped" | "obsolete") {
+            terminal_count += 1;
+        } else if let Some(step) = n.props.get("step").and_then(|v| v.as_u64()) {
+            non_terminal.push(step);
+        }
+    }
+    // 任务尚未推进（无闭环步骤）→ 仍需用户拍板，不按推荐处理。
+    if terminal_count == 0 {
+        return false;
+    }
+    match non_terminal.len() {
+        0 => true,                             // 全部闭环 → 推荐
+        1 => non_terminal[0] == max_step,      // 仅最后一步开口 → 收尾推荐
+        _ => false,                            // 多个步骤仍开口 → 进行中歧义分支
     }
 }
 

@@ -16,6 +16,7 @@
 use serde_json::json;
 use serde_json::Value;
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
@@ -79,6 +80,16 @@ pub struct PipelineResult {
 /// 构建技能指引段：把已绑定技能的工作流说明注入子任务 user 消息，
 /// 替代「模型调用 skill__xxx 工具拿指引再干活」的反模式（每个子任务省 1~2 轮 LLM 调用）。
 /// 多技能仅注入 name + description 摘要（全文靠模型按需 read_file）；整体控制在 2000 字符内截断。
+/// 全局交互准则：注入到每个子任务的 system_prompt 最前面（与具体技能/人格无关，
+/// 对所有智能体、所有任务统一生效）。核心一条：任务核心目标完成后，不要把「后续推荐」
+/// 包装成需要用户即时选择的弹窗——那属于多此一举；推荐应作为要点写进最终回复文本。
+/// `native__ask_user_choice` 仅保留给「任务进行中、意图确实不明确、必须用户拍板才能继续」的歧义分支。
+const GLOBAL_AGENT_RULES: &str = "【交互准则 · 全局】\n\
+- 当用户的核心任务目标已经完成后，不要调用 `native__ask_user_choice` 来征求后续方向或建议；\
+把可选的后续方向作为简短要点写在你的【最终回复】文本里即可（用户看完自行决定是否开启新任务）。\n\
+- `native__ask_user_choice` 仅用于「任务进行中、意图确实不明确、且必须用户拍板才能继续推进」的情形（如多分支取舍）。\n\
+- 不要把「推荐方案 / 后续建议」包装成需要用户即时选择的弹窗。";
+
 fn build_skill_guidance(skills: &[crate::agent::skill_adapter::SkillToolWrapper]) -> String {
     if skills.is_empty() {
         return String::new();
@@ -134,6 +145,12 @@ pub async fn run_pipeline(
         })
         .count();
     let mut total_usage: (u64, u64) = (0, 0);
+
+    // 跨步骤累积工具输出流：本会话所有子任务运行类工具（沙箱 pytest 等）的 stdout 聚合。
+    // 用于「运行测试」类步骤的客观校验——当模型把测试运行合并进更早的文件创建步骤时，
+    // 后续「运行单元测试」步骤自身的工具输出为空，但仍应以会话内已有的「passed」证据判定闭环，
+    // 避免误判「未闭环」→ 自动重试 → 最终标 skipped 的假失败（见 #20260914016）。
+    let session_tool_outputs: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
 
     // 单 Agent 强制串行（问题修复）：同一时刻仅执行一个子任务，消除多步并行导致的
     // 文件写入冲突、上下文黑域、恢复面板弹窗风暴、工具调用步骤归属错乱等问题。
@@ -227,6 +244,7 @@ pub async fn run_pipeline(
                 cancel,
                 tc.guidance.clone(),
                 &background,
+                &session_tool_outputs,
             )
         });
         let results = join_all(futures).await;
@@ -302,6 +320,50 @@ pub async fn run_pipeline(
         // 现对批内每个失败步都呈现恢复决策（逐一弹窗，前端依次处理），并对单步恢复次数
         // 设上限，防止无人值守 / 同因持续失败场景下的无限重试循环。
         if !failures.is_empty() {
+            // 全自动模式（计划审批=never）：步骤失败不弹恢复窗、不阻塞等待，
+            // 直接自动跳过该步，保持「零人工打断」语义与计划审批一致。前端可见 skipped 状态。
+            if cfg.plan_auto_approve_mode.as_str() == "never" {
+                // 全自动模式（计划审批=never）：失败不弹恢复窗、不阻塞等待。
+                // 改为「自动接管重试」——带诊断回灌让 Agent 自愈，累计达上限再自动跳过。
+                // 这才是「零人工打断 + 真正全自动」：不烦用户，但会自己修（含沙箱 selfheal 装依赖）。
+                for (i, out) in failures.into_iter() {
+                    let task_node_id = batch[i].clone();
+                    let (step, title) = node_step_title(graph, &task_node_id);
+                    let attempts = graph
+                        .get_node(&task_node_id)
+                        .and_then(|n| n.props.get("retryCount").and_then(|v| v.as_u64()))
+                        .unwrap_or(0) as usize
+                        + 1;
+                    if attempts > MAX_TASK_RECOVERY_ATTEMPTS {
+                        tracing::info!(
+                            "[agent] pipeline: 全自动模式(never) 步骤 {}/{} 自动重试达上限 {}，自动跳过",
+                            step, total, MAX_TASK_RECOVERY_ATTEMPTS
+                        );
+                        events::emit_status(app, &format!("步骤 {}/{}：全自动模式重试未闭环，自动跳过", step, total));
+                        graph.update_node(
+                            &task_node_id,
+                            json!({ "status": "skipped", "summary": "（全自动模式：自动重试未闭环，自动跳过）".to_string() }),
+                        );
+                        events::emit_step_finished(app, step, total, &title, true, "（全自动模式自动跳过）");
+                    } else {
+                        let guidance = format!(
+                            "上次执行未闭环，失败原因如下，请基于该诊断自主修复后重试（不要重复同样的做法）：\n{}",
+                            out.summary
+                        );
+                        tracing::info!(
+                            "[agent] pipeline: 全自动模式(never) 步骤 {}/{} 自动接管重试（带诊断回灌）",
+                            step, total
+                        );
+                        events::emit_status(app, &format!("步骤 {}/{}：全自动模式自动重试（带诊断）", step, total));
+                        graph.update_node(
+                            &task_node_id,
+                            json!({ "status": "pending", "retryCount": attempts, "guidance": guidance }),
+                        );
+                        events::emit_step_started(app, step, total, &title);
+                    }
+                }
+                continue; // 回到主循环，改回 pending 的步会重新拾起自愈；达上限的步标记 skipped
+            }
             for (i, out) in failures.into_iter() {
                 let task_node_id = batch[i].clone();
                 let (step, title) = node_step_title(graph, &task_node_id);
@@ -672,6 +734,9 @@ async fn run_subtask(
     // P2-1 滚动会话背景（来自 load_session_background）：非空时作为「会话背景摘要」段注入 user 消息，
     // 让工具型子任务感知「用户说过什么 / 已确认什么结论」，但不感知工具报文。空则不注入（保持现状）。
     background: &str,
+    // 跨步骤累积工具输出流（会话级，见 run_pipeline）。校验「运行结果须包含 X」类判定时，
+    // 与当前步骤自身输出合并传入校验器，使更早步骤已跑出的测试通过证据可被后续步骤复用。
+    session_tool_outputs: &Arc<Mutex<Vec<String>>>,
 ) -> (SubTaskOutput, (u64, u64)) {
     // 认知上下文绝对隔离：崭新的 messages，0 历史包袱。
     let t0 = Instant::now(); // 子任务级耗时基准（闭环日志用）
@@ -727,6 +792,24 @@ async fn run_subtask(
                         };
                         lines.push(req);
                     }
+                }
+                "stdout_contains" | "tool_output_contains" => {
+                    // 流类判定：强调「工具运行输出（stdout）」而非文件，避免执行端误去读不存在的 stdout 文件。
+                    let v = c.value.clone().unwrap_or_default();
+                    let cands: Vec<&str> = v
+                        .split('|')
+                        .map(|x| x.trim())
+                        .filter(|x| !x.is_empty())
+                        .collect();
+                    let req = if cands.len() > 1 {
+                        format!(
+                            "  - 工具运行输出（stdout）须包含以下任一关键词即可：{}",
+                            cands.join(" / ")
+                        )
+                    } else {
+                        format!("  - 工具运行输出（stdout）须包含：{v}")
+                    };
+                    lines.push(req);
                 }
                 "text_min_lines" => {
                     if let Some(t) = &c.target {
@@ -795,11 +878,13 @@ async fn run_subtask(
                 .unwrap_or_default()
         })
         .unwrap_or_default();
-    let system_prompt = if graph_digest.is_empty() {
+    let base_system = if graph_digest.is_empty() {
         cfg.system_prompt.clone()
     } else {
         format!("{}\n\n{}", cfg.system_prompt, graph_digest)
     };
+    // 全局交互准则前置（任务完成后不弹「推荐」选择窗，符合用户设定）。
+    let system_prompt = format!("{}\n\n{}", GLOBAL_AGENT_RULES, base_system);
     let mut messages: Vec<Value> = vec![
         json!({ "role": "system", "content": &system_prompt }),
         json!({
@@ -826,6 +911,7 @@ async fn run_subtask(
     let mut last_failed_command: Option<String> = None; // 最近一次失败工具的命令文本（供 classify_tier 风险词匹配）
     let mut changed_files: Vec<String> = Vec::new(); // 本子任务实际改动过的文件（2b-2 接管面板展示）
     let mut read_files: Vec<String> = Vec::new(); // 本子任务实际读取过的文件（阶段二图驱动 Read 边）
+    let mut tool_outputs: Vec<String> = Vec::new(); // 本子任务工具输出流聚合（校验器 stdout_contains 用）
 
     loop {
         // 每轮开始前检查取消：用户点击「停止」后，下一轮边界立即终止本子任务，
@@ -1065,10 +1151,22 @@ async fn run_subtask(
                         }
                     })
                     .collect();
+                // 合并本步骤输出与会话累积输出：当测试已在更早步骤跑通（模型合并执行），
+                // 后续「运行测试」步骤自身输出为空时，仍以会话内的 passed 证据判定闭环，
+                // 避免误判未闭环 → 自动重试 → 标 skipped 的假失败。
+                let mut combined_outputs = tool_outputs.clone();
+                if let Ok(prev) = session_tool_outputs.lock() {
+                    for o in prev.iter() {
+                        if !combined_outputs.contains(o) {
+                            combined_outputs.push(o.clone());
+                        }
+                    }
+                }
                 let result = crate::agent::verifier::verify_task(
                     &task,
                     ctx.workspace.as_deref(),
                     &actual_written,
+                    &combined_outputs,
                 );
                 if !result.met {
                     success = false;
@@ -1095,6 +1193,14 @@ async fn run_subtask(
             } else {
                 Vec::new()
             };
+            // 本步骤工具输出流并入会话累积（供后续步骤的「运行结果须包含 X」类校验复用）。
+            if let Ok(mut prev) = session_tool_outputs.lock() {
+                for o in &tool_outputs {
+                    if !prev.contains(o) {
+                        prev.push(o.clone());
+                    }
+                }
+            }
             let final_summary = if summary.is_empty() {
                 "子任务未产出有效结果（空响应）".to_string()
             } else if !success && !verify_detail.is_empty() {
@@ -1140,6 +1246,14 @@ async fn run_subtask(
                 "[agent] pipeline: 子任务 step={} 超过 {} 个工具轮仍未收敛（总轮 {}）",
                 task.step, MAX_SUBTASK_ITERATIONS, round,
             );
+            // 超轮上限也把已产出输出并入会话累积，避免后续步骤因缺证据误判。
+            if let Ok(mut prev) = session_tool_outputs.lock() {
+                for o in &tool_outputs {
+                    if !prev.contains(o) {
+                        prev.push(o.clone());
+                    }
+                }
+            }
             return (
                 SubTaskOutput {
                     step: task.step,
@@ -1214,6 +1328,13 @@ async fn run_subtask(
         for p in &stats.read_files {
             if !read_files.contains(p) {
                 read_files.push(p.clone());
+            }
+        }
+        // 采集本轮工具输出流（运行类工具 stdout 等），供校验器 stdout_contains 核验
+        // 「运行结果须包含 X」类判定，避免误判成文件导致恢复死循环。
+        for o in &stats.tool_outputs {
+            if !tool_outputs.contains(o) {
+                tool_outputs.push(o.clone());
             }
         }
 

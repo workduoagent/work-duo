@@ -39,28 +39,9 @@ const DEFAULT_ENV: &str = "default";
 /// 默认 Python 版本：调用方未指定 `python_version` 时使用。
 const DEFAULT_PYTHON: &str = "3.11";
 
-/// 允许运行时自动按需安装的常用数据科学库白名单（防止任意 pip 安装失控）。
-/// Agent 脚本因 `ModuleNotFoundError` 失败时，仅当缺失模块命中此表才会自动安装并重试，
-/// 这与 `init_mamba_env`「纯净环境、按需追加依赖」的设计初衷一致（见模块注释）。
-const AUTO_INSTALL_ALLOW: &[&str] = &[
-    "requests",
-    "numpy",
-    "pandas",
-    "openpyxl",
-    "xlsxwriter",
-    "scipy",
-    "statsmodels",
-    "matplotlib",
-    "seaborn",
-    "yfinance",
-    "ccxt",
-    "scikit-learn",
-    "sklearn",
-    "pyyaml",
-    "yaml",
-    "json5",
-    "tqdm",
-];
+/// 沙箱依赖安装：不做白名单限制。任何检测到的缺失模块都交由 selfheal 自动安装
+/// （`micromamba install`），用户明确：沙箱就该自由装依赖，限白名单等于阉割沙箱。
+
 
 /// 单个已安装依赖的元信息（供 `list_mamba_packages` 结构化返回）。
 #[derive(Serialize)]
@@ -151,10 +132,13 @@ ssl_verify: true
 ///
 /// `cwd` 为可选工作目录（经由 `CreateProcess` 传入，原生支持 Unicode，不进入
 /// micromamba 的 `cmd` 命令行，因此即使含中文也安全）。
+/// `extra_envs` 为附加环境变量（如 `PYTHONPATH`），透传给被执行的 python 进程，
+/// 用于修复「脚本被复制到临时目录后同目录 import 失效」等问题。
 async fn run_sidecar(
     app: &AppHandle,
     args: Vec<String>,
     cwd: Option<&Path>,
+    extra_envs: &[(String, String)],
 ) -> Result<(String, String, Option<i32>), String> {
     let mut cmd = app
         .shell()
@@ -163,6 +147,9 @@ async fn run_sidecar(
         .args(args);
     if let Some(dir) = cwd {
         cmd = cmd.current_dir(dir);
+    }
+    for (k, v) in extra_envs {
+        cmd = cmd.env(k, v);
     }
     let (mut rx, _child) = cmd
         .spawn()
@@ -239,7 +226,7 @@ pub async fn init_mamba_env(
         "-y".into(),
     ]);
 
-    let (stdout, stderr, code) = run_sidecar(&app, args, None).await?;
+    let (stdout, stderr, code) = run_sidecar(&app, args, None, &[]).await?;
     match code {
         Some(0) => Ok(format!(
             "Python 环境（{env}）创建完成（纯净环境，仅含 python={py}）。\n{stdout}"
@@ -274,7 +261,7 @@ pub async fn list_mamba_packages(
     let mut args = global_args(&mamba_root, &rc);
     args.extend(["list".into(), "-n".into(), env.clone()]);
 
-    let (stdout, stderr, code) = run_sidecar(&app, args, None).await?;
+    let (stdout, stderr, code) = run_sidecar(&app, args, None, &[]).await?;
     match code {
         Some(0) => parse_package_list(&stdout),
         Some(c) => Err(format!("查询依赖列表失败（退出码 {c}）：\n{stderr}")),
@@ -317,7 +304,7 @@ pub async fn install_mamba_packages(
         args.push(p.clone());
     }
 
-    let (stdout, stderr, code) = run_sidecar(&app, args, None).await?;
+    let (stdout, stderr, code) = run_sidecar(&app, args, None, &[]).await?;
     match code {
         Some(0) => Ok(format!(
             "依赖安装完成：{}\n{}",
@@ -363,7 +350,7 @@ pub async fn uninstall_mamba_packages(
         args.push(p.clone());
     }
 
-    let (stdout, stderr, code) = run_sidecar(&app, args, None).await?;
+    let (stdout, stderr, code) = run_sidecar(&app, args, None, &[]).await?;
     match code {
         Some(0) => Ok(format!("依赖移除完成：{}\n{}", packages.join(", "), stdout)),
         Some(c) => Err(format!("依赖移除失败（退出码 {c}）：\n{stderr}")),
@@ -410,7 +397,7 @@ pub async fn reset_mamba_env(
             env.clone(),
             "-y".into(),
         ]);
-        let (_, stderr, code) = run_sidecar(&app, rm_args, None).await?;
+        let (_, stderr, code) = run_sidecar(&app, rm_args, None, &[]).await?;
         match code {
             Some(0) => {}
             Some(c) => {
@@ -431,7 +418,7 @@ pub async fn reset_mamba_env(
         format!("python={py}"),
         "-y".into(),
     ]);
-    let (stdout, stderr, code) = run_sidecar(&app, create_args, None).await?;
+    let (stdout, stderr, code) = run_sidecar(&app, create_args, None, &[]).await?;
     match code {
         Some(0) => Ok(format!(
             "{env} 已重置为纯净环境（仅 python={py}），所有旧依赖已清空。\n{stdout}"
@@ -477,8 +464,9 @@ fn normalize_pkg(name: &str) -> String {
     .to_string()
 }
 
-/// 从脚本 stderr 中解析 `ModuleNotFoundError: No module named 'X'`，返回命中自动安装
-/// 白名单的顶层模块名集合（如 `sklearn.linear_model` → `sklearn`）。无命中则返回 None。
+/// 从脚本 stderr 中解析 `ModuleNotFoundError: No module named 'X'`，返回检测到的缺失
+/// 顶层模块名集合（如 `sklearn.linear_model` → `sklearn`）。沙箱对依赖安装不做白名单限制，
+/// 任何检测到的缺失模块都会交由 selfheal 自动安装。
 fn missing_modules(stderr: &str) -> Option<Vec<String>> {
     let mut found: std::collections::BTreeSet<String> = Default::default();
     for line in stderr.lines() {
@@ -499,9 +487,7 @@ fn missing_modules(stderr: &str) -> Option<Vec<String>> {
             if top.is_empty() {
                 continue;
             }
-            if AUTO_INSTALL_ALLOW.contains(&top) {
-                found.insert(normalize_pkg(top));
-            }
+            found.insert(normalize_pkg(top));
         }
     }
     if found.is_empty() {
@@ -524,6 +510,39 @@ fn build_run_args(mamba_root: &Path, rc: &Path, env: &str, tmp_path: &Path) -> V
     args
 }
 
+/// 构造注入 python 运行的 `PYTHONPATH` 环境变量。
+///
+/// 背景：脚本被复制到 `run_tmp` 后由 `python <tmp>` 执行，Python 的 `sys.path[0]`
+/// 指向临时目录而非原始目录，导致「同目录 `import calc`」这类兄弟模块导入失效
+/// （`ModuleNotFoundError: No module named 'calc'`）。
+///
+/// 修复：把「脚本原始所在目录」与「有效工作目录（通常为工作空间根）」追加进模块搜索路径，
+/// 等价于「在原始位置直接运行脚本」的语义，使 `import` 同目录/工作空间级模块恢复可用。
+fn pythonpath_env(
+    original_parent: Option<&Path>,
+    cwd: Option<&Path>,
+) -> Result<Vec<(String, String)>, String> {
+    let mut dirs: Vec<PathBuf> = Vec::new();
+    if let Some(p) = original_parent {
+        if !dirs.iter().any(|d| d == p) {
+            dirs.push(p.to_path_buf());
+        }
+    }
+    if let Some(c) = cwd {
+        if !dirs.iter().any(|d| d == c) {
+            dirs.push(c.to_path_buf());
+        }
+    }
+    if dirs.is_empty() {
+        return Ok(Vec::new());
+    }
+    let joined = std::env::join_paths(&dirs)
+        .map_err(|e| format!("构造 PYTHONPATH 失败：{e}"))?
+        .to_string_lossy()
+        .to_string();
+    Ok(vec![("PYTHONPATH".to_string(), joined)])
+}
+
 /// 静默向指定环境安装依赖（复用 micromamba install，不暴露 Tauri 命令通道）。
 async fn install_packages_silent(
     app: &AppHandle,
@@ -542,7 +561,7 @@ async fn install_packages_silent(
     for s in &specs {
         args.push(s.clone());
     }
-    let (_stdout, stderr, code) = run_sidecar(app, args, None).await?;
+    let (_stdout, stderr, code) = run_sidecar(app, args, None, &[]).await?;
     match code {
         Some(0) => Ok(specs.join(", ")),
         Some(c) => Err(format!("依赖安装失败（退出码 {c}）：\n{stderr}")),
@@ -550,10 +569,10 @@ async fn install_packages_silent(
     }
 }
 
-/// 在某环境中执行脚本，并在因缺失白名单内第三方库失败时**自动按需安装并重试一次**。
+/// 在某环境中执行脚本，并在因缺失第三方库失败时**自动按需安装并重试一次**。
 ///
 /// 这是「纯净环境 + 按需追加依赖」设计的最终闭环：Agent 直接 `import pandas` 即可，
-/// 运行时首次缺失时透明安装（仅限白名单），无需用户或模型手动安装系统包。
+/// 运行时首次缺失时透明安装（不限白名单，任何缺失模块都装），无需用户或模型手动安装系统包。
 /// 非库缺失类错误（语法错 / 逻辑错 / 网络错）不触发安装，原样返回。
 async fn run_script_with_selfheal(
     app: &AppHandle,
@@ -563,9 +582,10 @@ async fn run_script_with_selfheal(
     env: &str,
     tmp_path: &Path,
     cwd: Option<&Path>,
+    extra_envs: &[(String, String)],
 ) -> Result<String, String> {
     let args = build_run_args(mamba_root, rc, env, tmp_path);
-    let (stdout, stderr, code) = run_sidecar(app, args, cwd).await?;
+    let (stdout, stderr, code) = run_sidecar(app, args, cwd, extra_envs).await?;
     if code != Some(0) {
         if let Some(mods) = missing_modules(&stderr) {
             tracing::info!(
@@ -576,7 +596,7 @@ async fn run_script_with_selfheal(
                 Ok(specs) => {
                     tracing::info!("[agent] run_python: 已自动安装依赖（{}），重试执行", specs);
                     let args2 = build_run_args(mamba_root, rc, env, tmp_path);
-                    let (o2, e2, c2) = run_sidecar(app, args2, cwd).await?;
+                    let (o2, e2, c2) = run_sidecar(app, args2, cwd, extra_envs).await?;
                     return match c2 {
                         Some(0) => Ok(o2),
                         Some(c) => Err(format!("脚本执行失败（退出码 {c}）：\n{e2}")),
@@ -647,6 +667,8 @@ pub async fn run_python_script(
     // 关键：全局选项（root-prefix / rc-file）必须位于 `run` 子命令及 `python` 之前，
     // 否则会被当作传给 python 的参数而失效，micromamba 回退到 AppData 默认前缀。
     // 执行与缺失库自愈统一走 run_script_with_selfheal（含临时脚本清理）。
+    // 注入 PYTHONPATH：脚本被复制到 run_tmp 后，同目录 `import` 会失效，需把原始目录加回搜索路径。
+    let extra_envs = pythonpath_env(original_parent.as_deref(), None)?;
     let result = run_script_with_selfheal(
         &app,
         mgr.inner(),
@@ -655,6 +677,7 @@ pub async fn run_python_script(
         &env,
         &tmp_path,
         original_parent.as_deref(),
+        &extra_envs,
     )
     .await;
     let _ = std::fs::remove_file(&tmp_path);
@@ -698,6 +721,9 @@ pub async fn run_python_in_sandbox(
 
     // 执行与缺失库自愈统一走 run_script_with_selfheal（含临时脚本清理）。
     // 有效工作目录：Agent 注入的 cwd（通常为工作空间根）优先；未提供时回退到脚本所在目录（UI 行为）。
+    // 注入 PYTHONPATH：脚本被复制到 run_tmp 后，同目录 `import` 会失效，需把原始目录与
+    // 有效工作目录一并加回模块搜索路径，恢复「同目录 import」语义。
+    let extra_envs = pythonpath_env(original_parent.as_deref(), cwd)?;
     let result = run_script_with_selfheal(
         app,
         mgr,
@@ -706,6 +732,7 @@ pub async fn run_python_in_sandbox(
         &env,
         &tmp_path,
         cwd.or(original_parent.as_deref()),
+        &extra_envs,
     )
     .await;
     let _ = std::fs::remove_file(&tmp_path);
@@ -736,7 +763,7 @@ async fn build_env_info(
 
     let mut args = global_args(mamba_root, rc);
     args.extend(["list".into(), "-n".into(), name.to_string()]);
-    let (stdout, _stderr, code) = run_sidecar(app, args, None).await?;
+    let (stdout, _stderr, code) = run_sidecar(app, args, None, &[]).await?;
     if code != Some(0) {
         // list 失败（极少）时退化为「存在但信息未知」，避免卡片整体缺失。
         return Ok(EnvInfo {
@@ -824,7 +851,7 @@ pub async fn delete_mamba_env(
         env_name.clone(),
         "-y".into(),
     ]);
-    let (_, stderr, code) = run_sidecar(&app, args, None).await?;
+    let (_, stderr, code) = run_sidecar(&app, args, None, &[]).await?;
     match code {
         Some(0) => Ok(format!("环境「{}」已删除。", env_name)),
         Some(c) => Err(format!("删除环境失败（退出码 {c}）：\n{stderr}")),
@@ -854,10 +881,36 @@ pub async fn ensure_default_env(app: &AppHandle) -> Result<(), String> {
         format!("python={}", DEFAULT_PYTHON),
         "-y".into(),
     ]);
-    let (_, stderr, code) = run_sidecar(app, args, None).await?;
+    let (_, stderr, code) = run_sidecar(app, args, None, &[]).await?;
     match code {
         Some(0) => Ok(()),
         Some(c) => Err(format!("创建默认环境失败（退出码 {c}）：\n{stderr}")),
         None => Err(format!("创建默认环境进程异常终止，未收到退出码：\n{stderr}")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pythonpath_env_includes_original_parent_and_cwd_without_duplicates() {
+        let parent = Path::new("E:/WorkDuoTest");
+        let cwd = Path::new("E:/WorkDuoTest");
+        // 原始目录与 cwd 相同 → 只出现一次，且键为 PYTHONPATH。
+        let envs = pythonpath_env(Some(parent), Some(cwd)).unwrap();
+        assert_eq!(envs.len(), 1);
+        assert_eq!(envs[0].0, "PYTHONPATH");
+        assert_eq!(envs[0].1, "E:/WorkDuoTest");
+
+        // 原始目录与 cwd 不同 → 两者都进入，顺序为 原始目录在前。
+        let cwd2 = Path::new("E:/ws");
+        let envs2 = pythonpath_env(Some(parent), Some(cwd2)).unwrap();
+        assert_eq!(envs2.len(), 1);
+        assert_eq!(envs2[0].1, "E:/WorkDuoTest;E:/ws");
+
+        // 两者皆无 → 空列表（调用方据此跳过注入）。
+        let none = pythonpath_env(None, None).unwrap();
+        assert!(none.is_empty());
     }
 }

@@ -498,6 +498,27 @@ pub(crate) async fn trigger_background_compaction(
                     .iter()
                     .map(|r| r.raw_messages_json.chars().count())
                     .sum();
+                // 方案B（快速止血）：压缩把旧轮次移出活跃窗口、减小下一轮实际发送量，
+                // 但会话表累计 token 此前是 `+=` 纯累加、只增不减，导致顶栏环形图「上下文占比」
+                // 永只增不降、且压缩后不回落。这里把估算节省量从累计 prompt token 回退，
+                // 使环形图随压缩下降；前端监听 `agent-context-compacted` 事件重读会话表取最新值。
+                let saved = (compacted_chars / 4) as i64;
+                if let Err(e) = sqlx::query(
+                    "UPDATE agent_conversation_session \
+                     SET total_prompt_tokens = MAX(0, COALESCE(total_prompt_tokens, 0) - ?), \
+                         updated_at = ? \
+                     WHERE id = ?",
+                )
+                .bind(saved)
+                .bind(now_ms())
+                .bind(&sid)
+                .execute(&pool)
+                .await
+                {
+                    tracing::warn!("[Compactor] 回退累计 prompt token 失败：{e}");
+                } else {
+                    tracing::info!("[Compactor] 回退累计 prompt token -{saved}（session={sid}）");
+                }
                 events::emit_status(&app_bg, "历史对话已自动压缩进上下文摘要");
                 // 结构化压缩完成事件（替代纯字符串 status，供记忆宫殿/上下文健康视图消费）。
                 events::emit_context_compacted(

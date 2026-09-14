@@ -658,6 +658,10 @@ pub(crate) struct ToolRoundStats {
     /// 本轮文件读取类工具实际读过的路径（read_file 的 path 去重），
     /// 供 `run_subtask` 聚合为 `SubTaskOutput.read_files`，阶段二图驱动写 `Read` 边（记录「哪步读了哪些文件」）。
     pub read_files: std::collections::HashSet<String>,
+    /// 本轮全部工具执行的输出文本（运行类工具即 stdout 流），非空去重聚合，
+    /// 供 `run_subtask` 聚合为 `SubTaskOutput` 外的局部 `tool_outputs`，驱动校验器
+    /// `stdout_contains` / `tool_output_contains`（#9 增强：校验工具输出流而非文件）。
+    pub tool_outputs: Vec<String>,
 }
 
 /// 工具「操作类型」：供前端一行式工具行展示动词。
@@ -795,6 +799,7 @@ pub(crate) async fn run_tool_calls_round(
     let mut last_failed_command: Option<String> = None;
     let mut iter_changed_files: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut iter_read_files: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut iter_tool_outputs: Vec<String> = Vec::new();
 
     for tc in &outcome.tool_calls {
         let (call_id, tool_name, args) = match parse_tool_call(tc) {
@@ -995,6 +1000,11 @@ pub(crate) async fn run_tool_calls_round(
                 iter_read_files.insert(p.clone());
             }
         }
+        // 工具输出流：收集非空结果文本（运行类工具即 stdout），去重聚合后供校验器
+        // `stdout_contains` 核验——避免 planner 把「输出须包含 X」误判成「文件须包含 X」而永久失败。
+        if !result_text.is_empty() && !iter_tool_outputs.iter().any(|o| o == &result_text) {
+            iter_tool_outputs.push(result_text.clone());
+        }
         events::emit_tool_finished(app, &ToolStep {
             call_id: step_id.clone(),
             tool_name: tool_name.clone(),
@@ -1040,6 +1050,7 @@ pub(crate) async fn run_tool_calls_round(
         last_failed_command,
         changed_files: iter_changed_files,
         read_files: iter_read_files,
+        tool_outputs: iter_tool_outputs,
     }
 }
 

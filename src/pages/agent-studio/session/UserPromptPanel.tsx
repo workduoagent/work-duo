@@ -9,11 +9,21 @@
  *
  * 单 Agent 已强制串行，同一时刻只会有一个 category 活跃，三套通知 key 互不相冲。
  */
-import { useEffect, useRef, useState } from 'react'
-import { AlertTriangle, Check, X, RotateCcw, SkipForward, Hand, HelpCircle } from 'lucide-react'
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import {
+  AlertTriangle,
+  Check,
+  X,
+  RotateCcw,
+  SkipForward,
+  Hand,
+  HelpCircle,
+  ChevronDown,
+} from 'lucide-react'
 import { Button, Input } from '@/components/ui'
 import { useNotify } from '@/components/ui/notify'
 import { notifyOSWhenHidden } from '@/utils/osNotify'
+import { MarkdownRenderer } from '@/components/markdown/MarkdownRenderer'
 import type { ApprovalRequest, ChoiceRequest, PlanApprovalRequest, RecoveryRequest } from './types'
 
 interface UserPromptPanelProps {
@@ -40,6 +50,72 @@ interface UserPromptPanelProps {
    * （仅一行原因 + 决策按钮，不含输入框/改方案/详情——这些已在侧栏）。
    */
   compact?: boolean
+}
+
+/**
+ * HITL 弹窗长文案夹层（唯一滚动点）。
+ *
+ * 规则：
+ * 1. 弹窗整卡不滚、按钮钉底 —— 滚动只发生在本组件 body；
+ * 2. 内容放得下收起高度 → 不渲染展开按钮、不限高（无滚动条）；
+ * 3. 内容超高 → 收起态限高可滚；展开后撑满弹窗剩余高度（仍只有这一处滚）。
+ */
+function HitlClamp({
+  children,
+  className = '',
+  collapsedHeight = 120,
+  expandable = false,
+  expandLabel = '展开详情',
+}: {
+  children: ReactNode
+  className?: string
+  /** 收起态最大高度（px）。 */
+  collapsedHeight?: number
+  expandable?: boolean
+  expandLabel?: string
+}) {
+  const bodyRef = useRef<HTMLDivElement>(null)
+  const [open, setOpen] = useState(false)
+  const [overflowing, setOverflowing] = useState(false)
+
+  useLayoutEffect(() => {
+    const el = bodyRef.current
+    if (!el) return
+    const measure = () => {
+      // max-height 不影响 scrollHeight，这里读的是内容真实高度
+      setOverflowing(el.scrollHeight > collapsedHeight + 2)
+    }
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    if (el.firstElementChild) ro.observe(el.firstElementChild)
+    return () => ro.disconnect()
+  }, [collapsedHeight, children])
+
+  const showToggle = expandable && (overflowing || open)
+  // 收起且超高才限高；放得下或已展开都不设 inline max-height（展开靠 flex 撑满）
+  const bodyStyle =
+    !open && overflowing ? { maxHeight: collapsedHeight } : undefined
+
+  return (
+    <div
+      className={`hitl-clamp${open ? ' is-open' : ''}${className ? ` ${className}` : ''}`}
+    >
+      <div ref={bodyRef} className="hitl-clamp__body" style={bodyStyle}>
+        {children}
+      </div>
+      {showToggle && (
+        <button
+          type="button"
+          className="hitl-clamp__toggle"
+          onClick={() => setOpen((v) => !v)}
+        >
+          {open ? '收起' : expandLabel}
+          <ChevronDown size={12} className={`hitl-clamp__caret${open ? ' is-open' : ''}`} />
+        </button>
+      )}
+    </div>
+  )
 }
 
 /** 从入参中提取最关键的授权内容行（避免把整段 JSON 堆进通知）。 */
@@ -124,9 +200,13 @@ export function UserPromptPanel({
             智能体 <b>{agentName || '未知智能体'}</b> 请求调用工具{' '}
             <b className="agent-approval-note__tool">{approval.toolName}</b>，需要你的授权。
           </p>
-          <p className="agent-approval-note__desc">
-            {approval.description || '该操作可能影响你的文件或系统，请确认是否放行。'}
-          </p>
+          <HitlClamp collapsedHeight={120} expandable expandLabel="展开描述">
+            <div className="agent-approval-note__desc agent-approval-note__desc--md">
+              <MarkdownRenderer
+                content={approval.description || '该操作可能影响你的文件或系统，请确认是否放行。'}
+              />
+            </div>
+          </HitlClamp>
           <ul className="agent-approval-note__args">
             {lines.map((l, i) => (
               <li key={i}>
@@ -308,9 +388,9 @@ function RecoveryContent({
   if (compact) {
     return (
       <div className="agent-recovery-note agent-recovery-note--compact">
-        <span className="agent-recovery-note__compact-reason">
+        <span className="agent-recovery-note__compact-reason" title={reason}>
           <AlertTriangle size={14} />
-          {reason}
+          <span className="agent-recovery-note__compact-text">{reason}</span>
         </span>
         <div className="agent-recovery-note__actions">
           <Button
@@ -363,7 +443,16 @@ function RecoveryContent({
       </p>
       <div className="agent-recovery-note__reason">
         <span className="agent-recovery-note__label">受阻原因：</span>
-        <span className="agent-recovery-note__value">{reason}</span>
+        <HitlClamp
+          className="agent-recovery-note__clamp"
+          collapsedHeight={120}
+          expandable
+          expandLabel="展开完整原因"
+        >
+          <div className="agent-recovery-note__value agent-recovery-note__value--md">
+            <MarkdownRenderer content={reason} />
+          </div>
+        </HitlClamp>
       </div>
       <div className="agent-recovery-note__tip">
         工具栈 / 已改动文件 / 失败命令详情见右侧「接管」面板
@@ -371,7 +460,11 @@ function RecoveryContent({
       {summary !== '（无）' && (
         <div className="agent-recovery-note__summary">
           <span className="agent-recovery-note__label">已产出：</span>
-          <span className="agent-recovery-note__value">{summary}</span>
+          <HitlClamp className="agent-recovery-note__clamp" collapsedHeight={88} expandable expandLabel="展开产出">
+            <div className="agent-recovery-note__value agent-recovery-note__value--md">
+              <MarkdownRenderer content={summary} />
+            </div>
+          </HitlClamp>
         </div>
       )}
       {isB && (
@@ -453,7 +546,11 @@ function ChoiceContent({
   const trimmed = customText.trim()
   return (
     <div className="agent-choice-note">
-      <p className="agent-choice-note__question">{choice.question}</p>
+      <HitlClamp collapsedHeight={96} expandable expandLabel="展开问题">
+        <div className="agent-choice-note__question agent-choice-note__question--md">
+          <MarkdownRenderer content={choice.question} />
+        </div>
+      </HitlClamp>
       <div className="agent-choice-note__options">
         {choice.options.map((o) => (
           <button
@@ -516,26 +613,30 @@ function PlanApprovalContent({
   })
   return (
     <div className="agent-plan-note">
-      <p className="agent-plan-note__summary">{planApproval.goalSummary || '（无目标描述）'}</p>
-      <ul className="agent-plan-note__steps">
-        {planApproval.tasks.map((t) => (
-          <li key={t.step} className="agent-plan-note__step">
-            <span className="agent-plan-note__step-idx">{t.step}</span>
-            <div className="agent-plan-note__step-body">
-              <span className="agent-plan-note__step-title">{t.title}</span>
-              {t.description && <span className="agent-plan-note__step-desc">{t.description}</span>}
-              {t.dependsOn && t.dependsOn.length > 0 && (
-                <span className="agent-plan-note__step-dep">
-                  依赖：步骤{' '}
-                  {t.dependsOn
-                    .map((id) => stepByTaskId.get(Number(id)) ?? id)
-                    .join('、')}
-                </span>
-              )}
-            </div>
-          </li>
-        ))}
-      </ul>
+      <div className="agent-plan-note__summary agent-plan-note__summary--md">
+        <MarkdownRenderer content={planApproval.goalSummary || '（无目标描述）'} />
+      </div>
+      <HitlClamp collapsedHeight={168} expandable expandLabel="展开全部步骤">
+        <ul className="agent-plan-note__steps">
+          {planApproval.tasks.map((t) => (
+            <li key={t.step} className="agent-plan-note__step">
+              <span className="agent-plan-note__step-idx">{t.step}</span>
+              <div className="agent-plan-note__step-body">
+                <span className="agent-plan-note__step-title">{t.title}</span>
+                {t.description && <span className="agent-plan-note__step-desc">{t.description}</span>}
+                {t.dependsOn && t.dependsOn.length > 0 && (
+                  <span className="agent-plan-note__step-dep">
+                    依赖：步骤{' '}
+                    {t.dependsOn
+                      .map((id) => stepByTaskId.get(Number(id)) ?? id)
+                      .join('、')}
+                  </span>
+                )}
+              </div>
+            </li>
+          ))}
+        </ul>
+      </HitlClamp>
       <Input.TextArea
         className="agent-plan-note__revise-input"
         value={reviseText}

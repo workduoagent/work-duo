@@ -44,43 +44,8 @@ const NPM_MIRROR: &str = "https://registry.npmmirror.com";
 /// 默认本地缓存目录（Bun 下载依赖的 cache 落在此处，保持绿便携、不落用户 HOME）。
 const BUN_CACHE_DIR: &str = ".bun";
 
-/// 允许运行时自动按需安装的常用 npm 包白名单（防止任意 `bun add` 失控）。
-/// Agent 脚本因缺失包失败时，仅当缺失模块命中此表才会自动安装并重试。
-const AUTO_INSTALL_ALLOW: &[&str] = &[
-    "lodash",
-    "axios",
-    "zod",
-    "chalk",
-    "dayjs",
-    "moment",
-    "uuid",
-    "nanoid",
-    "fs-extra",
-    "got",
-    "node-fetch",
-    "puppeteer",
-    "cheerio",
-    "csv-parse",
-    "csv-stringify",
-    "xlsx",
-    "exceljs",
-    "pdf-lib",
-    "sharp",
-    "commander",
-    "yargs",
-    "express",
-    "koa",
-    "ws",
-    "socket.io",
-    "dotenv",
-    "semver",
-    "jszip",
-    "archiver",
-    "marked",
-    "highlight.js",
-    "mathjs",
-    "playwright",
-];
+/// 沙箱依赖安装：不做白名单限制。任何检测到的缺失包都交由 selfheal 自动安装
+/// （`bun add`），用户明确：沙箱就该自由装依赖，限白名单等于阉割沙箱。
 
 /// 单个已安装依赖的元信息（供 `list_bun_packages` 结构化返回）。
 #[derive(Serialize)]
@@ -175,7 +140,11 @@ async fn run_bun_sidecar(
         .map_err(|e| format!("准备 bun sidecar 失败：{e}"))?
         .args(args)
         .env("BUN_INSTALL", bun_root.join(BUN_CACHE_DIR).to_string_lossy().to_string())
-        .env("BUN_CONFIG_REGISTRY", NPM_MIRROR);
+        .env("BUN_CONFIG_REGISTRY", NPM_MIRROR)
+        // NODE_PATH 指向 bun_root/node_modules：运行时自动安装的依赖（bun add 落入此处）
+        // 才能被任意位置的脚本 `import` 命中——脚本原地执行后不再沿自身目录向上回溯到 run_tmp，
+        // 必须靠 NODE_PATH 兜底包解析（Bun 兼容 Node 的 NODE_PATH 回退解析）。
+        .env("NODE_PATH", bun_root.join("node_modules").to_string_lossy().to_string());
     if let Some(dir) = cwd {
         cmd = cmd.current_dir(dir);
     }
@@ -378,7 +347,7 @@ pub async fn delete_bun_env(
     Err("Node 沙箱为单一运行时环境（Bun 二进制即运行时），不可删除。如需清空依赖请使用「重置」。".into())
 }
 
-/// 从脚本 stderr 中解析缺失包名（命中白名单才返回），支持 Bun 常见报错格式。
+/// 从脚本 stderr 中解析缺失包名（任何检测到的缺失包都返回，不做白名单过滤），支持 Bun 常见报错格式。
 fn missing_modules(stderr: &str) -> Option<Vec<String>> {
     let mut found: BTreeSet<String> = Default::default();
     for line in stderr.lines() {
@@ -391,7 +360,7 @@ fn missing_modules(stderr: &str) -> Option<Vec<String>> {
             if let Some(rest) = line.strip_prefix(pat) {
                 if let Some(name) = rest.split('"').next() {
                     let name = name.trim();
-                    if !name.is_empty() && AUTO_INSTALL_ALLOW.contains(&name) {
+                    if !name.is_empty() {
                         found.insert(name.to_string());
                     }
                 }
@@ -424,7 +393,7 @@ async fn install_packages_silent(
     }
 }
 
-/// 在某环境中执行脚本，并在因缺失白名单内依赖失败时**自动按需安装并重试一次**。
+/// 在某环境中执行脚本，并在因缺失依赖失败时**自动按需安装并重试一次**（不限白名单）。
 async fn run_script_with_selfheal(
     app: &AppHandle,
     bun_root: &Path,
@@ -478,25 +447,13 @@ pub async fn run_node_script(
     }
     let original_parent = script.parent().map(|p| p.to_path_buf());
 
-    // 复制脚本到 bun_root/run_tmp/，使 Bun 的 node_modules 解析（沿脚本目录向上回溯）
-    // 能命中 bun_root/node_modules（与 Python 的 run_tmp 思路一致）；同时 cwd 设为原脚本所在目录，
-    // 便于脚本内相对路径文件操作仍按原位置解析。
-    let run_tmp = bun_root.join("run_tmp");
-    std::fs::create_dir_all(&run_tmp).map_err(|e| format!("创建脚本运行临时目录失败：{e}"))?;
-    let stamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    let ext = script
-        .extension()
-        .and_then(|e| e.to_str())
-        .map(|e| format!(".{}", e.to_lowercase()))
-        .unwrap_or_else(|| ".mjs".into());
-    let tmp_path = run_tmp.join(format!("__sandbox_run_{stamp}{ext}"));
-    std::fs::copy(&script, &tmp_path).map_err(|e| format!("复制脚本到临时文件失败：{e}"))?;
-
-    let result = run_script_with_selfheal(&app, &bun_root, &tmp_path, original_parent.as_deref()).await;
-    let _ = std::fs::remove_file(&tmp_path);
+    // 关键修复：改为「原地执行」脚本，不再复制到 run_tmp。
+    // 旧实现把脚本复制到 bun_root/run_tmp/ 后运行，导致 ESM 相对导入
+    // （如 `import { add } from './calc.js'`）按临时目录解析，同目录兄弟模块永远找不到。
+    // 原地执行后，相对导入按脚本真实所在目录解析，恢复「同目录 import」语义；
+    // 已安装依赖（bun_root/node_modules）的解析由 run_bun_sidecar 注入的 NODE_PATH 兜底。
+    // cwd 设为原脚本所在目录，便于脚本内相对路径文件操作仍按原位置解析。
+    let result = run_script_with_selfheal(&app, &bun_root, &script, original_parent.as_deref()).await;
     result
 }
 
@@ -517,23 +474,10 @@ pub async fn run_node_in_sandbox(
     }
     let original_parent = script.parent().map(|p| p.to_path_buf());
 
-    let run_tmp = bun_root.join("run_tmp");
-    std::fs::create_dir_all(&run_tmp).map_err(|e| format!("创建脚本运行临时目录失败：{e}"))?;
-    let stamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    let ext = script
-        .extension()
-        .and_then(|e| e.to_str())
-        .map(|e| format!(".{}", e.to_lowercase()))
-        .unwrap_or_else(|| ".mjs".into());
-    let tmp_path = run_tmp.join(format!("__sandbox_run_{stamp}{ext}"));
-    std::fs::copy(&script, &tmp_path).map_err(|e| format!("复制脚本到临时文件失败：{e}"))?;
-
+    // 关键修复：与原地执行一致（见 run_node_script）。不再复制到 run_tmp，
+    // 否则同目录相对导入（./calc.js）会按临时目录解析而失败；已安装依赖解析由 NODE_PATH 兜底。
     // 有效工作目录：Agent 注入的 cwd（通常为工作空间根）优先；未提供时回退到脚本所在目录（UI 行为）。
-    let result = run_script_with_selfheal(app, &bun_root, &tmp_path, cwd.or(original_parent.as_deref())).await;
-    let _ = std::fs::remove_file(&tmp_path);
+    let result = run_script_with_selfheal(app, &bun_root, &script, cwd.or(original_parent.as_deref())).await;
     result
 }
 

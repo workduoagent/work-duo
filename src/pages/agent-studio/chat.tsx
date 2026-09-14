@@ -24,15 +24,15 @@
  *  - 若绑定 LLM 的 category === 'multimodal'，底部允许图片粘贴与上传；
  *  - 若绑定了 STT 模型（agent.sttId），底部出现语音输入按钮（Web Speech API）。
  */
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactElement } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
   ArrowLeft,
   Pencil,
   Send,
   Bot,
+  Loader2,
   Box,
-  Hand,
   Trash2,
   Square,
   ChevronRight,
@@ -73,6 +73,7 @@ import {
 } from 'lucide-react'
 import { createPortal } from 'react-dom'
 import { invoke } from '@tauri-apps/api/core'
+import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { appDataDir, resourceDir } from '@tauri-apps/api/path'
 import { openPath } from '@tauri-apps/plugin-opener'
 import { open } from '@tauri-apps/plugin-dialog'
@@ -183,11 +184,11 @@ import { isTauri } from '@/core/config'
 import { MarkdownRenderer } from '@/components/markdown/MarkdownRenderer'
 import { useAgentSession } from './session/useAgentSession'
 import { TracePanel } from './session/TracePanel'
-import { ArtifactCanvas } from './session/ArtifactCanvas'
+import { RunDagCanvas } from './session/RunDagCanvas'
 import { ToolStepLine } from './session/ToolStepLine'
 import { UserPromptPanel } from './session/UserPromptPanel'
 import { TakeoverPanel } from './session/TakeoverPanel'
-import type { ToolStep, PlanStep, ChatAttachmentInput, ArtifactRef, ReadArtifactResult, BranchFromStepInput, BranchStep, PlanDAG } from './session/types'
+import type { ToolStep, PlanStep, ChatAttachmentInput, ArtifactRef, ReadArtifactResult, BranchFromStepInput, BranchStep, PlanDAG, ContextCompactedPayload } from './session/types'
 import type {
   AgentInfo,
   AgentConversationSession,
@@ -1050,12 +1051,18 @@ function DropdownMenu({
   title?: string
 }) {
   const [open, setOpen] = useState(false)
+  const [ready, setReady] = useState(false)
   const [pos, setPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 })
+  const [placement, setPlacement] = useState<'bottom' | 'top'>('bottom')
   const wrapRef = useRef<HTMLDivElement>(null)
   const triggerRef = useRef<HTMLSpanElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
+
   useEffect(() => {
-    if (!open) return
+    if (!open) {
+      setReady(false)
+      return
+    }
     const onDown = (e: MouseEvent) => {
       const t = e.target as Node
       // 触发器与浮层（已 portal 到 body）都算内部，点击外部才关闭
@@ -1066,18 +1073,50 @@ function DropdownMenu({
     document.addEventListener('mousedown', onDown)
     return () => document.removeEventListener('mousedown', onDown)
   }, [open])
+
+  // 自适应定位：打开后测量菜单真实尺寸与视口，若向下会超出视口底部（被任务栏/窗口底边挡住），
+  // 则向上翻转；同时保证左右不超出视口。首次定位完成前隐藏浮层，避免一闪而过的错误位置。
+  useLayoutEffect(() => {
+    if (!open) return
+    const menu = menuRef.current
+    const trigger = triggerRef.current
+    if (!menu || !trigger) return
+    const rect = trigger.getBoundingClientRect()
+    const menuH = menu.offsetHeight
+    const menuW = menu.offsetWidth
+    const margin = 8
+    const viewportH = window.innerHeight
+    const viewportW = window.innerWidth
+
+    let nextTop = rect.bottom + 4
+    let nextPlacement: 'bottom' | 'top' = 'bottom'
+    if (nextTop + menuH > viewportH - margin) {
+      nextTop = Math.max(margin, rect.top - menuH - 4)
+      nextPlacement = 'top'
+    }
+
+    const rawLeft = align === 'right' ? rect.right - menuW : rect.left
+    let nextLeft = Math.max(margin, rawLeft)
+    if (nextLeft + menuW > viewportW - margin) {
+      nextLeft = Math.max(margin, viewportW - menuW - margin)
+    }
+
+    setPos({ top: nextTop, left: nextLeft })
+    setPlacement(nextPlacement)
+    setReady(true)
+  }, [open, align])
+
   // 点击触发器：用触发器实际位置 + fixed 定位。浮层 portal 到 body，
   // 彻底逃逸任何祖先 transform / overflow 裁剪，避免定位大幅偏移。
   const handleClick = () => {
     const el = triggerRef.current
     if (el) {
       const r = el.getBoundingClientRect()
-      const width = 168
-      const left = align === 'right' ? r.right - width : r.left
-      setPos({ top: r.bottom + 4, left: Math.max(8, left) })
+      setPos({ top: r.bottom + 4, left: Math.max(8, align === 'right' ? r.right - 168 : r.left) })
     }
     setOpen((o) => !o)
   }
+
   return (
     <div className="agent-chat__menu-wrap" ref={wrapRef}>
       <span className="agent-chat__menu-trigger" ref={triggerRef} onClick={handleClick}>
@@ -1087,8 +1126,14 @@ function DropdownMenu({
         createPortal(
           <div
             ref={menuRef}
-            className={`agent-chat__menu${align === 'right' ? ' is-right' : ''}`}
-            style={{ position: 'fixed', top: pos.top, left: pos.left, minWidth: 168 }}
+            className={`agent-chat__menu${align === 'right' ? ' is-right' : ''}${placement === 'top' ? ' is-top' : ''}`}
+            style={{
+              position: 'fixed',
+              top: pos.top,
+              left: pos.left,
+              minWidth: 168,
+              visibility: ready ? 'visible' : 'hidden',
+            }}
           >
             {title && <div className="agent-chat__menu-title">{title}</div>}
             {items.map((it, i) => (
@@ -1286,10 +1331,10 @@ export default function AgentChatPage() {
   // 整窗拖拽吸附：dragDepth 计数嵌套 enter/leave，windowDrag 控制全窗遮罩。
   const [windowDrag, setWindowDrag] = useState(false)
   const dragDepth = useRef(0)
-  // 右侧 Tab 面板（执行轨迹 / 产物）：Phase 3 §3.1 改为右栏 Tab 展示
-  // 右栏（执行轨迹/画布/产物）默认关闭，用户按需展开（避免默认挤占对话区）。
+  // 右侧投影面板（图 / 过程 / 产物）：二期方案 C Graph-first，默认关闭、发消息自动展开「图」。
+  // 接管不再常驻 Tab，改为 recovery 非空时右栏底部情境升起。
   const [rightOpen, setRightOpen] = useState(false)
-  const [rightTab, setRightTab] = useState<'trace' | 'canvas' | 'artifacts' | 'takeover'>('trace')
+  const [rightTab, setRightTab] = useState<'graph' | 'process' | 'artifacts'>('graph')
   // 右栏宽度（可鼠标拖拽调节），默认 340px
   const [rightWidth, setRightWidth] = useState(340)
   const resizingRef = useRef(false)
@@ -1346,12 +1391,12 @@ export default function AgentChatPage() {
     }
   }, [isTauri, workspaceDir])
 
-  // 接管上下文侧栏（2b-2）：步骤受阻（recovery 非空）时自动展开右栏并切到「接管」Tab，
-  // 让用户接管决策前能直接看到工具栈 / 已改文件 / 失败命令。
+  // 接管上下文化（二期方案 C）：步骤受阻（recovery 非空）时自动展开右栏，
+  // 失败详情随右栏底部「接管」情境条升起（不再依赖常驻「接管」Tab），默认切到「图」便于看失败节点。
   useEffect(() => {
     if (recovery) {
       setRightOpen(true)
-      setRightTab('takeover')
+      setRightTab('graph')
     }
   }, [recovery])
 
@@ -1385,8 +1430,8 @@ export default function AgentChatPage() {
   // 放弃分支对比
   const handleDismissBranch = useCallback(() => {
     // planBranch 由 session 状态机管理，前端无法直接清空；
-    // 这里仅切换到其他 Tab 视觉上隐藏。后续可在 useAgentSession 加 dismissPlanBranch 方法。
-    setRightTab('trace')
+    // 这里切回「图」Tab 视觉上隐藏对比横幅。后续可在 useAgentSession 加 dismissPlanBranch 方法。
+    setRightTab('graph')
   }, [])
 
   // 历史会话加载时瞬时跳到底部，避免 smooth 滚动造成的长列表滑动抖动
@@ -1724,6 +1769,9 @@ export default function AgentChatPage() {
     lastPromptRef.current = text
 
     replyStartRef.current = Date.now()
+    // 方案 C：发消息即自动展开右栏并切到「图」（本轮 DAG 主视图），符合 Graph-first 作用域。
+    setRightOpen(true)
+    setRightTab('graph')
     const attachments = pendingAttachments
     const disabledSkillIds = [...removedSkillIds]
     const disabledMcpIds = [...removedMcpIds]
@@ -2210,6 +2258,23 @@ export default function AgentChatPage() {
     await Promise.all([refreshSessions(), refreshProjects()])
   }, [refreshSessions, refreshProjects])
 
+  // 方案B：监听会话压缩完成事件，重读会话表使顶栏环形图随压缩回落。
+  // 后端压缩时已把估算节省量从累计 prompt token 回退（持久化），这里仅重读最新值，
+  // 保证「上下文占比」在压缩后下降、不再只增不减。
+  useEffect(() => {
+    let off: UnlistenFn | undefined
+    let cancelled = false
+    void listen<ContextCompactedPayload>('agent-context-compacted', (ev) => {
+      if (ev.payload?.success) refreshSessions()
+    }).then((fn) => {
+      if (!cancelled) off = fn
+    })
+    return () => {
+      cancelled = true
+      off?.()
+    }
+  }, [refreshSessions])
+
   /** 欢迎语（按当前智能体）。 */
   const welcomeMessages = useCallback(
     (): ChatMessage[] =>
@@ -2624,7 +2689,7 @@ export default function AgentChatPage() {
         onResolve={resolveRecovery}
         onSubmitChoice={submitChoice}
         onResolvePlanApproval={resolvePlanApproval}
-        compact={rightOpen && rightTab === 'takeover'}
+        compact={false}
       />
 
       {/* 左侧会话列表 */}
@@ -2810,6 +2875,15 @@ export default function AgentChatPage() {
                         {formatTime(s.updatedAt ? s.updatedAt : undefined)}
                       </div>
                     </div>
+                    {/* 活动会话的运行/待确认状态位：为后续多任务后台执行预留每会话状态展示 */}
+                    {s.id === activeSessionId && (pendingApproval || pendingChoice || planApproval) && (
+                      <span className="agent-chat__session-badge agent-chat__session-badge--await" title="任务挂起，等待你确认 / 选择 / 审批">
+                        待确认
+                      </span>
+                    )}
+                    {s.id === activeSessionId && isRunning && !(pendingApproval || pendingChoice || planApproval) && (
+                      <Loader2 size={13} className="agent-chat__session-spin" />
+                    )}
                   </div>
                   <div className="agent-chat__session-ops" onClick={(e) => e.stopPropagation()}>
                     <DropdownMenu
@@ -3266,7 +3340,7 @@ export default function AgentChatPage() {
 
       </section>
 
-      {/* 右侧 Tab 面板：执行轨迹 + 产物 + 画布（Phase 3 §3.1，由底部面板改为右栏 Tab 展示） */}
+      {/* 右侧投影面板：图（本轮 DAG）/ 过程 / 产物（方案 C Graph-first） */}
       {rightOpen ? (
         <>
           <div className="agent-chat__resize" onMouseDown={startResize} title="拖拽调节宽度" />
@@ -3274,11 +3348,19 @@ export default function AgentChatPage() {
           <div className="agent-chat__right-tabs">
             <button
               type="button"
-              className={`agent-chat__right-tab ${rightTab === 'trace' ? 'is-active' : ''}`}
-              onClick={() => setRightTab('trace')}
+              className={`agent-chat__right-tab ${rightTab === 'graph' ? 'is-active' : ''}`}
+              onClick={() => setRightTab('graph')}
+            >
+              <Workflow size={13} />
+              图
+            </button>
+            <button
+              type="button"
+              className={`agent-chat__right-tab ${rightTab === 'process' ? 'is-active' : ''}`}
+              onClick={() => setRightTab('process')}
             >
               <GitBranch size={13} />
-              执行轨迹
+              过程
             </button>
             <button
               type="button"
@@ -3288,22 +3370,12 @@ export default function AgentChatPage() {
               <Box size={13} />
               产物（{artifacts.length}）
             </button>
-            <button
-              type="button"
-              className={`agent-chat__right-tab ${rightTab === 'canvas' ? 'is-active' : ''}`}
-              onClick={() => setRightTab('canvas')}
-            >
-              <Workflow size={13} />
-              画布
-            </button>
-            <button
-              type="button"
-              className={`agent-chat__right-tab ${rightTab === 'takeover' ? 'is-active' : ''}`}
-              onClick={() => setRightTab('takeover')}
-            >
-              <Hand size={13} />
-              接管
-            </button>
+            {recovery && (
+              <span className="agent-chat__right-flag" title="步骤受阻，请在底部处置">
+                <TriangleAlert size={12} />
+                待处置
+              </span>
+            )}
             <button
               type="button"
               className="agent-chat__right-collapse"
@@ -3314,16 +3386,10 @@ export default function AgentChatPage() {
             </button>
           </div>
           <div className="agent-chat__right-body">
-            {rightTab === 'trace' ? (
-              <TracePanel
-                intent={session.trace.intent}
-                thinking={session.trace.thinking}
-                planSteps={session.planSteps}
-                toolSteps={session.toolSteps}
-              />
-            ) : rightTab === 'canvas' ? (
-              <ArtifactCanvas
-                planSteps={session.planSteps}
+            {rightTab === 'graph' ? (
+              <RunDagCanvas
+                planSteps={planSteps}
+                toolSteps={toolSteps}
                 artifacts={artifacts}
                 planBranch={session.planBranch}
                 onPreviewArtifact={handlePreviewArtifact}
@@ -3331,23 +3397,34 @@ export default function AgentChatPage() {
                 onApplyBranch={handleApplyBranch}
                 onDismissBranch={handleDismissBranch}
               />
-            ) : rightTab === 'takeover' ? (
-              <TakeoverPanel recovery={recovery} onPreviewArtifact={handlePreviewArtifact} />
+            ) : rightTab === 'process' ? (
+              <TracePanel
+                intent={session.trace.intent}
+                thinking={[]}
+                planSteps={planSteps}
+                toolSteps={toolSteps}
+              />
             ) : (
               <ArtifactGallery artifacts={artifacts} isTauri={isTauri} />
             )}
           </div>
+          {/* 接管情境升起：recovery 非空时不再依赖常驻「接管」Tab，于右栏底部浮出详情（行动键在底部 UserPromptPanel） */}
+          {recovery && (
+            <div className="agent-chat__right-recovery">
+              <TakeoverPanel recovery={recovery} onPreviewArtifact={handlePreviewArtifact} />
+            </div>
+          )}
         </aside>
         </>
       ) : (
         <button
           type="button"
           className="agent-chat__right-reopen"
-          title="展开执行轨迹"
+          title="展开执行图"
           onClick={() => setRightOpen(true)}
         >
           <ChevronLeft size={14} />
-          <span>轨迹</span>
+          <span>执行图</span>
         </button>
       )}
 
