@@ -95,7 +95,13 @@ export interface ChoiceRequest {
 }
 
 /** 规划步骤状态（进度条渲染用）。 */
-export type PlanStepStatus = 'pending' | 'running' | 'success' | 'failed'
+export type PlanStepStatus =
+  | 'pending'
+  | 'running'
+  | 'success'
+  | 'failed'
+  | 'blocked' // 受阻待决策：进入步骤级恢复等待（Retry/Skip/Takeover/ChangeApproach/Cancel）
+  | 'retrying' // 重试中：恢复决策/自动接管后重新执行，随后翻 running
 
 /** 单个规划步骤（三层流水线：阶段二规划产物的进度条数据源）。 */
 export interface PlanStep {
@@ -106,6 +112,10 @@ export interface PlanStep {
   status: PlanStepStatus
   /** 步骤产物摘要（step_finished 时回填）。 */
   summary?: string
+  /** 验证置信度：true=已验证（有 success_criteria 且客观通过）/ false=暂定（无 criteria 仅模型自报，或失败/跳过）。前端据此渲染「已验证/暂定」角标。 */
+  verified?: boolean
+  /** 验证依据（客观通过时的 evidence 文本，或暂定/失败原因），前端角标 hover 展示。 */
+  evidence?: string
   /** 前置依赖的步骤 task_id 列表（plan_generated 事件携带，驱动 §3.2 画布 DAG 连边）。 */
   dependsOn?: string[]
 }
@@ -119,6 +129,10 @@ export interface PlanView {
   title?: string
   status?: PlanStepStatus
   summary?: string
+  /** 验证置信度（step_finished 事件携带）：true=已验证 / false=暂定。 */
+  verified?: boolean
+  /** 验证依据（step_finished 事件携带）。 */
+  evidence?: string
 }
 
 /** 子任务文件产物引用（「产物画廊」数据源，对应 Rust `ArtifactRef` + `agent-artifact-created` 事件）。 */
@@ -221,6 +235,8 @@ export interface AgentEvent {
     | 'plan_generated' // 三层流水线：阶段二规划生成（渲染步骤进度条）
     | 'step_started' // 子任务开始（对应步骤置 running）
     | 'step_finished' // 子任务结束（对应步骤置 success/failed，带产物摘要）
+    | 'step_blocked' // 子任务受阻（对应步骤置 blocked，等待恢复决策）
+    | 'step_retrying' // 子任务重试中（对应步骤置 retrying，随后翻 running）
     | 'intent_classified' // 阶段一意图分流结果（轨迹视图首节点）
     | 'thinking_chunk' // 分层思考片段（plan/exec/selfcheck）
     | 'plan_branch_generated' // §3.2 分支重规划结果（双分支对比）

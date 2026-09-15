@@ -409,6 +409,10 @@ pub struct SubTaskOutput {
     /// 本子任务执行期间实际读取过的文件路径（read_file 的 path 参数去重聚合），
     /// 供 `run_pipeline` 成功闭环写图（FileRef + Read 边），记录「哪一步读了哪些文件」（阶段二图驱动）。
     pub read_files: Option<Vec<String>>,
+    /// 步骤闭环是否具备客观可核验证据（Phase E 验证优先）：true=已验证 / false=暂定（无 criteria 或仅模型自报）。
+    pub verified: bool,
+    /// 客观证据说明（首个客观通过项详情 / 暂定原因），供前端/回复展示「暂定完成」时提示用户。
+    pub evidence: String,
 }
 
 /* ================= 小分队（Squad）协作引擎类型 ================= */

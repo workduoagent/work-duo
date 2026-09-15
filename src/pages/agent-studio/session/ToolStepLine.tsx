@@ -29,6 +29,7 @@ import {
   Terminal,
   Trash2,
   X,
+  AlertTriangle,
 } from 'lucide-react'
 import type { ToolStep } from './types'
 import { baseName, opOf, opVerb } from './toolNarrate'
@@ -76,7 +77,17 @@ function clip(s: string, n: number): string {
   return s.length > n ? `${s.slice(0, n)}…` : s
 }
 
-export function ToolStepLine({ step }: { step: ToolStep }) {
+export function ToolStepLine({
+  step,
+  verified,
+  evidence,
+}: {
+  step: ToolStep
+  /** 所属规划步骤的验证置信度（由父级 planSteps 查表传入）：true=已验证 / false=暂定。 */
+  verified?: boolean
+  /** 所属规划步骤的验证依据（hover 展示）。 */
+  evidence?: string
+}) {
   const [open, setOpen] = useState(false)
   const op = step.op ?? opOf(step.toolName)
   const label = opVerb(op)
@@ -107,6 +118,23 @@ export function ToolStepLine({ step }: { step: ToolStep }) {
         </span>
         <span className="tool-line__verb">{label}</span>
         {name && <span className="tool-line__name">{name}</span>}
+        {step.status === 'success' && typeof verified === 'boolean' && (
+          verified ? (
+            <span
+              className="tool-line__verify tool-line__verify--ok"
+              title={evidence ? `已验证：${evidence}` : '已验证：通过本步声明的 success_criteria 客观校验'}
+            >
+              <Check size={11} /> 已验证
+            </span>
+          ) : (
+            <span
+              className="tool-line__verify tool-line__verify--provisional"
+              title={evidence ? `暂定：${evidence}` : '暂定：无客观依据，建议人工确认'}
+            >
+              <AlertTriangle size={11} /> 暂定
+            </span>
+          )
+        )}
         {hasDelta && (
           <span className="tool-line__delta">
             {(step.linesAdded ?? 0) > 0 && (

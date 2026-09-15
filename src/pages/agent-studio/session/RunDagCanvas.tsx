@@ -28,7 +28,7 @@ import {
   type NodeProps,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { GitBranch, X, FileText, Loader2, CheckCircle2, XCircle, Wrench } from 'lucide-react'
+import { GitBranch, X, FileText, Loader2, CheckCircle2, XCircle, Wrench, AlertTriangle, RefreshCw } from 'lucide-react'
 import type {
   ArtifactRef,
   BranchStep,
@@ -70,6 +70,8 @@ const PLAN_COLOR: Record<string, string> = {
   success: 'var(--color-success, #10B981)',
   failed: 'var(--color-error, #EF4444)',
   skipped: 'var(--color-muted, #9ca3af)',
+  blocked: 'var(--color-warning, #F59E0B)',
+  retrying: 'var(--color-info, #3B82F6)',
 }
 const TOOL_COLOR: Record<string, string> = {
   pending: 'var(--color-border-strong, #98a2b3)',
@@ -77,6 +79,8 @@ const TOOL_COLOR: Record<string, string> = {
   success: 'var(--color-success, #10B981)',
   failed: 'var(--color-error, #EF4444)',
   skipped: 'var(--color-muted, #9ca3af)',
+  blocked: 'var(--color-warning, #F59E0B)',
+  retrying: 'var(--color-info, #3B82F6)',
 }
 const planColor = (s: string) => PLAN_COLOR[s] ?? PLAN_COLOR.pending
 const toolColor = (s: string) => TOOL_COLOR[s] ?? TOOL_COLOR.running
@@ -87,6 +91,8 @@ const PLAN_LABEL: Record<string, string> = {
   success: '已完成',
   failed: '失败',
   skipped: '已跳过',
+  blocked: '受阻待决策',
+  retrying: '重试中',
 }
 const TOOL_LABEL: Record<string, string> = {
   pending: '排队中',
@@ -94,6 +100,8 @@ const TOOL_LABEL: Record<string, string> = {
   success: '成功',
   failed: '失败',
   skipped: '已跳过',
+  blocked: '受阻待决策',
+  retrying: '重试中',
 }
 
 // 工具中文展示名（优先按完整 toolName，再按去前缀的 toolLabel；MCP 工具降级为「服务·工具」）。
@@ -157,6 +165,10 @@ interface PlanNodeData {
   subCount: number
   artifactCount: number
   selected: boolean
+  /** 验证置信度：true=已验证 / false=暂定（无 criteria 或失败/跳过）。 */
+  verified?: boolean
+  /** 验证依据（hover 展示）。 */
+  evidence?: string
   [key: string]: unknown
 }
 interface ToolNodeData {
@@ -175,9 +187,11 @@ function PlanNode({ data }: NodeProps) {
   const color = planColor(d.status)
   const running = d.status === 'running'
   const failed = d.status === 'failed'
+  const blocked = d.status === 'blocked'
+  const retrying = d.status === 'retrying'
   return (
     <div
-      className={`rf-plan${d.selected ? ' is-selected' : ''}${running ? ' is-running' : ''}${failed ? ' is-failed' : ''}`}
+      className={`rf-plan${d.selected ? ' is-selected' : ''}${running ? ' is-running' : ''}${failed ? ' is-failed' : ''}${blocked ? ' is-blocked' : ''}${retrying ? ' is-retrying' : ''}`}
       style={{ borderColor: color, ['--accent' as string]: color }}
     >
       <Handle type="target" position={Position.Top} id="t" className="rf-handle" />
@@ -185,7 +199,17 @@ function PlanNode({ data }: NodeProps) {
       <Handle type="source" position={Position.Right} id="r" className="rf-handle" />
 
       <span className="rf-plan__badge" style={{ background: color }}>
-        {running ? <Loader2 size={12} className="rf-spin" /> : failed ? <XCircle size={12} /> : <CheckCircle2 size={12} />}
+        {running ? (
+          <Loader2 size={12} className="rf-spin" />
+        ) : failed ? (
+          <XCircle size={12} />
+        ) : blocked ? (
+          <AlertTriangle size={12} />
+        ) : retrying ? (
+          <RefreshCw size={12} className="rf-spin" />
+        ) : (
+          <CheckCircle2 size={12} />
+        )}
       </span>
       <div className="rf-plan__main">
         <div className="rf-plan__title">
@@ -204,6 +228,17 @@ function PlanNode({ data }: NodeProps) {
           )}
         </div>
       </div>
+      {d.status === 'success' && (
+        d.verified ? (
+          <span className="rf-plan__verify rf-plan__verify--ok" title={d.evidence ? `已验证：${d.evidence}` : '已验证：通过本步声明的 success_criteria 客观校验'}>
+            <CheckCircle2 size={11} /> 已验证
+          </span>
+        ) : (
+          <span className="rf-plan__verify rf-plan__verify--provisional" title={d.evidence ? `暂定：${d.evidence}` : '暂定：无客观依据，建议人工确认'}>
+            <AlertTriangle size={11} /> 暂定
+          </span>
+        )
+      )}
     </div>
   )
 }
@@ -311,6 +346,8 @@ export function RunDagCanvas(props: RunDagCanvasProps) {
           title: s.title,
           status: s.status,
           summary: s.summary,
+          verified: s.verified,
+          evidence: s.evidence,
           subCount: toolsByStep.get(s.step)?.length ?? 0,
           artifactCount: artifactsByStep.get(s.step)?.length ?? 0,
           selected: sel,

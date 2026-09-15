@@ -142,43 +142,47 @@ export function StepModel({ draft, patch, models, errors, clearError }: StepMode
         const { modelId, config } = readSlot(draft, slot.key)
         const model = models.find((m) => m.id === modelId)
         return (
-          <Card frame="solid" key={slot.key} className="agent-wizard__slot">
-            <div className="agent-wizard__slot-head">
-              <div className="agent-wizard__slot-icon">{slot.icon}</div>
-              <div className="agent-wizard__slot-titles">
-              <div className="agent-wizard__slot-title">
-                {slot.required && <span className="mfm__required">*</span>}
-                {slot.title}
-                {slot.required && <span className="agent-wizard__required">必选</span>}
+          <div className="agent-wizard__slot" key={slot.key}>
+            {/* 上层：选择卡（始终紧凑，未选模型时整列只占这一张） */}
+            <Card frame="solid" className="agent-wizard__slot-select">
+              <div className="agent-wizard__slot-head">
+                <div className="agent-wizard__slot-icon">{slot.icon}</div>
+                <div className="agent-wizard__slot-titles">
+                  <div className="agent-wizard__slot-title">
+                    {slot.required && <span className="mfm__required">*</span>}
+                    {slot.title}
+                    {slot.required && <span className="agent-wizard__required">必选</span>}
+                  </div>
+                  <div className="agent-wizard__slot-desc">{slot.desc}</div>
+                </div>
               </div>
-                <div className="agent-wizard__slot-desc">{slot.desc}</div>
-              </div>
-            </div>
 
-            <Field>
-              <FieldLabel>选择模型</FieldLabel>
-              <Select
-                value={modelId}
-                allowClear
-                placeholder={
-                  options.length ? '选择已录入的模型' : '暂无该类型模型，请先到 LLM 模块录入'
-                }
-                options={options}
-                status={slot.key === 'llm' && errors?.llm ? 'error' : undefined}
-                onChange={(v) => {
-                  handleSelect(slot.key, v)
-                  if (slot.key === 'llm') clearError?.('llm')
-                }}
-              />
-              {slot.key === 'llm' && errors?.llm && (
-                <div className="agent-wizard__error">{errors.llm}</div>
-              )}
-            </Field>
+              <Field>
+                <FieldLabel>选择模型</FieldLabel>
+                <Select
+                  value={modelId}
+                  allowClear
+                  placeholder={
+                    options.length ? '选择已录入的模型' : '暂无该类型模型，请先到 LLM 模块录入'
+                  }
+                  options={options}
+                  status={slot.key === 'llm' && errors?.llm ? 'error' : undefined}
+                  onChange={(v) => {
+                    handleSelect(slot.key, v)
+                    if (slot.key === 'llm') clearError?.('llm')
+                  }}
+                />
+                {slot.key === 'llm' && errors?.llm && (
+                  <div className="agent-wizard__error">{errors.llm}</div>
+                )}
+              </Field>
+            </Card>
 
+            {/* 下层：参数卡（选中模型后才出现） */}
             {model && (
-              <>
+              <Card frame="solid" className="agent-wizard__slot-params">
                 <div className="agent-wizard__param-head">
-                  <span>模型参数（改的是智能体私有副本，不影响 LLM 模块的默认值）</span>
+                  <span>模型参数（智能体私有副本）</span>
                   <Button variant="ghost" size="sm" onClick={() => resetParams(slot.key)}>
                     <RotateCcw size={13} />
                     恢复默认
@@ -191,9 +195,9 @@ export function StepModel({ draft, patch, models, errors, clearError }: StepMode
                   className="agent-wizard__param-grid"
                   fullWidthClassName="agent-wizard__span-2"
                 />
-              </>
+              </Card>
             )}
-          </Card>
+          </div>
         )
       })}
     </div>

@@ -273,6 +273,8 @@ pub async fn run_pipeline(
                     json!({
                         "status": "completed",
                         "summary": out.summary,
+                        "verified": out.verified,
+                        "evidence": out.evidence,
                         "tokenInput": usage.0,
                         "tokenOutput": usage.1,
                         "completedAt": now_ms(),
@@ -305,13 +307,13 @@ pub async fn run_pipeline(
                 }
                 // 成功闭环：补发 step_finished(ok=true)。否则前端步骤状态停在 running，
                 // 任务结束时会被 useAgentSession.finalizeStuckSteps 兜底误判为失败。
-                events::emit_step_finished(app, step, total, &title, true, &out.summary);
+                events::emit_step_finished(app, step, total, &title, true, &out.summary, out.verified, &out.evidence, false);
             } else {
                 // 失败：标记 failed（下一轮 topo_ready 不再拾起），并标记 failed 供 UI 高亮；
                 // 恢复决策（Retry/Skip/Takeover）会把状态改回 pending/skipped。
                 graph.set_task_status(task_node_id, "failed");
                 graph.update_node(task_node_id, json!({ "summary": out.summary, "failureReason": out.summary }));
-                events::emit_step_finished(app, step, total, &title, false, &out.summary);
+                events::emit_step_finished(app, step, total, &title, false, &out.summary, false, "", false);
                 failures.push((i, out));
             }
         }
@@ -345,7 +347,7 @@ pub async fn run_pipeline(
                             &task_node_id,
                             json!({ "status": "skipped", "summary": "（全自动模式：自动重试未闭环，自动跳过）".to_string() }),
                         );
-                        events::emit_step_finished(app, step, total, &title, true, "（全自动模式自动跳过）");
+                        events::emit_step_finished(app, step, total, &title, true, "（全自动模式自动跳过）", false, "（全自动模式自动跳过，未做客观校验）", true);
                     } else {
                         let guidance = format!(
                             "上次执行未闭环，失败原因如下，请基于该诊断自主修复后重试（不要重复同样的做法）：\n{}",
@@ -358,12 +360,14 @@ pub async fn run_pipeline(
                         events::emit_status(app, &format!("步骤 {}/{}：全自动模式自动重试（带诊断）", step, total));
                         graph.update_node(
                             &task_node_id,
-                            json!({ "status": "pending", "retryCount": attempts, "guidance": guidance }),
+                            json!({ "status": "retrying", "retryCount": attempts, "guidance": guidance }),
                         );
+                        // 自动重试也显式置 retrying，让画布闪「重试中」再翻 running（与手动重试一致）。
+                        events::emit_step_retrying(app, step, total, &title);
                         events::emit_step_started(app, step, total, &title);
                     }
                 }
-                continue; // 回到主循环，改回 pending 的步会重新拾起自愈；达上限的步标记 skipped
+                continue; // 回到主循环，置 retrying 的步会被 topo_ready 重新拾起自愈；达上限的步标记 skipped
             }
             for (i, out) in failures.into_iter() {
                 let task_node_id = batch[i].clone();
@@ -394,7 +398,7 @@ pub async fn run_pipeline(
                             "summary": format!("（已达最大恢复次数 {}，自动跳过）", MAX_TASK_RECOVERY_ATTEMPTS),
                         }),
                     );
-                    events::emit_step_finished(app, step, total, &title, true, "（自动跳过：恢复次数达上限）");
+                    events::emit_step_finished(app, step, total, &title, true, "（自动跳过：恢复次数达上限）", false, "（自动跳过，未做客观校验）", true);
                     continue;
                 }
                 // 接管面板工具栈快照（2b-2）：原生工具 + MCP 工具 + 技能 + 沙箱开关。
@@ -424,6 +428,10 @@ pub async fn run_pipeline(
                 // 而「继续并托管」自愈分支需要用到该原因回灌 guidance。
                 let blocked_reason = req.reason.clone();
                 recovery.request(req);
+                // 进入恢复等待：节点置 blocked（琥珀「受阻待决策」），与终态 failed 区分；
+                // 同时发 step_blocked 事件让画布实时翻态（仅靠 graph 落盘不会推前端）。
+                graph.set_task_status(&task_node_id, "blocked");
+                events::emit_step_blocked(app, step, total, &title, &out.summary);
                 // P2-3 模式感知恢复：手动模式（unattended=false）保持永久阻塞等待用户决策，
                 // 行为完全不变；无人值守模式（schedule/api）下若 120s 内无响应则自动取消整条流水线，
                 // 避免无人值守下因恢复面板无人处理而卡死。超时包的是 `recovery.wait()`，非子任务执行。
@@ -467,8 +475,10 @@ pub async fn run_pipeline(
                     RecoveryDecision::Retry => {
                         graph.update_node(
                             &task_node_id,
-                            json!({ "status": "pending", "retryCount": attempts }),
+                            json!({ "status": "retrying", "retryCount": attempts }),
                         );
+                        // 用户选择重试：显式置 retrying，画布闪「重试中」再翻 running。
+                        events::emit_step_retrying(app, step, total, &title);
                         events::emit_step_started(app, step, total, &title);
                         events::emit_status(app, &format!("步骤 {}/{}：用户选择重试", step, total));
                     }
@@ -480,7 +490,7 @@ pub async fn run_pipeline(
                                 "summary": "（已跳过：用户选择跳过该步骤）".to_string(),
                             }),
                         );
-                        events::emit_step_finished(app, step, total, &title, true, "（已跳过）");
+                        events::emit_step_finished(app, step, total, &title, true, "（已跳过）", false, "（已跳过，未做客观校验）", true);
                     }
                     RecoveryDecision::Takeover(g) => {
                         // 「继续并托管」= 让用户把决策权交回 Agent 自愈。若用户未手写补充指示，
@@ -501,8 +511,10 @@ pub async fn run_pipeline(
                         };
                         graph.update_node(
                             &task_node_id,
-                            json!({ "status": "pending", "retryCount": attempts, "guidance": guidance }),
+                            json!({ "status": "retrying", "retryCount": attempts, "guidance": guidance }),
                         );
+                        // 用户接管并补充指示后重试：显式置 retrying。
+                        events::emit_step_retrying(app, step, total, &title);
                         events::emit_step_started(app, step, total, &title);
                         events::emit_status(
                             app,
@@ -526,8 +538,10 @@ pub async fn run_pipeline(
                         };
                         graph.update_node(
                             &task_node_id,
-                            json!({ "status": "pending", "retryCount": attempts, "guidance": guidance }),
+                            json!({ "status": "retrying", "retryCount": attempts, "guidance": guidance }),
                         );
+                        // 用户要求改方案后重试：显式置 retrying。
+                        events::emit_step_retrying(app, step, total, &title);
                         events::emit_step_started(app, step, total, &title);
                         events::emit_status(
                             app,
@@ -545,7 +559,7 @@ pub async fn run_pipeline(
                     }
                 }
             }
-            // 循环回到就绪判定：被恢复的步骤（status 已改回 pending）将重新被拾起执行。
+            // 循环回到就绪判定：被恢复的步骤（status=retrying，topo_ready 已识别为可重跑态）将重新被拾起执行。
             continue;
         }
     }
@@ -622,6 +636,7 @@ pub async fn run_pipeline(
         .filter_map(|n| {
             let step = n.props.get("step").and_then(|v| v.as_u64()).unwrap_or(0);
             let status = n.props.get("status").and_then(|v| v.as_str()).unwrap_or("");
+            let verified = n.props.get("verified").and_then(|v| v.as_bool()).unwrap_or(false);
             let summary = n
                 .props
                 .get("summary")
@@ -661,9 +676,15 @@ pub async fn run_pipeline(
                     if !names.is_empty() {
                         format!("已生成/更新 {}", names.join("、"))
                     } else if !summary.is_empty() {
-                        summary // 无文件任务：纯对话/读取，降级模型 summary（无污染风险）
-                    } else {
+                        if verified {
+                            summary // 无文件任务但有客观校验：纯对话/读取，降级模型 summary（无污染风险）
+                        } else {
+                            format!("{summary}\n（暂定完成：无客观依据，建议人工确认）")
+                        }
+                    } else if verified {
                         "已完成".to_string()
+                    } else {
+                        "已完成（暂定：无客观依据，建议人工确认）".to_string()
                     }
                 }
                 "failed" => {
@@ -931,6 +952,8 @@ async fn run_subtask(
                     cancelled: true,
                     skipped: false,
                     failed_command: last_failed_command.clone(),
+                    verified: false,
+                    evidence: String::new(),
                     changed_files: if changed_files.is_empty() {
                         None
                     } else {
@@ -975,6 +998,8 @@ async fn run_subtask(
                                 cancelled: true,
                                 skipped: false,
                                 failed_command: last_failed_command.clone(),
+                    verified: false,
+                    evidence: String::new(),
                     changed_files: if changed_files.is_empty() {
                         None
                     } else {
@@ -1005,6 +1030,8 @@ async fn run_subtask(
                                 cancelled: false,
                                 skipped: false,
                                 failed_command: last_failed_command.clone(),
+                    verified: false,
+                    evidence: String::new(),
                     changed_files: if changed_files.is_empty() {
                         None
                     } else {
@@ -1047,6 +1074,8 @@ async fn run_subtask(
                     cancelled: true,
                     skipped: false,
                     failed_command: last_failed_command.clone(),
+                    verified: false,
+                    evidence: String::new(),
                     changed_files: if changed_files.is_empty() {
                         None
                     } else {
@@ -1096,6 +1125,8 @@ async fn run_subtask(
                             cancelled: false,
                             skipped: false,
                             failed_command: last_failed_command.clone(),
+                    verified: false,
+                    evidence: String::new(),
                     changed_files: if changed_files.is_empty() {
                         None
                     } else {
@@ -1137,6 +1168,8 @@ async fn run_subtask(
             // L0/L1 确定性校验（#9）：子任务声明了 success_criteria 时，无论模型是否自报成功，
             // 都必须通过文件/内容层面的客观校验，否则判为未闭环（进入恢复链路）。
             let mut verify_detail = String::new();
+            let mut step_verified = false;
+            let mut step_evidence = String::new();
             if success && !task.success_criteria.is_empty() {
                 // 图驱动兜底：把本步 write_file/edit_file 实际写出的路径（changed_files，已聚合自工具执行轮）
                 // 作为「真实产物」传入校验器，使 planner 把 target 瞎填成占位名（如 generated_code_content）
@@ -1177,7 +1210,16 @@ async fn run_subtask(
                         task.step,
                         runtime::clip(&verify_detail, 200),
                     );
+                } else {
+                    // 客观校验通过 → 已验证（verifier 已确认至少一项客观证据）。
+                    step_verified = result.verified;
+                    step_evidence = result.evidence;
                 }
+            } else if success {
+                // 成功但本步未声明任何 success_criteria → 无客观依据，标暂定。
+                step_verified = false;
+                step_evidence =
+                    "步骤未声明 success_criteria，无客观依据，以模型自报为准".to_string();
             }
             tracing::info!(
                 "[agent] pipeline: 子任务 step={} 闭环（总轮 {}，工具轮 {}）success={} 耗时={}ms summary={}",
@@ -1188,9 +1230,20 @@ async fn run_subtask(
                 t0.elapsed().as_millis(),
                 runtime::clip(&summary, 200),
             );
-            // 成功闭环 → 从产物摘要抽取并登记文件产物（L1 文件存在校验后写库 + 推前端画廊）。
+            // 成功闭环 → 登记文件产物（图/工具驱动：优先 changed_files，其次 success_criteria.target，
+            // 兜底 summary 文本推断并 warn）。L1 文件存在校验后写库 + 推前端画廊。
             let artifacts = if success {
-                crate::agent::artifacts::register_artifacts(app, cfg, &task, &summary).await
+                let success_targets: Vec<String> = task
+                    .success_criteria
+                    .iter()
+                    .filter_map(|c| c.target.clone())
+                    .filter(|t| !t.is_empty())
+                    .collect();
+                let sources = crate::agent::artifacts::ArtifactSources {
+                    changed_files: &changed_files,
+                    success_targets,
+                };
+                crate::agent::artifacts::register_artifacts(app, cfg, &task, &summary, &sources).await
             } else {
                 Vec::new()
             };
@@ -1223,6 +1276,8 @@ async fn run_subtask(
                     cancelled: false,
                     skipped: false,
                     failed_command: last_failed_command.clone(),
+                    verified: step_verified,
+                    evidence: step_evidence,
                     changed_files: if changed_files.is_empty() {
                         None
                     } else {
@@ -1271,6 +1326,8 @@ async fn run_subtask(
                     cancelled: false,
                     skipped: false,
                     failed_command: last_failed_command.clone(),
+                    verified: false,
+                    evidence: String::new(),
                     changed_files: if changed_files.is_empty() {
                         None
                     } else {
@@ -1379,6 +1436,8 @@ async fn run_subtask(
                     cancelled: false,
                     skipped: false,
                     failed_command: last_failed_command.clone(),
+                    verified: false,
+                    evidence: String::new(),
                     changed_files: if changed_files.is_empty() {
                         None
                     } else {

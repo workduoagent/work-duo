@@ -167,6 +167,7 @@ import {
   addSessionTokens,
   renameSession,
   setSessionArchived,
+  clearSessionProject,
   toggleSessionTop,
   type SessionTreeGroup,
 } from '@/core/mapper/agent-session-mapper'
@@ -896,7 +897,11 @@ function SkillChip({
       className={`agent-chat__skill-chip${removed ? ' is-removed' : ''}`}
       title={removed ? `已临时移除：${skill.name}（点击恢复）` : `${skill.name}（点击临时移除）`}
     >
-      <Avatar size={24} src={logo ?? undefined} style={{ background: 'var(--color-warning)' }}>
+      <Avatar
+        size={24}
+        src={logo ?? undefined}
+        style={{ background: 'var(--color-background, #ffffff)', color: 'var(--color-foreground, #0b2030)' }}
+      >
         {logo ? '' : (skill.name || skill.identifier || '').slice(0, 1)}
       </Avatar>
       <button
@@ -1248,6 +1253,7 @@ function buildSessionTree(
       projectName: p?.name ?? '未命名工程',
       rootPath: p?.rootPath ?? null,
       isPinned: p?.isPinned,
+      isArchived: p?.isArchived,
       sessions: arr.map(toItem),
     })
   }
@@ -1315,6 +1321,8 @@ export default function AgentChatPage() {
   const [sessions, setSessions] = useState<AgentConversationSession[]>([])
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
   const [sessionSearch, setSessionSearch] = useState('')
+  // 归档项默认收起；开启后已归档会话 / 工程重新出现在列表（#20260915004 B2）。
+  const [showArchived, setShowArchived] = useState(false)
 
   // 工程记忆编辑器（.wd_mem/MEMORY.md）
   const [memoEditor, setMemoEditor] = useState<{ open: boolean; rootPath: string; name: string } | null>(null)
@@ -1462,6 +1470,10 @@ export default function AgentChatPage() {
   const prevIsRunningRef = useRef(false)
   const roundIdRef = useRef<string | null>(null)
   const roundIndexRef = useRef(0)
+  // 标记「本次由『新增子对话』创建的、尚未发过任何消息的空会话」——离开时若仍为 0 轮则清理
+  const pendingEmptySessionIdRef = useRef<string | null>(null)
+  // 卸载守卫：避免卸载后调用 setState 触发警告
+  const mountedRef = useRef(true)
   const lastPromptRef = useRef('')
   const lastTokensRef = useRef<{ input: number; output: number }>({ input: 0, output: 0 })
 
@@ -1602,6 +1614,7 @@ export default function AgentChatPage() {
 
   // 切换智能体时清空会话状态
   useEffect(() => {
+    void cleanupPendingEmptySession()
     reset()
     setMessages([])
     setActiveSessionId(null)
@@ -1611,6 +1624,15 @@ export default function AgentChatPage() {
     roundIndexRef.current = 0
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id])
+
+  // 卸载守卫 + 离开会话页时清理未发消息的空会话（刷新 / 路由回列表均走此处）
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+      void cleanupPendingEmptySession()
+    }
+  }, [])
 
   // 新消息 / 工具步骤 / 流式文本变化时滚动到底
   useEffect(() => {
@@ -1628,6 +1650,8 @@ export default function AgentChatPage() {
   /** 持久化一轮：确保有会话 → 追加 round → 记录 roundId / 序号。 */
   const ensureRound = useCallback(
     async (prompt: string): Promise<string | null> => {
+      // 一旦发起发送，立即取消「空会话待清理」标记，避免异步过程中离开误删
+      pendingEmptySessionIdRef.current = null
       if (!agent) return null
       let sessionId = activeSessionId
       if (!sessionId) {
@@ -1969,6 +1993,38 @@ export default function AgentChatPage() {
   )
 
   /** 重新生成：以上一轮 user 消息为 prompt 再跑一次，替换当前 agent 回复。 */
+  /**
+   * 从一段用户消息文本里反解出 @提及 标签（#20260915004 B3）。
+   * 与 `getCandidates` 同源：只匹配已知技能 / MCP 服务名称，避免误伤自由文本里的 @。
+   * 用于「重新生成」时把首轮临时启用的能力原样带回（send 走的是 mentionTags，regenerate 时它已清空）。
+   */
+  const resolveMentionTags = useCallback(
+    (text: string): { key: string; label: string }[] => {
+      const out: { key: string; label: string }[] = []
+      const seen = new Set<string>()
+      const add = (key: string, label: string) => {
+        if (!seen.has(key)) {
+          seen.add(key)
+          out.push({ key, label })
+        }
+      }
+      const tokens = text.match(/@[\p{L}\p{N}_-]+/gu) ?? []
+      for (const tk of tokens) {
+        const name = tk.slice(1)
+        if (!name) continue
+        const sk = allSkills.find((s) => s.name === name)
+        if (sk) {
+          add(`skill:${sk.id}`, sk.name)
+          continue
+        }
+        const mc = allMcps.find((m) => (m.aliasName || m.mcpName || m.id) === name)
+        if (mc) add(`mcp:${mc.id}`, mc.aliasName || mc.mcpName || mc.id)
+      }
+      return out
+    },
+    [allSkills, allMcps],
+  )
+
   const handleRegenerate = useCallback(
     (msgId: string) => {
       const idx = messages.findIndex((m) => m.id === msgId)
@@ -1993,6 +2049,12 @@ export default function AgentChatPage() {
       const disabledSkillIds = [...removedSkillIds]
       const disabledMcpIds = [...removedMcpIds]
       const disabledMcpToolIdsArr = [...disabledMcpToolIds]
+      // 修复（#20260915004 B3）：重新生成时 @@提及 文本已序列化进 userMsg.content，但 mentionTags 已清空。
+      // 从内容反解出本轮临时启用的技能 / MCP，与 send 对齐，避免「重生成丢失 @提及」。
+      const tags = resolveMentionTags(userMsg.content)
+      const enabledSkillIds = tags.filter((t) => t.key.startsWith('skill:')).map((t) => t.key.slice('skill:'.length))
+      const enabledMcpIds = tags.filter((t) => t.key.startsWith('mcp:')).map((t) => t.key.slice('mcp:'.length))
+      setMentionTags(tags) // 回填 chips，UI 重显本次启用的 @提及
       void ensureRound(userMsg.content).then((sid) => {
         void run({
           agentId: agent.id,
@@ -2005,10 +2067,13 @@ export default function AgentChatPage() {
           disabledSkillIds,
           disabledMcpIds,
           disabledMcpToolIds: disabledMcpToolIdsArr,
+          // 临时启用的技能 / MCP 服务（@提及 触发），与 send 完全对齐
+          enabledSkillIds,
+          enabledMcpIds,
         })
       })
     },
-    [messages, agent, reset, run, workspaceDir, ensureRound, removedSkillIds, removedMcpIds, disabledMcpToolIds],
+    [messages, agent, reset, run, workspaceDir, ensureRound, removedSkillIds, removedMcpIds, disabledMcpToolIds, resolveMentionTags],
   )
 
   /** 点击左侧历史会话，加载其全部轮次。 */
@@ -2037,6 +2102,7 @@ export default function AgentChatPage() {
 
   /** 新建对话：清空当前会话，回到欢迎语。 */
   const newChat = useCallback(() => {
+    void cleanupPendingEmptySession()
     reset()
     setActiveSessionId(null)
     setPendingProjectId(null) // 新建对话解绑工程（自由对话）
@@ -2294,6 +2360,22 @@ export default function AgentChatPage() {
     [agent],
   )
 
+  /** 清理「新增子对话」产生的空会话：尚未发过任何消息（0 轮）则删除该行。 */
+  const cleanupPendingEmptySession = useCallback(async () => {
+    const id = pendingEmptySessionIdRef.current
+    if (!id) return
+    pendingEmptySessionIdRef.current = null
+    try {
+      const rounds = await listRounds(id)
+      if (rounds.length === 0) {
+        await deleteSession(id)
+        if (mountedRef.current) await refreshSessions()
+      }
+    } catch {
+      // 清理失败不影响主流程
+    }
+  }, [listRounds, deleteSession, refreshSessions])
+
   /** 工程头「新增子对话」：基于已有工程新建并进入会话。 */
   const startProjectSession = useCallback(
     async (projectId: string) => {
@@ -2302,6 +2384,8 @@ export default function AgentChatPage() {
         message.error('工程不存在')
         return
       }
+      // 若上一次「新增子对话」后没发消息就又点了新增，先清掉那个空会话
+      await cleanupPendingEmptySession()
       reset()
       setActiveSessionId(null)
       setRemovedSkillIds(new Set())
@@ -2313,12 +2397,13 @@ export default function AgentChatPage() {
       try {
         const sess = await createSession(agent?.identifier ?? '', undefined, { projectId })
         setActiveSessionId(sess.id)
+        pendingEmptySessionIdRef.current = sess.id
         await refreshSessions()
       } catch (err) {
         message.error(`创建会话失败：${err instanceof Error ? err.message : String(err)}`)
       }
     },
-    [agent, projects, reset, welcomeMessages, refreshSessions, message],
+    [agent, projects, reset, welcomeMessages, refreshSessions, message, cleanupPendingEmptySession],
   )
 
   /** 输入框工作空间胶囊：选择 / 更改绑定目录（即时重绑当前会话为工程）。 */
@@ -2341,7 +2426,8 @@ export default function AgentChatPage() {
   const clearWorkspaceBinding = useCallback(async () => {
     setPendingProjectId(null)
     if (activeSessionId) {
-      await updateSession(activeSessionId, { projectId: null })
+      // 必须用 clearSessionProject：updateSession 对 project_id 走 COALESCE，传 null 不会真正解绑（#20260915004 B1）。
+      await clearSessionProject(activeSessionId)
       await refreshSessions()
     }
   }, [activeSessionId, refreshSessions])
@@ -2612,16 +2698,22 @@ export default function AgentChatPage() {
   // 注意：useMemo 必须在任何早退 return 之前调用，否则两次渲染 hook 数量不一致（React 报错）。
   const sessionTree = useMemo(() => buildSessionTree(sessions, projects), [sessions, projects])
   const filteredTree = useMemo(
-    () =>
-      sessionTree
+    () => {
+      const q = sessionSearch.trim().toLowerCase()
+      return sessionTree
+        // 默认隐藏已归档工程组（开启「显示归档」才出现）
+        .filter((g) => showArchived || !g.isArchived)
         .map((g) => ({
           ...g,
-          sessions: g.sessions.filter((s) =>
-            (s.sessionName ?? '').toLowerCase().includes(sessionSearch.trim().toLowerCase()),
-          ),
+          sessions: g.sessions.filter((s) => {
+            if (!showArchived && s.isArchived) return false // 默认隐藏已归档会话
+            if (q && !(s.sessionName ?? '').toLowerCase().includes(q)) return false
+            return true
+          }),
         }))
-        .filter((g) => g.sessions.length > 0),
-    [sessionTree, sessionSearch],
+        .filter((g) => g.sessions.length > 0)
+    },
+    [sessionTree, sessionSearch, showArchived],
   )
 
   if (loading) {
@@ -2819,6 +2911,14 @@ export default function AgentChatPage() {
             onChange={(e) => setSessionSearch(e.target.value)}
           />
         </div>
+        <label className="agent-chat__archive-toggle" title="显示已归档的会话与工程">
+          <input
+            type="checkbox"
+            checked={showArchived}
+            onChange={(e) => setShowArchived(e.target.checked)}
+          />
+          显示归档
+        </label>
         <div className="agent-chat__session-list">
           {filteredTree.length === 0 && (
             <div className="agent-chat__session-empty">暂无历史会话</div>
@@ -2829,7 +2929,7 @@ export default function AgentChatPage() {
               key={group.groupId}
             >
               {group.groupType === 'PROJECT' ? (
-                <div className="agent-chat__group-head">
+                <div className={group.isArchived ? 'agent-chat__group-head is-archived' : 'agent-chat__group-head'}>
                   <Folder size={13} className="agent-chat__group-icon" />
                   <div className="agent-chat__group-info">
                     <span className="agent-chat__group-name" title={group.rootPath ?? ''}>
@@ -2863,7 +2963,7 @@ export default function AgentChatPage() {
               {group.sessions.map((s) => (
                 <div
                   key={s.id}
-                  className={`agent-chat__session${s.id === activeSessionId ? ' is-active' : ''}`}
+                  className={`agent-chat__session${s.id === activeSessionId ? ' is-active' : ''}${s.isArchived ? ' is-archived' : ''}`}
                   onClick={() => openSession(s.id)}
                 >
                 <div className="agent-chat__session-main">
@@ -2894,7 +2994,7 @@ export default function AgentChatPage() {
                       items={[
                         { label: '重命名', icon: <Pencil size={13} />, onClick: () => void renameSessionHandler({ id: s.id, sessionName: s.sessionName, agentCode: '', status: 'RUNNING', isCollection: false, isTop: false, isArchive: false, fromSite: 'DEBUG_CHAT', createdAt: '', updatedAt: '' }) },
                         { label: s.isTop ? '取消置顶' : '置顶', icon: s.isTop ? <PinOff size={13} /> : <Pin size={13} />, onClick: () => void toggleSessionTopHandler({ id: s.id, sessionName: s.sessionName, agentCode: '', status: 'RUNNING', isCollection: false, isTop: false, isArchive: false, fromSite: 'DEBUG_CHAT', createdAt: '', updatedAt: '' }) },
-                        { label: s.isArchived ? '取消归档' : '归档', icon: s.isArchived ? <ArchiveRestore size={13} /> : <Archive size={13} />, onClick: () => void archiveSessionHandler({ id: s.id, sessionName: s.sessionName, agentCode: '', status: 'RUNNING', isCollection: false, isTop: false, isArchive: false, fromSite: 'DEBUG_CHAT', createdAt: '', updatedAt: '' }) },
+                        { label: s.isArchived ? '取消归档' : '归档', icon: s.isArchived ? <ArchiveRestore size={13} /> : <Archive size={13} />, onClick: () => void archiveSessionHandler({ id: s.id, sessionName: s.sessionName, agentCode: '', status: 'RUNNING', isCollection: false, isTop: false, isArchive: s.isArchived, fromSite: 'DEBUG_CHAT', createdAt: '', updatedAt: '' }) },
                         { label: '删除会话', icon: <Trash2 size={13} />, danger: true, onClick: () => void removeSession(s.id) },
                       ]}
                       trigger={
@@ -3007,9 +3107,18 @@ export default function AgentChatPage() {
                   )}
                   {m.role === 'agent' && (m.toolSteps?.length ?? 0) > 0 && (
                     <div className="agent-chat__tools">
-                      {m.toolSteps!.map((t) => (
-                        <ToolStepLine key={t.callId} step={t} />
-                      ))}
+                      {m.toolSteps!.map((t) => {
+                        // 工具步归属的某个规划步骤（用 ToolStep.step 反查），用于显示「已验证/暂定」角标。
+                        const ps = m.planSteps?.find((p) => p.step === t.step)
+                        return (
+                          <ToolStepLine
+                            key={t.callId}
+                            step={t}
+                            verified={ps?.verified}
+                            evidence={ps?.evidence}
+                          />
+                        )
+                      })}
                     </div>
                   )}
                   <div className="agent-chat__bubble">

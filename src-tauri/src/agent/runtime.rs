@@ -388,6 +388,9 @@ impl AgentRuntime {
                     &title,
                     true,
                     "（沿用已完成结果，分支重跑跳过）",
+                    false,
+                    "（沿用已完成结果，未做客观校验）",
+                    true,
                 );
             }
         }

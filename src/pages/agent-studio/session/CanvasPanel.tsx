@@ -31,6 +31,8 @@ const STATUS_COLOR: Record<PlanStepStatus, string> = {
   running: 'var(--color-info, #3B82F6)',
   success: 'var(--color-success, #10B981)',
   failed: 'var(--color-error, #EF4444)',
+  blocked: 'var(--color-warning, #F59E0B)',
+  retrying: 'var(--color-info, #3B82F6)',
 }
 
 const STATUS_LABEL: Record<PlanStepStatus, string> = {
@@ -38,6 +40,8 @@ const STATUS_LABEL: Record<PlanStepStatus, string> = {
   running: '进行中',
   success: '已完成',
   failed: '失败',
+  blocked: '受阻待决策',
+  retrying: '重试中',
 }
 
 function truncate(s: string, n: number): string {

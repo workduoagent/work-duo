@@ -150,34 +150,42 @@
     }
   }
 
-  /* ---------- 内容区（水平垂直居中，限宽 80%） ---------- */
+  /* ---------- 内容区（水平垂直居中；各步骤自带限宽） ---------- */
   &__body {
     flex: 1 1 auto;
     min-height: 0;
     overflow-y: auto;
-    padding: 24px 4px 24px;
+    padding: 20px 8px 28px;
     display: flex;
     flex-direction: column;
-    align-items: center; /* 水平居中 */
-    justify-content: safe center; /* 垂直居中；内容超高时安全回退到顶部可滚动 */
+    align-items: center;
+    justify-content: safe center;
 
     > * {
       width: 100%;
-      max-width: 80%;
     }
   }
 
   &__form {
     display: flex;
     flex-direction: column;
-    gap: 18px;
+    gap: 20px;
+    width: 100%;
+    max-width: 960px;
+  }
+
+  &__span-full {
     width: 100%;
   }
 
   &__grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(min(100%, 360px), 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 16px 18px;
+
+    @media (max-width: 720px) {
+      grid-template-columns: 1fr;
+    }
   }
 
   &__span-2 {
@@ -207,11 +215,39 @@
     color: var(--color-foreground-muted);
   }
 
-  /* ---------- 步骤1：头像（顶部，点击上传） ---------- */
-  &__logo {
+  /* ---------- 步骤1：身份区（头像 + 名称/标识/场景/欢迎） ---------- */
+  &__identity {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 8px 24px;
+    align-items: start;
+    padding: 16px 18px;
+    border-radius: 12px;
+    border: 1px solid var(--color-border);
+    background-color: var(--color-background-subtle);
+
+    @media (max-width: 720px) {
+      grid-template-columns: 1fr;
+      gap: 16px;
+    }
+  }
+
+  &__identity-avatar {
     display: flex;
-    align-items: center;
-    gap: 14px;
+    flex-direction: column;
+    gap: 8px;
+    width: 96px;
+  }
+
+  &__identity-fields {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px 16px;
+    min-width: 0;
+
+    @media (max-width: 720px) {
+      grid-template-columns: 1fr;
+    }
   }
 
   &__logo-preview {
@@ -222,12 +258,12 @@
     border-radius: 14px;
     overflow: hidden;
     border: 1px solid var(--color-border);
-    background-color: var(--color-background-muted);
+    background-color: var(--color-background);
   }
 
   &__logo-upload {
     cursor: pointer;
-    transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
+    transition: border-color 0.18s ease, box-shadow 0.18s ease;
 
     &:hover {
       border-color: var(--color-brand-600);
@@ -289,70 +325,153 @@
     opacity: 1;
   }
 
-  /* ---------- 步骤1：开关组 ---------- */
-  &__switches {
+  /* ---------- 步骤1：行为策略选项卡片 ---------- */
+  &__options {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr));
+    grid-template-columns: repeat(6, minmax(0, 1fr));
     gap: 12px;
-  }
 
-  &__switch-row {
-    display: flex;
-    align-items: flex-start;
-    gap: 10px;
-    padding: 12px 14px;
-    border-radius: 10px;
-    border: 1px solid var(--color-border);
-    background-color: var(--color-background-subtle);
-    cursor: pointer;
-    max-width: 480px;
+    @media (max-width: 900px) {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
 
-    > span {
-      display: flex;
-      flex-direction: column;
-      gap: 2px;
-      font-size: 13px;
-      line-height: 18px;
-      color: var(--color-foreground);
+    @media (max-width: 560px) {
+      grid-template-columns: 1fr;
     }
   }
 
-  /* ---------- 步骤2：模型槽位 ---------- */
+  &__option-card {
+    grid-column: span 2; /* 宽屏三等分：启用 / 自动执行 / 沙箱 */
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 0;
+    padding: 14px 16px;
+    border-radius: 12px;
+    border: 1px solid var(--color-border);
+    background-color: var(--color-background-subtle);
+    transition: border-color 0.18s ease, background-color 0.18s ease, box-shadow 0.18s ease;
+
+    &:hover {
+      border-color: var(--color-brand-300, var(--color-brand-600));
+      background-color: var(--color-background);
+      box-shadow: var(--shadow-sm);
+    }
+
+    &--wide {
+      grid-column: span 3; /* 记忆模式 / 计划审批 各占半行，Segmented 不挤压标题 */
+    }
+
+    @media (max-width: 900px) {
+      grid-column: auto;
+
+      &--wide {
+        grid-column: 1 / -1;
+      }
+    }
+
+    @media (max-width: 560px) {
+      grid-column: auto;
+
+      &--wide {
+        grid-column: auto;
+      }
+    }
+  }
+
+  &__option-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+  }
+
+  &__option-title {
+    flex: 1 1 auto;
+    min-width: 0;
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 20px;
+    color: var(--color-foreground-intense);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  &__option-hint {
+    margin: 0;
+    font-size: 12px;
+    line-height: 1.55;
+    color: var(--color-foreground-muted);
+  }
+
+  /* Segmented 在卡片内占满一行，避免和标题挤在同一行 */
+  &__option-card .ant-segmented {
+    width: 100%;
+  }
+
+  &__option-card .ant-segmented-group {
+    display: flex;
+  }
+
+  &__option-card .ant-segmented-item {
+    flex: 1 1 0;
+    min-width: 0;
+    text-align: center;
+  }
+
+  /* ---------- 步骤2：模型槽位（上层选择卡 + 下层参数卡） ---------- */
   &__slots {
     width: 100%;
-    max-width: 1200px;
+    max-width: 1120px;
     margin: 0 auto;
     min-height: 100%;
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 16px;
-    align-items: stretch;
+    /* 未选模型的列只占选择卡高度，不被大脑参数拉齐 */
+    align-items: start;
 
-    @media (max-width: 720px) {
+    @media (max-width: 1024px) {
       grid-template-columns: 1fr;
     }
   }
 
   &__slot {
-    &.app-card {
-      height: 100%;
-      display: flex;
-      flex-direction: column;
-      transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-width: 0;
+  }
 
-      &:hover {
-        transform: translateY(-2px);
-        border-color: var(--color-brand-300, var(--color-brand-600));
-        box-shadow: var(--shadow-md);
-      }
+  &__slot-select,
+  &__slot-params {
+    &.app-card {
+      transition: box-shadow 0.18s ease, border-color 0.18s ease;
     }
 
     &.app-card .ant-card-body {
-      flex: 1 1 auto;
       display: flex;
       flex-direction: column;
       gap: 14px;
-      padding: 20px;
+      padding: 18px;
+    }
+  }
+
+  &__slot-select {
+    &.app-card:hover {
+      border-color: var(--color-brand-300, var(--color-brand-600));
+      box-shadow: var(--shadow-sm);
+    }
+  }
+
+  &__slot-params {
+    &.app-card {
+      background-color: var(--color-background-subtle);
+    }
+
+    &.app-card .ant-card-body {
+      gap: 12px;
     }
   }
 
@@ -418,18 +537,16 @@
     align-items: center;
     justify-content: space-between;
     gap: 12px;
-    padding-top: 12px;
-    border-top: 1px dashed var(--color-border);
     font-size: 12px;
     color: var(--color-foreground-muted);
     flex-shrink: 0;
   }
 
   &__param-grid {
-    flex: 1 1 auto;
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
-    gap: 14px 18px;
+    /* 窄列下优先单列，避免参数被压成过窄两列 */
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+    gap: 14px 16px;
     align-content: start;
   }
 
@@ -441,6 +558,8 @@
     align-items: start;
     flex: 1 1 auto;
     min-height: 0;
+    max-width: 1280px;
+    margin: 0 auto;
 
     @media (max-width: 1100px) {
       grid-template-columns: 200px minmax(0, 1fr);
@@ -712,7 +831,7 @@
   /* ---------- 技能卡片 ---------- */
   &__skill-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 240px), 1fr));
     gap: 10px;
   }
 

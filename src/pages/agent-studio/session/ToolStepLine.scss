@@ -84,6 +84,30 @@
     color: var(--color-danger);
   }
 
+  // 验证置信度角标（已验证 / 暂定）；DOM 顺序位于 name 之后、delta 之前。
+  &__verify {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    padding: 0 6px;
+    border-radius: 999px;
+    font-size: 10px;
+    font-weight: 600;
+    line-height: 1.5;
+    height: 16px;
+    white-space: nowrap;
+
+    &--ok {
+      background: rgba(16, 185, 129, 0.14);
+      color: var(--color-success, #10b981);
+    }
+    &--provisional {
+      background: rgba(245, 158, 11, 0.16);
+      color: var(--color-warning, #f59e0b);
+    }
+  }
+
   &__spacer {
     flex: 1 1 auto;
   }

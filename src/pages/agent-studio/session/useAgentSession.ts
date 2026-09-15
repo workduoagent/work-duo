@@ -153,6 +153,9 @@ export function useAgentSession(): AgentSessionState {
   // 主动复位 UI（多轮智能体任务可能耗时数分钟）。此超时仅用于 Rust 进程异常（panic）
   // 导致终态事件丢失的极端场景，时长设得足够长（20 分钟），避免把仍在运行的后端误判为「超时」。
   const taskTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // 取消看门狗：cancel_agent_task 为 best-effort，可能不回 agent-task-done/error，
+  // 3s 兜底强制复位运行态，避免「停止」后按钮卡死（#20260915004 B4）。
+  const cancelWatchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   // 最近一轮任务的真实 token 用量（后端取自 LLM usage，经 agent-task-done 带出）；
   // Tauri 环境由事件填充，dev/mock 无后端时为 null，页面据此回退到估算值。
   const lastTaskUsageRef = useRef<{ promptTokens: number; completionTokens: number } | null>(null)
@@ -294,6 +297,13 @@ export function useAgentSession(): AgentSessionState {
     }
   }, [])
 
+  const clearCancelWatchdog = useCallback(() => {
+    if (cancelWatchdogRef.current) {
+      clearTimeout(cancelWatchdogRef.current)
+      cancelWatchdogRef.current = null
+    }
+  }, [])
+
   const startTaskTimeout = useCallback(() => {
     clearTaskTimeout()
     // 仅作极端兜底（见 taskTimeoutRef 注释）：正常多轮任务不会触发。
@@ -335,6 +345,7 @@ export function useAgentSession(): AgentSessionState {
       pendingChoiceRef.current = null
       setPendingChoice(null)
       clearTaskTimeout()
+      clearCancelWatchdog()
 
       if (!isTauri) {
         await mockRun(input)
@@ -396,7 +407,7 @@ export function useAgentSession(): AgentSessionState {
         setStatusText(msg)
       }
     },
-    [flushSteps, mockRun, clearTaskTimeout, startTaskTimeout],
+    [flushSteps, mockRun, clearTaskTimeout, startTaskTimeout, clearCancelWatchdog],
   )
 
   const submitDecision = useCallback(async (decision: ApprovalDecision) => {
@@ -483,21 +494,35 @@ export function useAgentSession(): AgentSessionState {
     pendingChoiceRef.current = null
     setPendingChoice(null)
     clearTaskTimeout()
+    clearCancelWatchdog()
     setRunning(false)
-  }, [flushSteps, clearTaskTimeout])
+  }, [flushSteps, clearTaskTimeout, clearCancelWatchdog])
 
   const cancel = useCallback(() => {
     cancelRef.current?.()
-    if (isTauri) {
-      // 通知 Rust 取消当前任务（best-effort，命令可不存在/忽略）。
-      void invoke('cancel_agent_task').catch(() => {})
-    }
-    clearTaskTimeout()
     pendingChoiceRef.current = null
     setPendingChoice(null)
-    setRunning(false)
-    setIsStreaming(false)
-  }, [isTauri, clearTaskTimeout])
+    if (!isTauri) {
+      // 非 Tauri 无后端，直接复位运行态。
+      setRunning(false)
+      setIsStreaming(false)
+      return
+    }
+    // 通知 Rust 取消当前任务（best-effort，命令可不存在/忽略）。
+    void invoke('cancel_agent_task').catch(() => {})
+    // 撤掉 20 分钟长护栏（正常 cancel 不应触发该告警）。
+    clearTaskTimeout()
+    // 不再乐观清运行态：终态由后端 agent-task-done/error 翻转（与既有铁律一致，#20260915004 B4）。
+    // 兜底看门狗：cancel_agent_task 为 best-effort，可能不回终态事件，3s 后强制复位避免按钮卡死。
+    clearCancelWatchdog()
+    cancelWatchdogRef.current = setTimeout(() => {
+      if (isRunningRef.current) {
+        setIsStreaming(false)
+        setRunning(false)
+        setStatusText('')
+      }
+    }, 3000)
+  }, [isTauri, clearTaskTimeout, clearCancelWatchdog])
 
   // 步骤级恢复：回传决策（retry / skip / takeover）给后台挂起的流水线。
   // 不在下发时乐观收起面板——后端接到决策后会 emit step_started（retry/takeover）
@@ -610,14 +635,39 @@ export function useAgentSession(): AgentSessionState {
               const s = e.plan.step
               const st = e.plan.status ?? 'success'
               const sum = e.plan.summary
+              // 验证置信度：后端 verifier 已校验则为 true；无 criteria 仅模型自报 / 失败 / 跳过为 false。
+              // 仅当后端明确下发了 verified 字段时才采用，避免历史事件缺失该字段时误判。
+              const verified = typeof e.plan.verified === 'boolean' ? e.plan.verified : undefined
+              const evidence = typeof e.plan.evidence === 'string' ? e.plan.evidence : undefined
               if (currentStepRef.current === s) currentStepRef.current = null
               setPlanSteps((prev) =>
                 prev.map((t) =>
-                  t.step === s ? { ...t, status: st, summary: sum ?? t.summary } : t,
+                  t.step === s
+                    ? { ...t, status: st, summary: sum ?? t.summary, verified, evidence }
+                    : t,
                 ),
               )
               // 跳过分支：被跳过的步骤不会再 emit step_started，这里直接收起恢复面板。
               setRecovery((prev) => (prev && prev.step === s ? null : prev))
+            }
+            break
+          case 'step_blocked':
+            // 子任务受阻：进入恢复等待，画布置 blocked（琥珀「受阻待决策」），与 failed 区分。
+            if (typeof e.plan?.step === 'number') {
+              const s = e.plan.step
+              const sum = e.plan.summary
+              setPlanSteps((prev) =>
+                prev.map((t) =>
+                  t.step === s ? { ...t, status: 'blocked', summary: sum ?? t.summary } : t,
+                ),
+              )
+            }
+            break
+          case 'step_retrying':
+            // 子任务重试中：画布置 retrying（蓝「重试中」），随后 run_subtask 的 step_started 翻 running。
+            if (typeof e.plan?.step === 'number') {
+              const s = e.plan.step
+              setPlanSteps((prev) => prev.map((t) => (t.step === s ? { ...t, status: 'retrying' } : t)))
             }
             break
           case 'intent_classified':
@@ -657,6 +707,7 @@ export function useAgentSession(): AgentSessionState {
           // 终值同步到实时计数卡（simple_chat 等不推送 token_update 的路径也能拿到终值）。
           setLiveTokenUsage(ev.payload ?? null)
           clearTaskTimeout()
+          clearCancelWatchdog()
           setRunning(false)
           setIsStreaming(false)
           setStatusText('')
@@ -669,6 +720,7 @@ export function useAgentSession(): AgentSessionState {
       )
       const offErr = await listen<string>('agent-task-error', (ev) => {
         clearTaskTimeout()
+        clearCancelWatchdog()
         setRunning(false)
         setIsStreaming(false)
         setStatusText(`任务异常：${ev.payload}`)

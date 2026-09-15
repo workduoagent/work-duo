@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Bot, GitBranch, Sparkles, Wrench, ShieldAlert, CheckCircle2, XCircle, Loader2, ChevronRight, ChevronDown } from 'lucide-react'
+import { Bot, GitBranch, Sparkles, Wrench, ShieldAlert, CheckCircle2, XCircle, Loader2, ChevronRight, ChevronDown, AlertTriangle, RefreshCw } from 'lucide-react'
 import { MarkdownRenderer } from '@/components/markdown/MarkdownRenderer'
 import type { IntentClassified, PlanStep, ThinkingChunk, ToolStep } from './types'
 
@@ -27,6 +27,8 @@ function StepStatusIcon({ status }: { status?: PlanStep['status'] }) {
   if (status === 'running') return <Loader2 size={13} className="agent-trace__spin" />
   if (status === 'success') return <CheckCircle2 size={13} color="var(--color-success, #10B981)" />
   if (status === 'failed') return <XCircle size={13} color="var(--color-error, #EF4444)" />
+  if (status === 'blocked') return <AlertTriangle size={13} color="var(--color-warning, #F59E0B)" />
+  if (status === 'retrying') return <RefreshCw size={13} className="agent-trace__spin" />
   return <span className="agent-trace__dot" />
 }
 
@@ -122,6 +124,23 @@ export function TracePanel({ intent, thinking, planSteps, toolSteps }: TracePane
                     <span className="agent-trace__plan-card-num">{s.step}</span>
                     <StepStatusIcon status={s.status} />
                     <span className="agent-trace__plan-card-title">{s.title}</span>
+                    {s.status === 'success' && (
+                      s.verified ? (
+                        <span
+                          className="agent-trace__verify agent-trace__verify--ok"
+                          title={s.evidence ? `已验证：${s.evidence}` : '已验证：通过本步声明的 success_criteria 客观校验'}
+                        >
+                          <CheckCircle2 size={11} /> 已验证
+                        </span>
+                      ) : (
+                        <span
+                          className="agent-trace__verify agent-trace__verify--provisional"
+                          title={s.evidence ? `暂定：${s.evidence}` : '暂定：无客观依据，建议人工确认'}
+                        >
+                          <AlertTriangle size={11} /> 暂定
+                        </span>
+                      )
+                    )}
                     {hasContent && (
                       <span className="agent-trace__plan-card-caret">
                         {collapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}

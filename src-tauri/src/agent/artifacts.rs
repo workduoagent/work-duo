@@ -31,23 +31,73 @@ const KNOWN_EXT: &[&str] = &[
     "db", "sqlite", "duckdb",
 ];
 
+/// 结构化产物来源（图/工具驱动，取代单纯扫 `summary` 文本）。
+///
+/// 优先级：P0 `changed_files`（工具真实写出） > P1 `success_targets`（声明 criteria 且存在）>
+/// P3 `summary` 文本推断（兜底，命中即 warn）。
+pub struct ArtifactSources<'a> {
+    /// P0：本步工具真实写出的路径（write_file/edit_file 真实返回），最可信。
+    pub changed_files: &'a [String],
+    /// P1：本步声明的 `success_criteria.target`（相对工作空间、存在的文件）。
+    pub success_targets: Vec<String>,
+}
+
+/// 按优先级合并产物候选路径（纯函数，便于单测）。
+///
+/// 返回 `(raw_path, is_summary_fallback)`：
+/// - P0 `changed_files` 与 P1 `success_targets` 来源 `is_summary_fallback = false`
+/// - 仅由 `summary` 文本推断命中者 `is_summary_fallback = true`（调用方据此 warn 幽灵产物风险）
+///
+/// 全局去重：同路径只保留首次命中来源（P0 > P1 > P3）。
+fn merge_artifact_candidates(
+    changed_files: &[String],
+    success_targets: &[String],
+    summary: &str,
+) -> Vec<(String, bool)> {
+    let mut raw: Vec<(String, bool)> = Vec::new();
+    for p in changed_files {
+        raw.push((p.clone(), false));
+    }
+    for p in success_targets {
+        if !raw.iter().any(|(r, _)| r == p) {
+            raw.push((p.clone(), false));
+        }
+    }
+    let summary_cands = candidate_paths(summary);
+    for c in summary_cands {
+        if !raw.iter().any(|(r, _)| *r == c) {
+            raw.push((c, true));
+        }
+    }
+    raw
+}
+
 /// 子任务成功闭环后登记其文件产物。
 ///
 /// 返回登记成功的产物清单（供调用方写回 `SubTaskOutput.artifacts`）。
 /// 任何单条产物登记失败都不影响其它产物（best-effort）。
+///
+/// 产物来源由 `sources` 提供（图/工具驱动的结构化事实），仅在无结构化来源时
+/// 退化到 `summary` 文本推断（`candidate_paths`），命中即 `tracing::warn!`。
 pub async fn register_artifacts(
     app: &AppHandle,
     cfg: &AgentRuntimeConfig,
     task: &PlanSubTask,
     summary: &str,
+    sources: &ArtifactSources<'_>,
 ) -> Vec<ArtifactRef> {
     let ws = cfg.workspace.clone().unwrap_or_default();
-    let candidates = candidate_paths(summary);
+
+    // 候选路径按优先级合并：P0 工具真实写盘 > P1 success_criteria.target > P3 summary 文本推断（降级）。
+    // 仅 summary 推断命中者 `is_fallback = true`（用于末尾 warn 幽灵产物风险）。
+    let raw_candidates = merge_artifact_candidates(sources.changed_files, &sources.success_targets, summary);
+
     let now = now_ms();
     let mut out: Vec<ArtifactRef> = Vec::new();
     let mut idx: u32 = 0;
+    let mut had_summary_fallback = false;
 
-    for raw in candidates {
+    for (raw, is_fallback) in raw_candidates {
         let path = match resolve_path(&raw, &ws) {
             Some(p) => p,
             None => continue,
@@ -60,6 +110,9 @@ pub async fn register_artifacts(
             Ok(m) => m,
             Err(_) => continue, // 文件不存在 → 不登记（L1 文件存在校验）
         };
+        if is_fallback {
+            had_summary_fallback = true;
+        }
         let is_dir = meta.is_dir();
         let size = if is_dir { 0 } else { meta.len() };
         let ext = Path::new(&path)
@@ -93,6 +146,12 @@ pub async fn register_artifacts(
 
     if !out.is_empty() {
         crate::agent::events::emit_artifact_created(app, task.step, &out);
+        if had_summary_fallback {
+            tracing::warn!(
+                "[agent] artifacts: 步骤 {} 产物含仅由 summary 文本推断的候选（非工具真实写出），可能含幽灵产物",
+                task.step,
+            );
+        }
         tracing::info!(
             "[agent] artifacts: 步骤 {} 登记 {} 个产物：{}",
             task.step,
@@ -269,4 +328,50 @@ fn now_ms() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn merge_prefers_changed_files_over_summary() {
+        let changed = vec!["out.md".to_string()];
+        let targets: Vec<String> = vec![];
+        let summary = "我创建了 report.xlsx 和 out.md";
+        let merged = merge_artifact_candidates(&changed, &targets, summary);
+
+        // out.md 来自工具真实写出（changed_files），非兜底。
+        let out_md = merged.iter().find(|(p, _)| p == "out.md");
+        assert!(out_md.is_some(), "out.md 应出现在候选中");
+        assert!(!out_md.unwrap().1, "out.md 应来自 changed_files，非 summary 兜底");
+
+        // report.xlsx 仅由 summary 文本推断，应标 fallback。
+        let report = merged.iter().find(|(p, _)| p == "report.xlsx");
+        assert!(report.is_some(), "report.xlsx 应出现在候选中");
+        assert!(report.unwrap().1, "report.xlsx 来自 summary，应标 fallback");
+    }
+
+    #[test]
+    fn merge_summary_only_marks_fallback() {
+        let changed: Vec<String> = vec![];
+        let targets: Vec<String> = vec![];
+        let summary = "例如 config.yaml 可以这样配置";
+        let merged = merge_artifact_candidates(&changed, &targets, summary);
+        let cfg = merged.iter().find(|(p, _)| p == "config.yaml");
+        assert!(cfg.is_some(), "config.yaml 应被 summary 推断命中");
+        assert!(cfg.unwrap().1, "纯 summary 推断应标 fallback（举例路径风险）");
+    }
+
+    #[test]
+    fn merge_target_and_changed_dedup_no_fallback() {
+        let changed = vec!["a.md".to_string()];
+        let targets = vec!["a.md".to_string(), "b.json".to_string()];
+        let merged = merge_artifact_candidates(&changed, &targets, "");
+        for (p, fb) in &merged {
+            if p == "a.md" || p == "b.json" {
+                assert!(!*fb, "{} 来自结构化来源，不应标 fallback", p);
+            }
+        }
+    }
 }

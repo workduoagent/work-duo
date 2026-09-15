@@ -15,12 +15,14 @@
  */
 import { useMemo, useState } from 'react'
 import {
+  AlertTriangle,
   CheckCircle2,
   ChevronRight,
   Circle,
   CircleSlash,
   ListChecks,
   Loader2,
+  RefreshCw,
   XCircle,
 } from 'lucide-react'
 import { ToolStepCard } from './ToolStepCard'
@@ -101,6 +103,8 @@ function GroupIcon({ status }: { status: PlanStep['status'] }) {
   if (status === 'success') return <CheckCircle2 size={14} className="plan-tool-timeline__ok" />
   if (status === 'failed') return <XCircle size={14} className="plan-tool-timeline__fail" />
   if (status === 'running') return <Loader2 size={14} className="plan-tool-timeline__spin" />
+  if (status === 'blocked') return <AlertTriangle size={14} color="var(--color-warning, #F59E0B)" />
+  if (status === 'retrying') return <RefreshCw size={14} className="plan-tool-timeline__spin" />
   return <Circle size={14} className="plan-tool-timeline__pending" />
 }
 

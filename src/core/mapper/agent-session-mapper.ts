@@ -362,9 +362,31 @@ export async function renameSession(id: string, name: string): Promise<void> {
   await updateSession(id, { sessionName: name })
 }
 
-/** 切换归档。 */
-export async function setSessionArchived(id: string, archived: boolean): Promise<void> {
+/**
+ * 显式解绑会话所属工程（置 project_id 为 NULL，变回自由会话）。
+ *  - 不能用 `updateSession({ projectId: null })`：其 SQL 对 project_id 用 `COALESCE(?, project_id)`，
+ *    传入 null 时恒取旧值，解绑无效（见 #20260915004 B1）。
+ *  - 本函数用**显式** `project_id = ?` 且参数传 null，保证写空。
+ */
+export async function clearSessionProject(id: string): Promise<void> {
   const now = Date.now()
+  if (!isTauri) {
+    const list = lsRead<AgentConversationSession>(LS_SESSION).map((s) =>
+      s.id === id ? { ...s, projectId: undefined, updatedAt: new Date(now).toISOString() } : s,
+    )
+    lsWrite(LS_SESSION, list)
+    return
+  }
+  const db = await getDb()
+  await db.execute('UPDATE agent_conversation_session SET project_id = ?, updated_at = ? WHERE id = ?', [
+    null,
+    now,
+    id,
+  ])
+}
+
+/** 切换归档。 */
+export async function setSessionArchived(id: string, archived: boolean): Promise<void> {  const now = Date.now()
   if (!isTauri) {
     const list = lsRead<AgentConversationSession>(LS_SESSION).map((s) =>
       s.id === id ? { ...s, isArchive: archived, updatedAt: new Date(now).toISOString() } : s,

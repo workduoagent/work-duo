@@ -15,7 +15,8 @@
 //!    `text_contains` 指向一个名为 `stdout` 的**文件**，否则该校验永不命中、陷入恢复死循环。
 //!  - `command_succeeded`：**运行类工具进程退出码为 0**（通用判定真相源）。与语言 / 框架 / 输出措辞 /
 //!    emoji 完全无关（同 `cargo check` 退出 0 即通过的契约）；替代「去 stdout 文本里猜测试过没」的脆弱做法。
-//!    本步未执行运行类工具（无退出码）时降级为通过，避免对破碎条件死循环。
+//!    本步未执行运行类工具（无退出码）时降级为通过，避免对破碎条件死循环；
+//!    **降级项不计入客观证据**——含降级项的步骤聚合后标暂定（verified=false），不得打「已验证」。
 
 use std::path::{Path, PathBuf};
 
@@ -29,6 +30,11 @@ pub struct VerificationResult {
     pub met: bool,
     /// 未通过项的明细（多个用「；」拼接），通过时为空。
     pub details: String,
+    /// 是否具备客观可核验证据（Phase E 验证优先）：
+    /// `true`=已验证（步骤声明了 success_criteria 且客观通过）；`false`=暂定（无 criteria 或仅模型自报）。
+    pub verified: bool,
+    /// 客观证据说明（首个客观通过项详情 / 暂定原因），供前端/回复展示。
+    pub evidence: String,
 }
 
 /// 把（可能相对的）目标路径解析为绝对路径：绝对路径原样保留，相对路径以工作空间为基准。
@@ -77,15 +83,21 @@ fn cands_disp(cands: &[PathBuf]) -> String {
 /// 破碎条件无限重跑（典型：`text_contains` 缺 `value`，重跑也补不上 value → 死循环）。
 /// 处理原则：**仅当「条件不可评估」才降级**；条件完整但客观未命中仍返回 `false`（真实失败，重试有意义）。
 /// 降级即按「以模型自报为准」视为通过，并打 warn 日志便于排查是 planner 生成了残缺条件。
+///
+/// ⚠️ 降级 ≠ 客观通过：降级项没有客观证据，聚合时必须把整步标为**暂定**（verified=false）。
+/// 所有降级明细都以 [`DEGRADED_MARK`] 开头，聚合端据此识别（见 `verify_task`）。
 fn degraded(check_type: &str, reason: &str) -> (bool, String) {
     tracing::warn!(
         "[agent] verifier: 校验条件不完整，降级为「以模型自报为准」（视为通过）：type={check_type} reason={reason}"
     );
     (
         true,
-        format!("（校验条件不完整，已降级为以模型自报为准）{reason}"),
+        format!("{DEGRADED_MARK}，已降级为以模型自报为准）{reason}"),
     )
 }
+
+/// 降级明细的统一标记前缀（含开括号，避免与正文撞词）。聚合端据此把含降级项的步骤标暂定。
+const DEGRADED_MARK: &str = "（校验条件不完整";
 
 /// 读取文件用于校验：先确认「存在性 + 是否目录」，再读内容。
 /// 把裸 `os error 2/3/5` 翻译成清晰中文，落实「先看文件有没有，你不能上来就读」的闭环要求。
@@ -422,6 +434,8 @@ pub fn verify_task(
         return VerificationResult {
             met: true,
             details: String::new(),
+            verified: false,
+            evidence: "步骤未声明 success_criteria，无客观依据，以模型自报为准".to_string(),
         };
     }
     // 工具运行输出流聚合文本：供 stdout_contains / tool_output_contains 精确子串匹配。
@@ -431,12 +445,18 @@ pub fn verify_task(
         .collect::<Vec<&str>>()
         .join("\n");
     let mut failed: Vec<String> = Vec::new();
+    // 降级追踪：凡有条件是「降级视为通过」（而非客观命中），整步不能标已验证，
+    // 必须回落到暂定（verified=false）——降级 = 无客观证据，与「无 criteria」同权。
+    let mut degraded_notes: Vec<String> = Vec::new();
     for c in &task.success_criteria {
         let ct = c.check_type.to_lowercase();
         // 运行成功通用判定：直接读退出码，与输出措辞 / 语言 / emoji 无关（同 cargo check 契约）。
         if ct == "command_succeeded" {
             let (ok, detail) = check_command_succeeded(run_outcomes);
             if ok {
+                if detail.contains(DEGRADED_MARK) {
+                    degraded_notes.push(detail);
+                }
                 continue;
             }
             failed.push(detail);
@@ -446,6 +466,9 @@ pub fn verify_task(
         if ct == "stdout_contains" || ct == "tool_output_contains" {
             let (ok, detail) = check_tool_output(c, &joined_output);
             if ok {
+                if detail.contains(DEGRADED_MARK) {
+                    degraded_notes.push(detail);
+                }
                 continue;
             }
             failed.push(detail);
@@ -454,28 +477,51 @@ pub fn verify_task(
         // 第一阶段：仅 planner 声明的 target。
         let (planner_ok, planner_detail) = check_one(c, workspace, &[]);
         if planner_ok {
+            if planner_detail.contains(DEGRADED_MARK) {
+                degraded_notes.push(planner_detail);
+            }
             continue;
         }
         // 第二阶段：planner target 未命中 → 兜底核验工具实际写出的真实文件。
         let (real_ok, real_detail) = check_one(c, workspace, actual_written);
         if real_ok {
-            tracing::info!(
-                "[agent] verifier: 计划 target 未命中，但以工具实际写出的文件通过 step 校验：{}",
-                real_detail
-            );
+            if real_detail.contains(DEGRADED_MARK) {
+                degraded_notes.push(real_detail);
+            } else {
+                tracing::info!(
+                    "[agent] verifier: 计划 target 未命中，但以工具实际写出的文件通过 step 校验：{}",
+                    real_detail
+                );
+            }
             continue;
         }
         failed.push(planner_detail);
     }
     if failed.is_empty() {
-        VerificationResult {
-            met: true,
-            details: String::new(),
+        if degraded_notes.is_empty() {
+            VerificationResult {
+                met: true,
+                details: String::new(),
+                verified: true,
+                evidence: "已通过本步声明的 success_criteria 客观校验".to_string(),
+            }
+        } else {
+            VerificationResult {
+                met: true,
+                details: String::new(),
+                verified: false,
+                evidence: format!(
+                    "步骤声明了 success_criteria，但存在不可评估条件（降级为以模型自报为准），无完整客观证据，暂定：{}",
+                    degraded_notes.join("；")
+                ),
+            }
         }
     } else {
         VerificationResult {
             met: false,
             details: failed.join("；"),
+            verified: false,
+            evidence: String::new(),
         }
     }
 }
@@ -597,6 +643,7 @@ mod tests {
         };
         let r4 = verify_task(&task_no_value, None, &[], &[]);
         assert!(r4.met, "stdout_contains 缺 value 应降级通过");
+        assert!(!r4.verified, "降级通过无客观证据，必须标暂定");
     }
 
     /// 通用运行成功判定：退出码 0 即通过，与输出措辞 / 语言 / emoji 完全无关。
@@ -692,7 +739,8 @@ mod tests {
         assert!(!r2.met, "FAILED exit 非0 应判未闭环：{}", r2.details);
     }
 
-    /// 本步未执行任何运行类工具（无退出码）→ 条件无法客观评估，降级为通过（避免死循环）。
+    /// 本步未执行任何运行类工具（无退出码）→ 条件无法客观评估，降级为通过（避免死循环）；
+    /// 但降级 = 无客观证据，整步必须标暂定（verified=false），不得打「已验证」角标。
     #[test]
     fn verify_task_command_succeeded_degrades_without_run() {
         let task = PlanSubTask {
@@ -710,5 +758,108 @@ mod tests {
         };
         let r = verify_task(&task, None, &[], &[]);
         assert!(r.met, "无运行工具应降级通过");
+        assert!(!r.verified, "降级通过无客观证据，必须标暂定 verified=false");
+        assert!(
+            r.evidence.contains("降级"),
+            "暂定 evidence 需说明降级原因：{}",
+            r.evidence
+        );
+    }
+
+    /// 混合场景：一条条件客观通过 + 一条条件降级通过 → 整步证据不完整，仍须标暂定。
+    #[test]
+    fn verify_task_mixed_objective_and_degraded_is_provisional() {
+        let dir = std::env::temp_dir().join("workduo_verifier_mixed");
+        let _ = std::fs::create_dir_all(&dir);
+        let real = dir.join("a.txt");
+        std::fs::write(&real, "content").expect("写测试文件");
+
+        let task = PlanSubTask {
+            step: 1,
+            task_id: "t1".into(),
+            title: "生成文件并运行".into(),
+            description: String::new(),
+            success_criteria: vec![
+                SuccessCriterion {
+                    check_type: "file_nonempty".into(),
+                    target: Some(real.to_string_lossy().into()),
+                    value: None,
+                    threshold: None,
+                },
+                SuccessCriterion {
+                    check_type: "command_succeeded".into(), // 未运行任何命令 → 降级
+                    target: None,
+                    value: None,
+                    threshold: None,
+                },
+            ],
+            depends_on: vec![],
+        };
+        let r = verify_task(&task, None, &[], &[]);
+        assert!(r.met, "全部条件视为通过：{}", r.details);
+        assert!(
+            !r.verified,
+            "含降级项时整步不得标已验证：{}",
+            r.evidence
+        );
+        let _ = std::fs::remove_file(&real);
+        let _ = std::fs::remove_dir(&dir);
+    }
+
+    /// Phase E：无 success_criteria 的步骤闭环应标 Provisional（verified=false）。
+    #[test]
+    fn verify_task_provisional_when_no_criteria() {
+        let task = PlanSubTask {
+            step: 2,
+            task_id: "t2".into(),
+            title: "总结需求要点".into(),
+            description: String::new(),
+            success_criteria: vec![], // 纯对话/总结类，无客观校验
+            depends_on: vec![],
+        };
+        let r = verify_task(&task, None, &[], &[]);
+        assert!(r.met, "无 criteria 应视为通过（以模型自报为准）");
+        assert!(!r.verified, "无 criteria 必须标暂定 verified=false");
+        assert!(
+            r.evidence.contains("无客观依据"),
+            "暂定需带原因说明：{}",
+            r.evidence
+        );
+    }
+
+    /// Phase E：声明了 success_criteria 且客观通过 → 标已验证（verified=true）。
+    #[test]
+    fn verify_task_verified_on_objective_pass() {
+        let dir = std::env::temp_dir().join("workduo_verifier_evidence");
+        let _ = std::fs::create_dir_all(&dir);
+        let real = dir.join("calc.py");
+        std::fs::write(&real, "def add(a, b):\n    return a + b\n").expect("写测试文件");
+
+        let task = PlanSubTask {
+            step: 1,
+            task_id: "t1".into(),
+            title: "生成 calc.py".into(),
+            description: String::new(),
+            success_criteria: vec![SuccessCriterion {
+                check_type: "file_nonempty".into(),
+                target: Some(real.to_string_lossy().into()),
+                value: None,
+                threshold: None,
+            }],
+            depends_on: vec![],
+        };
+        let r = verify_task(&task, None, &[], &[]);
+        assert!(r.met, "文件存在应判通过");
+        assert!(
+            r.verified,
+            "有 criteria 且客观通过应标已验证 verified=true"
+        );
+        assert!(
+            r.evidence.contains("客观校验"),
+            "已验证需带证据说明：{}",
+            r.evidence
+        );
+        let _ = std::fs::remove_file(&real);
+        let _ = std::fs::remove_dir(&dir);
     }
 }

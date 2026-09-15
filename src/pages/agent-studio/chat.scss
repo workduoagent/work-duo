@@ -71,6 +71,32 @@
     }
   }
 
+  &__archive-toggle {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin: 2px 2px 0;
+    padding: 4px 8px;
+    font-size: 0.74rem;
+    color: var(--color-foreground-muted);
+    cursor: pointer;
+    user-select: none;
+    border-radius: 8px;
+    transition: background-color 0.15s ease, color 0.15s ease;
+
+    &:hover {
+      background: var(--color-hover, rgba(127, 127, 127, 0.12));
+      color: var(--color-foreground);
+    }
+
+    input {
+      width: 13px;
+      height: 13px;
+      accent-color: var(--color-brand-600);
+      cursor: pointer;
+    }
+  }
+
   &__session-list {
     flex: 1 1 auto;
     overflow-y: auto;
@@ -135,6 +161,22 @@
 
   &__session.is-active::before {
     height: 60%;
+  }
+
+  &__session.is-archived {
+    background: rgba(245, 158, 11, 0.14);
+    border-color: rgba(245, 158, 11, 0.45);
+    color: var(--color-foreground);
+    &:hover {
+      background: rgba(245, 158, 11, 0.2);
+    }
+    .dark & {
+      background: rgba(245, 158, 11, 0.2);
+      border-color: rgba(245, 158, 11, 0.55);
+      &:hover {
+        background: rgba(245, 158, 11, 0.28);
+      }
+    }
   }
 
   &__session-main {
@@ -1265,6 +1307,16 @@
 
     .dark & {
       color: #888;
+    }
+  }
+
+  &__group-head.is-archived {
+    background: rgba(245, 158, 11, 0.14);
+    border: 1px solid rgba(245, 158, 11, 0.45);
+    color: var(--color-foreground);
+    .dark & {
+      background: rgba(245, 158, 11, 0.2);
+      border-color: rgba(245, 158, 11, 0.55);
     }
   }
 
@@ -3182,6 +3234,28 @@
     }
   }
 
+  // 验证置信度角标（已验证 / 暂定）
+  &__verify {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    padding: 1px 6px;
+    border-radius: 999px;
+    font-size: 10px;
+    font-weight: 600;
+    line-height: 1.4;
+    white-space: nowrap;
+
+    &--ok {
+      background: rgba(16, 185, 129, 0.14);
+      color: var(--color-success, #10b981);
+    }
+    &--provisional {
+      background: rgba(245, 158, 11, 0.16);
+      color: var(--color-warning, #f59e0b);
+    }
+  }
+
   &__reason {
     color: var(--color-foreground-muted, #666);
   }
@@ -4543,6 +4617,7 @@
 
   // ── ReactFlow 自定义节点（plan 大节点 / tool 小节点）──
   .rf-plan {
+    position: relative;
     width: 208px;
     min-height: 66px;
     box-sizing: border-box;
@@ -4598,6 +4673,7 @@
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
+      padding-right: 56px;
 
       .dark & {
         color: #e8e8e8;
@@ -4624,6 +4700,31 @@
       color: var(--color-foreground-muted, #999);
     }
 
+    // 验证置信度角标（已验证 / 暂定）
+    &__verify {
+      position: absolute;
+      top: 8px;
+      right: 10px;
+      display: inline-flex;
+      align-items: center;
+      gap: 2px;
+      padding: 1px 6px;
+      border-radius: 999px;
+      font-size: 10px;
+      font-weight: 600;
+      line-height: 1.4;
+      white-space: nowrap;
+
+      &--ok {
+        background: rgba(16, 185, 129, 0.14);
+        color: var(--color-success, #10b981);
+      }
+      &--provisional {
+        background: rgba(245, 158, 11, 0.16);
+        color: var(--color-warning, #f59e0b);
+      }
+    }
+
     &.is-selected {
       box-shadow: 0 0 0 3px rgba(22, 119, 255, 0.25), 0 4px 14px rgba(15, 23, 42, 0.16);
     }
@@ -4637,6 +4738,26 @@
 
       .dark & {
         background: rgba(239, 68, 68, 0.12);
+      }
+    }
+
+    // 受阻待决策：琥珀环 + 浅琥珀底，与终态 failed（红）明确区分。
+    &.is-blocked {
+      background: rgba(245, 158, 11, 0.08);
+      box-shadow: 0 0 0 2px var(--color-warning, #f59e0b), 0 2px 8px rgba(15, 23, 42, 0.1);
+
+      .dark & {
+        background: rgba(245, 158, 11, 0.14);
+      }
+    }
+
+    // 重试中：呼吸动画（同 running）+ 浅蓝底，便于与全新 pending 步区分。
+    &.is-retrying {
+      animation: agent-rf-breath 1.2s ease-in-out infinite;
+      background: rgba(59, 130, 246, 0.05);
+
+      .dark & {
+        background: rgba(59, 130, 246, 0.12);
       }
     }
   }

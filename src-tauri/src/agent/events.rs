@@ -356,7 +356,7 @@ pub fn emit_step_started(app: &AppHandle, step: usize, total: usize, title: &str
     );
 }
 
-/// 子任务结束：进度条对应步骤置为 success / failed，并携带产物摘要。
+/// 子任务结束：进度条对应步骤置为 success / failed / skipped，并携带产物摘要。
 pub fn emit_step_finished(
     app: &AppHandle,
     step: usize,
@@ -364,6 +364,14 @@ pub fn emit_step_finished(
     title: &str,
     ok: bool,
     summary: &str,
+    // 是否已验证：true=有客观依据（声明 success_criteria 且通过校验）；
+    // false=暂定（无 criteria 仅模型自报，或失败/跳过）。前端据此渲染「已验证/暂定」角标。
+    verified: bool,
+    // 验证依据（客观通过时的 evidence 文本，或暂定/失败原因），前端角标 hover 展示。
+    evidence: &str,
+    // 是否为跳过终态：true 时事件 status 下发 "skipped"（前端画灰「已跳过」），
+    // 不再被 ok=true 洗成 success（修复 skip 步在画布误显示绿色「已完成」）。
+    skipped: bool,
 ) {
     emit(
         app,
@@ -375,15 +383,78 @@ pub fn emit_step_finished(
             message: Some(format!(
                 "步骤 {step}/{total}：{} {}",
                 title,
-                if ok { "完成" } else { "失败" }
+                if skipped {
+                    "已跳过"
+                } else if ok {
+                    "完成"
+                } else {
+                    "失败"
+                }
             )),
             seq: None,
             plan: Some(serde_json::json!({
                 "step": step,
                 "total": total,
                 "title": title,
-                "status": if ok { "success" } else { "failed" },
+                "status": if skipped {
+                    "skipped"
+                } else if ok {
+                    "success"
+                } else {
+                    "failed"
+                },
                 "summary": summary,
+                "verified": verified,
+                "evidence": evidence,
+            })),
+            intent: None,
+        },
+    );
+}
+
+/// 子任务受阻：进入恢复等待（Retry/Skip/Takeover/ChangeApproach/Cancel 等待用户决策）。
+/// 进度条对应步骤置为 `blocked`（琥珀「受阻待决策」），与终态 `failed` 区分——画布不再把
+/// "等你拍板" 误画成 "这步死了"。
+pub fn emit_step_blocked(app: &AppHandle, step: usize, total: usize, title: &str, summary: &str) {
+    emit(
+        app,
+        EVT_AGENT_EVENT,
+        &AgentEventPayload {
+            event_type: "step_blocked".into(),
+            step: None,
+            chunk: None,
+            message: Some(format!("步骤 {step}/{total}：{title} 受阻，等待恢复决策")),
+            seq: None,
+            plan: Some(serde_json::json!({
+                "step": step,
+                "total": total,
+                "title": title,
+                "status": "blocked",
+                "summary": summary,
+            })),
+            intent: None,
+        },
+    );
+}
+
+/// 子任务重试中：恢复决策（Retry/Takeover/ChangeApproach）或 never 模式自动接管重试后重新执行。
+/// 进度条对应步骤置为 `retrying`（蓝「重试中」），随后 `run_subtask` 的 `step_started` 翻成 `running`，
+/// 形成 `blocked/retrying → running` 可见过渡，让"这步已失败过一次、正在自愈"可被观测。
+pub fn emit_step_retrying(app: &AppHandle, step: usize, total: usize, title: &str) {
+    emit(
+        app,
+        EVT_AGENT_EVENT,
+        &AgentEventPayload {
+            event_type: "step_retrying".into(),
+            step: None,
+            chunk: None,
+            message: Some(format!("步骤 {step}/{total}：{title} 重试中")),
+            seq: None,
+            plan: Some(serde_json::json!({
+                "step": step,
+                "total": total,
+                "title": title,
+                "status": "retrying",
             })),
             intent: None,
         },

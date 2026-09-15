@@ -493,12 +493,15 @@ impl KnowledgeGraph {
         })
     }
 
-    /// 拓扑就绪：status=pending 且全部 depends_on 源节点 status ∈ {completed, skipped}。
+    /// 拓扑就绪：status ∈ {pending, retrying} 且全部 depends_on 源节点 status ∈ {completed, skipped}。
+    /// 注意 `retrying` 也视为就绪：恢复/自动接管重试把节点置 `retrying` 后回到主循环，
+    /// 必须能被重新拾起执行（其前置依赖必然已闭环）；否则会被死锁分支误判为卡死。
     pub fn topo_ready(&self, session_id: &str) -> Vec<String> {
         let mut ready = Vec::new();
         for id in self.session_task_ids(session_id) {
             let node = &self.nodes[&id];
-            if node.props.get("status").and_then(|v| v.as_str()) != Some("pending") {
+            let st = node.props.get("status").and_then(|v| v.as_str()).unwrap_or("");
+            if st != "pending" && st != "retrying" {
                 continue;
             }
             let deps: Vec<String> = node
