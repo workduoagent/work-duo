@@ -40,6 +40,7 @@ Skill 不再注册为工具；`pipeline.rs::build_skill_guidance` 在 `run_subta
 - 校验器运行成功=退出码 0 为唯一真相源（`command_succeeded`），禁从 stdout 猜（20260914018）。
 - 计划审批=never：失败步自动接管重试（带诊断回灌），达 `MAX_TASK_RECOVERY_ATTEMPTS` 才 skipped，不弹 recovery（20260914013/14）。
 - 任务完成后推荐：追加进最终回复文本，禁弹 `ask_user_choice`（20260914015）。
+- **沙箱脚本落盘路径 + 执行 cwd（2026-09-10 真机 P1，已提交）**：脚本落 `.wd_mem/runtime/scripts/`（旧 `.wd_mem/scripts`）、执行 cwd=工作空间根（`ctx.workspace`），消除 `run_node_sandbox` ENOENT；见 `bun_manager.rs`/`mamba_manager.rs` `run_*_in_sandbox` 的 `cwd:Option<&Path>`。`wd_mem.rs` `.gitignore` 模板同步 `runtime/`。**P2（react-developer Skill 依赖三铁律 + edit_file 先 read_file）未做**。
 
 ## 前端 / 工程铁律
 UI 令牌只用 `var(--color-*)`（禁 hex/px）；根容器 `width:100%`；表单 `autoComplete="off"`、标签禁「中文(English)」混排。Hooks 须 early-return 前无条件执行。chat 右栏三投影 Tab（图/过程/产物，图默认）。执行图=RunDagCanvas 复合 DAG（PlanStep 节点 + ToolStep 子节点；L 形鱼骨布局）。交互态 hover 禁用位移/缩放，只做背景/颜色过渡。
@@ -50,4 +51,7 @@ UI 令牌只用 `var(--color-*)`（禁 hex/px）；根容器 `width:100%`；表�
 - Rust：`$CARGO_HOME/bin/cargo.exe` 或裸 `cargo`（用户已配 PATH，禁硬编码路径）。重编前停 `npm run tauri` 防 `target/` 锁。bash 缺 coreutils：日志重定向后 Read，勿管道 `| tail`。
 
 ## 当前冲刺（2026-09-15 起）
-下一波任务 = `需求与问题跟踪-第二期.md` 总览 `20260915001~012`（全 🔲）。Week1 可信地基：20260915001(provisional 完成态)→20260915002(产物图驱动)→20260915003(图中间态)→20260915004(前端4确定性bug)。收口标准：`cargo check`+`npm run typecheck`+真机一条验收路径写回跟踪文件。
+单一事实源 = `需求与问题跟踪-第二期.md`（总览 `20260915001~012` + 3 周冲刺「排期建议」章节）。记忆只留进度快照，不复制排期。
+- **Week1 可信地基（已收口/收口中）**：`20260915001`(provisional 完成态 ✅ 真机过)→`20260915002`(产物图驱动 ✅ 真机过)→`20260915003`(图中间态 ✅ 真机过，含死锁回归修复)→`20260915015`(校验降级误标已验证 ✅ 真机过)；`20260915004`(前端4确定性 bug ✅ 真机点验全通过：B1/B2/B3/B4；另硬化 @提及匹配 name→identifier)。
+- **Week2/3 待办**：`15005`(chat 拆分)/`15006`(错误面板)/`15007`(边审批引擎)/`15008`(Dashboard)/`15009`(小队)/`15010`(记忆护栏)/`15011`(TTS/STT)/`15012`(DB 路径 ⚠️ 待定)。
+- 收口标准：`cargo check`+`npm run typecheck`+真机一条验收路径写回跟踪文件。

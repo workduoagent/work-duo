@@ -1297,7 +1297,8 @@ export default function AgentChatPage() {
   const [suggest, setSuggest] = useState<SuggestState | null>(null)
   const [helpOpen, setHelpOpen] = useState(false)
   // @提及 选中的标签（chip）：独立维护，发送时序列化为「@标签」前缀，从文本框剥离避免歧义
-  const [mentionTags, setMentionTags] = useState<{ key: string; label: string }[]>([])
+  // token = 序列化进 prompt 的稳定标识（优先 skill.identifier，绝不依赖 name 判断）；label = 展示用人类可读名
+  const [mentionTags, setMentionTags] = useState<{ key: string; label: string; token: string }[]>([])
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   // 当前会话内临时移除的技能 id（内存态，不写库；页面重进/切换智能体即复位）
   const [removedSkillIds, setRemovedSkillIds] = useState<Set<string>>(new Set())
@@ -1767,8 +1768,8 @@ export default function AgentChatPage() {
   }, [])
 
   const send = useCallback(() => {
-    // 序列化：@标签 作为前缀，再拼接自由文本；标签与文本框解耦，避免技能名含空格导致解析歧义
-    const mentionPrefix = mentionTags.map((t) => `@${t.label}`).join(' ')
+    // 序列化：@标签 作为前缀，再拼接自由文本；token 用 skill.identifier（稳定、无空格），label 仅用于展示
+    const mentionPrefix = mentionTags.map((t) => `@${t.token}`).join(' ')
     const text = [mentionPrefix, input.trim()].filter(Boolean).join(' ').trim()
     if (!text || isRunning || !agent) return
 
@@ -1999,26 +2000,31 @@ export default function AgentChatPage() {
    * 用于「重新生成」时把首轮临时启用的能力原样带回（send 走的是 mentionTags，regenerate 时它已清空）。
    */
   const resolveMentionTags = useCallback(
-    (text: string): { key: string; label: string }[] => {
-      const out: { key: string; label: string }[] = []
+    (text: string): { key: string; label: string; token: string }[] => {
+      const out: { key: string; label: string; token: string }[] = []
       const seen = new Set<string>()
-      const add = (key: string, label: string) => {
+      const add = (key: string, label: string, token: string) => {
         if (!seen.has(key)) {
           seen.add(key)
-          out.push({ key, label })
+          out.push({ key, label, token })
         }
       }
       const tokens = text.match(/@[\p{L}\p{N}_-]+/gu) ?? []
       for (const tk of tokens) {
         const name = tk.slice(1)
         if (!name) continue
-        const sk = allSkills.find((s) => s.name === name)
+        // 硬化：优先按 identifier 精确匹配，绝不依赖 name 判断（name 含空格会被截断、重名歧义、改名失链）
+        const sk =
+          allSkills.find((s) => (s.identifier || '') === name) ?? allSkills.find((s) => s.name === name)
         if (sk) {
-          add(`skill:${sk.id}`, sk.name)
+          add(`skill:${sk.id}`, sk.name, sk.identifier || sk.name)
           continue
         }
         const mc = allMcps.find((m) => (m.aliasName || m.mcpName || m.id) === name)
-        if (mc) add(`mcp:${mc.id}`, mc.aliasName || mc.mcpName || mc.id)
+        if (mc) {
+          const mcName = mc.aliasName || mc.mcpName || mc.id
+          add(`mcp:${mc.id}`, mcName, mcName)
+        }
       }
       return out
     },
@@ -2172,7 +2178,8 @@ export default function AgentChatPage() {
           (s.identifier || '').toLowerCase().includes(q) ||
           (s.description || '').toLowerCase().includes(q),
       )
-      .map<SuggestItem>((s) => ({ key: `skill:${s.id}`, token: s.name, label: s.name, sub: s.description || '技能', group: '技能' }))
+      // token 用 skill.identifier（稳定、无空格），label 用 s.name 仅展示；硬化后不再依赖 name 做判断
+      .map<SuggestItem>((s) => ({ key: `skill:${s.id}`, token: s.identifier || s.name, label: s.name, sub: s.description || '技能', group: '技能' }))
     const mcps = allMcps
       .filter((m) => !q || (m.aliasName || m.mcpName || '').toLowerCase().includes(q))
       .map<SuggestItem>((m) => {
@@ -2210,7 +2217,8 @@ export default function AgentChatPage() {
     setInput(next)
     setMentionTags((prev) => {
       if (prev.some((t) => t.key === item.key)) return prev // 去重：同一技能/MCP 不重复添加
-      return [...prev, { key: item.key, label: item.token }]
+      // 写入 chip：label 展示人类名，token 携带 identifier（send 序列化与 regenerate 反解都按 token 匹配）
+      return [...prev, { key: item.key, label: item.label, token: item.token }]
     })
     setSuggest(null)
     requestAnimationFrame(() => {
