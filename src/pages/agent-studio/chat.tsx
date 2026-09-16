@@ -2759,7 +2759,7 @@ export default function AgentChatPage() {
                       </div>
                     </div>
                   )}
-                  {m.role === 'agent' && <FilePathCards content={m.content} />}
+                  {m.role === 'agent' && <FilePathCards content={isLastAgent ? displayedContent : m.content} />}
                   {m.role === 'agent' && m.completedAt && (
                     <MessageActions
                       msg={m}
