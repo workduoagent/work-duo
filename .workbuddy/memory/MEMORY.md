@@ -45,6 +45,7 @@ Skill 不再注册为工具；`pipeline.rs::build_skill_guidance` 在 `run_subta
 ## 前端 / 工程铁律
 UI 令牌只用 `var(--color-*)`（禁 hex/px）；根容器 `width:100%`；表单 `autoComplete="off"`、标签禁「中文(English)」混排。Hooks 须 early-return 前无条件执行。chat 右栏三投影 Tab（图/过程/产物，图默认）。执行图=RunDagCanvas 复合 DAG（PlanStep 节点 + ToolStep 子节点；L 形鱼骨布局）。交互态 hover 禁用位移/缩放，只做背景/颜色过渡。
 - antd `Notification` 弹窗**硬规矩**：整卡 `max-height:700px;overflow:hidden` + `.ant-notification-notice-description{max-height:540px;overflow-y:auto}`（仅文本区内部滚动，按钮第一眼可见）。正文走 `MarkdownRenderer`。**禁**字符截断+复制图标版（已废弃）。
+- 表单自动行为**宁可静默无提示**（用户 9-16 决策）：自动同步/回填类动作不弹 toast/Alert，状态用**字段级 icon + 悬浮 Tooltip** 表达（如插件参数 Schema 同步 ✓绿/⚠琥珀，悬浮列内容/原因）。
 
 ## 全局消息 / Rust 工具链
 - `useNotify()`（`App.useApp()`），禁静态 `import {message}`；`<App message={{top:72}}>` 避让顶栏。
@@ -54,4 +55,15 @@ UI 令牌只用 `var(--color-*)`（禁 hex/px）；根容器 `width:100%`；表�
 单一事实源 = `需求与问题跟踪-第二期.md`（总览 `20260915001~012` + 3 周冲刺「排期建议」章节）。记忆只留进度快照，不复制排期。
 - **Week1 可信地基（已收口/收口中）**：`20260915001`(provisional 完成态 ✅ 真机过)→`20260915002`(产物图驱动 ✅ 真机过)→`20260915003`(图中间态 ✅ 真机过，含死锁回归修复)→`20260915015`(校验降级误标已验证 ✅ 真机过)；`20260915004`(前端4确定性 bug ✅ 真机点验全通过：B1/B2/B3/B4；另硬化 @提及匹配 name→identifier)。
 - **Week2/3 待办**：`15005`(chat 拆分)/`15006`(错误面板)/`15007`(边审批引擎)/`15008`(Dashboard)/`15009`(小队)/`15010`(记忆护栏)/`15011`(TTS/STT)/`15012`(DB 路径 ⚠️ 待定)。
+- **#20260916001 用户自定义脚本插件（9-16 新建，当前活跃）**：P0 数据契约 / P1 Rust 执行闭环 / P2 Agent 装配 / P3 插件中心 UI 均 ✅（含 @提及插件、16:39 基础点验收口、17:15 P2 真机验收通过）；P4 打磨（日志页/清理/审批文案/导出 JSON）待办。详见下方「用户自定义脚本插件」段。`15005`(chat 拆分) v1 已回退；**v2 安全优先拆分 9-16 晚六步落地**（3839→2600 行 -32%，物理搬运零结构改动，commit 504f8e5…682b5b8 + tag pre-chat-split，方案 docs/chat-split-plan.md，待终验翻 ✅）。
 - 收口标准：`cargo check`+`npm run typecheck`+真机一条验收路径写回跟踪文件。
+
+## 用户自定义脚本插件（#20260916001 · P0-P3 ✅，P4 打磨待办）
+本地 FaaS：用户脚本（Python/Bun）= Agent 工具 `custom__<identifier>`（语义对齐 Skill/MCP）。设计稿 `docs/user-plugin-design.md` v1.0。
+- Rust：`plugin_runner.rs`（Runner 壳 + **exit 42 依赖自愈优先协议** + 超时 `taskkill /T /F` 杀树 + 写 `plugin_run_log` + 回写 `last_run_*`）/ `plugin_adapter.rs`（`PluginTool`+`register_plugins_into`）/ `plugin_commands.rs`（`test_user_plugin` + `extract_plugin_meta` 头注释解析→JSON Schema）；`lib.rs` 注册两命令。
+- TS：`src/core/file/plugin-file.ts`（领域模型+校验+草稿）+ `src/core/mapper/plugin-mapper.ts`（CRUD+bind/unbind+localStorage 回退）+ `plugin-connection.ts`（桥，对齐 mcp-connection）；`pages/plugins/`（卡片网格+detail Tabs+Form/Test Modal）；TopBar 百宝箱「插件」(Puzzle)；paths/router 接线。
+- DDL：`init.sql`+`updater.sql` 三表 `user_plugin_tool`/`agent_plugin_ref`/`plugin_run_log`（双源同步）；`database.d.ts` 对应 Row。
+- 装配（P2）：`load_config` 拼 `user_plugin_tool JOIN agent_plugin_ref` 注册；`RunAgentTaskInput` 加 `enabled/disabled_plugin_ids`（@提及临时并入，对齐 Skill）；`planner.rs capability_outline` 追加插件条目（明确「匹配时必须优先直接调 custom__，禁手写脚本重复实现」）；系统提示仅 plugin_tools 非空时追加「本地插件工具」段。
+- @提及：chat.tsx 加插件候选（group='插件'，token=identifier，label=name）；`resolveMentionTags` 插件匹配（identifier 优先/name 兜底）；send/regenerate 透传；底部 PluginPill（复用 McpPill，createPortal 到 body 避 transform 祖先致 fixed 漂移）。
+- 铁律：① 插件=工具，**先做完单模块再跑 Agent**；② 受管 `bun_root/node_modules` 自愈（设置页依赖管理可见、跨运行复用），`ensure_node_modules_link`（Windows junction / Unix symlink），失败回退装运行目录；③ Runner 壳用 raw string 常量（禁 `\n\` 续接吞缩进）；顶层 import 缺包走 exit 42（`_USER_SRC` 直接 `py_safe_json_literal` 赋值，非 json.loads 二次解码）。
+- 状态：P0/P1/P2/P3 ✅（16:39 基础点验收口、17:15 P2 真机验收通过）；P4 打磨（日志页/清理/审批文案/导出 JSON）待办。
