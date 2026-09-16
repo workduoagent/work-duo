@@ -77,6 +77,8 @@ pub fn run() {
             agent::commands::submit_choice_decision,
             agent::commands::submit_plan_decision,
             agent::commands::cancel_agent_task,
+            agent::plugin_commands::extract_plugin_meta,
+            agent::plugin_commands::test_user_plugin,
             net::http_probe,
             agent::commands::retry_subtask,
             agent::commands::skip_subtask,

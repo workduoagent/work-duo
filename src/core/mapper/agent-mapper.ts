@@ -299,6 +299,20 @@ export async function upsertAgent(input: AgentUpsertInput): Promise<AgentInfo[]>
       })),
     )
     lsWrite(LS_SKILL, skillRefs)
+
+    // 本地插件绑定（P2 新增；键与 plugin-mapper 的 localStorage 回退保持一致）
+    const pluginRefs = lsRead<{ id: string; agentId: string; pluginId: string; isActive: boolean; createdAt: string; updatedAt: string }>('work-duo:agent-plugins').filter((r) => r.agentId !== id)
+    pluginRefs.push(
+      ...(input.pluginIds ?? []).map((pluginId) => ({
+        id: crypto.randomUUID(),
+        agentId: id,
+        pluginId,
+        isActive: true,
+        createdAt: new Date(now).toISOString(),
+        updatedAt: new Date(now).toISOString(),
+      })),
+    )
+    lsWrite('work-duo:agent-plugins', pluginRefs)
     return list
   }
 
@@ -373,6 +387,16 @@ export async function upsertAgent(input: AgentUpsertInput): Promise<AgentInfo[]>
     )
   }
 
+  // 本地插件绑定（P2 新增）：先删后插，与向导勾选结果一致
+  await db.execute('DELETE FROM agent_plugin_ref WHERE agent_id = ?', [id])
+  for (const pluginId of input.pluginIds ?? []) {
+    await db.execute(
+      `INSERT INTO agent_plugin_ref (id, agent_id, plugin_id, is_active, created_at, updated_at)
+       VALUES (?, ?, ?, 1, ?, ?)`,
+      [crypto.randomUUID(), id, pluginId, now, now],
+    )
+  }
+
   return listAgents()
 }
 
@@ -391,11 +415,17 @@ export async function deleteAgent(id: string): Promise<AgentInfo[]> {
       LS_SKILL,
       lsRead<AgentSkillRef>(LS_SKILL).filter((r) => r.agentId !== id),
     )
+    // 本地插件绑定级联清理（P2 新增；键与 plugin-mapper 一致）
+    lsWrite(
+      'work-duo:agent-plugins',
+      lsRead<{ id: string; agentId: string; pluginId: string }>('work-duo:agent-plugins').filter((r) => r.agentId !== id),
+    )
     return lsRead<AgentInfo>(LS_AGENT)
   }
   const db = await getDb()
   await db.execute('DELETE FROM agent_mcp_ref WHERE agent_id = ?', [id])
   await db.execute('DELETE FROM agent_skill_ref WHERE agent_id = ?', [id])
+  await db.execute('DELETE FROM agent_plugin_ref WHERE agent_id = ?', [id])
   await db.execute('DELETE FROM agent_info WHERE id = ?', [id])
   return listAgents()
 }

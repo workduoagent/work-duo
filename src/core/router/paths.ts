@@ -6,12 +6,15 @@ export const ROUTES = {
   squadsWorkspace: '/squads-workspace',
   skillHub: '/skill-hub',
   mcpHub: '/mcp-hub',
+  pluginHub: '/plugin-hub',
   sandbox: '/sandbox',
   sandboxPython: '/sandbox/python',
   settings: '/settings',
 } as const
 
 export const mcpDetailPath = (id: string): string => `/mcp-hub/${id}`
+
+export const pluginDetailPath = (id: string): string => `/plugin-hub/${id}`
 
 export const skillDetailPath = (id: string): string => `/skill-hub/${id}`
 

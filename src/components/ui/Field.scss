@@ -4,6 +4,12 @@
   gap: 6px;
 }
 
+/* flex column 默认 align-items:stretch 会把 antd Switch 拉满整行宽度（表单「启用」项）；
+   开关保持固有宽度、靠左（Field 全局修复，MCP / Skill / 插件表单同步生效） */
+.app-field > .ant-switch {
+  align-self: flex-start;
+}
+
 .app-field__label {
   font-size: 0.875rem;
   font-weight: 500;

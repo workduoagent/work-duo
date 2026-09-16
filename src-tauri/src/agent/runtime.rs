@@ -160,10 +160,13 @@ impl AgentRuntime {
         for (server, tools) in by_server {
             crate::agent::mcp_adapter::register_mcp_into(&mut base, &server, tools);
         }
-        // 工具已全部直接注册进 base（原生 + Skill + MCP），base 即完整注册表。
+        // 本地插件（P2 纯增量）：cfg.plugin_tools 非空时注册为 custom__<identifier> 工具；
+        // 为空时零影响（register_plugins_into 对空切片不做事），不触碰既有注册逻辑。
+        crate::agent::plugin_adapter::register_plugins_into(&mut base, app, &cfg.plugin_tools);
+        // 工具已全部直接注册进 base（原生 + Skill + MCP + 插件），base 即完整注册表。
         let registry = base;
         tracing::info!(
-            "[agent] run_task: 工具注册完成，共 {} 个工具（原生 + Skill + MCP）",
+            "[agent] run_task: 工具注册完成，共 {} 个工具（原生 + Skill + MCP + 插件）",
             registry.get_tools_for_llm().len()
         );
 

@@ -41,9 +41,9 @@ use crate::agent::tools::ScriptRunResult;
 /// 默认受管环境名：Node 仅此一个，调用方未指定 `env_name` 时使用。
 const DEFAULT_ENV: &str = "default";
 /// 安装依赖时使用的国内镜像源（npmmirror），与 Python 的清华镜像源思路一致，避免直连 npm 官方源超时。
-const NPM_MIRROR: &str = "https://registry.npmmirror.com";
+pub(crate) const NPM_MIRROR: &str = "https://registry.npmmirror.com";
 /// 默认本地缓存目录（Bun 下载依赖的 cache 落在此处，保持绿便携、不落用户 HOME）。
-const BUN_CACHE_DIR: &str = ".bun";
+pub(crate) const BUN_CACHE_DIR: &str = ".bun";
 
 /// 沙箱依赖安装：不做白名单限制。任何检测到的缺失包都交由 selfheal 自动安装
 /// （`bun add`），用户明确：沙箱就该自由装依赖，限白名单等于阉割沙箱。
@@ -94,7 +94,7 @@ impl BunManager {
     /// 步骤一 + 步骤二：在 `$RESOURCES/bun_root` 创建运行时目录、初始化 `package.json`
     /// 与本地 `.bun` 缓存目录，保证绿便携 + 国内镜像。返回 `(bun_root, package_json)`。
     /// 权限被拒时返回友好提示。
-    fn setup(&self, app: &AppHandle) -> Result<(PathBuf, PathBuf), String> {
+    pub(crate) fn setup(&self, app: &AppHandle) -> Result<(PathBuf, PathBuf), String> {
         let base_dir = Self::base_dir(app);
         let bun_root = base_dir.join("bun_root");
 
@@ -348,20 +348,22 @@ pub async fn delete_bun_env(
     Err("Node 沙箱为单一运行时环境（Bun 二进制即运行时），不可删除。如需清空依赖请使用「重置」。".into())
 }
 
-/// 从脚本 stderr 中解析缺失包名（任何检测到的缺失包都返回，不做白名单过滤），支持 Bun 常见报错格式。
-fn missing_modules(stderr: &str) -> Option<Vec<String>> {
+/// 从脚本 stderr 中解析缺失包名（任何检测到的缺失包都返回，不做白名单过滤）。
+/// 支持 Bun 常见报错格式，单/双引号均可（Bun 新版报错为 `Cannot find package 'x'`）。
+pub(crate) fn missing_modules(stderr: &str) -> Option<Vec<String>> {
     let mut found: BTreeSet<String> = Default::default();
     for line in stderr.lines() {
         let line = line.trim();
-        for pat in [
-            "Cannot find package \"",
-            "Could not resolve \"",
-            "Module not found: \"",
-        ] {
+        for pat in ["Cannot find package", "Could not resolve", "Module not found"] {
             if let Some(rest) = line.strip_prefix(pat) {
-                if let Some(name) = rest.split('"').next() {
+                let rest = rest.trim_start();
+                let quote = match rest.chars().next() {
+                    Some(q) if q == '\'' || q == '"' => q,
+                    _ => continue,
+                };
+                if let Some(name) = rest[1..].split(quote).next() {
                     let name = name.trim();
-                    if !name.is_empty() {
+                    if !name.is_empty() && !name.contains(char::is_whitespace) {
                         found.insert(name.to_string());
                     }
                 }
@@ -376,7 +378,7 @@ fn missing_modules(stderr: &str) -> Option<Vec<String>> {
 }
 
 /// 静默向 default 环境安装依赖（复用 `bun add`，不暴露 Tauri 命令通道）。
-async fn install_packages_silent(
+pub(crate) async fn install_packages_silent(
     app: &AppHandle,
     bun_root: &Path,
     packages: &[String],
@@ -387,6 +389,87 @@ async fn install_packages_silent(
     }
     let (_stdout, stderr, code) =
         run_bun_sidecar(app, bun_root, args, Some(bun_root)).await?;
+    match code {
+        Some(0) => Ok(packages.join(", ")),
+        Some(c) => Err(format!("依赖安装失败（退出码 {c}）：\n{stderr}")),
+        None => Err(format!("依赖安装进程异常终止，未收到退出码：\n{stderr}")),
+    }
+}
+
+/// 在插件运行目录建立指向 `bun_root/node_modules` 的目录联接，使插件脚本与受管
+/// default 沙箱环境共享依赖：自愈装进 default 环境（设置页「依赖管理」可见、跨运行
+/// 复用、与 Python 的 mamba env 行为对齐），插件目录经联接解析到包。
+/// Windows 用 junction（`mklink /J`，无需管理员权限）；Unix 用符号链接。
+/// 返回是否就绪（联接已存在视为成功）。失败时调用方应回退「装进运行目录」策略。
+/// 注意：未来清理 call_dir 时只删联接本身，不会波及 bun_root 内的真实依赖。
+pub(crate) fn ensure_node_modules_link(call_dir: &Path, bun_root: &Path) -> bool {
+    let link = call_dir.join("node_modules");
+    if link.exists() {
+        return true;
+    }
+    let target = bun_root.join("node_modules");
+    if let Err(e) = std::fs::create_dir_all(&target) {
+        tracing::warn!("[plugin] 创建 bun_root/node_modules 失败：{e}");
+        return false;
+    }
+    #[cfg(windows)]
+    {
+        let out = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(&link)
+            .arg(&target)
+            .output();
+        match out {
+            Ok(o) if o.status.success() => true,
+            Ok(o) => {
+                tracing::warn!(
+                    "[plugin] 建立依赖联接失败：{}",
+                    String::from_utf8_lossy(&o.stderr).trim()
+                );
+                false
+            }
+            Err(e) => {
+                tracing::warn!("[plugin] 建立依赖联接异常：{e}");
+                false
+            }
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        match std::os::unix::fs::symlink(&target, &link) {
+            Ok(()) => true,
+            Err(e) => {
+                tracing::warn!("[plugin] 建立依赖符号链接失败：{e}");
+                false
+            }
+        }
+    }
+}
+
+/// 在指定目录内安装依赖（`bun add`，cwd=dir）——插件自愈的**兜底**安装路径。
+///
+/// 仅当 `ensure_node_modules_link` 建立联接失败时使用：把包装进插件运行目录本身
+/// （脚本旁边解析天然成立），代价是不可见、不跨运行复用。目录内无 package.json
+/// 时先写一个最小清单（bun add 需要）。
+pub(crate) async fn install_packages_in_dir(
+    app: &AppHandle,
+    bun_root: &Path,
+    dir: &Path,
+    packages: &[String],
+) -> Result<String, String> {
+    let pkg_json = dir.join("package.json");
+    if !pkg_json.exists() {
+        std::fs::write(
+            &pkg_json,
+            "{\n  \"name\": \"workduo-plugin-run\",\n  \"private\": true\n}\n",
+        )
+        .map_err(|e| format!("写入插件运行 package.json 失败：{e}"))?;
+    }
+    let mut args = vec!["add".into()];
+    for s in packages {
+        args.push(s.clone());
+    }
+    let (_stdout, stderr, code) = run_bun_sidecar(app, bun_root, args, Some(dir)).await?;
     match code {
         Some(0) => Ok(packages.join(", ")),
         Some(c) => Err(format!("依赖安装失败（退出码 {c}）：\n{stderr}")),

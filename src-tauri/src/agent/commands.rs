@@ -31,6 +31,7 @@ use crate::agent::runtime::AgentRuntime;
 use crate::agent::skill_adapter::SkillToolWrapper;
 use crate::agent::tools::{PathGuard, ToolContext};
 use crate::agent::native::parse_host_allowlist;
+use crate::agent::types::MountedUserPlugin;
 use crate::agent::types::AgentRuntimeConfig;
 use crate::agent::types::BranchStep;
 use crate::agent::types::PlanBranchGenerated;
@@ -72,6 +73,13 @@ pub struct RunAgentTaskInput {
     /// 可包含「智能体未绑定」的 MCP 服务——load_config 据此把其全部工具临时并入工具集。
     #[serde(default)]
     pub enabled_mcp_ids: Option<Vec<String>>,
+    /// 本轮临时禁用的插件 id 列表（仅会话内有效，不写库）。load_config 据此从插件工具集中剔除。
+    #[serde(default)]
+    pub disabled_plugin_ids: Option<Vec<String>>,
+    /// 本轮临时启用的插件 id 列表（`@` 提及触发，仅会话内有效，不写库）。
+    /// 可包含「智能体未绑定」的插件——load_config 据此临时并入工具集（受 10 个上限兜底）。
+    #[serde(default)]
+    pub enabled_plugin_ids: Option<Vec<String>>,
     /// 本轮用户消息附件（多模态图片）。前端契约 { type, dataUrl, name? }。
     #[serde(default)]
     pub attachments: Option<Vec<crate::agent::types::AttachmentInput>>,
@@ -116,6 +124,8 @@ pub async fn run_agent_task(
         input.disabled_mcp_tool_ids.clone(),
         input.enabled_skill_ids.clone(),
         input.enabled_mcp_ids.clone(),
+        input.disabled_plugin_ids.clone(),
+        input.enabled_plugin_ids.clone(),
         input.attachments.clone(),
     )
     .await?;
@@ -537,6 +547,8 @@ pub async fn branch_from_step(app: AppHandle, input: BranchFromStepInput) -> Res
         None,
         None,
         None,
+        None, // disabled_plugin_ids：分支规划阶段不剔除插件
+        None, // enabled_plugin_ids：分支规划阶段不临时并入插件
         None, // attachments：分支规划阶段不携带附件
     )
     .await?;
@@ -747,6 +759,8 @@ async fn load_config(
     disabled_mcp_tool_ids: Option<Vec<String>>,
     enabled_skill_ids: Option<Vec<String>>,
     enabled_mcp_ids: Option<Vec<String>>,
+    disabled_plugin_ids: Option<Vec<String>>,
+    enabled_plugin_ids: Option<Vec<String>>,
     attachments: Option<Vec<crate::agent::types::AttachmentInput>>,
 ) -> Result<AgentRuntimeConfig, String> {
     let instances = app.state::<DbInstances>();
@@ -1069,12 +1083,213 @@ async fn load_config(
         }
     };
 
+    // ===== 本地插件装配（P2 纯增量，无插件绑定时 plugin_tools 为空、行为不变） =====
+    // 过滤条件（设计稿 §6.3）：ref.is_active=1 AND tool.enabled=1 AND agent.allow_sandbox=1；
+    // disabled_plugin_ids 仅会话内临时剔除（对齐 disabled_skill_ids 语义），不写库。
+    let mut plugin_tools: Vec<MountedUserPlugin> = Vec::new();
+    if allow_sandbox {
+        let plugin_rows = sqlx::query(
+            "SELECT p.id AS plugin_id, p.identifier AS identifier, p.name AS name, \
+                    p.description AS description, p.runtime AS runtime, \
+                    p.script_content AS script_content, p.parameters_schema AS parameters_schema, \
+                    p.timeout_sec AS timeout_sec \
+             FROM user_plugin_tool p JOIN agent_plugin_ref r ON r.plugin_id = p.id \
+             WHERE r.agent_id = ? AND r.is_active = 1 AND p.enabled = 1",
+        )
+        .bind(agent_id)
+        .fetch_all(&pool)
+        .await
+        .unwrap_or_default();
+        let disabled_plugins: std::collections::HashSet<String> = disabled_plugin_ids
+            .unwrap_or_default()
+            .into_iter()
+            .collect();
+        for r in &plugin_rows {
+            let plugin_id = r
+                .try_get::<Option<String>, _>("plugin_id")
+                .ok()
+                .flatten()
+                .unwrap_or_default();
+            let identifier = r
+                .try_get::<Option<String>, _>("identifier")
+                .ok()
+                .flatten()
+                .unwrap_or_default();
+            if plugin_id.is_empty() || identifier.is_empty() {
+                continue;
+            }
+            // 会话内临时禁用：插件 id 或工具标识符命中均可
+            if disabled_plugins.contains(&plugin_id) || disabled_plugins.contains(&identifier) {
+                continue;
+            }
+            let runtime = r
+                .try_get::<Option<String>, _>("runtime")
+                .ok()
+                .flatten()
+                .unwrap_or_default();
+            if runtime != "python" && runtime != "bun" {
+                continue; // 未知运行时兜底跳过（adapter 处还有一层防御）
+            }
+            let script_content = r
+                .try_get::<Option<String>, _>("script_content")
+                .ok()
+                .flatten()
+                .unwrap_or_default();
+            if script_content.trim().is_empty() {
+                continue; // 无脚本内容的插件无法执行
+            }
+            let schema_raw = r
+                .try_get::<Option<String>, _>("parameters_schema")
+                .ok()
+                .flatten()
+                .unwrap_or_default();
+            let parameters_schema = serde_json::from_str::<serde_json::Value>(&schema_raw)
+                .unwrap_or_else(|_| serde_json::json!({"type": "object", "properties": {}}));
+            let timeout_sec = r
+                .try_get::<Option<i64>, _>("timeout_sec")
+                .ok()
+                .flatten()
+                .unwrap_or(60)
+                .clamp(1, 300) as u64;
+            let name = r
+                .try_get::<Option<String>, _>("name")
+                .ok()
+                .flatten()
+                .unwrap_or_else(|| identifier.clone());
+            let description = r
+                .try_get::<Option<String>, _>("description")
+                .ok()
+                .flatten()
+                .unwrap_or_default();
+            plugin_tools.push(MountedUserPlugin {
+                plugin_id,
+                identifier,
+                name,
+                description,
+                runtime,
+                script_content,
+                parameters_schema,
+                timeout_sec,
+            });
+        }
+
+        // `@` 提及临时并入（P2 纯增量，语义对齐 enabled_skill_ids）：把「智能体未绑定」
+        // 的插件临时并入工具集；allow_sandbox 前置条件同样适用；受 10 个上限兜底
+        // （与前端 draft.MAX_PLUGINS 一致）。
+        if let Some(enabled_plugin) = &enabled_plugin_ids {
+            let en_set: std::collections::HashSet<String> =
+                enabled_plugin.iter().cloned().collect();
+            if !en_set.is_empty() {
+                let bound_ids: std::collections::HashSet<String> = plugin_tools
+                    .iter()
+                    .map(|p| p.plugin_id.clone())
+                    .collect();
+                let pending: Vec<String> = en_set
+                    .iter()
+                    .filter(|id| !bound_ids.contains(*id))
+                    .cloned()
+                    .collect();
+                if !pending.is_empty() {
+                    let ph = pending.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+                    let q = format!(
+                        "SELECT id, identifier, name, description, runtime, script_content, \
+                         parameters_schema, timeout_sec FROM user_plugin_tool WHERE id IN ({ph})"
+                    );
+                    let mut qb = sqlx::query(&q);
+                    for id in &pending {
+                        qb = qb.bind(id);
+                    }
+                    if let Ok(rows) = qb.fetch_all(&pool).await {
+                        for r in &rows {
+                            if plugin_tools.len() >= 10 {
+                                break; // MAX_PLUGINS 兜底（与前端 draft.MAX_PLUGINS 一致）
+                            }
+                            let plugin_id = r
+                                .try_get::<Option<String>, _>("id")
+                                .ok()
+                                .flatten()
+                                .unwrap_or_default();
+                            let identifier = r
+                                .try_get::<Option<String>, _>("identifier")
+                                .ok()
+                                .flatten()
+                                .unwrap_or_default();
+                            if plugin_id.is_empty() || identifier.is_empty() {
+                                continue;
+                            }
+                            if plugin_tools.iter().any(|p| p.plugin_id == plugin_id) {
+                                continue; // 已绑定，去重
+                            }
+                            let runtime = r
+                                .try_get::<Option<String>, _>("runtime")
+                                .ok()
+                                .flatten()
+                                .unwrap_or_default();
+                            if runtime != "python" && runtime != "bun" {
+                                continue;
+                            }
+                            let script_content = r
+                                .try_get::<Option<String>, _>("script_content")
+                                .ok()
+                                .flatten()
+                                .unwrap_or_default();
+                            if script_content.trim().is_empty() {
+                                continue;
+                            }
+                            let schema_raw = r
+                                .try_get::<Option<String>, _>("parameters_schema")
+                                .ok()
+                                .flatten()
+                                .unwrap_or_default();
+                            let parameters_schema =
+                                serde_json::from_str::<serde_json::Value>(&schema_raw)
+                                    .unwrap_or_else(|_| {
+                                        serde_json::json!({"type": "object", "properties": {}})
+                                    });
+                            let timeout_sec = r
+                                .try_get::<Option<i64>, _>("timeout_sec")
+                                .ok()
+                                .flatten()
+                                .unwrap_or(60)
+                                .clamp(1, 300) as u64;
+                            let name = r
+                                .try_get::<Option<String>, _>("name")
+                                .ok()
+                                .flatten()
+                                .unwrap_or_else(|| identifier.clone());
+                            let description = r
+                                .try_get::<Option<String>, _>("description")
+                                .ok()
+                                .flatten()
+                                .unwrap_or_default();
+                            plugin_tools.push(MountedUserPlugin {
+                                plugin_id,
+                                identifier,
+                                name,
+                                description,
+                                runtime,
+                                script_content,
+                                parameters_schema,
+                                timeout_sec,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    } else {
+        // 沙箱未开启：设计稿 §5.1「Agent 必须 allow_sandbox=1 才注册插件工具」——
+        // 保持 plugin_tools 为空（向导保存时已有前端强提示，此处运行时兜底不加载）。
+        let _ = disabled_plugin_ids;
+    }
+
     tracing::info!(
-        "[agent] load_config 完成: llm_id={} model={} mcp_tools={} skill_tools={} auto_exec={} sandbox={} system_prompt={}字符 附件数={}",
+        "[agent] load_config 完成: llm_id={} model={} mcp_tools={} skill_tools={} plugins={} auto_exec={} sandbox={} system_prompt={}字符 附件数={}",
         if llm_id.is_empty() { "<无>" } else { llm_id.as_str() },
         if llm_model_name.is_empty() { "<无>" } else { llm_model_name.as_str() },
         mcp_tools.len(),
         skill_tools.len(),
+        plugin_tools.len(),
         get_i64(&row, "auto_tool_exec_mode") == 1,
         allow_sandbox,
         get_str(&row, "system_prompt").chars().count(),
@@ -1162,6 +1377,22 @@ async fn load_config(
         }
     }
 
+    // 本地插件使用规则（P2 纯增量）：仅在确有插件挂载时追加，无插件时系统提示不变。
+    if !plugin_tools.is_empty() {
+        let plugin_list = plugin_tools
+            .iter()
+            .map(|p| format!("- `custom__{}`：{}", p.identifier, p.description))
+            .collect::<Vec<_>>()
+            .join("\n");
+        system_prompt.push_str(&format!(
+            "\n\n### 本地插件工具（custom__ 前缀）\n已为你可以调用以下本地插件工具：\n{plugin_list}\n\
+调用规则：\n\
+1. 仅当任务与插件描述匹配时调用，传参必须严格符合该工具的 JSON Schema；\n\
+2. 禁止伪造不存在的 custom__ 工具名，禁止猜测未列出的插件；\n\
+3. 插件在你的沙箱内执行，缺依赖会自动安装并重试一次；调用即视为执行用户本机代码，结果以工具返回为准。"
+        ));
+    }
+
     // 记忆宫殿：自动召回 top-K 记忆注入系统提示（引用计数随运行累计，驱动热力图）。
     // 仅在真实任务运行（有 session_id）且记忆模式非 off 时召回；off 模式不读记忆库。
     if session_id.is_some() && memory_mode != "off" {
@@ -1228,6 +1459,7 @@ category 取值：decision（决策）/ code_pattern（代码模式）/ user_pre
         attachments: attachments.unwrap_or_default(),
         http_allowed_hosts,
         network_proxy: crate::net::load_network_proxy(&pool).await,
+        plugin_tools,
     })
 }
 
@@ -1333,6 +1565,8 @@ pub async fn load_squad(app: &AppHandle, squad_id: &str) -> Result<SquadRuntimeC
             } else {
                 Some(global_mcp_ids.clone())
             },
+            None, // disabled_plugin_ids
+            None, // enabled_plugin_ids
             None, // attachments
         )
         .await?;

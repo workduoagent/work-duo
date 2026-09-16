@@ -21,6 +21,17 @@ import { Copy, Wand2 } from 'lucide-react'
 // 否则会被拼成 esm/vs/esm/vs/... 而解析失败。
 import EditorWorker from 'monaco-editor/editor/editor.worker?worker'
 import JsonWorker from 'monaco-editor/language/json/json.worker?worker'
+// TS/JS 语言 worker：编辑 typescript/javascript 时必须注册，否则编辑器向基础
+// EditorWorker 请求 getSyntacticDiagnostics / getNavigationTree / provideInlayHints
+// 等能力全部落空，控制台随每次按键疯狂报 "Missing requestHandler or method"。
+import TsWorker from 'monaco-editor/language/typescript/ts.worker?worker'
+// TS 语言贡献显式加载（0.56 ESM 拆分后不随主包自动注册）：负责 languages.onLanguage
+// 注册诊断等特性，并导出 typescriptDefaults / javascriptDefaults（与注册闭包同实例）。
+// 静态 import 保证它在下方 setDiagnosticsOptions 之前求值。
+import {
+  typescriptDefaults as tsDefaults,
+  javascriptDefaults as jsDefaults,
+} from 'monaco-editor/language/typescript/monaco.contribution.js'
 import './MonacoJsonEditor.scss'
 
 // 本地加载：直接传入本地 monaco 实例，不走 CDN。
@@ -28,6 +39,21 @@ import './MonacoJsonEditor.scss'
 loader.config({
   monaco,
   paths: { vs: '/node_modules/monaco-editor/min/vs' },
+})
+
+// TS/JS 诊断配置：插件脚本运行在沙箱（有 node:crypto / node_modules），但编辑器进程里
+// 没有 node 类型声明，完整语义校验会对正常代码误报红线（如 "Cannot find module 'node:crypto'"）。
+// 关闭语义校验、保留语法校验——拼写/括号错误仍有波浪线，模块导入类误报消失。
+// ★ 必须直接使用上方贡献模块导出的 defaults 实例：0.56 运行时不存在
+//   monaco.languages.typescript 命名空间（d.ts 的 deprecated 桩即运行时现实），
+//   经它配置会静默空转（languageFeatures.js 每次校验前才读取本实例的开关）。
+tsDefaults.setDiagnosticsOptions({
+  noSemanticValidation: true,
+  noSyntaxValidation: false,
+})
+jsDefaults.setDiagnosticsOptions({
+  noSemanticValidation: true,
+  noSyntaxValidation: false,
 })
 
 // --- Monaco web worker（Vite 必配）---
@@ -39,6 +65,8 @@ loader.config({
 type WorkerCtor = new () => Worker
 const LANGUAGE_WORKERS: Record<string, WorkerCtor> = {
   json: JsonWorker,
+  typescript: TsWorker,
+  javascript: TsWorker,
 }
 ;(self as unknown as {
   MonacoEnvironment?: { getWorker?: (workerId: string, label: string) => Worker }
@@ -110,6 +138,14 @@ export function MonacoJsonEditor({
   useEffect(() => {
     if (readOnly) setText(toText(value))
   }, [value, readOnly])
+
+  // 可编辑态同样同步外部 value：内部 text 只在首次 useState 初始化，若不同步，
+  // 「插入模板 / 提取元数据回填 / 弹窗重开换数据」等外部赋值都不会反映到编辑器。
+  // 受控回环安全：输入时父级回传的 value 与当前 text 一致 → no-op，不会打断光标。
+  useEffect(() => {
+    const next = toText(value)
+    setText((prev) => (prev === next ? prev : next))
+  }, [value])
 
   // 主题跟随应用明暗切换（<html> 上的 .light / .dark）
   useEffect(() => {

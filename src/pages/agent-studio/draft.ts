@@ -23,6 +23,8 @@ export const MAX_MCP_SERVERS = 3
 export const MAX_MCP_TOOLS = 10
 /** 编排 Skill 数量上限 */
 export const MAX_SKILLS = 3
+/** 挂载本地插件数量上限（P2 新增） */
+export const MAX_PLUGINS = 10
 
 export interface AgentDraft {
   name: string
@@ -51,6 +53,8 @@ export interface AgentDraft {
   mcpTools: Array<{ mcpId: string; toolId: string }>
   /** 已编排的技能 id */
   skillIds: string[]
+  /** 已挂载的本地插件 id（P2 新增，保存写入 agent_plugin_ref） */
+  pluginIds: string[]
 }
 
 /** 新建时的空草稿（identifier 由调用方预先随机生成，便于用户直接看到可改） */
@@ -65,14 +69,16 @@ export function createEmptyDraft(identifier: string): AgentDraft {
     planAutoApproveMode: 'always',
     mcpTools: [],
     skillIds: [],
+    pluginIds: [],
   }
 }
 
-/** 编辑时：把主表 + 两张关联表的行还原成草稿 */
+/** 编辑时：把主表 + 两张关联表的行还原成草稿（pluginIds 为本地插件 id 列表，P2 新增） */
 export function draftFromAgent(
   agent: AgentInfo,
   mcpRefs: AgentMcpToolRef[],
   skillRefs: AgentSkillRef[],
+  pluginIds: string[] = [],
 ): AgentDraft {
   return {
     name: agent.name,
@@ -95,6 +101,7 @@ export function draftFromAgent(
     planAutoApproveMode: agent.planAutoApproveMode ?? 'always',
     mcpTools: mcpRefs.map((r) => ({ mcpId: r.mcpId, toolId: r.toolId })),
     skillIds: skillRefs.map((r) => r.skillId),
+    pluginIds,
   }
 }
 
@@ -124,5 +131,6 @@ export function draftToInput(draft: AgentDraft, id?: string): AgentUpsertInput {
     planAutoApproveMode: draft.planAutoApproveMode,
     mcpTools: draft.mcpTools,
     skillIds: draft.skillIds,
+    pluginIds: draft.pluginIds,
   }
 }

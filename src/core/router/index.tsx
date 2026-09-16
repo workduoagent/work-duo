@@ -12,6 +12,8 @@ import SkillHubPage from '@/pages/skill-hub'
 import SkillDetailPage from '@/pages/skill-hub/detail'
 import McpHubPage from '@/pages/mcp'
 import McpDetailPage from '@/pages/mcp/detail'
+import PluginHubPage from '@/pages/plugins'
+import PluginDetailPage from '@/pages/plugins/detail'
 import SettingsPage from '@/pages/settings'
 import SandboxPythonPage from '@/pages/sandbox/python'
 
@@ -37,6 +39,8 @@ export const router = createHashRouter([
       { path: 'skill-hub/:id', element: <SkillDetailPage /> },
       { path: 'mcp-hub', element: <McpHubPage /> },
       { path: 'mcp-hub/:id', element: <McpDetailPage /> },
+      { path: 'plugin-hub', element: <PluginHubPage /> },
+      { path: 'plugin-hub/:id', element: <PluginDetailPage /> },
       { path: 'sandbox/python', element: <SandboxPythonPage /> },
       { path: 'settings', element: <SettingsPage /> },
     ],

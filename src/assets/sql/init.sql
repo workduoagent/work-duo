@@ -608,3 +608,76 @@ CREATE TABLE IF NOT EXISTS agent_squad_memory
 CREATE INDEX IF NOT EXISTS idx_squad_memories_squad ON agent_squad_memory(squad_id, category);
 CREATE INDEX IF NOT EXISTS idx_squad_memories_ref ON agent_squad_memory(squad_id, ref_count DESC);
 
+-- ============ 自定义脚本插件主表（user_plugin_tool） ============
+-- 行映射见 src/types/database.d.ts 的 UserPluginToolRow。
+-- 本地可执行函数（FaaS）：用户在界面写 run(params)，平台沙箱执行并以 custom__<identifier> 注册为智能体工具。
+--   id：本地 UUID（文本主键）；
+--   identifier：工具唯一 slug（不含 custom__ 前缀），UNIQUE 约束兜底命名空间；
+--   runtime：'python' | 'bun'；
+--   script_content：用户核心代码（仅 run + 头注释，不含 Runner 壳）；
+--   parameters_schema：OpenAI function 可用的 JSON Schema 字符串（{"type":"object",...}）；
+--   dependencies：声明式依赖 JSON 数组文本（如 '["requests"]'），可空；
+--   sample_params：试跑示例参数 JSON 对象文本，可空；
+--   enabled：启用开关（INTEGER 0/1，默认 1）；
+--   timeout_sec：单次执行超时（秒，默认 60，上限 300）；
+--   scenario：场景分类 key（与 MCP/Skill 对齐），可空；
+--   last_run_at / last_run_status：列表态冗余（0 未知 / 1 成功 / 2 失败），由试跑与 Agent 执行回写；
+--   created_at / updated_at：epoch 毫秒（整型）。
+CREATE TABLE IF NOT EXISTS user_plugin_tool
+(
+    id                TEXT    PRIMARY KEY,
+    name              TEXT    NOT NULL,
+    identifier        TEXT    NOT NULL,
+    description       TEXT    NOT NULL,
+    runtime           TEXT    NOT NULL,
+    script_content    TEXT    NOT NULL,
+    parameters_schema TEXT    NOT NULL,
+    dependencies      TEXT,
+    sample_params     TEXT,
+    enabled           INTEGER NOT NULL DEFAULT 1,
+    timeout_sec       INTEGER NOT NULL DEFAULT 60,
+    scenario          TEXT,
+    last_run_at       INTEGER,
+    last_run_status   INTEGER,
+    created_at        INTEGER NOT NULL,
+    updated_at        INTEGER NOT NULL,
+    CONSTRAINT uk_user_plugin_identifier UNIQUE (identifier)
+);
+
+-- ============ 智能体 × 本地插件关联表（agent_plugin_ref） ============
+-- 行映射见 src/types/database.d.ts 的 AgentPluginRefRow。
+-- 对齐 agent_mcp_ref / agent_skill_ref 习惯：最小关联单元是「插件」，is_active 支持绑定级启停。
+CREATE TABLE IF NOT EXISTS agent_plugin_ref
+(
+    id         TEXT    PRIMARY KEY,
+    agent_id   TEXT    NOT NULL,
+    plugin_id  TEXT    NOT NULL,
+    is_active  INTEGER NOT NULL DEFAULT 1,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    CONSTRAINT uk_agent_plugin UNIQUE (agent_id, plugin_id)
+);
+CREATE INDEX IF NOT EXISTS idx_agent_plugin_agent ON agent_plugin_ref (agent_id);
+
+-- ============ 插件执行日志表（plugin_run_log） ============
+-- 行映射见 src/types/database.d.ts 的 PluginRunLogRow。
+-- 试跑与 Agent 调用共用，支撑排障与列表态（滚动保留，按 plugin_id + created_at 清理）。
+CREATE TABLE IF NOT EXISTS plugin_run_log
+(
+    id             TEXT    PRIMARY KEY,
+    plugin_id      TEXT    NOT NULL,
+    agent_id       TEXT,
+    session_id     TEXT,
+    source         TEXT    NOT NULL,
+    params         TEXT,
+    ok             INTEGER NOT NULL,
+    exit_code      INTEGER,
+    duration_ms    INTEGER,
+    stdout         TEXT,
+    stderr         TEXT,
+    error_type     TEXT,
+    missing_package TEXT,
+    created_at     INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_plugin_run_log_plugin ON plugin_run_log (plugin_id, created_at DESC);
+

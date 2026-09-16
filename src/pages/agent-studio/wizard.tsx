@@ -17,13 +17,15 @@ import {
   upsertAgent,
   generateAgentIdentifier,
 } from '@/core/mapper/agent-mapper'
+import { listAgentPlugins } from '@/core/mapper/plugin-mapper'
 import { listModels } from '@/core/mapper/model-mapper'
 import type { ModelConfig } from '@/core/file/model-file'
 import { StepBasic } from './components/StepBasic'
 import { StepModel } from './components/StepModel'
 import { StepMcp } from './components/StepMcp'
 import { StepSkill } from './components/StepSkill'
-import { createEmptyDraft, draftFromAgent, draftToInput, type AgentDraft, MAX_MCP_SERVERS, MAX_MCP_TOOLS, MAX_SKILLS } from './draft'
+import { StepPlugin } from './components/StepPlugin'
+import { createEmptyDraft, draftFromAgent, draftToInput, type AgentDraft, MAX_MCP_SERVERS, MAX_MCP_TOOLS, MAX_SKILLS, MAX_PLUGINS } from './draft'
 import './wizard.scss'
 
 const STEPS = [
@@ -31,6 +33,7 @@ const STEPS = [
   { key: 'model', title: '选择模型', desc: '大脑 / 嘴巴 / 耳朵' },
   { key: 'mcp', title: '配置 MCP', desc: '按工具粒度挂载' },
   { key: 'skill', title: '编排 Skill', desc: '技能编排' },
+  { key: 'plugin', title: '本地插件', desc: '挂载自定义函数工具' },
 ] as const
 
 const IDENTIFIER_RE = /^[a-zA-Z0-9_-]+$/
@@ -73,10 +76,11 @@ export default function AgentWizardPage() {
         setModels(modelList)
 
         if (id) {
-          const [agent, mcpRefs, skillRefs] = await Promise.all([
+          const [agent, mcpRefs, skillRefs, pluginRefs] = await Promise.all([
             getAgent(id),
             listAgentMcpTools(id),
             listAgentSkills(id),
+            listAgentPlugins(id),
           ])
           if (!alive) return
           if (!agent) {
@@ -84,7 +88,7 @@ export default function AgentWizardPage() {
             navigate('/agent-studio', { replace: true })
             return
           }
-          setDraft(draftFromAgent(agent, mcpRefs, skillRefs))
+          setDraft(draftFromAgent(agent, mcpRefs, skillRefs, pluginRefs.map((p) => p.id)))
         }
       } catch (e) {
         message.error(`加载失败：${e instanceof Error ? e.message : String(e)}`)
@@ -120,10 +124,14 @@ export default function AgentWizardPage() {
     if (target > 3 && draft.skillIds.length > MAX_SKILLS) {
       errs.skill = `编排的 Skill 不能超过 ${MAX_SKILLS} 个`
     }
+    // 插件约束（P2 新增）：挂载数量 ≤ 10（target>4 表示已到达/越过插件步骤）
+    if (target > 4 && draft.pluginIds.length > MAX_PLUGINS) {
+      errs.plugin = `挂载的插件不能超过 ${MAX_PLUGINS} 个`
+    }
     setErrors(errs)
     const ok = Object.keys(errs).length === 0
     if (!ok) {
-      const msgs = [errs.name, errs.identifier, errs.llm, errs.mcp, errs.skill].filter(Boolean)
+      const msgs = [errs.name, errs.identifier, errs.llm, errs.mcp, errs.skill, errs.plugin].filter(Boolean)
       message.warning(msgs.join('；'))
     }
     return ok
@@ -228,6 +236,7 @@ export default function AgentWizardPage() {
         )}
         {step === 2 && <StepMcp draft={draft} patch={patch} />}
         {step === 3 && <StepSkill draft={draft} patch={patch} />}
+        {step === 4 && <StepPlugin draft={draft} patch={patch} />}
       </div>
 
       <button

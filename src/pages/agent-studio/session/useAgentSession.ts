@@ -374,6 +374,10 @@ export function useAgentSession(): AgentSessionState {
             // 临时启用的技能 / MCP 服务（`@` 提及触发）；Rust load_config 据此把未绑定能力临时并入工具集
             enabledSkillIds: input.enabledSkillIds ?? [],
             enabledMcpIds: input.enabledMcpIds ?? [],
+            // 临时启用的本地插件（`@` 提及触发，P2 新增）；Rust load_config 据此把未绑定插件临时并入工具集
+            enabledPluginIds: input.enabledPluginIds ?? [],
+            // 临时取消挂载的插件（工具条「移除」触发，P2 新增）；Rust load_config 据此从插件工具集剔除
+            disabledPluginIds: input.disabledPluginIds ?? [],
             // §3.2 分支重跑：直接采用前端计划（跳过 LLM 规划），并标记 head 预完成 + 初始上下文。
             planOverride: input.planOverride ?? undefined,
             preCompleted: input.preCompleted ?? [],

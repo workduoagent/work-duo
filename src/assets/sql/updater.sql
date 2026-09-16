@@ -340,4 +340,59 @@ ALTER TABLE agent_squad ADD COLUMN global_mcp_tools TEXT;
 -- 取值：always=每次复合任务都走人工审批 / sensitive=仅含敏感操作的计划才审批（纯低风险任务自动放行）/ never=从不审批。默认 always。
 ALTER TABLE agent_info ADD COLUMN plan_auto_approve_mode TEXT NOT NULL DEFAULT 'always';
 
+-- ---------- v23：自定义脚本插件三表（user_plugin_tool / agent_plugin_ref / plugin_run_log） ----------
+-- 本地可执行函数（FaaS）模块后端存储。全新表用 CREATE TABLE IF NOT EXISTS，重复执行幂等无副作用；
+-- 新装库在 init.sql 建表时即包含本批表，此处再补一次保证存量库在仅走 updater 的路径下也能拿到。
+CREATE TABLE IF NOT EXISTS user_plugin_tool
+(
+    id                TEXT    PRIMARY KEY,
+    name              TEXT    NOT NULL,
+    identifier        TEXT    NOT NULL,
+    description       TEXT    NOT NULL,
+    runtime           TEXT    NOT NULL,
+    script_content    TEXT    NOT NULL,
+    parameters_schema TEXT    NOT NULL,
+    dependencies      TEXT,
+    sample_params     TEXT,
+    enabled           INTEGER NOT NULL DEFAULT 1,
+    timeout_sec       INTEGER NOT NULL DEFAULT 60,
+    scenario          TEXT,
+    last_run_at       INTEGER,
+    last_run_status   INTEGER,
+    created_at        INTEGER NOT NULL,
+    updated_at        INTEGER NOT NULL,
+    CONSTRAINT uk_user_plugin_identifier UNIQUE (identifier)
+);
+
+CREATE TABLE IF NOT EXISTS agent_plugin_ref
+(
+    id         TEXT    PRIMARY KEY,
+    agent_id   TEXT    NOT NULL,
+    plugin_id  TEXT    NOT NULL,
+    is_active  INTEGER NOT NULL DEFAULT 1,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    CONSTRAINT uk_agent_plugin UNIQUE (agent_id, plugin_id)
+);
+CREATE INDEX IF NOT EXISTS idx_agent_plugin_agent ON agent_plugin_ref (agent_id);
+
+CREATE TABLE IF NOT EXISTS plugin_run_log
+(
+    id             TEXT    PRIMARY KEY,
+    plugin_id      TEXT    NOT NULL,
+    agent_id       TEXT,
+    session_id     TEXT,
+    source         TEXT    NOT NULL,
+    params         TEXT,
+    ok             INTEGER NOT NULL,
+    exit_code      INTEGER,
+    duration_ms    INTEGER,
+    stdout         TEXT,
+    stderr         TEXT,
+    error_type     TEXT,
+    missing_package TEXT,
+    created_at     INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_plugin_run_log_plugin ON plugin_run_log (plugin_id, created_at DESC);
+
 -- ============================================================

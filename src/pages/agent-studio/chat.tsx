@@ -70,6 +70,7 @@ import {
   FileArchive,
   Paperclip,
   TriangleAlert,
+  Puzzle,
 } from 'lucide-react'
 import { createPortal } from 'react-dom'
 import { invoke } from '@tauri-apps/api/core'
@@ -151,6 +152,9 @@ function ArtifactGallery({ artifacts, isTauri }: { artifacts: ArtifactRef[]; isT
 }
 import { getAgent, listAgentMcpTools, listAgentSkills } from '@/core/mapper/agent-mapper'
 import { listSkills } from '@/core/mapper/skill-mapper'
+import { listPlugins } from '@/core/mapper/plugin-mapper'
+import { listAgentPlugins } from '@/core/mapper/plugin-mapper'
+import type { UserPluginTool } from '@/core/file/plugin-file'
 import { readSkillLogoBase64 } from '@/core/file/skillFs'
 import { listMcps, listMcpTools } from '@/core/mapper/mcp-mapper'
 import { getModel } from '@/core/mapper/model-mapper'
@@ -226,7 +230,7 @@ interface SuggestItem {
   /** 补充说明（技能描述 / 服务类型 / 指令说明）。 */
   sub?: string
   /** 分组标题（决定浮层渲染时的分组头）。 */
-  group: '技能' | 'MCP 服务' | '指令'
+  group: '技能' | 'MCP 服务' | '插件' | '指令'
 }
 
 /** 输入框建议浮层状态（@提及 与 /指令 共用同一套触发/渲染逻辑）。 */
@@ -919,6 +923,145 @@ function SkillChip({
   )
 }
 
+/** 已挂载插件的图标胶囊（P2）：icon 代替长名，悬浮 Pop 列出全部插件详情，
+ *  支持临时取消挂载（会话内生效，与 Skill 临时移除同逻辑，走 disabled_plugin_ids 通道）。 */
+function PluginPill({
+  plugins,
+  removedIds,
+  onToggleRemove,
+}: {
+  plugins: UserPluginTool[]
+  removedIds: Set<string>
+  onToggleRemove: (pluginId: string) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLSpanElement>(null)
+  const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // 工具条在页面底部，弹层向上展开（锚定 bottom，避免溢出视口下沿）
+  const [pos, setPos] = useState<{ bottom: number; left: number }>({ bottom: 0, left: 0 })
+
+  const computePos = useCallback(() => {
+    const el = ref.current
+    if (el) {
+      const r = el.getBoundingClientRect()
+      const left = Math.max(8, Math.min(r.left, window.innerWidth - 320))
+      setPos({ bottom: window.innerHeight - r.top + 6, left })
+    }
+  }, [])
+
+  const show = useCallback(() => {
+    if (hideTimer.current) clearTimeout(hideTimer.current)
+    computePos()
+    setOpen(true)
+    // 打开后再校准一次：规避 mouseenter 瞬间的布局漂移（如异步头像/字体加载导致的位移）
+    requestAnimationFrame(computePos)
+  }, [computePos])
+
+  const scheduleHide = useCallback(() => {
+    if (hideTimer.current) clearTimeout(hideTimer.current)
+    hideTimer.current = setTimeout(() => setOpen(false), 140)
+  }, [])
+
+  useEffect(
+    () => () => {
+      if (hideTimer.current) clearTimeout(hideTimer.current)
+    },
+    [],
+  )
+
+  const activeCount = plugins.length - removedIds.size
+
+  return (
+    <span
+      ref={ref}
+      className={`agent-chat__plugin-pill${activeCount === 0 ? ' is-removed' : ''}`}
+      onMouseEnter={show}
+      onMouseLeave={scheduleHide}
+      title="已挂载插件（悬浮查看详情 / 临时取消挂载）"
+    >
+      <Puzzle size={13} />
+      {plugins.length > 1 && <span className="agent-chat__mcp-label">×{plugins.length}</span>}
+
+      {open &&
+        createPortal(
+          <div
+            className="agent-chat__mcp-pop"
+            style={{ position: 'fixed', bottom: pos.bottom, left: pos.left }}
+            onMouseEnter={show}
+            onMouseLeave={scheduleHide}
+          >
+            <div className="agent-chat__mcp-pop-card">
+              <div className="agent-chat__mcp-pop-head">
+                <span className="agent-chat__mcp-pop-title">
+                  已挂载插件（{plugins.length}）
+                </span>
+              </div>
+              <div className="agent-chat__mcp-pop-tools">
+                {plugins.map((p) => {
+                  const removed = removedIds.has(p.id)
+                  return (
+                    <div
+                      key={p.id}
+                      className="agent-chat__mcp-tool"
+                      style={removed ? { opacity: 0.55 } : undefined}
+                    >
+                      <Puzzle size={13} style={{ flexShrink: 0 }} />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 6,
+                            fontSize: 12,
+                            fontWeight: 600,
+                          }}
+                        >
+                          <span>{p.name}</span>
+                          <code
+                            style={{
+                              fontSize: 10.5,
+                              fontWeight: 400,
+                              color: 'var(--color-foreground-muted)',
+                            }}
+                          >
+                            custom__{p.identifier}
+                          </code>
+                        </div>
+                        <div
+                          style={{
+                            fontSize: 11,
+                            color: 'var(--color-foreground-muted)',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                          }}
+                          title={p.description}
+                        >
+                          {p.runtime === 'python' ? 'Python' : 'Bun'} ·{' '}
+                          {p.description || '暂无描述'}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        className="agent-chat__mcp-pop-remove"
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => onToggleRemove(p.id)}
+                        title={removed ? '恢复挂载（当前会话内生效）' : '临时取消挂载（仅当前会话）'}
+                      >
+                        {removed ? '恢复' : '移除'}
+                      </button>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          </div>,
+          document.body,
+        )}
+    </span>
+  )
+}
+
 /** MCP 服务的文字胶囊 + 悬浮 Pop（移除整个服务 / 单个工具开关）。
  *  - 无头像，纯文字胶囊；多个 MCP 排列在 Skill 之后；
  *  - 悬浮弹出层显示该服务下全部绑定工具，可逐个开/关；
@@ -1290,9 +1433,22 @@ export default function AgentChatPage() {
   // 当前会话内临时关闭的单个 MCP 工具 id（内存态，不写库）。键为 mcp_tool_definition.id
   const [disabledMcpToolIds, setDisabledMcpToolIds] = useState<Set<string>>(new Set())
   const [boundSkills, setBoundSkills] = useState<SkillInfo[]>([])
+  // 底部工具条展示用：已挂载的本地插件（P2 新增）
+  const [boundPlugins, setBoundPlugins] = useState<UserPluginTool[]>([])
+  /** 临时取消/恢复挂载某个插件（仅当前会话，不写库；随 disabled_plugin_ids 生效）。 */
+  const togglePlugin = useCallback((pluginId: string) => {
+    setRemovedPluginIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(pluginId)) next.delete(pluginId)
+      else next.add(pluginId)
+      return next
+    })
+  }, [])
   // @提及 候选全集（全量技能 / MCP 服务，不限于本智能体绑定），供输入框随时引用
   const [allSkills, setAllSkills] = useState<SkillInfo[]>([])
   const [allMcps, setAllMcps] = useState<Awaited<ReturnType<typeof listMcps>>>([])
+  // 全量插件缓存（P2 新增）：供输入框 @提及 候选（不局限于本智能体绑定项）
+  const [allPlugins, setAllPlugins] = useState<Awaited<ReturnType<typeof listPlugins>>>([])
   // 输入框 @提及 / /指令 浮层状态
   const [suggest, setSuggest] = useState<SuggestState | null>(null)
   const [helpOpen, setHelpOpen] = useState(false)
@@ -1302,6 +1458,8 @@ export default function AgentChatPage() {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   // 当前会话内临时移除的技能 id（内存态，不写库；页面重进/切换智能体即复位）
   const [removedSkillIds, setRemovedSkillIds] = useState<Set<string>>(new Set())
+  // 临时取消挂载的插件 id（P2 新增，仅当前会话有效，不写库）：随本轮请求走 disabled_plugin_ids
+  const [removedPluginIds, setRemovedPluginIds] = useState<Set<string>>(new Set())
   // 工作空间：默认解析路径（单人调试）+ 当前会话绑定的工程（智能工作空间绑定）。
   // pendingProjectId 非空时，workspaceDir 取该工程 root_path；否则取默认解析路径。
   // 注意：projects 必须声明在 workspaceDir 之前（useMemo 依赖引用，避免 TDZ 编译报错）。
@@ -1505,10 +1663,11 @@ export default function AgentChatPage() {
     let alive = true
     void (async () => {
       try {
-        const [a, mcp, skills] = await Promise.all([
+        const [a, mcp, skills, plugins] = await Promise.all([
           getAgent(id),
           listAgentMcpTools(id),
           listAgentSkills(id),
+          listAgentPlugins(id),
         ])
         if (!alive) return
         if (!a) {
@@ -1535,7 +1694,7 @@ export default function AgentChatPage() {
         if (alive) setHasStt(!!a.sttId)
 
         // MCP 服务（含其绑定工具）+ 技能（底部工具条展示）
-        const [allMcps, allSkills] = await Promise.all([listMcps(), listSkills()])
+        const [allMcps, allSkills, allPlugins] = await Promise.all([listMcps(), listSkills(), listPlugins()])
         // 智能体绑定的 MCP 工具引用：每个 ref 对应一个 mcp_tool_definition
         const serverIds = [...new Set(mcp.map((r) => r.mcpId))]
         // 逐个 MCP 拉取其全部工具定义，按 ref 匹配出「本智能体实际绑定」的工具
@@ -1572,9 +1731,12 @@ export default function AgentChatPage() {
         if (alive) {
           setBoundMcps(bound)
           setBoundSkills(matched)
-          // 全量技能 / MCP 服务缓存，供输入框 @提及 候选（不局限于本智能体绑定项）
+          // 已挂载插件（P2 新增）：底部工具条罗列
+          setBoundPlugins(plugins)
+          // 全量技能 / MCP 服务 / 插件缓存，供输入框 @提及 候选（不局限于本智能体绑定项）
           setAllSkills(allSkills)
           setAllMcps(allMcps)
+          setAllPlugins(allPlugins)
         }
 
         // 工作空间：解析默认路径（单人调试不自定义）
@@ -1804,6 +1966,8 @@ export default function AgentChatPage() {
     const disabledSkillIds = [...removedSkillIds]
     const disabledMcpIds = [...removedMcpIds]
     const disabledMcpToolIdsArr = [...disabledMcpToolIds]
+    // 临时取消挂载的插件（P2 新增）：随本轮请求传给 Rust，从插件工具集中剔除
+    const disabledPluginIdsArr = [...removedPluginIds]
     // `@` 提及 → 本轮临时启用：从 mentionTags 解析出技能 / MCP 服务 id（key 形如 skill:<id> / mcp:<id>）
     const enabledSkillIds = mentionTags
       .filter((t) => t.key.startsWith('skill:'))
@@ -1811,6 +1975,10 @@ export default function AgentChatPage() {
     const enabledMcpIds = mentionTags
       .filter((t) => t.key.startsWith('mcp:'))
       .map((t) => t.key.slice('mcp:'.length))
+    // 插件（P2 新增）：@提及 触发本轮临时启用（可含未绑定插件，Rust 侧受 10 个上限兜底）
+    const enabledPluginIds = mentionTags
+      .filter((t) => t.key.startsWith('plugin:'))
+      .map((t) => t.key.slice('plugin:'.length))
     void ensureRound(text).then((sid) => {
       void run({
         agentId: agent.id,
@@ -1824,12 +1992,14 @@ export default function AgentChatPage() {
         disabledSkillIds,
         disabledMcpIds,
         disabledMcpToolIds: disabledMcpToolIdsArr,
+        disabledPluginIds: disabledPluginIdsArr,
         // `@` 提及触发：本轮临时启用未绑定（或重新启用已移除）的技能 / MCP 服务
         enabledSkillIds,
         enabledMcpIds,
+        enabledPluginIds,
       })
     })
-  }, [input, isRunning, agent, run, workspaceDir, pendingAttachments, ensureRound, removedSkillIds, removedMcpIds, disabledMcpToolIds, mentionTags])
+  }, [input, isRunning, agent, run, workspaceDir, pendingAttachments, ensureRound, removedSkillIds, removedMcpIds, disabledMcpToolIds, removedPluginIds, mentionTags])
 
   // 将 session 的流式文本/思考/工具步骤同步进「最后一条助手气泡」
   useEffect(() => {
@@ -2024,11 +2194,18 @@ export default function AgentChatPage() {
         if (mc) {
           const mcName = mc.aliasName || mc.mcpName || mc.id
           add(`mcp:${mc.id}`, mcName, mcName)
+          continue
+        }
+        // 插件（P2 新增）：identifier 稳定无空格，优先精确匹配；name 仅历史兼容兜底
+        const pl =
+          allPlugins.find((p) => p.identifier === name) ?? allPlugins.find((p) => p.name === name)
+        if (pl) {
+          add(`plugin:${pl.id}`, pl.name, pl.identifier || pl.name)
         }
       }
       return out
     },
-    [allSkills, allMcps],
+    [allSkills, allMcps, allPlugins],
   )
 
   const handleRegenerate = useCallback(
@@ -2055,11 +2232,14 @@ export default function AgentChatPage() {
       const disabledSkillIds = [...removedSkillIds]
       const disabledMcpIds = [...removedMcpIds]
       const disabledMcpToolIdsArr = [...disabledMcpToolIds]
+      // 临时取消挂载的插件（P2 新增）：重生成时同样生效
+      const disabledPluginIdsArr = [...removedPluginIds]
       // 修复（#20260915004 B3）：重新生成时 @@提及 文本已序列化进 userMsg.content，但 mentionTags 已清空。
       // 从内容反解出本轮临时启用的技能 / MCP，与 send 对齐，避免「重生成丢失 @提及」。
       const tags = resolveMentionTags(userMsg.content)
       const enabledSkillIds = tags.filter((t) => t.key.startsWith('skill:')).map((t) => t.key.slice('skill:'.length))
       const enabledMcpIds = tags.filter((t) => t.key.startsWith('mcp:')).map((t) => t.key.slice('mcp:'.length))
+      const enabledPluginIds = tags.filter((t) => t.key.startsWith('plugin:')).map((t) => t.key.slice('plugin:'.length))
       setMentionTags(tags) // 回填 chips，UI 重显本次启用的 @提及
       void ensureRound(userMsg.content).then((sid) => {
         void run({
@@ -2073,13 +2253,15 @@ export default function AgentChatPage() {
           disabledSkillIds,
           disabledMcpIds,
           disabledMcpToolIds: disabledMcpToolIdsArr,
-          // 临时启用的技能 / MCP 服务（@提及 触发），与 send 完全对齐
+          disabledPluginIds: disabledPluginIdsArr,
+          // 临时启用的技能 / MCP 服务 / 插件（@提及 触发），与 send 完全对齐
           enabledSkillIds,
           enabledMcpIds,
+          enabledPluginIds,
         })
       })
     },
-    [messages, agent, reset, run, workspaceDir, ensureRound, removedSkillIds, removedMcpIds, disabledMcpToolIds, resolveMentionTags],
+    [messages, agent, reset, run, workspaceDir, ensureRound, removedSkillIds, removedMcpIds, disabledMcpToolIds, removedPluginIds, resolveMentionTags],
   )
 
   /** 点击左侧历史会话，加载其全部轮次。 */
@@ -2186,7 +2368,23 @@ export default function AgentChatPage() {
         const name = m.aliasName || m.mcpName || m.id
         return { key: `mcp:${m.id}`, token: name, label: name, sub: 'MCP 服务', group: 'MCP 服务' }
       })
-    return [...skills, ...mcps]
+    // 插件候选（P2 新增）：token 用 identifier（稳定无空格），label 用 name 仅展示
+    const plugins = allPlugins
+      .filter(
+        (p) =>
+          !q ||
+          p.name.toLowerCase().includes(q) ||
+          p.identifier.toLowerCase().includes(q) ||
+          (p.description || '').toLowerCase().includes(q),
+      )
+      .map<SuggestItem>((p) => ({
+        key: `plugin:${p.id}`,
+        token: p.identifier || p.name,
+        label: p.name,
+        sub: '插件',
+        group: '插件',
+      }))
+    return [...skills, ...mcps, ...plugins]
   }
 
   /** 依据当前文本与光标位置刷新浮层；命中候选则展开，否则收起。 */
@@ -3375,6 +3573,14 @@ export default function AgentChatPage() {
                         />
                       ))}
                   </>
+                )}
+                {/* 已挂载插件（P2 新增）：图标胶囊（长名用 icon 代替），悬浮 Pop 列详情 + 临时取消挂载 */}
+                {boundPlugins.length > 0 && (
+                  <PluginPill
+                    plugins={boundPlugins}
+                    removedIds={removedPluginIds}
+                    onToggleRemove={togglePlugin}
+                  />
                 )}
               </div>
 

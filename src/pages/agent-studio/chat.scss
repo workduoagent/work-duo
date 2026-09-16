@@ -1095,6 +1095,36 @@
     }
   }
 
+  /* 插件胶囊（P2）：icon 水平垂直居中版本——mcp-pill 的 18px 右内边距是给
+     绝对定位的移除按钮预留的，插件胶囊没有该按钮，用对称 padding 才不会偏 */
+  &__plugin-pill {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    flex: 0 0 auto;
+    padding: 5px 10px;
+    border-radius: 999px;
+    background: var(--color-background-soft, #f0f0f0);
+    color: var(--color-text, #333);
+    font-size: 12px;
+    line-height: 1;
+    cursor: default;
+    white-space: nowrap;
+    transition: opacity 0.15s ease, background 0.15s ease;
+
+    .dark & {
+      background: #2a2a2a;
+      color: #e6e6e6;
+    }
+
+    &.is-removed {
+      opacity: 0.5;
+      border: 1px dashed var(--color-border, #d9d9d9);
+    }
+  }
+
   &__mcp-label {
     padding: 1px 2px;
   }

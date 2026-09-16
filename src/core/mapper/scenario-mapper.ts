@@ -22,6 +22,7 @@ const SCOPE_REF: Partial<
   MCP: { table: 'mcp_info', column: 'scenario', notNull: false },
   KB: { table: 'knowledge_base', column: 'scenario', notNull: false },
   AGENT: { table: 'agent_info', column: 'scenario', notNull: false },
+  PLUGIN: { table: 'user_plugin_tool', column: 'scenario', notNull: false },
 }
 
 interface Row {

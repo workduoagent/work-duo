@@ -116,7 +116,7 @@ export type McpScenario =
  *  - AGENT：智能体应用场景（对应 agent_info.scenario）。
  *  注：LLM 模型分类不纳入本字典——模型大类直接驱动 paramFields 动态表单，须与代码参数结构严格对应。
  */
-export type ScenarioScope = 'MCP' | 'SKILL' | 'KB' | 'AGENT'
+export type ScenarioScope = 'MCP' | 'SKILL' | 'KB' | 'AGENT' | 'PLUGIN'
 
 /**
  * 场景分类字典行（对应 scenario_category 表）。
@@ -289,6 +289,8 @@ export interface AgentUpsertInput {
   mcpTools: Array<{ mcpId: string; toolId: string }>
   /** 编排的技能 id */
   skillIds: string[]
+  /** 挂载的本地插件 id（P2 新增；写入 agent_plugin_ref） */
+  pluginIds?: string[]
 }
 
 /**

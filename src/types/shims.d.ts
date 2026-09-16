@@ -50,3 +50,7 @@ declare module '@xyflow/react' {
 
 // ReactFlow 基础样式表（未 install 时让 typecheck 通过，install 后由真实文件覆盖）。
 declare module '@xyflow/react/dist/style.css'
+
+// Monaco TS 语言贡献（0.56 ESM 不随主包自动加载，需显式 import；仅 side-effect，无导出类型）。
+// 路径遵循 package.json exports（"./*": "./esm/vs/*.js"）→ 实际文件 esm/vs/language/typescript/...。
+declare module 'monaco-editor/language/typescript/monaco.contribution.js'

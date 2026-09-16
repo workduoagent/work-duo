@@ -1,0 +1,147 @@
+/* ============================================================
+ * pages/plugins/detail — 插件详情页
+ * 仅使用设计令牌 var(--color-*)，不写 hex / px 字面量。
+ * 卡片 / 表单等样式复用 index.scss（已在此页 import）。
+ * ============================================================ */
+
+.pluginhub-detail-page {
+  height: 100%;
+  padding: 20px 24px;
+  box-sizing: border-box;
+  overflow-y: auto;
+  background: var(--color-background);
+}
+
+.pluginhub-detail-page__loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 60vh;
+}
+
+.pluginhub-detail-page__nav {
+  margin-bottom: 16px;
+}
+
+.pluginhub-detail-page__header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.pluginhub-detail-page__header-logo {
+  width: 56px;
+  height: 56px;
+  flex: 0 0 56px;
+  border-radius: 14px;
+  background: var(--color-brand-50);
+  color: var(--color-brand-600);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.pluginhub-detail-page__header-info {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.pluginhub-detail-page__title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.pluginhub-detail-page__title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--color-foreground-intense);
+}
+
+.pluginhub-detail-page__desc {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--color-foreground-muted);
+}
+
+/* 头部右侧动作区（试跑 / 删除） */
+.pluginhub-detail-page__header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.pluginhub-detail-page__del:hover {
+  color: var(--color-danger) !important;
+}
+
+.pluginhub-detail-page__section {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.pluginhub-detail-page__code {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Consolas, monospace);
+  font-size: 12.5px;
+  color: var(--color-foreground);
+  word-break: break-all;
+}
+
+.pluginhub-detail-page__configs {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.pluginhub-detail__config {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pluginhub-detail__config-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-foreground-muted);
+}
+
+/* ---------------- 执行日志 Tab ---------------- */
+.pluginhub-logs {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.pluginhub-log-item {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border-radius: var(--radius-card);
+  background-color: var(--color-background-subtle);
+  border: 1px solid var(--color-border);
+}
+
+.pluginhub-log-item__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.pluginhub-log-item__meta {
+  font-size: 12px;
+  color: var(--color-foreground-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.pluginhub-logs-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 200px;
+}

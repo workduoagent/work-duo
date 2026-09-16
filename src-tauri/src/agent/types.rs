@@ -152,6 +152,28 @@ fn default_proxy_mode() -> String {
     "direct".to_string()
 }
 
+/// 已挂载到运行时（待注册为 `custom__<identifier>` 工具）的本地插件元信息。
+///
+/// 由 `load_config` 经 `agent_plugin_ref` JOIN `user_plugin_tool` 装配（P2 起），
+/// 过滤条件 `ref.is_active=1 AND tool.enabled=1 AND agent.allow_sandbox=1`。
+/// 此处仅携带「执行所需」的最小字段，脚本内容内联进 Runner 壳，不落用户目录。
+#[derive(Debug, Clone)]
+pub struct MountedUserPlugin {
+    pub plugin_id: String,
+    /// 工具 slug（无 `custom__` 前缀）。
+    pub identifier: String,
+    pub name: String,
+    pub description: String,
+    /// 运行时：`python` | `bun`。
+    pub runtime: String,
+    /// 用户核心代码（仅 `run` + 头注释，不含 Runner 壳）。
+    pub script_content: String,
+    /// OpenAI function 可用的 JSON Schema（已解析对象）。
+    pub parameters_schema: serde_json::Value,
+    /// 单次执行超时（秒，硬上限 300）。
+    pub timeout_sec: u64,
+}
+
 /// 单个 agent 运行配置（由前端 run_agent_task 传入，或从 agent_info 读取）。
 #[derive(Debug, Clone, Default)]
 pub struct AgentRuntimeConfig {
@@ -183,6 +205,10 @@ pub struct AgentRuntimeConfig {
     /// 网络代理模式（direct / system / manual），由 app_config.network_proxy 解析。
     /// 智能体所有 LLM 出站请求据此建客户端：direct 无视系统代理（兼容开 VPN 时直连 LAN 模型）。
     pub network_proxy: NetworkProxy,
+    /// 已挂载的本地插件（含真实 script_content 与 schema），注册为 `custom__<identifier>` 工具。
+    /// P1 起暂由 `load_config` 置空（装配延 P2），但字段与结构体先行落地以免后续改动面扩散。
+    #[allow(dead_code)] // P2 runtime.rs 读取；P1 仅置空
+    pub plugin_tools: Vec<MountedUserPlugin>,
 }
 
 /* ================= 三层流水线架构（意图分流 → DAG 规划 → 微 ReAct 执行） ================= */

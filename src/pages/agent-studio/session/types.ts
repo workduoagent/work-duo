@@ -306,6 +306,10 @@ export interface RunAgentTaskInput {
   enabledSkillIds?: string[]
   /** 本轮临时启用的 MCP 服务 id 列表（`@` 提及触发，仅会话内有效，不写库）。可包含智能体未绑定的服务，Rust 侧据此把其全部工具临时并入工具集。 */
   enabledMcpIds?: string[]
+  /** 本轮临时启用的本地插件 id 列表（`@` 提及触发，仅会话内有效，不写库）。P2 新增；可包含智能体未绑定的插件，Rust 侧据此临时并入工具集（受 10 个上限兜底）。 */
+  enabledPluginIds?: string[]
+  /** 本轮临时取消挂载的插件 id 列表（工具条胶囊「移除」触发，仅会话内有效，不写库）。Rust 侧据此从插件工具集剔除。P2 新增。 */
+  disabledPluginIds?: string[]
   /** §3.2 分支重跑：直接采用前端合并好的完整计划（head + 新分支 tail），跳过 LLM 规划。字段名用 snake_case 以匹配 Rust `PlanDAG` 反序列化。 */
   planOverride?: PlanDAG
   /** 分支起点之前的已完成 head 步骤 task_id（流水线跳过执行，沿用其结果）。 */

@@ -173,6 +173,22 @@ fn capability_outline(cfg: &AgentRuntimeConfig) -> String {
             .map(|t| t.skill_name.as_str())
             .collect();
         lines.push(format!("{idx}. 技能工具：{}；", names.join("、")));
+        idx += 1;
+    }
+    // 本地插件（P2 纯增量，与 MCP/Skill 同款模式）：plugin_tools 为空时不出现该行。
+    // 存在插件时明确「优先直接调用」，避免规划员把任务规划成手写脚本重复实现插件功能
+    // （设计稿 §13 预判风险；真机 2026-09-16 首测暴露：planner 不知插件存在 → 规划成写 Python 脚本）。
+    if !cfg.plugin_tools.is_empty() {
+        let names: Vec<String> = cfg
+            .plugin_tools
+            .iter()
+            .map(|p| format!("custom__{}（{}）", p.identifier, p.description))
+            .collect();
+        lines.push(format!(
+            "{idx}. 本地插件工具（用户自定义函数，任务与其描述匹配时**必须优先直接调用对应 custom__ 工具**，\
+严禁手写脚本重复实现插件已有功能）：{}；",
+            names.join("、")
+        ));
     }
     lines.join("\n")
 }

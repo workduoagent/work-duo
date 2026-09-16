@@ -96,7 +96,7 @@ impl MambaManager {
     /// 步骤一 + 步骤二：在 `$RESOURCES/mamba_root` 下创建运行时目录并校验写入权限；
     /// 若缺失则生成 `.mambarc`。返回 `(mamba_root, rc_file)` 两个已就绪的路径。
     /// 权限被拒时返回友好提示，引导用户将软件移动到非系统盘（如 D 盘）。
-    fn setup(&self, app: &AppHandle) -> Result<(PathBuf, PathBuf), String> {
+    pub(crate) fn setup(&self, app: &AppHandle) -> Result<(PathBuf, PathBuf), String> {
         let base_dir = Self::base_dir(app);
         let mamba_root = base_dir.join("mamba_root");
 
@@ -179,7 +179,7 @@ async fn run_sidecar(
 /// 关键陷阱：micromamba 的全局选项若写在子命令之后（尤其 `run` 的 `python <脚本>` 之后），
 /// 会被当作目标程序的参数而完全失效，进而回退到内置默认根前缀（AppData），
 /// 导致「环境找不到 / 落到 AppData」。因此这里统一前置，所有命令都先拼全局选项再拼子命令。
-fn global_args(mamba_root: &Path, rc: &Path) -> Vec<String> {
+pub(crate) fn global_args(mamba_root: &Path, rc: &Path) -> Vec<String> {
     vec![
         "--root-prefix".into(),
         mamba_root.to_string_lossy().to_string(),
@@ -468,7 +468,7 @@ fn normalize_pkg(name: &str) -> String {
 /// 从脚本 stderr 中解析 `ModuleNotFoundError: No module named 'X'`，返回检测到的缺失
 /// 顶层模块名集合（如 `sklearn.linear_model` → `sklearn`）。沙箱对依赖安装不做白名单限制，
 /// 任何检测到的缺失模块都会交由 selfheal 自动安装。
-fn missing_modules(stderr: &str) -> Option<Vec<String>> {
+pub(crate) fn missing_modules(stderr: &str) -> Option<Vec<String>> {
     let mut found: std::collections::BTreeSet<String> = Default::default();
     for line in stderr.lines() {
         let line = line.trim();
@@ -499,7 +499,7 @@ fn missing_modules(stderr: &str) -> Option<Vec<String>> {
 }
 
 /// 构造 `micromamba run -n <env> python <tmp>` 的参数列表（全局选项前置）。
-fn build_run_args(mamba_root: &Path, rc: &Path, env: &str, tmp_path: &Path) -> Vec<String> {
+pub(crate) fn build_run_args(mamba_root: &Path, rc: &Path, env: &str, tmp_path: &Path) -> Vec<String> {
     let mut args = global_args(mamba_root, rc);
     args.extend([
         "run".into(),
@@ -545,7 +545,7 @@ fn pythonpath_env(
 }
 
 /// 静默向指定环境安装依赖（复用 micromamba install，不暴露 Tauri 命令通道）。
-async fn install_packages_silent(
+pub(crate) async fn install_packages_silent(
     app: &AppHandle,
     mgr: &MambaManager,
     env: &str,
