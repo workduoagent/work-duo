@@ -73,7 +73,7 @@ export interface AgentSessionState {
     promptTokens: number
     completionTokens: number
   } | null
-  /** 最近一轮任务的异常信息（由 `agent-task-error` 写入），供页面渲染「错误诊断面板」（展示+复制；重试/跳过留 Phase 2）。 */
+  /** 最近一轮任务的异常信息（由 `agent-task-error` 写入），供页面渲染「错误诊断面板」（展示+复制+重试本轮）。 */
   taskError: { message: string; at: number } | null
   /** 本次任务产生的文件产物（各子任务成功闭环后由 `agent-artifact-created` 累计推送），驱动「产物画廊」。 */
   artifacts: ArtifactRef[]
@@ -437,12 +437,13 @@ export function useAgentSession(): AgentSessionState {
   }, [isTauri, startTaskTimeout])
 
   // 计划审批门禁（Phase 2b-3）：回传决策（approve / reject / revise）给后台挂起的计划审批中枢。
-  // 不在下发时乐观收起面板——后端接到决策后会 emit plan_generated（approve）或本轮以
-  // task-done/error 结束（reject/cancel），这些事件统一清面板；若网络异常未复位，面板保留、
-  // 后端仍在挂起等待，用户可再次点击，避免死锁。
+  // 处置中心版：点击即**乐观收起**（对齐旧 Notification.destroy）——revise 会重新规划并再次
+  // 推送新计划审批（新对象自动清空上次输入）；下发失败则回滚恢复面板，用户可再次点击。
   const resolvePlanApproval = useCallback(
     async (decision: 'approve' | 'reject' | 'revise', guidance?: string) => {
       if (!isTauri) return
+      const snapshot = planApproval
+      setPlanApproval(null)
       try {
         await invoke('submit_plan_decision', {
           input: {
@@ -452,9 +453,10 @@ export function useAgentSession(): AgentSessionState {
         })
       } catch (e) {
         console.error('[agent] submit_plan_decision failed', e)
+        setPlanApproval(snapshot)
       }
     },
-    [isTauri],
+    [isTauri, planApproval],
   )
 
   // 方案推荐：回传用户所选 optionId（或自定义文本），唤醒后台挂起的 `native__ask_user_choice`。
@@ -528,13 +530,15 @@ export function useAgentSession(): AgentSessionState {
     }, 3000)
   }, [isTauri, clearTaskTimeout, clearCancelWatchdog])
 
-  // 步骤级恢复：回传决策（retry / skip / takeover）给后台挂起的流水线。
-  // 不在下发时乐观收起面板——后端接到决策后会 emit step_started（retry/takeover）
-  // 或 step_finished（skip），或本轮以 agent-task-done/error 结束，这些事件统一清面板；
-  // 若网络异常未复位，面板保留、后端仍在挂起等待，用户可再次点击，避免死锁。
+  // 步骤级恢复：回传决策（retry / skip / takeover / change-approach）给后台挂起的流水线。
+  // 处置中心版：点击即**乐观收起**面板（对齐旧 Notification.destroy 的即时反馈），
+  // 后端接到决策后会 emit step_started（retry/takeover）或 step_finished（skip）刷新流程；
+  // 若下发失败则回滚恢复面板，用户可再次点击，避免死锁。
   const resolveRecovery = useCallback(
     async (decision: 'retry' | 'skip' | 'takeover' | 'change-approach', guidance?: string) => {
       if (!isTauri) return
+      const snapshot = recovery
+      setRecovery(null)
       try {
         await invoke('resolve_subtask', {
           input: {
@@ -544,9 +548,10 @@ export function useAgentSession(): AgentSessionState {
         })
       } catch (e) {
         console.error('[agent] resolve_subtask failed', e)
+        setRecovery(snapshot)
       }
     },
-    [isTauri],
+    [isTauri, recovery],
   )
 
   // 挂载：注册 Tauri 事件监听（仅 Tauri 环境）。

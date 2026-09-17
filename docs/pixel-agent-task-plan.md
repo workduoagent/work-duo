@@ -32,7 +32,7 @@
   - 验证记录：
 
 ### 阶段 2：持久化
-- [ ] **T3** `agent-mapper.ts`：`rowToAgent` 走既有 safeParse（坏 JSON→undefined 走 logo 回退）；`upsertAgent` **22/22/22** + `ON CONFLICT` 补 appearance + localStorage 分支同步；新流程**不再写 logo**（编辑保留旧 logo 不清空）。
+- [ ] **T3** `agent-mapper.ts`：`rowToAgent` 走既有 safeParse（坏 JSON→undefined 走 logo 回退）；`upsertAgent` **22/22/22** + `ON CONFLICT` 补 appearance + localStorage 分支同步；新流程**不再写 logo**（并且新建/编辑智能体表单不在提供Logo上传了，角色完成会话，生成快照填充这个logo字段-还是base64个头像，这个头不再由用户自己上传，而且由用户制定的像素任务作为头像）。
   - 验收：保存装扮→重启回显；旧 logo 智能体不受影响。
   - 验证记录：
 

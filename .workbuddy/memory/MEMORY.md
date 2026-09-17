@@ -1,4 +1,4 @@
-# work-duo 长期约定（单一事实源 · 校准 2026-09-15）
+# work-duo 长期约定（单一事实源 · 校准 2026-09-17）
 
 > 与每日日志冲突以本文件为准；逐日实现细节留 `2026-*.md`；需求/问题单一事实源 = 仓库根 `需求与问题跟踪-第二期.md`（2026-09-12 起）。前端规范见《前端开发规范.md》。**🔴 内部私有数据红线：`.wd_mem/**` 与 `.workbuddy/memory/**` 绝不可进用户可见 UI / 经 `present_files` 展示。**
 
@@ -54,16 +54,17 @@ UI 令牌只用 `var(--color-*)`（禁 hex/px）；根容器 `width:100%`；表�
 ## 当前冲刺（2026-09-15 起）
 单一事实源 = `需求与问题跟踪-第二期.md`（总览 `20260915001~012` + 3 周冲刺「排期建议」章节）。记忆只留进度快照，不复制排期。
 - **Week1 可信地基（已收口/收口中）**：`20260915001`(provisional 完成态 ✅ 真机过)→`20260915002`(产物图驱动 ✅ 真机过)→`20260915003`(图中间态 ✅ 真机过，含死锁回归修复)→`20260915015`(校验降级误标已验证 ✅ 真机过)；`20260915004`(前端4确定性 bug ✅ 真机点验全通过：B1/B2/B3/B4；另硬化 @提及匹配 name→identifier)。
-- **Week2/3 待办**：`15005`(chat 拆分)/`15006`(错误面板)/`15007`(边审批引擎)/`15008`(Dashboard)/`15009`(小队)/`15010`(记忆护栏)/`15011`(TTS/STT)/`15012`(DB 路径 ⚠️ 待定)。
-- **#20260916001 用户自定义脚本插件（9-16 新建，当前活跃）**：P0 数据契约 / P1 Rust 执行闭环 / P2 Agent 装配 / P3 插件中心 UI 均 ✅（含 @提及插件、16:39 基础点验收口、17:15 P2 真机验收通过）；P4 打磨（日志页/清理/审批文案/导出 JSON）待办。详见下方「用户自定义脚本插件」段。`15005`(chat 拆分) v1 已回退；**v2 安全优先拆分 9-16 晚六步落地**（3839→2600 行 -32%，物理搬运零结构改动，commit 504f8e5…682b5b8 + tag pre-chat-split，方案 docs/chat-split-plan.md，待终验翻 ✅）。
+- **Week2/3 待办**：`15005`(chat 拆分 ✅ 2026-09-17 核验)/`15006`(错误面板可操作化 ✅ 2026-09-17 真机验收：重试本轮+查看恢复面板)/`15007`(边审批引擎)/`15008`(Dashboard)/`15009`(小队)/`15010`(记忆护栏)/`15011`(TTS/STT)/`15012`(DB 路径 ⚠️ 待定)。另 `[20260917001]` HITL 处置中心（Phase1 真机✅/Phase2 待点验）与 `[20260917002]` plan_approval 残留 Cancel 修复（✅）见跟踪文件。
+- **#20260916001 用户自定义脚本插件（9-16 新建，✅ 已完结并入库）**：P0 数据契约 / P1 Rust 执行闭环 / P2 Agent 装配 / P3 插件中心 UI 全部真机验收通过（9-16 全天推进：基础点验→Bun 自愈修复→P2 Agent 调用→@提及插件→对话工具条胶囊）；**代码已由用户自行提交（9-16 晚）**。残留可选项：P4 打磨（运行日志清理策略/导出导入 JSON/审批文案），按需插队做。详见下方「用户自定义脚本插件」段。`15005`(chat 拆分) v1 已回退；**v2 安全优先拆分 9-16 晚六步落地**（3839→2600 行 -32%，物理搬运零结构改动，commit 504f8e5…682b5b8 + tag pre-chat-split，方案 docs/chat-split-plan.md，**2026-09-17 用户核验通过 ✅**）。
+- **Pixel Agent 拟人化像素智能体（9-16 晚规划，未开工，下一个候选任务）**：设计稿 `docs/pixel-agent-design.md` v1.0 + 任务规划 `docs/pixel-agent-task-plan.md`（T0 DDL 双写 → T1/T2 类型字典 → T3 mapper 22/22/22 三要素+ON CONFLICT → T4/T5 SVG 渲染+四态动效 → T6/T7 AgentFace+三处接入 → T8 AppearancePicker/场景预设）。开工前必读规划文件的铁律节（upsertAgent ON CONFLICT 必补 appearance、chat/MessageList.tsx 不存在实际改 chat.tsx、SCENARIO_PRESETS key 需与 AGENT 场景字典对表）。
 - 收口标准：`cargo check`+`npm run typecheck`+真机一条验收路径写回跟踪文件。
 
-## 用户自定义脚本插件（#20260916001 · P0-P3 ✅，P4 打磨待办）
+## 用户自定义脚本插件（#20260916001 · ✅ 已完结入库 2026-09-16，P4 打磨可选）
 本地 FaaS：用户脚本（Python/Bun）= Agent 工具 `custom__<identifier>`（语义对齐 Skill/MCP）。设计稿 `docs/user-plugin-design.md` v1.0。
 - Rust：`plugin_runner.rs`（Runner 壳 + **exit 42 依赖自愈优先协议** + 超时 `taskkill /T /F` 杀树 + 写 `plugin_run_log` + 回写 `last_run_*`）/ `plugin_adapter.rs`（`PluginTool`+`register_plugins_into`）/ `plugin_commands.rs`（`test_user_plugin` + `extract_plugin_meta` 头注释解析→JSON Schema）；`lib.rs` 注册两命令。
 - TS：`src/core/file/plugin-file.ts`（领域模型+校验+草稿）+ `src/core/mapper/plugin-mapper.ts`（CRUD+bind/unbind+localStorage 回退）+ `plugin-connection.ts`（桥，对齐 mcp-connection）；`pages/plugins/`（卡片网格+detail Tabs+Form/Test Modal）；TopBar 百宝箱「插件」(Puzzle)；paths/router 接线。
 - DDL：`init.sql`+`updater.sql` 三表 `user_plugin_tool`/`agent_plugin_ref`/`plugin_run_log`（双源同步）；`database.d.ts` 对应 Row。
 - 装配（P2）：`load_config` 拼 `user_plugin_tool JOIN agent_plugin_ref` 注册；`RunAgentTaskInput` 加 `enabled/disabled_plugin_ids`（@提及临时并入，对齐 Skill）；`planner.rs capability_outline` 追加插件条目（明确「匹配时必须优先直接调 custom__，禁手写脚本重复实现」）；系统提示仅 plugin_tools 非空时追加「本地插件工具」段。
-- @提及：chat.tsx 加插件候选（group='插件'，token=identifier，label=name）；`resolveMentionTags` 插件匹配（identifier 优先/name 兜底）；send/regenerate 透传；底部 PluginPill（复用 McpPill，createPortal 到 body 避 transform 祖先致 fixed 漂移）。
+- @提及：chat.tsx 加插件候选（group='插件'，token=identifier，label=name）；`resolveMentionTags` 插件匹配（identifier 优先/name 兜底）；send/regenerate 透传；底部 PluginPill（Puzzle 图标胶囊 + hover Pop 列详情/临时移除恢复，**Pop createPortal 到 body 避 transform 祖先致 fixed 漂移**，胶囊用专用 `__plugin-pill` 对称 padding 居中）。
 - 铁律：① 插件=工具，**先做完单模块再跑 Agent**；② 受管 `bun_root/node_modules` 自愈（设置页依赖管理可见、跨运行复用），`ensure_node_modules_link`（Windows junction / Unix symlink），失败回退装运行目录；③ Runner 壳用 raw string 常量（禁 `\n\` 续接吞缩进）；顶层 import 缺包走 exit 42（`_USER_SRC` 直接 `py_safe_json_literal` 赋值，非 json.loads 二次解码）。
-- 状态：P0/P1/P2/P3 ✅（16:39 基础点验收口、17:15 P2 真机验收通过）；P4 打磨（日志页/清理/审批文案/导出 JSON）待办。
+- 状态：**✅ 已完结**（9-16 真机全链路：Python/Bun×成功/自愈、向导挂载、Agent 调用 custom__、@提及、临时取消挂载），用户已提交。当日顺手修复：Bun 自愈两层 bug（整句报错当包名 + 单引号正则）、Monaco ts.worker 注册/关语义校验/外部值同步、Field.scss Switch 拉满、planner 能力大纲补插件条目（否则规划员不知插件存在，规划成手写脚本）。

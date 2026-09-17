@@ -58,6 +58,7 @@ import {
   FileText,
   Paperclip,
   TriangleAlert,
+  RefreshCw,
 } from 'lucide-react'
 import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
@@ -105,7 +106,7 @@ import { useAgentSession } from './session/useAgentSession'
 import { TracePanel } from './session/TracePanel'
 import { RunDagCanvas } from './session/RunDagCanvas'
 import { ToolStepLine } from './session/ToolStepLine'
-import { UserPromptPanel } from './session/UserPromptPanel'
+import { DecisionCenter } from './session/DecisionCenter'
 import { TakeoverPanel } from './session/TakeoverPanel'
 import type { ReadArtifactResult, BranchFromStepInput, BranchStep, PlanDAG, ContextCompactedPayload } from './session/types'
 import type {
@@ -273,7 +274,7 @@ export default function AgentChatPage() {
   // 右侧投影面板（图 / 过程 / 产物）：二期方案 C Graph-first，默认关闭、发消息自动展开「图」。
   // 接管不再常驻 Tab，改为 recovery 非空时右栏底部情境升起。
   const [rightOpen, setRightOpen] = useState(false)
-  const [rightTab, setRightTab] = useState<'graph' | 'process' | 'artifacts'>('graph')
+  const [rightTab, setRightTab] = useState<'graph' | 'process' | 'artifacts' | 'actions'>('graph')
   // 右栏宽度（可鼠标拖拽调节），默认 340px
   const [rightWidth, setRightWidth] = useState(340)
   const resizingRef = useRef(false)
@@ -333,14 +334,13 @@ export default function AgentChatPage() {
     }
   }, [isTauri, workspaceDir])
 
-  // 接管上下文化（二期方案 C）：步骤受阻（recovery 非空）时自动展开右栏，
-  // 失败详情随右栏底部「接管」情境条升起（不再依赖常驻「接管」Tab），默认切到「图」便于看失败节点。
+  // 挂起自动聚焦（处置中心版）：四类 HITL 任一挂起时自动展开右栏并切到「处置」Tab。
   useEffect(() => {
-    if (recovery) {
+    if (pendingApproval || recovery || pendingChoice || planApproval) {
       setRightOpen(true)
-      setRightTab('graph')
+      setRightTab('actions')
     }
-  }, [recovery])
+  }, [pendingApproval, recovery, pendingChoice, planApproval])
 
   // 右键「从此步骤分支」→ 调 branch_from_step 命令，后端生成新分支并推 plan_branch 事件
   const handleBranchFromStep = useCallback(async (fromStep: number) => {
@@ -408,7 +408,8 @@ export default function AgentChatPage() {
   const lastPromptRef = useRef('')
   const lastTokensRef = useRef<{ input: number; output: number }>({ input: 0, output: 0 })
 
-  // 收到 agent-task-error 时，把错误挂到最后一条 agent 消息，渲染「错误诊断面板」（展示+复制；重试/跳过留 Phase 2）。
+  // 收到 agent-task-error 时，把错误挂到最后一条 agent 消息，渲染「错误诊断面板」
+  // （展示 + 复制 + 重试本轮/查看恢复面板，20260915006）。
   useEffect(() => {
     if (!taskError) return
     setMessages((prev) => {
@@ -1751,19 +1752,7 @@ export default function AgentChatPage() {
           </div>
         </div>
       )}
-      {/* 审批授权：右下角通知形式，不再嵌入对话流 */}
-      <UserPromptPanel
-        approval={pendingApproval}
-        recovery={recovery}
-        choice={pendingChoice}
-        planApproval={planApproval}
-        agentName={agent?.name ?? ''}
-        onApproval={handleApproval}
-        onResolve={resolveRecovery}
-        onSubmitChoice={submitChoice}
-        onResolvePlanApproval={resolvePlanApproval}
-        compact={false}
-      />
+      {/* 四类 HITL 决策（授权/恢复/选择/计划审批）统一走右栏「处置」Tab（弹窗改版 Phase 2） */}
 
       {/* 左侧会话列表 */}
       <aside className="agent-chat__side">
@@ -2124,6 +2113,29 @@ export default function AgentChatPage() {
                         <Button variant="ghost" size="sm" onClick={() => copyError(m.error!.message)}>
                           复制错误详情
                         </Button>
+                        {/* 恢复挂起与整轮错误常态互斥（error 终态会清 recovery）；残留时给入口直达右栏 */}
+                        {recovery && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              setRightOpen(true)
+                              setRightTab('process')
+                            }}
+                          >
+                            查看恢复面板
+                          </Button>
+                        )}
+                        {/* 整轮级失败：同一 user prompt 原地重跑（复用 regenerate，不重发消息） */}
+                        <Button
+                          variant="solid"
+                          size="sm"
+                          disabled={isRunning}
+                          onClick={() => handleRegenerate(m.id)}
+                        >
+                          <RefreshCw size={14} />
+                          重试本轮
+                        </Button>
                       </div>
                     </div>
                   )}
@@ -2144,6 +2156,29 @@ export default function AgentChatPage() {
 
         {/* 底部输入工具条：仿 WorkBuddy 的大圆角输入框，工具按钮内嵌在框底 */}
         <footer className="agent-chat__input">
+          {/* 待处置提醒卡（方案 B 轻量）：贴输入框上方、与输入框同宽居中；挂起期间常驻，点击直达「处置」Tab */}
+          {(pendingApproval || recovery || pendingChoice || planApproval) && (
+            <button
+              type="button"
+              className="agent-chat__action-banner"
+              onClick={() => {
+                setRightOpen(true)
+                setRightTab('actions')
+              }}
+            >
+              <TriangleAlert size={14} />
+              <span>
+                {pendingApproval
+                  ? '有敏感操作待授权，需要你的决策'
+                  : recovery
+                    ? `步骤 ${recovery.step}「${recovery.title}」受阻，需要你的决策`
+                    : pendingChoice
+                      ? '智能体需要你选择一个方案'
+                      : '计划已生成，等待你审批'}
+              </span>
+              <span className="agent-chat__action-banner-go">前往处置 →</span>
+            </button>
+          )}
           <div
             className={`agent-chat__input-box${dragOver ? ' agent-chat__input-box--drag' : ''}`}
             onDragOver={(e) => {
@@ -2468,12 +2503,23 @@ export default function AgentChatPage() {
               <Box size={13} />
               产物（{artifacts.length}）
             </button>
-            {recovery && (
-              <span className="agent-chat__right-flag" title="步骤受阻，请在底部处置">
-                <TriangleAlert size={12} />
-                待处置
-              </span>
-            )}
+            {/* 处置 Tab（弹窗改版 Phase 1）：授权/恢复决策迁移入口；角标=待处置数量 */}
+            <button
+              type="button"
+              className={`agent-chat__right-tab ${rightTab === 'actions' ? 'is-active' : ''}`}
+              onClick={() => setRightTab('actions')}
+            >
+              <TriangleAlert size={13} />
+              处置
+              {(pendingApproval || recovery || pendingChoice || planApproval) && (
+                <span className="agent-chat__right-tab-badge">
+                  {(pendingApproval ? 1 : 0) +
+                    (recovery ? 1 : 0) +
+                    (pendingChoice ? 1 : 0) +
+                    (planApproval ? 1 : 0)}
+                </span>
+              )}
+            </button>
             <button
               type="button"
               className="agent-chat__right-collapse"
@@ -2502,11 +2548,23 @@ export default function AgentChatPage() {
                 planSteps={planSteps}
                 toolSteps={toolSteps}
               />
+            ) : rightTab === 'actions' ? (
+              <DecisionCenter
+                approval={pendingApproval}
+                recovery={recovery}
+                choice={pendingChoice}
+                planApproval={planApproval}
+                agentName={agent?.name ?? ''}
+                onApproval={handleApproval}
+                onResolve={resolveRecovery}
+                onSubmitChoice={submitChoice}
+                onResolvePlanApproval={resolvePlanApproval}
+              />
             ) : (
               <ArtifactGallery artifacts={artifacts} isTauri={isTauri} />
             )}
           </div>
-          {/* 接管情境升起：recovery 非空时不再依赖常驻「接管」Tab，于右栏底部浮出详情（行动键在底部 UserPromptPanel） */}
+          {/* 接管详情条：工具栈 / 已改动文件 / 失败命令（决策键已迁至「处置」Tab） */}
           {recovery && (
             <div className="agent-chat__right-recovery">
               <TakeoverPanel recovery={recovery} onPreviewArtifact={handlePreviewArtifact} />

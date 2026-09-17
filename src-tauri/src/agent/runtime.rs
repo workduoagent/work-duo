@@ -132,6 +132,11 @@ impl AgentRuntime {
         self.cancel_flag.store(false, Ordering::SeqCst);
         // 新一轮开始：清空前一轮可能残留的恢复挂起态（避免上轮 cancel 残留误导前端面板）。
         self.recovery.reset();
+        // 同步清空计划审批 hub：cancel() 会无条件把 decision 置为 Cancel，若当时没有
+        // 等待者消费（如用户在非门禁阶段点了停止），残留的 Cancel 会被**下一个任务**的
+        // wait() 第一轮 take 走 → 新任务刚进门禁就被误判「用户取消」终止（真机 2026-09-17
+        // 出现两次）。与 cancel_flag / recovery 的启动重置同源同必要。
+        self.plan_approval.reset();
 
         // 0.1) 动态重算并回写 tools_tokens：按当前已解析的 MCP/Skill 工具数覆盖写入会话表，
         //    中途移除 Skill / 停用（解绑）MCP 后，下一轮会自动下调；重新绑定则上调。

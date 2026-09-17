@@ -2756,6 +2756,10 @@
   display: flex;
   flex-direction: column;
   min-height: 0;
+  // 层级高于 fixed 输入条（z-index:5）：输入框拉高时 footer 全宽白底不得盖住轨迹面板
+  // （footer 实际高度含工具条/提醒卡，高于 --input-h 预留值；层级兜底保证面板恒可见）。
+  position: relative;
+  z-index: 6;
   // 宽度由内联 style 控制（默认 340px，可拖拽调节）；右侧 14px 避让视口边
   // 与左侧栏对齐的留白；底部避让高度跟随 `--input-h`，输入框拉高时面板同步上移不被遮挡。
   margin: 14px 14px calc(var(--input-h, 48px) + 110px) 0;
@@ -3032,6 +3036,8 @@
   position: relative;
   flex: 0 0 5px;
   align-self: stretch;
+  // 与右栏同层级：不被拉高后的 fixed 输入条盖住（拖拽手柄需始终可操作）
+  z-index: 6;
   // 底部避让高度跟随 `--input-h`，与右栏、主区保持一致，输入框拉高时手柄同步上移。
   margin: 14px 0 calc(var(--input-h, 48px) + 110px);
   cursor: col-resize;
@@ -4081,6 +4087,32 @@
   overflow: hidden;
 }
 
+// 恢复通知多夹层修复（2026-09-17，用户真机反馈「展开完整原因后按钮被挤出卡片外」）：
+// reason 区是 65vh 限高卡内**唯一可伸缩区**——展开后在此处内部滚动；
+// 标题行/tip/输入框/按钮组 flex-shrink:0 恒可见。否则展开内容撑高卡片、
+// 被 overflow:hidden 裁掉按钮区（HitlClamp.is-open 的 flex:1 断在无约束的中间层上）。
+.agent-recovery-note > * {
+  flex-shrink: 0;
+}
+.agent-recovery-note > .agent-recovery-note__reason {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+// reason 内可能并列产出夹层（__summary）：展开态同样参与分配剩余空间并内部滚动
+.agent-recovery-note > .agent-recovery-note__summary {
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.agent-recovery-note .agent-recovery-note__summary .hitl-clamp.is-open {
+  flex: 1 1 auto;
+}
+
 // HITL 长文案夹层：弹窗内唯一滚动点
 .hitl-clamp {
   display: flex;
@@ -4931,6 +4963,110 @@
 }
 
 // recovery 非空时右栏底部情境升起的接管详情（行动键在底部 UserPromptPanel）
+
+/* ── 处置中心（弹窗改版 Phase 1，方案 A+B 轻量）── */
+
+// 「处置」Tab 角标（待处置数量，琥珀底）
+.agent-chat__right-tab-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 1;
+  color: #fff;
+  background: var(--color-warning, #d97706);
+}
+
+// 决策卡容器：贯通 65vh 安全网的 flex 链——卡片均分高度、内部 HitlClamp 滚动，按钮恒可见
+.agent-chat__decision-center {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow: hidden;
+
+  // 卡片沿用 notification 时代的 note 样式（agent-approval-note / agent-recovery-note），
+  // 这里补面板化的外观（边框/圆角/内边距）与高度约束
+  .agent-approval-note,
+  .agent-recovery-note {
+    flex: 1 1 auto;
+    min-height: 0;
+    padding: 12px;
+    border: 1px solid var(--color-border, #e5e5e5);
+    border-radius: 10px;
+    background: var(--color-background, #fff);
+  }
+}
+
+.agent-chat__decision-empty {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: var(--color-foreground-muted, #8a8a8a);
+
+  p {
+    margin: 0;
+    font-size: 13px;
+    font-weight: 500;
+  }
+  span {
+    font-size: 12px;
+  }
+}
+
+// 待处置提醒卡（方案 B 轻量）：贴输入框上方，宽度规则与 .agent-chat__input-box 镜像
+// （50%/max720 居中，窄屏 85%/95%），挂起期间常驻，点击直达「处置」Tab
+.agent-chat__action-banner {
+  width: 50%;
+  max-width: 720px;
+  margin: 0 auto 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  border: 1px solid var(--color-warning, #d97706);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--color-warning, #d97706) 8%, var(--color-background, #fff));
+  color: var(--color-foreground, #1f2328);
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+
+  &:hover {
+    border-color: var(--color-warning, #d97706);
+    background: color-mix(in srgb, var(--color-warning, #d97706) 14%, var(--color-background, #fff));
+  }
+
+  &:hover .agent-chat__action-banner-go {
+    text-decoration: underline;
+  }
+
+  .agent-chat__action-banner-go {
+    margin-left: auto;
+    color: var(--color-warning, #d97706);
+    font-weight: 600;
+    flex: 0 0 auto;
+  }
+
+  @media (max-width: 1200px) {
+    width: 85%;
+    max-width: none;
+  }
+
+  @media (max-width: 700px) {
+    width: 95%;
+  }
+}
+
+// recovery 非空时右栏底部情境升起的接管详情（工具栈/已改动文件/失败命令；决策键在上方「处置」Tab）
 .agent-chat__right-recovery {
   border-top: 1px solid var(--color-border, #e5e5e5);
   background: var(--color-background-subtle, #fafbff);
