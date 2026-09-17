@@ -66,6 +66,9 @@ pub struct AgentRuntime {
     pub choice: Arc<ChoiceHub>,
     /// 计划审批挂起中枢（Phase 2b-3：DAG 规划完成后、执行前等待用户确认/修改/拒绝）。
     pub plan_approval: Arc<crate::agent::plan_approval::PlanApprovalHub>,
+    /// 边审批策略授权集（15007）：计划批准/「记住」写入，命中同信号的后续操作放行。
+    /// 任务级生命周期：run_task 启动重置（与 cancel_flag/recovery/plan_approval 同批）。
+    pub approval_grants: Arc<crate::agent::policy::ApprovalGrants>,
 }
 
 /// 并发互斥守卫：生命周期结束（正常退出 / 取消 / 异常 / panic）时自动复位 `running`。
@@ -91,6 +94,7 @@ impl AgentRuntime {
             recovery: crate::agent::recovery::RecoveryHub::new(),
             choice: Arc::new(ChoiceHub::new()),
             plan_approval: crate::agent::plan_approval::PlanApprovalHub::new(),
+            approval_grants: Arc::new(crate::agent::policy::ApprovalGrants::new()),
         }
     }
 
@@ -137,6 +141,8 @@ impl AgentRuntime {
         // wait() 第一轮 take 走 → 新任务刚进门禁就被误判「用户取消」终止（真机 2026-09-17
         // 出现两次）。与 cancel_flag / recovery 的启动重置同源同必要。
         self.plan_approval.reset();
+        // 边审批策略授权集（15007）：任务级生命周期，启动重置。
+        self.approval_grants.reset();
 
         // 0.1) 动态重算并回写 tools_tokens：按当前已解析的 MCP/Skill 工具数覆盖写入会话表，
         //    中途移除 Skill / 停用（解绑）MCP 后，下一轮会自动下调；重新绑定则上调。
@@ -294,9 +300,13 @@ impl AgentRuntime {
                     events::emit_task_done(app, plan_usage.0, plan_usage.1);
                     return;
                 }
+                // 15007 闸 1：计划门禁处对整个 DAG 做策略评估——敏感操作清单随审批卡下发，
+                // 用户「批准执行」即一次性授权整计划（清单写入 grants，执行期同信号不再弹卡）。
+                let sensitive_ops = crate::agent::policy::evaluate_plan(&plan);
                 let req = crate::agent::plan_approval::PlanApprovalRequest {
                     goal_summary: plan.goal_summary.clone(),
                     plan: plan.clone(),
+                    sensitive_ops: sensitive_ops.clone(),
                 };
                 events::emit_plan_approval_needed(app, &req);
                 self.plan_approval.request(req);
@@ -304,6 +314,11 @@ impl AgentRuntime {
                 match decision {
                     crate::agent::plan_approval::PlanApprovalDecision::Approve => {
                         self.plan_approval.reset();
+                        // 批准 = 授权整计划敏感清单（执行期同信号操作放行）
+                        for op in &sensitive_ops {
+                            self.approval_grants
+                                .grant(&format!("{}:{}", op.category, op.pattern));
+                        }
                         break;
                     }
                     crate::agent::plan_approval::PlanApprovalDecision::Reject => {
@@ -417,6 +432,7 @@ impl AgentRuntime {
             &self.cancel_flag,
             &self.recovery,
             false,
+            Some(&self.approval_grants),
         )
         .await;
         // 收尾：保存会话子图快照（完整子图，供后续检索/复盘）。
@@ -790,6 +806,7 @@ pub(crate) async fn run_tool_calls_round(
     ctx: &ToolContext,
     approval: &ApprovalManager,
     cfg: &AgentRuntimeConfig,
+    grants: Option<&crate::agent::policy::ApprovalGrants>,
     messages: &mut Vec<Value>,
     outcome: &StreamOutcome,
     // 当前子任务步骤序号：用于把工具调用精确归属到对应步骤卡片（前端按 step 展示工具调用列表）。
@@ -854,7 +871,64 @@ pub(crate) async fn run_tool_calls_round(
         );
 
         let step_id = call_id.clone();
-        let sensitive = tool.check_permission(&args) == PermissionLevel::RequireApproval;
+        let static_sensitive = tool.check_permission(&args) == PermissionLevel::RequireApproval;
+        // 15007 边审批策略：对一切可提取「操作 × 目标」的工具评估（含静态敏感工具）。
+        // 真机教训（2026-09-17 首轮验收）：write_file 属静态敏感工具，若仅「静态未拦」才评估，
+        // 纯 auto 模式（auto_exec=true）下写 .env / .github/workflows 仍会静默通过（盲区未堵），
+        // 且 never 留痕、计划批准写入的 grants 对静态敏感工具全部失效。
+        //  - grants 命中（计划内已授权 / 已「记住」）→ 放行（静态敏感也不再弹卡，闸 1 语义）；
+        //  - never（全自动）模式 → 不弹卡，仅状态栏留痕（方案 A，零打断）；
+        //  - 其余模式命中 → 硬门禁弹审批卡（无视 auto_tool_exec_mode，危险操作必须过目）。
+        // 插件 custom__* 无边映射，天然不受策略影响（恒审批语义保留）。
+        let mut sensitive = static_sensitive;
+        let mut policy_approval: Option<(String, String)> = None; // (命中原因, grant_key)
+        let mut policy_granted = false; // grants 命中：本信号已授权，静态敏感亦放行
+        {
+            if let Some(op_str) = tool_op(&tool_name) {
+                if let Some(edge) = crate::agent::policy::EdgeOp::from_op_str(op_str) {
+                    let targets = crate::agent::policy::edge_targets(edge, &args);
+                    // grants=None（小分队等无授权集场景）→ 策略不适用，维持旧行为
+                    if let Some(grants) = grants {
+                        if let Some(hit) = crate::agent::policy::evaluate_edge(
+                            edge,
+                            &targets,
+                            cfg.workspace.as_deref(),
+                        ) {
+                            let key = hit.grant_key();
+                            if grants.contains(&key) {
+                                // 计划批准 / 已「记住」→ 本信号已授权，执行期不再打扰（闸 1/闸 3）
+                                policy_granted = true;
+                            } else {
+                                let reason = format!(
+                                    "命中危险信号 [{}]：{}（目标：{}）",
+                                    hit.category, hit.pattern, hit.target
+                                );
+                                if cfg.plan_auto_approve_mode.as_str() == "never" {
+                                    // 只留痕，不置 sensitive——避免 never 模式经静态门禁弹卡，破坏零打断语义
+                                    tracing::info!(
+                                        "[agent] tool_round: 策略命中（never 模式不打断，留痕）：{}",
+                                        reason
+                                    );
+                                    events::emit_status(
+                                        app,
+                                        &format!(
+                                            "⚠ 敏感操作（全自动模式不打断，已留痕）：{}",
+                                            reason
+                                        ),
+                                    );
+                                } else {
+                                    tracing::info!(
+                                        "[agent] tool_round: 策略命中（弹审批）：{}", reason
+                                    );
+                                    sensitive = true;
+                                    policy_approval = Some((reason, key));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
         // 一行式工具行元数据：操作类型 + 目标路径（执行前即可确定；行数在执行后 diff 得出）。
         let op = tool_op(&tool_name);
         let path_arg = tool_path(&args);
@@ -880,8 +954,74 @@ pub(crate) async fn run_tool_calls_round(
             "[agent] tool_round: 审批门禁检查 agent={} tool={} sensitive={} auto_exec={}",
             cfg.agent_id, tool_name, sensitive, cfg.auto_tool_exec_mode,
         );
-        // 敏感工具：审批挂起（auto_tool_exec_mode 时跳过逐次确认）
-        if sensitive && !cfg.auto_tool_exec_mode {
+        if let Some((reason, grant_key)) = policy_approval {
+            // 策略命中（非 never 模式）：硬门禁审批——无视 auto_tool_exec_mode，危险操作必须过目。
+            let approval_id = format!("ap-{}-{}", cfg.agent_id, step_id);
+            let req = ApprovalRequest {
+                approval_id: approval_id.clone(),
+                tool_name: tool_name.clone(),
+                description: format!("智能体请求执行命中风险策略的操作：{}", tool_name),
+                args: serde_json::to_string(&args).unwrap_or_default(),
+                kind: detect_kind(&tool_name, &args),
+                hint: Some("该操作命中敏感路径特征。拒绝可填写原因引导纠偏。".into()),
+                reason: Some(reason),
+                grant_key: Some(grant_key.clone()),
+            };
+            events::emit_awaiting_approval(app, &req);
+            let rx = approval.suspend(req).await;
+            // 超时/停止与既有语义一致：走 Skip 分支（详见静态敏感块注释）。
+            let approval_outcome: ApprovalOutcome = match timeout(
+                Duration::from_secs(APPROVAL_TIMEOUT_SECS),
+                rx,
+            )
+            .await
+            {
+                Ok(Ok(o)) => o,
+                Ok(Err(_)) => {
+                    approval.cancel(&approval_id).await;
+                    ApprovalOutcome::Skip
+                }
+                Err(_) => {
+                    approval.cancel(&approval_id).await;
+                    ApprovalOutcome::Skip
+                }
+            };
+            tracing::info!(
+                "[agent] tool_round: 策略审批完成 approval_id={} outcome={:?}",
+                approval_id, approval_outcome,
+            );
+            match &approval_outcome {
+                // grants 写入统一由 submit_approval_decision 按「记住」勾选处理（skip 不记）；
+                // 此处不再无条件写，避免勾选被架空（取消勾选后同信号仍应再次询问）。
+                ApprovalOutcome::Approve => {}
+                ApprovalOutcome::Takeover(g) => {
+                    takeover_guidance = Some(g.clone());
+                }
+                ApprovalOutcome::Skip => {
+                    events::emit_tool_finished(app, &ToolStep {
+                        call_id: step_id.clone(),
+                        tool_name: tool_name.clone(),
+                        status: "failed".into(),
+                        sensitive,
+                        args: Some(serde_json::to_string(&args).unwrap_or_default()),
+                        result: Some("用户跳过执行（未授权）".into()),
+                        duration_ms: None,
+                        created_at: now_ms(),
+                        step: Some(current_step),
+                        op: op.map(|s| s.to_string()),
+                        path: path_arg.clone(),
+                        lines_added: None,
+                        lines_removed: None,
+                    });
+                    messages.push(json!({
+                        "role": "tool",
+                        "tool_call_id": call_id,
+                        "content": "用户跳过执行（未授权），按原计划继续后续步骤"
+                    }));
+                    continue;
+                }
+            }
+        } else if sensitive && !cfg.auto_tool_exec_mode && !policy_granted {
             let approval_id = format!("ap-{}-{}", cfg.agent_id, step_id);
             let req = ApprovalRequest {
                 approval_id: approval_id.clone(),
@@ -890,6 +1030,8 @@ pub(crate) async fn run_tool_calls_round(
                 args: serde_json::to_string(&args).unwrap_or_default(),
                 kind: detect_kind(&tool_name, &args),
                 hint: Some("请在弹窗中允许或拒绝（拒绝可填写原因引导纠偏）".into()),
+                reason: None,
+                grant_key: None,
             };
             events::emit_awaiting_approval(app, &req);
             let rx = approval.suspend(req).await;

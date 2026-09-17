@@ -118,6 +118,15 @@ export function ToolStepLine({
         </span>
         <span className="tool-line__verb">{label}</span>
         {name && <span className="tool-line__name">{name}</span>}
+        {/* 15007 边审批策略：never 全自动模式下敏感操作不打断，以警示角标留痕（悬浮看原因） */}
+        {step.sensitive && (
+          <span
+            className="tool-line__verify tool-line__verify--provisional"
+            title="敏感操作：命中边审批策略（never 全自动模式下不打断，仅留痕）"
+          >
+            <AlertTriangle size={11} /> 敏感
+          </span>
+        )}
         {step.status === 'success' && typeof verified === 'boolean' && (
           verified ? (
             <span

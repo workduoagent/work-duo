@@ -929,9 +929,16 @@ export default function AgentChatPage() {
   }, [inputHeight])
 
   const handleApproval = useCallback(
-    (decision: 'approve' | 'skip' | 'takeover', guidance?: string) => {
+    (decision: 'approve' | 'skip' | 'takeover', guidance?: string, remember?: boolean) => {
       if (!pendingApproval) return
-      void submitDecision({ approvalId: pendingApproval.approvalId, decision, guidance })
+      void submitDecision({
+        approvalId: pendingApproval.approvalId,
+        decision,
+        guidance,
+        // 15007 边审批策略：「本任务内记住」→ grantKey 写入后端授权集
+        remember,
+        grantKey: pendingApproval.grantKey ?? null,
+      })
     },
     [pendingApproval, submitDecision],
   )

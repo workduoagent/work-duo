@@ -54,6 +54,12 @@ pub struct ApprovalRequest {
     pub kind: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hint: Option<String>,
+    /// 边审批策略命中原因（15007；非策略命中时为 None）。例：「命中危险信号 [ci]：.github/workflows（目标：…）」
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    /// 策略授权 key（15007；「本任务内记住」勾选后由 submit_approval_decision 写入 grants）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub grant_key: Option<String>,
 }
 
 /// 方案推荐：单个可选项（Agent 调 `native__ask_user_choice` 时给出；前端渲染为 chip）。

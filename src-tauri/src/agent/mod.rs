@@ -29,6 +29,7 @@ pub mod native;
 pub mod pipeline;
 pub mod planner;
 pub mod plan_approval;
+pub mod policy;
 pub mod recovery;
 pub mod runtime;
 pub mod squad_api_server;

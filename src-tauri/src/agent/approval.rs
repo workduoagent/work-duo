@@ -25,6 +25,14 @@ pub struct ApprovalDecisionInput {
     /// 接管时携带的用户补充指示（takeover 时有效，空等价于 approve）。
     #[serde(default)]
     pub guidance: Option<String>,
+    /// 15007 边审批策略：「本任务内记住该授权」勾选（默认 false）。
+    /// 勾选时由 `submit_approval_decision` 把 `grant_key` 写入 runtime 授权集，
+    /// 同信号后续操作本任务内不再询问。
+    #[serde(default)]
+    pub remember: bool,
+    /// 策略授权 key（与 ApprovalRequest.grant_key 回传配对；remember 时必带）。
+    #[serde(default)]
+    pub grant_key: Option<String>,
 }
 
 /// 单个挂起的审批：发送端（运行时持有，接收决策）。

@@ -428,6 +428,9 @@ export function useAgentSession(): AgentSessionState {
           approvalId: decision.approvalId,
           decision: decision.decision,
           guidance: decision.guidance ?? null,
+          // 15007 边审批策略：「记住」勾选随决策回传，Rust 侧写入授权集
+          remember: decision.remember ?? false,
+          grantKey: decision.grantKey ?? null,
         },
       })
     } catch (e) {

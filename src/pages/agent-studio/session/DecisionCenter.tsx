@@ -9,10 +9,12 @@
  *  - OS 原生通知保留（窗口最小化时仍提醒）。
  *
  * 决策语义（零变化）：
- *  - approval: approve=放行 / skip=跳过 / takeover=放行+补充指示
+ *  - approval: approve=放行 / skip=跳过 / takeover=放行+补充指示；15007 策略命中时
+ *    卡片渲染命中原因 + 「本任务内记住」勾选（remember+grantKey 回传写入 grants）
  *  - recovery: retry / skip / takeover / change-approach（后两者携带 guidance）
  *  - choice: optionId（或 __custom__ + customText）
- *  - planApproval: approve=批准 / reject=拒绝 / revise=按意见重规划（携带 guidance）
+ *  - planApproval: approve=批准 / reject=拒绝 / revise=按意见重规划（携带 guidance）；
+ *    15007 起渲染计划内敏感操作清单（批准=一次授权整清单）
  */
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import {
@@ -22,10 +24,11 @@ import {
   Hand,
   Inbox,
   RotateCcw,
+  ShieldAlert,
   SkipForward,
   X,
 } from 'lucide-react'
-import { Button, Input } from '@/components/ui'
+import { Button, Checkbox, Input } from '@/components/ui'
 import { notifyOSWhenHidden } from '@/utils/osNotify'
 import { MarkdownRenderer } from '@/components/markdown/MarkdownRenderer'
 import type {
@@ -41,8 +44,12 @@ export interface DecisionCenterProps {
   choice: ChoiceRequest | null
   planApproval: PlanApprovalRequest | null
   agentName: string
-  /** 授权决策回调：approve=授权执行 / skip=跳过 / takeover=授权+补充指示。 */
-  onApproval: (decision: 'approve' | 'skip' | 'takeover', guidance?: string) => void
+  /** 授权决策回调：approve=授权执行 / skip=跳过 / takeover=授权+补充指示；remember=「本任务内记住」。 */
+  onApproval: (
+    decision: 'approve' | 'skip' | 'takeover',
+    guidance?: string,
+    remember?: boolean,
+  ) => void
   /** 恢复决策回调：retry / skip / takeover / change-approach（后两者携带 guidance）。 */
   onResolve: (decision: 'retry' | 'skip' | 'takeover' | 'change-approach', guidance?: string) => void
   /** 方案推荐回调：用户点选的 optionId；走「其他 / 自定义」时携带 customText。 */
@@ -154,15 +161,20 @@ export function ApprovalContent({
 }: {
   approval: ApprovalRequest
   agentName: string
-  onResolve: (decision: 'approve' | 'skip' | 'takeover', guidance?: string) => void
+  onResolve: (
+    decision: 'approve' | 'skip' | 'takeover',
+    guidance?: string,
+    remember?: boolean,
+  ) => void
 }) {
   const [guidance, setGuidance] = useState('')
+  const [remember, setRemember] = useState(true)
   const lines = contentLines(approval)
   const allow = () => {
     // 补充说明非空时，授权执行等价于「接管并继续」：把补充指示一并注入下一轮，
     // 否则后端按 Approve 处理会静默丢弃 guidance（用户备注不生效）。
     const g = guidance.trim()
-    onResolve(g ? 'takeover' : 'approve', g || undefined)
+    onResolve(g ? 'takeover' : 'approve', g || undefined, remember)
   }
   return (
     <div className="agent-approval-note">
@@ -170,6 +182,12 @@ export function ApprovalContent({
         智能体 <b>{agentName || '未知智能体'}</b> 请求调用工具{' '}
         <b className="agent-approval-note__tool">{approval.toolName}</b>，需要你的授权。
       </p>
+      {approval.reason && (
+        <p className="agent-approval-note__reason">
+          <ShieldAlert size={13} />
+          <span>{approval.reason}</span>
+        </p>
+      )}
       <HitlClamp collapsedHeight={120} expandable expandLabel="展开描述">
         <div className="agent-approval-note__desc agent-approval-note__desc--md">
           <MarkdownRenderer
@@ -192,12 +210,22 @@ export function ApprovalContent({
         value={guidance}
         onChange={(e) => setGuidance((e.target as HTMLInputElement).value)}
       />
+      {/* 「记住」依赖策略授权 key（同信号放行）：静态门禁卡没有 grantKey，勾选无从生效，不渲染 */}
+      {approval.grantKey && (
+        <Checkbox
+          className="agent-approval-note__remember"
+          checked={remember}
+          onChange={(e) => setRemember(e.target.checked)}
+        >
+          本任务内记住该授权（同信号操作不再询问）
+        </Checkbox>
+      )}
       <div className="agent-approval-note__actions">
         <Button
           variant="ghost"
           size="sm"
           className="agent-approval-note__skip"
-          onClick={() => onResolve('skip')}
+          onClick={() => onResolve('skip', undefined, false)}
         >
           <X size={14} />
           跳过
@@ -206,7 +234,7 @@ export function ApprovalContent({
           variant="outline"
           size="sm"
           className="agent-approval-note__takeover"
-          onClick={() => onResolve('takeover', guidance)}
+          onClick={() => onResolve('takeover', guidance, remember)}
         >
           <Hand size={14} />
           接管并继续
@@ -450,6 +478,25 @@ export function PlanApprovalContent({
       <div className="agent-plan-note__summary agent-plan-note__summary--md">
         <MarkdownRenderer content={planApproval.goalSummary || '（无目标描述）'} />
       </div>
+      {/* 15007 边审批策略：敏感操作清单——批准计划即一次性授权整清单（执行期不再逐次询问） */}
+      {planApproval.sensitiveOps && planApproval.sensitiveOps.length > 0 && (
+        <div className="agent-plan-note__sensitive">
+          <p className="agent-plan-note__sensitive-head">
+            <ShieldAlert size={13} />
+            本计划包含 {planApproval.sensitiveOps.length} 处敏感操作，批准后随计划一次性授权：
+          </p>
+          <ul className="agent-plan-note__sensitive-list">
+            {planApproval.sensitiveOps.map((s, i) => (
+              <li key={`${s.step}-${s.pattern}-${i}`} className="agent-plan-note__sensitive-item">
+                <code className="agent-plan-note__sensitive-pattern">{s.pattern}</code>
+                <span>
+                  步骤 {s.step}「{s.title}」（{s.category}）
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       <HitlClamp collapsedHeight={168} expandable expandLabel="展开全部步骤">
         <ul className="agent-plan-note__steps">
           {planApproval.tasks.map((t) => (

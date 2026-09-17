@@ -134,6 +134,8 @@ pub async fn run_pipeline(
     // P2-3 模式感知恢复：无人值守模式（schedule/api）下，子任务恢复等待超时后自动取消整条流水线，
     // 防止无人值守死锁；手动模式（manual）恒为 false，恢复等待保持永久阻塞（行为完全不变）。
     unattended: bool,
+    // 15007 边审批策略授权集（主 Agent 传入；小分队等无授权集场景传 None → 策略不适用，维持旧行为）。
+    grants: Option<&crate::agent::policy::ApprovalGrants>,
 ) -> PipelineResult {
     // 步数只统计「本轮」任务：二次规划会把上一轮节点置 obsolete（已被取代），
     // 不计入本轮步数，否则同会话多轮会显示「步骤 1/N（N 含历史）」且回复聚合所有历史步骤。
@@ -246,6 +248,7 @@ pub async fn run_pipeline(
                 tc.guidance.clone(),
                 &background,
                 &session_tool_outputs,
+                grants,
             )
         });
         let results = join_all(futures).await;
@@ -759,6 +762,8 @@ async fn run_subtask(
     // 跨步骤累积运行类工具结构化结果（会话级，见 run_pipeline）。校验 `command_succeeded` / `stdout_contains` 时，
     // 与当前步骤自身结果合并传入校验器，使更早步骤已跑出的测试通过证据（退出码/输出）可被后续步骤复用。
     session_tool_outputs: &Arc<Mutex<Vec<RunOutcome>>>,
+    // 15007 边审批策略授权集（None=策略不适用，如小分队）。
+    grants: Option<&crate::agent::policy::ApprovalGrants>,
 ) -> (SubTaskOutput, (u64, u64)) {
     // 认知上下文绝对隔离：崭新的 messages，0 历史包袱。
     let t0 = Instant::now(); // 子任务级耗时基准（闭环日志用）
@@ -1363,6 +1368,7 @@ async fn run_subtask(
             ctx,
             approval,
             cfg,
+            grants,
             &mut messages,
             &outcome,
             task.step,

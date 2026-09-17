@@ -493,6 +493,8 @@ async fn run_member_subtask(
         &cancel,
         &recovery,
         unattended,
+        // 小分队无授权集（15007）：策略不适用，维持旧行为
+        None,
     )
     .await;
     graph.snapshot(&session_id);

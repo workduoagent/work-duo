@@ -5022,6 +5022,90 @@
   }
 }
 
+// 决策卡标题头（处置 Tab 内，区分四类卡）
+.agent-chat__decision-head {
+  flex: 0 0 auto;
+  margin-bottom: 6px;
+  padding-bottom: 6px;
+  border-bottom: 1px dashed var(--color-border, #e5e5e5);
+
+  .agent-chat__decision-title {
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--color-foreground, #1f2328);
+  }
+}
+
+// 15007 策略命中原因（授权卡内，琥珀警示行）
+.agent-approval-note__reason {
+  display: flex;
+  align-items: flex-start;
+  gap: 5px;
+  margin: 0 0 6px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--color-warning, #d97706);
+  background: color-mix(in srgb, var(--color-warning, #d97706) 10%, transparent);
+
+  span {
+    flex: 1 1 auto;
+    word-break: break-all;
+  }
+}
+
+// 「本任务内记住」勾选行
+.agent-approval-note__remember {
+  margin-top: 6px;
+  font-size: 12px;
+}
+
+// 计划审批卡的敏感操作清单（15007）
+.agent-plan-note__sensitive {
+  margin: 0 0 8px;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--color-warning, #d97706) 45%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--color-warning, #d97706) 8%, transparent);
+
+  .agent-plan-note__sensitive-head {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin: 0 0 6px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--color-warning, #d97706);
+  }
+
+  .agent-plan-note__sensitive-list {
+    margin: 0;
+    padding: 0 0 0 4px;
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+
+    .agent-plan-note__sensitive-item {
+      display: flex;
+      align-items: baseline;
+      gap: 6px;
+      font-size: 12px;
+      line-height: 1.5;
+
+      .agent-plan-note__sensitive-pattern {
+        flex: 0 0 auto;
+        padding: 1px 5px;
+        border-radius: 4px;
+        background: var(--color-background-soft, #f0f0f0);
+        font-size: 11px;
+        color: var(--color-warning, #d97706);
+      }
+    }
+  }
+}
+
 // 待处置提醒卡（方案 B 轻量）：贴输入框上方，宽度规则与 .agent-chat__input-box 镜像
 // （50%/max720 居中，窄屏 85%/95%），挂起期间常驻，点击直达「处置」Tab
 .agent-chat__action-banner {

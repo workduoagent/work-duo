@@ -330,6 +330,8 @@ pub fn emit_plan_approval_needed(app: &AppHandle, req: &PlanApprovalRequest) {
         &serde_json::json!({
             "goalSummary": req.goal_summary,
             "tasks": tasks,
+            // 15007 边审批策略：计划内敏感操作清单（批准=一次授权整清单）
+            "sensitiveOps": req.sensitive_ops,
         }),
     );
 }

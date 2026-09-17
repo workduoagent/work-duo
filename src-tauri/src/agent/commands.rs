@@ -165,6 +165,13 @@ pub async fn submit_approval_decision(
     runtime: State<'_, AgentRuntime>,
     decision: ApprovalDecisionInput,
 ) -> Result<bool, String> {
+    // 15007：「本任务内记住」勾选 → 把策略授权 key 写入 grants（同信号后续操作放行）。
+    // 仅 approve/takeover 生效；skip 意味着拒绝，不该记住。
+    if decision.remember && decision.decision != "skip" {
+        if let Some(key) = &decision.grant_key {
+            runtime.approval_grants.grant(key);
+        }
+    }
     Ok(runtime.approval.resolve(decision).await)
 }
 

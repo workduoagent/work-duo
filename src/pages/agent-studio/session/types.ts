@@ -70,6 +70,10 @@ export interface ApprovalRequest {
   kind: 'edit_file' | 'execute_command' | 'other'
   /** 等待审批时 Rust 已给出的提示信息。 */
   hint?: string
+  /** 15007 边审批策略命中原因（非策略命中时缺省）。例：「命中危险信号 [ci]：.github/workflows（目标：…）」 */
+  reason?: string
+  /** 策略授权 key（勾选「本任务内记住」时随决策回传，写入 grants）。 */
+  grantKey?: string
 }
 
 /** 方案推荐：单个选项（Agent 调 `native__ask_user_choice` 时给出；前端渲染为 chip）。 */
@@ -194,12 +198,26 @@ export interface PlanApprovalStep {
   dependsOn?: string[]
 }
 
+/** 计划内敏感操作（15007 边审批策略：批准计划=一次授权整清单）。 */
+export interface PlanSensitiveOp {
+  /** 步骤序号。 */
+  step: number
+  /** 步骤标题。 */
+  title: string
+  /** 危险信号类别：credential / ci / lock / buildcfg。 */
+  category: string
+  /** 命中的信号模式（如 .github/workflows）。 */
+  pattern: string
+}
+
 /** 计划审批请求（对应 Rust `agent-plan-approval-needed` 事件，渲染「计划确认」弹窗）。 */
 export interface PlanApprovalRequest {
   /** 任务一句话目标。 */
   goalSummary: string
   /** DAG 步骤清单。 */
   tasks: PlanApprovalStep[]
+  /** 15007 边审批策略：计划内敏感操作清单（空=无可敏感性，卡片维持原样）。 */
+  sensitiveOps?: PlanSensitiveOp[]
 }
 
 /** 意图分类结果（intent_classified 事件携带，对应 Rust `IntentProfile` 经 camelCase 序列化）。 */
@@ -263,6 +281,10 @@ export interface ApprovalDecision {
   decision: 'approve' | 'skip' | 'takeover'
   /** 接管时携带的用户补充指示（takeover 时有效，空等价于 approve）。 */
   guidance?: string
+  /** 15007 边审批策略：「本任务内记住该授权」勾选（默认 false；勾选时须带 grantKey）。 */
+  remember?: boolean
+  /** 策略授权 key（与 ApprovalRequest.grantKey 回传配对；Rust 侧写入 grants）。 */
+  grantKey?: string | null
 }
 
 /** 消息附件（图片等），随 prompt 一起交给后端组装多模态 content。 */
