@@ -35,6 +35,7 @@ import {
   Box,
   Trash2,
   Square,
+  ChevronDown,
   ChevronRight,
   ChevronLeft,
   Coins,
@@ -275,8 +276,19 @@ export default function AgentChatPage() {
   // 接管不再常驻 Tab，改为 recovery 非空时右栏底部情境升起。
   const [rightOpen, setRightOpen] = useState(false)
   const [rightTab, setRightTab] = useState<'graph' | 'process' | 'artifacts' | 'actions'>('graph')
-  // 右栏宽度（可鼠标拖拽调节），默认 340px
-  const [rightWidth, setRightWidth] = useState(340)
+  // 右栏宽度（可鼠标拖拽调节）：默认即最大 680px——右栏现有 4 个 Tab（图/过程/产物/处置），
+  // 窄宽度下页签文字会竖排折行，默认给满
+  const [rightWidth, setRightWidth] = useState(680)
+  // 会话分组折叠态（自由会话 / 各工程分组）：仅会话内 UI 态，不持久化
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set())
+  const toggleGroupFold = useCallback((groupId: string) => {
+    setCollapsedGroups((prev) => {
+      const next = new Set(prev)
+      if (next.has(groupId)) next.delete(groupId)
+      else next.add(groupId)
+      return next
+    })
+  }, [])
   const resizingRef = useRef(false)
   const resizeElRef = useRef<HTMLDivElement>(null)
   const startResize = (e: React.MouseEvent) => {
@@ -1904,6 +1916,17 @@ export default function AgentChatPage() {
             >
               {group.groupType === 'PROJECT' ? (
                 <div className={group.isArchived ? 'agent-chat__group-head is-archived' : 'agent-chat__group-head'}>
+                  <button
+                    type="button"
+                    className={`agent-chat__group-fold${collapsedGroups.has(group.groupId) ? ' is-collapsed' : ''}`}
+                    title={collapsedGroups.has(group.groupId) ? '展开会话' : '收叠会话'}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      toggleGroupFold(group.groupId)
+                    }}
+                  >
+                    {collapsedGroups.has(group.groupId) ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
+                  </button>
                   <Folder size={13} className="agent-chat__group-icon" />
                   <div className="agent-chat__group-info">
                     <span className="agent-chat__group-name" title={group.rootPath ?? ''}>
@@ -1930,11 +1953,27 @@ export default function AgentChatPage() {
                 </div>
               ) : (
                 <div className="agent-chat__group-head agent-chat__group-head--global">
+                  <button
+                    type="button"
+                    className={`agent-chat__group-fold${collapsedGroups.has(group.groupId) ? ' is-collapsed' : ''}`}
+                    title={collapsedGroups.has(group.groupId) ? '展开会话' : '收叠会话'}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      toggleGroupFold(group.groupId)
+                    }}
+                  >
+                    {collapsedGroups.has(group.groupId) ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
+                  </button>
                   <MessageSquare size={13} className="agent-chat__group-icon" />
                   <span className="agent-chat__group-name">{group.projectName}</span>
                 </div>
               )}
-              {group.sessions.map((s) => (
+              {collapsedGroups.has(group.groupId) && (
+                <div className="agent-chat__group-collapsed-hint">
+                  已收叠 · {group.sessions.length} 个会话
+                </div>
+              )}
+              {!collapsedGroups.has(group.groupId) && group.sessions.map((s) => (
                 <div
                   key={s.id}
                   className={`agent-chat__session${s.id === activeSessionId ? ' is-active' : ''}${s.isArchived ? ' is-archived' : ''}`}

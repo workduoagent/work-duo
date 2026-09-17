@@ -122,13 +122,13 @@
     border-radius: 10px;
     border: 1px solid transparent;
     cursor: pointer;
-    transition: background-color 0.2s ease, color 0.2s ease, transform 0.12s ease;
+    // 交互态禁位移（前端规范）：悬浮只做背景/颜色过渡，不再 translateX 浮动
+    transition: background-color 0.2s ease, color 0.2s ease;
     color: var(--color-foreground-muted);
 
     &:hover {
       color: var(--color-foreground);
       background: var(--color-background-muted);
-      transform: translateX(2px);
     }
     &.is-active {
       color: var(--color-brand-600);
@@ -1321,6 +1321,40 @@
     &:last-child {
       margin-bottom: 0;
     }
+  }
+
+  &__group-fold {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    width: 18px;
+    height: 18px;
+    margin-left: -4px;
+    padding: 0;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--color-foreground-muted);
+    cursor: pointer;
+    transition: background-color 0.15s ease, color 0.15s ease;
+
+    &:hover {
+      color: var(--color-foreground);
+      background: var(--color-background-muted);
+    }
+
+    .dark & {
+      &:hover {
+        background: #2a2a2a;
+      }
+    }
+  }
+
+  &__group-collapsed-hint {
+    padding: 2px 8px 6px 14px;
+    font-size: 0.68rem;
+    color: var(--color-muted, #999);
   }
 
   &__group-head {

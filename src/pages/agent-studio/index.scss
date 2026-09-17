@@ -262,12 +262,11 @@
     line-height: 20px;
     cursor: pointer;
     text-align: left;
-    transition: background-color 0.2s ease, color 0.2s ease, transform 0.12s ease;
+    transition: background-color 0.2s ease, color 0.2s ease;
 
     &:hover {
       color: var(--color-foreground);
       background-color: var(--color-background-muted);
-      transform: translateX(2px);
     }
 
     &.is-active {
