@@ -669,6 +669,8 @@ pub async fn anchor_memory(app: AppHandle, input: AnchorMemoryInput) -> Result<M
         &input.content,
         input.category.as_deref().unwrap_or("other"),
         input.anchored.unwrap_or(true),
+        // 手动 UI 锚定不走质量护栏（用户明确意图，宽松处理）。
+        false,
     )
     .await
 }
@@ -1403,7 +1405,7 @@ async fn load_config(
     // 记忆宫殿：自动召回 top-K 记忆注入系统提示（引用计数随运行累计，驱动热力图）。
     // 仅在真实任务运行（有 session_id）且记忆模式非 off 时召回；off 模式不读记忆库。
     if session_id.is_some() && memory_mode != "off" {
-        let (recalled, block) = memory::recall_top_memories(app, Some(agent_id), memory::recall_top()).await;
+        let (recalled, block) = memory::recall_top_memories(app, Some(agent_id), memory::recall_top(), None).await;
         if !block.is_empty() {
             system_prompt.push_str("\n\n");
             system_prompt.push_str(&block);

@@ -455,7 +455,16 @@ impl AgentRuntime {
 
         // 强制记忆模式：流水线成功收尾后，引擎级确定性沉淀（不依赖模型是否主动调工具）。
         if cfg.memory_mode == "forced" && result.success {
-            Self::forced_memory_settle(app, &cfg, &plan.goal_summary, &result.final_text).await;
+            // M0 输入增强：final_text 面向用户只含「已生成/更新 X」模板行（产物型步骤的
+            // summary 被去 AI 味规则丢弃），提炼器无米下锅 → 追加各步 summary 作提炼素材。
+            let mut settle_input = result.final_text.clone();
+            if !result.step_summaries.is_empty() {
+                settle_input.push_str("\n\n各步骤产出详情：\n");
+                for (i, s) in result.step_summaries.iter().enumerate() {
+                    settle_input.push_str(&format!("{}. {}\n", i + 1, s));
+                }
+            }
+            Self::forced_memory_settle(app, &cfg, &plan.goal_summary, &settle_input).await;
         }
 
         // 阶段四：合并全局执行视图，一次性推送终态文本（前端打字机渲染）。
@@ -520,8 +529,11 @@ impl AgentRuntime {
 只沉淀真正值得长期保留的：用户明确表达的偏好/约束、已确认的技术决策/架构约定、踩过的坑与规避方式、可复用代码/脚本模式。\
 不要沉淀一次性任务步骤、临时草稿、当轮琐碎状态。";
         let user = format!(
-            "本次任务目标：\n{}\n\n最终交付内容：\n{}\n\n请提炼可跨会话复用的长期记忆。\n\
-若没有值得长期沉淀的内容，只回复一个字「无」。\n\
+            "本次任务目标：\n{}\n\n最终交付内容：\n{}\n\n提炼判定规则（严格遵循）：\n\
+1. 若本次创建/修改的文件中包含「团队约定 / 编码规范 / 用户偏好 / 流程 / 技术决策」类内容，**必须**将其提炼为记忆条目（分类通常为 user_pref 或 decision）——此情形禁止回答「无」。\n\
+2. 若用户在对话中明确表达了偏好或约束，同样必须提炼。\n\
+3. 仅当任务纯属一次性执行（如验证环境、跑临时脚本）且确实没有任何稳定知识产出时，才回复「无」。\n\n\
+若无值得长期沉淀的内容，只回复一个字「无」。\n\
 否则按每行一条输出，格式严格为：关键词 | 分类 | 记忆内容\n\
 其中分类取 decision（决策）/ code_pattern（代码模式）/ user_pref（用户偏好）/ architecture（架构）/ fix（避坑）/ other（其他）之一。",
             goal_summary, final_text
@@ -530,7 +542,13 @@ impl AgentRuntime {
             serde_json::json!({ "role": "system", "content": sys }),
             serde_json::json!({ "role": "user", "content": user }),
         ];
-        match call_llm(cfg, &messages, &[]).await {
+        // 提炼是确定性任务：temperature=0 抑制小模型输出波动
+        // （实测 gemma4 同 prompt 三次 34/614/35 token 波动，0.7 下频繁偷懒回「无」）。
+        let mut settle_cfg = cfg.clone();
+        if let Some(obj) = settle_cfg.llm_config.as_object_mut() {
+            obj.insert("temperature".into(), serde_json::json!(0));
+        }
+        match call_llm(&settle_cfg, &messages, &[]).await {
             Ok((resp, _usage)) => {
                 let content = resp
                     .get("choices")
@@ -546,6 +564,7 @@ impl AgentRuntime {
                     return;
                 }
                 let mut count = 0usize;
+                let mut skipped = 0usize;
                 for line in content.lines() {
                     let line = line.trim();
                     if line.is_empty() {
@@ -558,6 +577,18 @@ impl AgentRuntime {
                     let key = parts[0];
                     let category = parts[1];
                     let body = parts[2];
+                    // M0 质量护栏：短 key / 短 content / 模板复述句 / 非法分类直接丢弃，不落库。
+                    if let Err(reason) =
+                        crate::agent::memory::validate_forced_entry(key, category, body)
+                    {
+                        tracing::debug!(
+                            "[agent] forced_memory_settle: 跳过低质量条目（{}，key={}）",
+                            reason,
+                            key
+                        );
+                        skipped += 1;
+                        continue;
+                    }
                     match crate::agent::memory::anchor_memory(
                         app,
                         Some(&cfg.agent_id),
@@ -566,14 +597,23 @@ impl AgentRuntime {
                         body,
                         category,
                         false,
+                        // 引擎强制沉淀属自动路径，走质量护栏（去噪合并 + 强校验）。
+                        true,
                     )
                     .await
                     {
                         Ok(_) => count += 1,
-                        Err(e) => tracing::warn!("[agent] forced_memory_settle: 锚定失败（key={}）：{e}", key),
+                        Err(e) => tracing::warn!(
+                            "[agent] forced_memory_settle: 锚定失败（key={}）：{e}",
+                            key
+                        ),
                     }
                 }
-                tracing::info!("[agent] forced_memory_settle: 强制沉淀 {} 条记忆", count);
+                tracing::info!(
+                    "[agent] forced_memory_settle: 强制沉淀 {} 条记忆（跳过 {} 条低质量）",
+                    count,
+                    skipped
+                );
             }
             Err(e) => tracing::warn!("[agent] forced_memory_settle: 总结 LLM 调用失败：{e}"),
         }
@@ -1201,6 +1241,47 @@ pub(crate) async fn run_tool_calls_round(
 
 /* ----------------------------- LLM 调用 ----------------------------- */
 
+/// 提取响应字段的规范化文本：字符串直接用；OpenAI 多模态数组（[{type:"text",text:...}]）拼接全部 text；
+/// 对象壳（{content:...}/{text:...}）取内部文本。解决 gemma4 网关 content/reasoning 非标准形态解析为空。
+fn extract_message_text(v: Option<&Value>) -> String {
+    let Some(v) = v else {
+        return String::new();
+    };
+    if let Some(s) = v.as_str() {
+        return s.to_string();
+    }
+    if let Some(arr) = v.as_array() {
+        return arr
+            .iter()
+            .filter_map(|p| {
+                p.get("text")
+                    .and_then(|t| t.as_str())
+                    .or_else(|| p.get("content").and_then(|t| t.as_str()))
+            })
+            .collect::<Vec<_>>()
+            .join("");
+    }
+    if let Some(obj) = v.as_object() {
+        for key in ["content", "text", "summary"] {
+            if let Some(s) = obj.get(key).and_then(|t| t.as_str()) {
+                return s.to_string();
+            }
+        }
+    }
+    String::new()
+}
+
+/// 描述 JSON 值形态（诊断日志用）：类型 + 文本长度 / 键名。
+fn describe_value_shape(v: &Value) -> String {
+    match v {
+        Value::Null => "null".into(),
+        Value::String(s) => format!("string({}字符)", s.chars().count()),
+        Value::Array(a) => format!("array({}项)", a.len()),
+        Value::Object(o) => format!("object(keys={:?})", o.keys().collect::<Vec<_>>()),
+        other => format!("其他={other}"),
+    }
+}
+
 pub(crate) async fn call_llm(
     cfg: &AgentRuntimeConfig,
     messages: &[Value],
@@ -1314,13 +1395,62 @@ pub(crate) async fn call_llm(
         "[agent] call_llm: 非流式 usage prompt={} completion={}",
         usage.0, usage.1
     );
-    let message = data
+    let mut message = data
         .get("choices")
         .and_then(|c| c.as_array())
         .and_then(|c| c.first())
         .and_then(|c| c.get("message"))
         .cloned()
         .ok_or_else(|| "LLM 响应缺少 choices[0].message".to_string())?;
+
+    // reasoning 模型返空兼容（gemma4 等）：非流式响应可能把实际内容放非标准位置——
+    // content 为多模态数组（[{type:"text",text:...}]）、或全落 `reasoning`/`reasoning_content`
+    // 字段（字符串或对象）。统一回退：规范化提取文本，content 空时逐级回填（打 WARN 便于观察）。
+    {
+        let content_text = extract_message_text(message.get("content"));
+        if content_text.trim().is_empty() {
+            // 诊断：打印 message 字段名与 reasoning 字段形态，一次性揭示网关真实结构。
+            let keys: Vec<String> = message
+                .as_object()
+                .map(|o| o.keys().cloned().collect())
+                .unwrap_or_default();
+            let reason_ty = message.get("reasoning").map(describe_value_shape);
+            let reason_c_ty = message.get("reasoning_content").map(describe_value_shape);
+            tracing::warn!(
+                "[agent] call_llm: content 规范化提取为空，message 字段={:?} reasoning形态={:?} reasoning_content形态={:?} message原始（截断）={}",
+                keys,
+                reason_ty,
+                reason_c_ty,
+                clip(&message.to_string(), 800)
+            );
+            let alt = extract_message_text(message.get("reasoning_content"))
+                .trim()
+                .to_string();
+            let alt = if alt.is_empty() {
+                extract_message_text(message.get("reasoning")).trim().to_string()
+            } else {
+                alt
+            };
+            if !alt.is_empty() {
+                tracing::warn!(
+                    "[agent] call_llm: 回退用 reasoning 文本作为响应内容（{}字符，reasoning 模型返空兼容）",
+                    alt.chars().count()
+                );
+                if let Some(obj) = message.as_object_mut() {
+                    obj.insert("content".into(), json!(alt));
+                }
+            }
+        } else {
+            // content 为数组等非字符串形态：规范化为字符串，避免下游 as_str() 解析为空。
+            let raw = message.get("content").map(|v| v.to_string()).unwrap_or_default();
+            if raw != format!("\"{}\"", content_text) {
+                if let Some(obj) = message.as_object_mut() {
+                    obj.insert("content".into(), json!(content_text));
+                }
+            }
+        }
+    }
+
     Ok((message, usage))
 }
 

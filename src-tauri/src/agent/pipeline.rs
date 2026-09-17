@@ -67,6 +67,10 @@ pub struct PipelineResult {
     /// `Some(reason)`=系统自动取消（当前仅无人值守恢复超时一种来源），run_task 据此分流文案，
     /// 避免 schedule/api 模式下把超时自动取消误报成「用户取消」。
     pub cancel_reason: Option<String>,
+    /// 各成功步骤的模型 summary（M0 forced_memory_settle 输入增强）：final_text 面向用户
+    /// 只保留「已生成/更新 X」模板行（去 AI 味），产物型步骤的 summary 不进 final_text——
+    /// 提炼器若只读 final_text 会无米下锅。此处保留原文供记忆提炼使用。
+    pub step_summaries: Vec<String>,
 }
 
 /// DAG 拓扑调度图中全部原子子任务（#10）。
@@ -175,6 +179,7 @@ pub async fn run_pipeline(
                 success: false,
                 cancelled: true,
                 cancel_reason: None,
+                step_summaries: Vec::new(),
             };
         }
         // 拓扑就绪：status=pending 且全部 depends_on 源节点 status ∈ {completed, skipped}。
@@ -214,6 +219,7 @@ pub async fn run_pipeline(
                 success: false,
                 cancelled: false,
                 cancel_reason: None,
+                step_summaries: Vec::new(),
             };
         }
         // 串行：本批仅取 1 个（max_parallel=1），其余下轮（依赖解除后）再拾起。
@@ -266,6 +272,7 @@ pub async fn run_pipeline(
                     success: false,
                     cancelled: true,
                     cancel_reason: None,
+                    step_summaries: Vec::new(),
                 };
             }
             let task_node_id = &batch[i];
@@ -468,6 +475,7 @@ pub async fn run_pipeline(
                                     "无人值守模式步骤 {}「{}」恢复等待超时，已自动取消任务",
                                     step, title
                                 )),
+                                step_summaries: Vec::new(),
                             };
                         }
                     }
@@ -558,6 +566,7 @@ pub async fn run_pipeline(
                             success: false,
                             cancelled: true,
                             cancel_reason: None,
+                            step_summaries: Vec::new(),
                         };
                     }
                 }
@@ -634,6 +643,9 @@ pub async fn run_pipeline(
             s != "obsolete"
         })
         .collect();
+    // 各成功步骤的模型 summary（M0 forced_memory_settle 输入增强）：与 review_lines 同步收集，
+    // 供记忆提炼使用——final_text 面向用户不包含产物型步骤的 summary（去 AI 味），提炼器需要。
+    let mut step_summaries: Vec<String> = Vec::new();
     let review_lines: Vec<String> = tasks
         .iter()
         .filter_map(|n| {
@@ -676,6 +688,11 @@ pub async fn run_pipeline(
             // 回复面向用户，不展示「步骤 N」这类内部调度术语（用户明确要求去 AI 味、简洁）。
             let content = match status {
                 "completed" => {
+                    if !summary.is_empty() {
+                        // M0：无论产物型与否，成功步的 summary 一并收集供记忆提炼（提炼器需要
+                        // 看到任务真实产出内容；final_text 对产物型步骤只保留模板行）。
+                        step_summaries.push(summary.clone());
+                    }
                     if !names.is_empty() {
                         format!("已生成/更新 {}", names.join("、"))
                     } else if !summary.is_empty() {
@@ -722,6 +739,7 @@ pub async fn run_pipeline(
         final_text,
         usage: total_usage,
         success: true,
+        step_summaries,
         cancelled: false,
         cancel_reason: None,
     }

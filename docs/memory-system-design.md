@@ -1,121 +1,412 @@
-# work-duo 记忆系统 v2 设计稿
+# work-duo 记忆系统 v2 设计稿（统一 LanceDB）
 
-> 版本 v1.0 · 2026-09-17 · 状态：**待评审（未开工）**
-> 关联任务：`20260915010` 记忆质量护栏（本设计 Phase 0）；关联代码：`memory.rs` / `round_compactor.rs` / `wd_mem.rs` / `runtime.rs::forced_memory_settle`
+> 版本 v2.0 · 2026-09-17 · 状态：**已拍板（待开工）**
+> 前版 v1.0 推荐 SQLite BLOB + 暴力余弦；**v2.0 改为统一 LanceDB**（用户拍板：L1/L2/L3/K1/K2/K3 向量一律进 LanceDB；嵌入/重排模型外接 LLM 模块，不捆绑本地模型）。
+> 关联：`需求与问题跟踪-第三期.md`；代码：`memory.rs` / `round_compactor.rs` / `wd_mem.rs` / `runtime.rs::forced_memory_settle` / `fs_helper.rs::migrate_storage_dir`
 
 ---
 
 ## 0. 背景与动机
 
-当前记忆能力分散在三个互不相通的子系统里，且召回均为非语义启发式。15010（记忆护栏）只能止痛——真正的问题是**架构性的：三层记忆各自为政、召回与任务内容零相关、会话知识随会话蒸发**。
+当前记忆能力分散在三个互不相通的子系统里，召回均为非语义启发式。真正的问题是架构性的：**三层记忆各自为政、召回与任务内容零相关、会话知识随会话蒸发**；知识库（KB）UI/表/目录齐备但 Rust 侧零消费（RAG 0%）。
 
-关键前提（用户拍板的架构判断）：
+### 已拍板架构判断（v2）
 
-1. **不捆绑本地嵌入模型**——0.x B 的向量模型也要几百 MB，对 LLM 是零头、对软件本体是重负；
-2. **嵌入能力的「接入」已经存在**——LLM 模块（models 表）早已支持 `embedding` / `rerank` 两大类模型配置，前端探测逻辑（`modelTest.ts`）已实现 OpenAI `/embeddings`、TEI `/embed`、TEI `/rerank` 三种协议；
-3. **缺的只是中间一环**：本地向量存储选型 + Rust 侧调用链路 + 记忆系统对它们的消费。
+1. **不捆绑本地嵌入模型**——LLM 模块（`models` 表）已支持 `embedding` / `rerank`；前端探测已实现 OpenAI `/embeddings`、TEI `/embed`、TEI `/rerank`。嵌入与重排**一律外接**。
+2. **向量存储统一 LanceDB**——不再用 SQLite BLOB 扛向量；不引入 Qdrant 等需独立进程的服务。理由：单项目可数千条记忆，多智能体协作后期可达数万~数十万；需要原生向量检索 + 标量过滤（`agent_id` / `project_id` / `scope`）。
+3. **SQLite 只做业务元数据**——会话、轮次、模型配置、记忆列表 UI/`ref_count`/`anchored`、KB 目录元数据；**不存 embedding**。
+4. **降级链不变**——嵌入可用 → 向量检索；失败/未配置 → 关键词重排 → `ref_count`。向量是增强，不是依赖。
+5. **数据目录可迁移**——默认 `$APPDATA/.vectors`，设置项 `vector_path`，复用一期 `migrate_storage_dir` 范式；**不放 `$RESOURCES`**。
 
-因此本设计的核心命题：**把记忆召回做成「能力可选、逐级降级」的统一管道**——配了向量模型就走语义检索，没配就落回关键词启发式，始终可用、永不阻塞。
+---
 
-## 1. 现状盘点（三层记忆）
+## 1. 现状盘点
 
-| 层 | 存储 | 写入路径 | 读取路径 | 核心问题 |
+| 层 | 存储 | 写入 | 读取 | 核心问题 |
 |---|---|---|---|---|
-| **L1 会话级** | `agent_conversation_session` / `agent_conversation_round` | 每轮落库；round_compactor 每 5 轮触发，LLM 把旧摘要+待压缩轮合并为滚动摘要（state-compaction prompt，保留文件/代码变更/环境/目标） | 摘要注入本会话上下文 | 摘要只服务本会话，**任务结束即蒸发**——没有升入长期记忆的管道 |
-| **L2 项目级（.wd_mem）** | 工作空间文件（复用清单 / `knowledge/artifacts/` / `runtime/`） | `native__archive_artifact` 沉淀设计蓝图 Markdown；引擎注入复用清单 | system prompt 注入清单**文件名列表** | 无索引无检索——模型只能凭文件名猜内容，沉淀越多越靠猜 |
-| **L3 长期知识点（记忆宫殿）** | `agent_memories`（key/content/category/ref_count/anchored） | 三路：手动锚定（UI）/ 主动工具（`native__anchor_memory`）/ 引擎强制沉淀（`forced_memory_settle`，任务成功后 LLM 总结落库） | `recall_top_memories`：`ref_count DESC LIMIT 5` | ① 非语义、马太效应（召回即 +1 自我强化）；② 噪音无护栏（15010 三痛点）；③ 与当前任务零相关 |
+| **L1 会话级** | `agent_conversation_session` / `agent_conversation_round` | 每轮落库；round_compactor 滚动摘要 | 摘要注入本会话 | 任务结束蒸发；无跨会话语义检索 |
+| **L2 项目级** | `.wd_mem/`（清单 / `knowledge/artifacts/`） | `native__archive_artifact` | 仅文件名清单注入 | 无索引，凭文件名猜 |
+| **L3 记忆宫殿** | `agent_memories` | 手动锚定 / `native__anchor_memory` / `forced_memory_settle` | `ref_count DESC LIMIT 5` | 非语义、马太效应、与任务零相关 |
+| **KB 知识库** | `knowledge_base` / `knowledge_asset` + `$APPDATA/.knowledge_base` | UI 文件管理 | 无 | Rust 零消费，RAG 0% |
 
-附：`agent_squad_memory`（小分队黑板）与 L3 同构，未来同管道升级；`knowledge_base` / `knowledge_asset`（知识库模块）远期可纳入统一检索，本期不展开。
+小分队黑板 `agent_squad_memory` 与 L3 同构，本设计并入同一 LanceDB 表（`scope=squad`）。
 
-## 2. 设计总纲：统一记忆检索管道
+---
+
+## 2. 总架构
 
 ```
-任务开始（组装上下文）
-  L1 会话摘要      ← 现状原样
-  L2 项目记忆      ← 复用清单注入（现状保留）+ [P2] artifacts 语义检索 top-k 片段
-  L3 长期记忆      ← 召回管道：候选池 → 语义/关键词重排 → （rerank 可用？精排）→ top-K
+┌─────────────────────────────────────────────────────────────────┐
+│  召回管道（任务开始 · load_config / native__kb_search / unified）  │
+│                                                                 │
+│  L1 会话摘要（本会话） + [可选] 跨会话摘要检索                       │
+│  L2 artifacts 片段  ──┐                                           │
+│  L3 记忆宫殿        ──┼──→ EmbeddingProvider(query)               │
+│  K1 知识库切块      ──┘         │                                 │
+│                                ▼                                 │
+│                    LanceDB search(scope filter, k)               │
+│                         │                                       │
+│              命中 ──────┼──── 未配置/失败                          │
+│                │       │         │                               │
+│                ▼       │         ▼                               │
+│           注入上下文    │    关键词重排 → ref_count 兜底             │
+└─────────────────────────────────────────────────────────────────┘
 
-任务结束（沉淀管道）
-  forced/主动沉淀 → 质量护栏（15010）→ [P1] 向量化（嵌入可用时）→ 入库
-  会话压缩时      → [P3] 长期记忆候选蒸馏 → 确认/自动入 L3
+┌─────────────────────────────────────────────────────────────────┐
+│  沉淀管道（任务结束 / 压缩 / 文件变更）                              │
+│                                                                 │
+│  forced/主动锚定 ──→ M0 护栏 ──→ SQLite 元数据 ──→ embed ──→ LanceDB │
+│  archive_artifact ──→ 切块 ──→ embed ──→ LanceDB artifacts        │
+│  KB 文件变更 ──→ 切块 ──→ embed ──→ LanceDB kb_chunks              │
+│  会话压缩 ──→ 蒸馏候选 ──→（确认/forced）──→ 同 L3 路径              │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
-两个核心抽象（Rust trait，各只有一个 v1 实现，为未来换核留缝）：
+### 2.1 核心抽象（Rust）
 
 ```rust
-/// 嵌入提供者：调 LLM 模块配置的 embedding 模型（OpenAI /embeddings 与 TEI /embed 双协议）
-trait EmbeddingProvider { async fn embed(&self, texts: Vec<String>) -> Result<Vec<Vec<f32>>>; }
-/// 向量存储：v1 = SQLite BLOB + 暴力余弦；未来可换 sqlite-vec 而不动上层
-trait VectorStore { async fn upsert(&self, id, vec); async fn search(&self, query_vec, k, filter) -> Vec<(id, score)>; }
+/// 嵌入提供者：调用 LLM 模块配置的 embedding 模型（OpenAI / TEI 双协议）
+#[async_trait]
+pub trait EmbeddingProvider: Send + Sync {
+    async fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>, String>;
+    fn model_id(&self) -> &str;
+    fn dims(&self) -> Option<usize>;
+}
+
+/// 重排提供者：可选，TEI /rerank
+#[async_trait]
+pub trait RerankProvider: Send + Sync {
+    async fn rerank(&self, query: &str, docs: &[String], top_n: usize)
+        -> Result<Vec<(usize, f32)>, String>;
+}
+
+/// 向量存储：v1 唯一实现 = LanceDB
+#[async_trait]
+pub trait VectorStore: Send + Sync {
+    async fn upsert(&self, rows: Vec<VectorRow>) -> Result<(), String>;
+    async fn delete(&self, ids: &[String], table: VectorTable) -> Result<(), String>;
+    async fn delete_by_filter(&self, table: VectorTable, filter: &str) -> Result<(), String>;
+    async fn search(&self, req: VectorSearchRequest) -> Result<Vec<VectorHit>, String>;
+    /// 嵌入缺失时的懒回填扫描
+    async fn list_missing_embeddings(&self, table: VectorTable, limit: usize)
+        -> Result<Vec<VectorRow>, String>;
+}
+
+pub enum VectorTable { Memories, Artifacts, KbChunks, SessionSummaries }
+
+pub struct VectorRow {
+    pub id: String,
+    pub table: VectorTable,
+    pub text: String,                 // 用于嵌入的正文
+    pub embedding: Option<Vec<f32>>,
+    pub embedding_model: Option<String>,
+    pub meta: serde_json::Value,      // 表相关过滤字段（见 §3）
+}
+
+pub struct VectorSearchRequest {
+    pub table: VectorTable,
+    pub query_embedding: Option<Vec<f32>>,
+    pub query_text: Option<String>,   // 降级关键词用
+    pub filter: Option<String>,       // Lance 谓词，如 "agent_id = 'a1' AND scope = 'palace'"
+    pub limit: usize,
+}
+
+pub struct VectorHit {
+    pub id: String,
+    pub score: f32,
+    pub text: String,
+    pub meta: serde_json::Value,
+}
 ```
 
-**降级链（本设计的灵魂）**：
+### 2.2 降级链（灵魂，不可省）
 
 ```
-嵌入模型已配置且调用成功 → 向量余弦重排
-  └─ 未配置 / 调用失败 → 关键词重排（15010 的字符重合度启发式）
-        └─ 重合度全零 → ref_count 序（现状兜底）
+嵌入已配置且调用成功 → LanceDB 向量检索（+ 可选 rerank 精排）
+  └─ 未配置 / 调用失败 / LanceDB 打开失败
+        → 关键词重排（M0 字符重合度；作用于 SQLite 候选或 LanceDB 纯文本）
+              → 全零 / 无候选 → ref_count 序（L3）或 文件名清单（L2）
 ```
 
-向量是**增强，不是依赖**——任何一层失效，记忆系统照常工作。
+任何一层失效，记忆/知识注入不阻塞任务。
 
-## 3. 本地向量库选型（决策项）
+---
 
-| 方案 | 体积 | 依赖 | 适配量级 | 结论 |
-|---|---|---|---|---|
-| **SQLite BLOB + 暴力余弦（v1 推荐）** | 0 | 0（复用现有 sqlx/SQLite） | ≤1 万条无压力：1536 维 f32 ≈ 6KB/条，1 万条全量扫描 <50ms | ✅ 零成本起步 |
-| sqlite-vec（SQLite 扩展） | ~1MB | 随包分发单个 .dll/.so，虚表 API | 十万~百万级 | Phase 远期备选，trait 兼容 |
-| usearch / hnswlib | 数 MB | FFI 绑定 | 千万级 | 过度设计，不采 |
-| LanceDB / Qdrant 嵌入式 | 几十 MB+ | 重运行时 | 百万级+ | 不采（软件变重，违背初衷） |
+## 3. LanceDB 数据设计
 
-**结论：v1 用 BLOB + 暴力余弦**。单智能体记忆量级（几十~几百条）距离暴力扫描瓶颈差三个数量级；等真到十万条再换 sqlite-vec，上层零改动（trait 已隔离）。
+### 3.1 目录与配置
 
-## 4. 嵌入调用设计
+| 项 | 值 |
+|---|---|
+| 配置键 | `app_config.vector_path` |
+| 默认 | `$APPDATA/.vectors` |
+| 占位符 | `$APPDATA` / `$RESOURCE`（与 skill/workspace/KB 同语义） |
+| 打开方式 | 嵌入式 `lancedb::connect(path)`，无服务进程 |
+| 迁移 | 设置页「向量库目录」+ `migrate_storage_dir`；**迁移前 close → 拷贝 → 更新配置 → reopen** |
 
-- **配置来源**：`models` 表 `category='embedding'` 的启用模型（URL/Key/参数字段现成）；默认策略 = 标记默认者或首个启用项；
-- **调用**：Rust reqwest POST，双协议兼容（OpenAI `/embeddings`：`{model, input:[...]}`；TEI `/embed`：`{inputs:[...]}`），批量 input 摊薄请求数；超时/重试对齐现有 LLM 调用约定；
-- **存储**：`agent_memories` 加列 `embedding BLOB` + `embedding_model TEXT`（记录来源模型；换模型后旧向量按 model 不匹配**懒失效重算**）——`init.sql` + `updater.sql` 双写；
-- **回填**：召回时发现 NULL embedding 且嵌入可用 → 后台限速批量回填，不阻塞召回（本次按关键词模式）；
-- **成本量级**：每条记忆 ~几十 token，写入批量一次；召回每次仅 embed 当前 prompt（1 次调用）。设置页状态展示：「记忆语义召回：已启用（模型 xxx）/ 未配置（关键词模式）」。
+```text
+$app_data/.vectors/                 # LanceDB database root
+  ├── memories/                     # L3 + 小队黑板 + 蒸馏候选
+  ├── artifacts/                    # L2 .wd_mem 分节
+  ├── kb_chunks/                    # K1 知识库切块
+  └── session_summaries/            # L1 跨会话摘要（可后置）
+```
 
-## 5. 三层改造点
+### 3.2 表 Schema
 
-### L3 记忆宫殿（Phase 1 主战场）
-- 写入：**15010 护栏全量保留**（非空/最短长度/模板句黑名单/去噪合并/category 白名单）——护栏就是降级模式的质量地基，无论有无向量都必须做；
-- 召回管道化（§2 降级链）；候选池取 `LIMIT k×4` 再重排。
+#### 表 `memories`（L3 / squad / distilled）
 
-### L2 .wd_mem（Phase 2）
-- `knowledge/artifacts/*.md` 入向量域：按标题分节切块 → 嵌入 → 统一向量表（`scope='wd_mem'`，ref=path#section）；
-- 召回注入：任务相关时检索 top-k 片段随上下文注入（增强现状的文件名清单注入，清单保留——便宜且稳定）。
+| 列 | 类型 | 说明 |
+|---|---|---|
+| id | string pk | 与 `agent_memories.id` 一致 |
+| agent_id | string \| null | 过滤 |
+| project_id | string \| null | 过滤 |
+| session_id | string \| null | 蒸馏来源 |
+| scope | string | `palace` \| `squad` \| `distilled` |
+| key | string | 短标题 |
+| content | string | 正文（检索文本 = key + content） |
+| category | string | decision / code_pattern / … |
+| embedding | FixedSizeList\<f32\> \| null | |
+| embedding_model | string \| null | 换模型懒失效 |
+| updated_at | int64 ms | |
 
-### L1 会话压缩（Phase 3）
-- 滚动摘要机制**原样保留**（本会话工作记忆）；
-- 新增「蒸馏管道」：压缩 LLM 调用顺带输出「值得升入长期记忆的候选条目」→ 存 pending 候选 → 记忆宫殿确认（或 forced 模式自动转入）——**会话知识不再蒸发**；
-- 远期：历史会话摘要入向量域，跨会话检索「以前做过类似的」。
+**权威分裂（避免双写腐烂）**：
 
-## 6. 分阶段路线图
+| 字段 | 权威源 |
+|---|---|
+| id, agent_id, key, content, category, scope | 写入时双写；**列表 UI / 编辑以 SQLite `agent_memories` 为准** |
+| anchored, ref_count, last_recalled | **仅 SQLite**（高频更新，不进 Lance） |
+| embedding, embedding_model | **仅 LanceDB** |
 
-| 阶段 | 内容 | 体量 | 依赖 |
-|---|---|---|---|
-| **Phase 0 = 15010 护栏**（建议先行） | 非空/最短长度校验、模板句黑名单、去噪合并、召回关键词重排——**它同时是 Phase 1 的降级实现**，不是丢弃而是成为地基 | 半天 | 无 |
-| **Phase 1 嵌入向量召回** | EmbeddingProvider（双协议）+ embedding BLOB 列 + 写入向量化 + 召回向量重排 + 降级链 + 设置页状态 + 懒回填 | 1~1.5 天 | Phase 0 |
-| **Phase 2 rerank + .wd_mem 索引** | TEI /rerank 精排（top-20 → 5）；artifacts 分节入向量域 + 检索注入 | 1 天 | Phase 1 |
-| **Phase 3 会话蒸馏** | 压缩时长期记忆候选提取 + 记忆宫殿确认流 | 1 天 | Phase 1 |
-| 远期 | sqlite-vec 换核（量级触发）；知识库统一检索；小分队黑板同构升级 | 按需 | — |
+召回流程：LanceDB 出 `id` + score → 批量查 SQLite 补 `ref_count`/`anchored` 并 +1 → 注入。
 
-## 7. 待拍板决策点
+#### 表 `artifacts`（L2）
 
-1. **向量库**：v1 暴力余弦 + BLOB（推荐，零依赖零体积）——是否同意？
-2. **嵌入模型选择**：全局默认一个（推荐 Phase 1）还是智能体级可覆盖（远期）？
-3. **降级链**：嵌入失败 → 关键词重排 → ref_count，三层兜底——是否同意？
-4. **节奏**：先做 Phase 0（15010），再上 Phase 1？还是直接合并做？
-5. **成本可见性**：设置页显示 embedding 调用统计（Phase 1 顺手做？）
+| 列 | 类型 | 说明 |
+|---|---|---|
+| id | string | `{path}#{section_index}` |
+| project_id | string | |
+| path | string | `.wd_mem` 下相对路径 |
+| heading | string | 分节标题 |
+| content | string | 分节正文 |
+| content_digest | string | 文件/节 hash，增量 |
+| embedding / embedding_model | 同上 | |
+| updated_at | int64 | |
 
-## 8. 验收标准
+#### 表 `kb_chunks`（K1）
+
+| 列 | 类型 | 说明 |
+|---|---|---|
+| id | string | `{kb_id}/{asset_id}#{chunk_index}` |
+| kb_id | string | |
+| asset_id | string | |
+| path | string | 相对 KB 根路径 |
+| heading | string | md 标题或空 |
+| chunk_index | int32 | |
+| content | string | |
+| content_digest | string | 增量 |
+| embedding / embedding_model | | |
+| updated_at | int64 | |
+
+#### 表 `session_summaries`（L1 · Phase 可后置）
+
+| 列 | 类型 | 说明 |
+|---|---|---|
+| id | string | |
+| agent_id / session_id | string | |
+| project_id | string \| null | |
+| summary | string | 滚动摘要快照 |
+| embedding / embedding_model | | |
+| created_at | int64 | |
+
+用于跨会话「以前做过类似的」；本会话注入仍走 SQLite 滚动摘要（便宜、稳定）。
+
+### 3.3 索引与过滤策略
+
+- 向量列建 ANN 索引（LanceDB 默认 IVF_PQ / HNSW，按版本 SDK 能力选择；v1 可用暴力/默认索引，量级触发再显式建索引）。
+- 过滤一律走 **标量谓词先滤再向量**（`agent_id = ? AND scope = 'palace'`），避免多智能体串记忆。
+- `embedding_model` 与当前默认模型不一致的行：检索时排除或降权，后台重嵌。
+
+### 3.4 打开失败与空库
+
+| 情况 | 行为 |
+|---|---|
+| 目录不存在 | 自动 `create_dir_all` + connect + 建表 |
+| 连接失败（锁/损坏） | 记 ERROR，`VectorStore` 标记 unavailable → 全链路降级 |
+| 迁移中 | 业务侧短暂 unavailable，不 panic |
+
+---
+
+## 4. 嵌入与重排（外接，不改前提）
+
+- **配置来源**：`models` 表 `category='embedding'` 启用项（默认标记或首个启用）；`category='rerank'` 同理可选。
+- **调用**：Rust `reqwest`，OpenAI `/embeddings` 与 TEI `/embed` 双协议；批量；超时/重试对齐现有 LLM 约定。
+- **存储**：向量只在 LanceDB；`embedding_model` 记录来源。
+- **回填**：召回发现缺失 → 后台限速批量 `list_missing_embeddings` + embed + upsert；本次降级不阻塞。
+- **隐私**：内容会发往用户配置的 embedding 服务商；设置页状态区明示。
+- **成本**：设置页显示调用次数 / 估算 token（M1 埋点）。
+
+---
+
+## 5. 分层改造点
+
+### L3 记忆宫殿（主战场）
+
+- 写入：M0 护栏全量保留（非空/最短长度/模板黑名单/去噪合并/category 白名单）→ SQLite 元数据 → 异步 embed → LanceDB `memories` upsert。
+- 召回：`recall_top_memories(app, agent_id, prompt)`：  
+  1. embed prompt → LanceDB `search(table=memories, filter=agent_id+scope in (palace,squad), k*4)`  
+  2. 可选 rerank → top-K  
+  3. 失败：SQLite `LIMIT k*4` → 关键词重排 → 全零 ref_count  
+  4. 命中后 SQLite `ref_count+1` + 事件日志（现状保留热力图）。
+- 删除/改写：SQLite 与 LanceDB 双删/双更；Lance 失败仅打日志，启动期可做对账任务（远期）。
+
+### L2 `.wd_mem` artifacts
+
+- `native__archive_artifact` 成功后：按标题分节 → digest 未变跳过 → embed → `artifacts` 表。
+- `load_config`：复用清单注入**保留**；叠加 prompt 相关 top-k 分节片段（filter=`project_id`）。
+
+### L1 会话压缩
+
+- 滚动摘要机制原样保留。
+- 蒸馏：压缩 prompt 追加「值得升入长期记忆的候选」→ pending → 记忆宫殿确认 / forced 自动入 L3（走护栏 + Lance）。
+- 远期：摘要快照入 `session_summaries` 做跨会话检索。
+
+### K1 知识库 RAG
+
+- 解析：首批 `.md` / `.txt`；md 按标题分节，txt 滑窗（~512 token、10% 重叠）。
+- 写入钩子：KB 文件增删改 → 重切块 → `kb_chunks` 增量（digest）。
+- 嵌入未配置：先存 content 与 digest，向量列 null，懒回填。
+- 手动「重建索引」命令 + 进度事件。
+
+### K2 检索工具
+
+- `native__kb_search(query, kb_ids?)`：统一管道，filter=`kb_id IN (...)`；RequireApproval=否。
+- `agent_kb_ref` 绑定；未绑定不注册工具；planner 能力大纲补条目。
+
+### K3 统一检索
+
+- `unified_retrieve(prompt, scopes)`：一次 embed，多表/多 scope 并行 search，合并排序。
+- 自动注入与工具调用共用；前端引用标记可跳转。
+
+---
+
+## 6. 实施步骤（一步步完成）
+
+> 原则：每步可独立验收；向量失败永不阻塞主路径；DDL 双写必查 mapper。
+
+### Step 0 — M0 记忆质量护栏（约 0.5 天）
+
+**不依赖 LanceDB**，先做，作为降级地基。
+
+- [ ] `forced_memory_settle` / `anchor_memory` 自动路径：非空、key≥2、content≥10、模板句黑名单、category 白名单、去噪合并。
+- [ ] `recall_top_memories`：候选 `LIMIT k×4` + 字符重合度重排 + 全零回落 `ref_count`。
+- [ ] 验收：forced 跑 N 任务无复述型条目；「ref_count 高无关 / 低相关」能召回相关条。
+
+### Step 1 — 基础设施（约 1–1.5 天）
+
+- [ ] `Cargo.toml` 增加 `lancedb`（及官方 SDK 所需 arrow 等传递依赖）；**评估编译时长与二进制增量**，记录在验收备注。
+- [ ] `app_config.vector_path` 默认 `$APPDATA/.vectors`；`settings-file` + 设置页「向量库目录」行；接入 `migrate_storage_dir`（close→move→reopen）。
+- [ ] 新建 `agent/vector_store.rs`：`VectorStore` trait + `LanceDbVectorStore`（connect / 建表 / upsert / search / delete）。
+- [ ] 新建 `agent/embedding.rs`：`EmbeddingProvider` 双协议 + 从 `models` 取默认；`RerankProvider` 可先 trait + TEI 实现骨架。
+- [ ] Tauri managed state 或等价单例持有 DB 连接；启动 init、失败降级标记。
+- [ ] 验收：空库自动建表；设置页改路径能迁移；embedding 探测连通。
+
+### Step 2 — L3 记忆进 LanceDB（约 1 天）
+
+- [ ] 写路径：`anchor_memory` / forced settle 成功后异步 upsert `memories`（scope=palace）。
+- [ ] 召回改造：`recall_top_memories(..., prompt)` 走向量优先降级链；`load_config` 传入 prompt。
+- [ ] 删除/更新双写；启动后可选「向量对账」（SQLite 有行 Lance 无 → 补齐）。
+- [ ] 设置页：语义召回状态 + 调用统计 +「立即回填向量」。
+- [ ] 验收：相关/无关对照用例；未配置嵌入自动关键词模式；回填按钮跑通。
+
+### Step 3 — K1 知识库切块入库（约 1–1.5 天）
+
+- [ ] `agent/knowledge.rs`：md/txt 解析与切块；`knowledge_asset.indexed_at`（或等价状态）。
+- [ ] KB 增删改钩子 → `kb_chunks`；手动重建索引 + 进度。
+- [ ] 验收：拖入 md 自动入库；改文件增量；无嵌入时 chunk 仍在、向量空。
+
+### Step 4 — L2 artifacts 索引（约 0.5–1 天）
+
+- [ ] `archive_artifact` 钩子分节入 `artifacts`；`load_config` 片段注入。
+- [ ] 验收：问「auth-flow 设计决策」能注入对应分节。
+
+### Step 5 — K2 检索工具与绑定（约 1 天）
+
+- [ ] `native__kb_search`；`agent_kb_ref` DDL + mapper + 向导绑定 + load_config 装配。
+- [ ] planner 大纲条目。
+- [ ] 验收：绑定后能引用 KB 片段；未绑定不可见工具。
+
+### Step 6 — M2 rerank 精排（约 0.5 天）
+
+- [ ] TEI `/rerank` 接入召回管道（向量/关键词之后）；未配置跳过。
+- [ ] 验收：top-k 顺序优于纯向量（构造边界）。
+
+### Step 7 — M3 会话蒸馏（约 1 天）
+
+- [ ] round_compactor 增加候选输出 → pending → 确认/forced 入 L3（含 Lance upsert）。
+- [ ] 验收：压缩后出现候选；确认后可召回；拒绝不再出现。
+
+### Step 8 — K3 统一检索与引用（约 1 天，收官）
+
+- [ ] `unified_retrieve`；消息流引用标记与跳转。
+- [ ] 验收：一次任务日志可见多源检索；前端可点引用。
+
+### 远期池（不阻塞）
+
+- ANN 索引显式调参（量级触发）
+- `session_summaries` 跨会话检索
+- 小分队黑板 UI 与 scope 隔离打磨
+- 智能体级 embedding 模型覆盖
+- Lance ↔ SQLite 启动对账与修复工具
+
+### 建议排期
+
+```text
+Step0 (0.5d) → Step1 (1~1.5d) → Step2 (1d) → Step3 (1~1.5d)
+  → Step4 (0.5~1d) → Step5 (1d) → Step6 (0.5d) → Step7 (1d) → Step8 (1d)
+合计约 8~10 人日（含真机验收）
+```
+
+---
+
+## 7. 风险与限制
+
+| 风险 | 缓解 |
+|---|---|
+| `lancedb` 编译体积/时间 | Step1 先落地并记录增量；过大则评估 feature 裁剪 |
+| 双写不一致（SQLite ↔ Lance） | 字段权威表（§3.2）；删除双删；远期对账 |
+| 迁移中并发写 | 迁移序列 close→move→reopen；失败回滚旧路径 |
+| 换 embedding 模型 | `embedding_model` 懒失效重算 |
+| 隐私（外发内容） | 设置页明示；仅用户配置的服务商 |
+| 中文关键词降级粗糙 | M0 接受 n-gram；不引分词库 |
+| PDF/office | K1 首批 md/txt |
+
+---
+
+## 8. 决策记录
+
+| # | 决策 | 结论 |
+|---|---|---|
+| 1 | 向量库 | **LanceDB 统一**（否决 SQLite BLOB；否决需独立进程的 Qdrant） |
+| 2 | 数据目录 | `$APPDATA/.vectors` + `vector_path` 可迁移；否决 `$RESOURCES` |
+| 3 | 嵌入/重排 | 外接 LLM 模块配置；不捆绑本地模型 |
+| 4 | SQLite 职责 | 业务元数据与 `ref_count`；不存向量 |
+| 5 | L3 量级假设 | 单项目数千；多智能体数万+，必须 ANN+过滤 |
+| 6 | 降级链 | 向量 → 关键词 → ref_count/清单，保留 |
+| 7 | 节奏 | Step0 护栏先行，再上 Lance 基建与各层 |
+
+---
+
+## 9. 验收总表
 
 | 阶段 | 验收 |
 |---|---|
-| Phase 0 | forced 跑 N 个任务后记忆宫殿无明显复述型/重复条目；召回重排生效（15010 原验收） |
-| Phase 1 | 配置 embedding 模型后：构造「ref_count 高但语义无关 / ref_count 低但语义相关」两条记忆，召回选中相关条；未配置模型时自动落关键词模式，功能不中断；设置页状态正确 |
-| Phase 2 | 问「项目里 auth-flow 的设计决策」能召回对应 artifact 分节片段；rerank 配置后 top-5 顺序优于纯向量序 |
-| Phase 3 | 连续多轮会话压缩后，记忆宫殿出现蒸馏候选，确认后入库可被召回 |
+| Step0 | 记忆质量与关键词重排生效（原 M0） |
+| Step1 | 依赖编译通过；路径可配可迁；空库可开；嵌入探测通 |
+| Step2 | 语义召回选中相关条；无嵌入不中断；回填可用 |
+| Step3 | KB md 自动/增量入库 |
+| Step4 | artifacts 分节可召回注入 |
+| Step5 | `native__kb_search` + 绑定生效 |
+| Step6 | rerank 改善 top 序 |
+| Step7 | 会话蒸馏候选闭环 |
+| Step8 | 统一检索 + 前端引用 |

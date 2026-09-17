@@ -219,10 +219,23 @@ pub async fn anchor_memory(
     content: &str,
     category: &str,
     anchored: bool,
+    // 自动路径（forced 引擎沉淀 + native__anchor_memory 工具）= true：走质量护栏
+    // （category 强校验丢弃、与同 agent 已有条目去噪合并）；手动 UI 锚定 = false：原行为不拦。
+    auto_merge: bool,
 ) -> Result<MemoryItem, String> {
     let pool = get_pool(app).await?;
     let now = now_ms();
-    let cat = if category.is_empty() || !MEMORY_CATEGORIES.contains(&category) {
+    // M0 质量护栏·category：自动路径强校验丢弃（不再静默回落 other，避免噪音进库）；
+    // 手动路径保留原回落 other 行为（用户明确意图，宽松处理）。
+    let cat = if auto_merge {
+        if category.is_empty() || !MEMORY_CATEGORIES.contains(&category) {
+            return Err(format!(
+                "非法记忆分类「{}」（允许：{:?}）",
+                category, MEMORY_CATEGORIES
+            ));
+        }
+        category
+    } else if category.is_empty() || !MEMORY_CATEGORIES.contains(&category) {
         "other"
     } else {
         category
@@ -245,6 +258,13 @@ pub async fn anchor_memory(
             .ok()
             .flatten()
             .and_then(|r| r.try_get::<String, _>("id").ok())
+    };
+    // M0 去噪合并（仅自动路径）：精确 key 未命中时，查同 agent 下 content 归一化高度重合的条目，
+    // 命中则更新已有条目而非新增，避免复述型条目堆积。手动路径不拦（用户明确意图）。
+    let existing = if auto_merge && existing.is_none() {
+        find_similar_memory(&pool, agent_id, content).await.unwrap_or(None)
+    } else {
+        existing
     };
 
     let id = match existing {
@@ -289,6 +309,68 @@ pub async fn anchor_memory(
     // 锚定完成（手动或自动）即推送事件，前端「记忆宫殿」实时新增/更新卡片，无需重开页面。
     events::emit_memory_anchored(app, &item);
     Ok(item)
+}
+
+/// M0 去噪合并：查同 agent（或全局 agent_id IS NULL）下与 content 语义重复的已有条目 id。
+/// 判定两级：① 归一化（去全部空白）后完全相等 → 直接命中；② 字符 2-gram 重合率 ≥60% → 视为
+/// 措辞不同的语义重复（LLM 提炼必换措辞，完全相等挡不住；阈值真机可调）。量级可控（单 agent
+/// 通常 < 数千条），M0 作降级地基可接受 O(n) 扫描；向量时代由语义检索取代。
+async fn find_similar_memory(
+    pool: &SqlitePool,
+    agent_id: Option<&str>,
+    content: &str,
+) -> Result<Option<String>, String> {
+    const SIMILAR_THRESHOLD: f64 = 0.6;
+    const MIN_CONTENT_CHARS: usize = 6;
+    let norm: String = content.chars().filter(|c| !c.is_whitespace()).collect();
+    if norm.chars().count() < MIN_CONTENT_CHARS {
+        return Ok(None);
+    }
+    let q_grams = char_bigrams(&norm);
+    if q_grams.is_empty() {
+        return Ok(None);
+    }
+    let rows = if let Some(aid) = agent_id {
+        sqlx::query("SELECT id, content FROM agent_memories WHERE agent_id = ?")
+            .bind(aid)
+            .fetch_all(pool)
+            .await
+    } else {
+        sqlx::query("SELECT id, content FROM agent_memories WHERE agent_id IS NULL")
+            .fetch_all(pool)
+            .await
+    }
+    .map_err(|e| format!("查相似记忆失败：{e}"))?;
+    let mut best_score = 0f64;
+    let mut best_id: Option<String> = None;
+    for r in &rows {
+        let c: String = r.try_get("content").unwrap_or_default();
+        let cn: String = c.chars().filter(|ch| !ch.is_whitespace()).collect();
+        if cn == norm {
+            return Ok(r.try_get::<String, _>("id").ok());
+        }
+        let c_grams = char_bigrams(&cn);
+        if c_grams.is_empty() {
+            continue;
+        }
+        let inter = q_grams.intersection(&c_grams).count();
+        let denom = q_grams.len().min(c_grams.len()).max(1);
+        let score = inter as f64 / denom as f64;
+        if score > best_score {
+            best_score = score;
+            best_id = r.try_get::<String, _>("id").ok();
+        }
+    }
+    if best_score >= SIMILAR_THRESHOLD {
+        tracing::debug!(
+            "[memory] 去噪合并：命中语义重复条目（2-gram 重合率={:.2}≥{:.2}）",
+            best_score,
+            SIMILAR_THRESHOLD
+        );
+        Ok(best_id)
+    } else {
+        Ok(None)
+    }
 }
 
 /// 更新一条记忆的部分字段（仅更新提供的非空字段）。
@@ -362,6 +444,55 @@ pub async fn recall_memory(app: &AppHandle, id: &str) -> Result<MemoryItem, Stri
     Ok(item)
 }
 
+/// M0 forced_memory_settle 落库前质量校验。通过返回 Ok；不通过返回 Err(跳过原因)。
+/// 抽成纯函数便于单测；runtime.rs::forced_memory_settle 解析循环调用，单一事实源。
+pub fn validate_forced_entry(key: &str, category: &str, body: &str) -> Result<(), &'static str> {
+    const BOILERPLATE_PREFIXES: &[&str] = &[
+        "已成功",
+        "任务完成",
+        "已完成",
+        "本次任务",
+        "成功完成",
+        "执行完成",
+        "任务已",
+        "本次执行",
+    ];
+    if key.chars().count() < 2 {
+        return Err("短 key（<2字）");
+    }
+    if body.chars().count() < 10 {
+        return Err("短 content（<10字）");
+    }
+    if BOILERPLATE_PREFIXES.iter().any(|p| body.starts_with(p)) {
+        return Err("模板复述句");
+    }
+    if !MEMORY_CATEGORIES.contains(&category) {
+        return Err("非法 category");
+    }
+    Ok(())
+}
+
+/// M0 关键词重排：取字符串的字符 2-gram（中文友好，无需分词）。
+fn char_bigrams(s: &str) -> std::collections::HashSet<String> {
+    let chars: Vec<char> = s.chars().collect();
+    if chars.len() < 2 {
+        return std::collections::HashSet::new();
+    }
+    (0..chars.len() - 1)
+        .map(|i| format!("{}{}", chars[i], chars[i + 1]))
+        .collect()
+}
+
+/// M0 关键词重排：query 与 candidate 共享的 2-gram 数（绝对值；候选池内相对排序有意义）。
+fn overlap_score(query: &str, candidate: &str) -> usize {
+    let q = char_bigrams(query);
+    if q.is_empty() {
+        return 0;
+    }
+    let c = char_bigrams(candidate);
+    q.intersection(&c).count()
+}
+
 /// 运行时自动召回：从「全局 + 当前 agent」记忆中选取 top-K（ref_count 降序、updated_at 降序），
 /// 逐条 ref_count += 1、last_recalled=now、写 `recall` 事件并 emit `memory_recalled`，
 /// 然后拼成「记忆宫殿 · 召回」系统提示块返回（无记忆则返回空串）。
@@ -372,6 +503,9 @@ pub async fn recall_top_memories(
     app: &AppHandle,
     agent_id: Option<&str>,
     k: usize,
+    // 本轮 prompt：提供时先取 k×4 候选池，按字符 2-gram 重合度重排取 top-K；
+    // 全零重合因 stable sort 自然回落原 ref_count DESC 序。None 时退化为原行为（ref_count 序 top-K）。
+    prompt: Option<&str>,
 ) -> (Vec<MemoryItem>, String) {
     if k == 0 {
         return (Vec::new(), String::new());
@@ -384,12 +518,14 @@ pub async fn recall_top_memories(
         }
     };
     let now = now_ms();
+    // 有 prompt 时放大候选池到 k×4 供重排；无 prompt 时原 k。
+    let limit = if prompt.is_some() { k * 4 } else { k };
     let rows = match sqlx::query(
         "SELECT * FROM agent_memories WHERE agent_id IS NULL OR agent_id = ? \
          ORDER BY ref_count DESC, updated_at DESC LIMIT ?",
     )
     .bind(agent_id.unwrap_or(""))
-    .bind(k as i64)
+    .bind(limit as i64)
     .fetch_all(&pool)
     .await
     {
@@ -403,11 +539,28 @@ pub async fn recall_top_memories(
         return (Vec::new(), String::new());
     }
 
+    // M0 字符重排：有 prompt 时按 2-gram 重合度排序取 top-K；stable sort 保证同分保持原 ref_count 序（全零回落）。
+    let ordered: Vec<sqlx::sqlite::SqliteRow> = if let Some(p) = prompt {
+        let mut scored: Vec<(usize, sqlx::sqlite::SqliteRow)> = rows
+            .into_iter()
+            .map(|r| {
+                let key: String = r.try_get("key").unwrap_or_default();
+                let content: String = r.try_get("content").unwrap_or_default();
+                let cand = format!("{} {}", key, content);
+                (overlap_score(p, &cand), r)
+            })
+            .collect();
+        scored.sort_by(|a, b| b.0.cmp(&a.0));
+        scored.into_iter().take(k).map(|(_, r)| r).collect()
+    } else {
+        rows.into_iter().take(k).collect()
+    };
+
     let mut items: Vec<MemoryItem> = Vec::new();
     let mut block = String::from(
         "### 记忆宫殿 · 召回的长期记忆\n以下是你此前沉淀、本次自动召回的关键记忆，处理任务时应优先参考：\n",
     );
-    for row in &rows {
+    for row in &ordered {
         let id: String = row.try_get("id").unwrap_or_default();
         let key: String = row.try_get("key").unwrap_or_default();
         let content: String = row.try_get("content").unwrap_or_default();
@@ -605,4 +758,72 @@ pub async fn delete_squad_memory(app: &AppHandle, id: &str) -> Result<(), String
 /// 暴露自动召回条数常量给调用方（load_config 注入用）。
 pub const fn recall_top() -> usize {
     MEMORY_RECALL_TOP
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── validate_forced_entry ──
+    #[test]
+    fn validate_rejects_short_key() {
+        assert!(validate_forced_entry("a", "decision", "这是一段足够长的记忆内容").is_err());
+    }
+
+    #[test]
+    fn validate_rejects_short_content() {
+        assert!(validate_forced_entry("合法key", "fix", "太短").is_err());
+    }
+
+    #[test]
+    fn validate_rejects_boilerplate() {
+        assert!(validate_forced_entry("任务结果", "other", "已成功完成本次任务的全部步骤").is_err());
+        assert!(validate_forced_entry("任务结果", "other", "任务完成，无异常").is_err());
+    }
+
+    #[test]
+    fn validate_rejects_invalid_category() {
+        assert!(validate_forced_entry("合法key", "bogus_cat", "这是一段足够长的记忆内容").is_err());
+    }
+
+    #[test]
+    fn validate_accepts_legitimate_entry() {
+        assert!(validate_forced_entry("用户偏好深色主题", "user_pref", "用户在多次对话中明确表示偏好深色 UI 主题").is_ok());
+        assert!(validate_forced_entry("auth-flow", "architecture", "采用 JWT + 刷新令牌双令牌方案，access 15min / refresh 7d").is_ok());
+    }
+
+    // ── char_bigrams / overlap_score（recall 字符重排降级链核心）──
+    #[test]
+    fn bigrams_empty_for_short_string() {
+        assert!(char_bigrams("").is_empty());
+        assert!(char_bigrams("a").is_empty());
+    }
+
+    #[test]
+    fn overlap_high_for_related_cjk() {
+        // 「用户偏好」与「用户的偏好设定」共享「用户」「户的」「偏好」相关 2-gram，重合高
+        let s = overlap_score("用户偏好深色主题", "用户的偏好设定为深色");
+        assert!(s >= 2, "相关条应有重合，实际 {s}");
+    }
+
+    #[test]
+    fn overlap_zero_for_unrelated() {
+        let s = overlap_score("认证鉴权流程", "数据库备份策略");
+        assert_eq!(s, 0, "无关条应零重合");
+    }
+
+    #[test]
+    fn overlap_ranks_relevant_above_popular() {
+        // 模拟 recall 场景：ref_count 高的无关条 vs ref_count 低的相关条
+        // 字符重排后相关条应排在前面（score 更高）
+        let prompt = "用户偏好深色主题";
+        let popular_unrelated = "数据库索引优化方案"; // 假装 ref_count 高
+        let rare_relevant = "用户偏好深色 UI 主题设置";
+        let s_unrel = overlap_score(prompt, popular_unrelated);
+        let s_rel = overlap_score(prompt, rare_relevant);
+        assert!(
+            s_rel > s_unrel,
+            "相关条 score {s_rel} 应 > 无关条 score {s_unrel}"
+        );
+    }
 }

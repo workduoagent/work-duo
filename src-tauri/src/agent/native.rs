@@ -718,6 +718,8 @@ impl AgentTool for AnchorMemoryTool {
             &content,
             &category,
             false,
+            // native 工具属自动路径，走质量护栏（去噪合并 + category 强校验）。
+            true,
         )
         .await
         {
