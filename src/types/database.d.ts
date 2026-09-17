@@ -89,6 +89,8 @@ export interface KnowledgeAssetRow {
 export interface AgentInfoRow {
   id: string
   logo: string | null
+  /** 拟人化像素形象配置 JSON（形象设计弹窗再编辑源；NULL=从未生成/仅历史上传） */
+  appearance: string | null
   scenario: string | null
   name: string
   identifier: string

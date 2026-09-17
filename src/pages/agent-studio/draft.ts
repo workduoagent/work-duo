@@ -16,6 +16,7 @@ import type {
   MemoryMode,
   PlanApprovalMode,
 } from '@/types/core'
+import type { PixelAgentAppearance } from '@/components/ui/pixel-agent'
 
 /** 智能体配置上限（新建 / 编辑统一校验，选择时实时拦截 + 保存时硬校验共用） */
 export const MAX_MCP_SERVERS = 3
@@ -30,6 +31,8 @@ export interface AgentDraft {
   name: string
   identifier: string
   logo?: string
+  /** 拟人化像素形象配置（形象设计弹窗再编辑源；undefined=尚未用形象设计生成过） */
+  appearance?: PixelAgentAppearance
   scenario?: string
   description?: string
   /** 人设与指令（Markdown） */
@@ -84,6 +87,7 @@ export function draftFromAgent(
     name: agent.name,
     identifier: agent.identifier,
     logo: agent.logo,
+    appearance: agent.appearance,
     scenario: agent.scenario,
     description: agent.description,
     systemPrompt: agent.systemPrompt,
@@ -112,6 +116,7 @@ export function draftToInput(draft: AgentDraft, id?: string): AgentUpsertInput {
     name: draft.name.trim(),
     identifier: draft.identifier.trim(),
     logo: draft.logo,
+    appearance: draft.appearance,
     scenario: draft.scenario,
     description: draft.description?.trim() || undefined,
     systemPrompt: draft.systemPrompt,

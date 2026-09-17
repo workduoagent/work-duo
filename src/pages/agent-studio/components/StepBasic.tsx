@@ -6,14 +6,16 @@
  *  - 智能体描述（纯文本简介）；
  *  - 人设与指令（system_prompt，走 Markdown 编辑器，编辑 / 预览双模式）；
  *  - 欢迎消息（welcome_message）；
- *  - 头像（选图后以 Base64 data URL 直存 logo 列，未设置时前端回退 lucide 图标）；
+ *  - 形象设计（Pixel Agent）：点击打开设计弹窗，保存时生成 PNG 快照写 logo
+ *    （展示源）+ 结构化配置写 appearance（再编辑源）；未设计过时预览按场景预设渲染；
  *  - 行为策略卡片：启用 / 自动执行 / 沙箱 / 记忆模式 / 计划审批。
  *
  * 必填项（名称、唯一标识）标 *，并提供内联校验错误（errors / clearError 由向导下发）。
  */
-import { useRef } from 'react'
-import { ImagePlus, RefreshCw, Trash2 } from 'lucide-react'
+import { useState } from 'react'
+import { RefreshCw } from 'lucide-react'
 import { Button, Field, FieldLabel, Input, Segmented, Switch } from '@/components/ui'
+import { AppearanceModal, PixelAgent, generateAvatarByScenario } from '@/components/ui/pixel-agent'
 import type { MemoryMode, PlanApprovalMode } from '@/types/core'
 import { ScenarioSelect } from '@/components/scenario'
 import { MarkdownEditor } from '@/components/markdown/MarkdownEditor'
@@ -30,66 +32,54 @@ export interface StepBasicProps {
 }
 
 export function StepBasic({ draft, patch, errors, clearError }: StepBasicProps) {
-  const fileRef = useRef<HTMLInputElement>(null)
-
-  function pickLogo(file: File | undefined) {
-    if (!file) return
-    const reader = new FileReader()
-    reader.onload = () => {
-      if (typeof reader.result === 'string') patch({ logo: reader.result })
-    }
-    reader.readAsDataURL(file)
-  }
+  const [designerOpen, setDesignerOpen] = useState(false)
+  // 预览 / 弹窗初始配置：优先草稿已保存的 appearance（再编辑源），
+  // 否则按场景预设 + identifier 稳定生成（同一智能体可复现）
+  const previewAppearance = draft.appearance ?? generateAvatarByScenario(draft.scenario, draft.identifier)
+  // 仅历史 logo（从未用形象设计生成过）：保存形象将覆盖原头像，需提示
+  const overrideHint = Boolean(draft.logo) && !draft.appearance
 
   return (
     <div className="agent-wizard__form">
       {/* 身份：头像 + 名称 / 标识，宽屏并排，窄屏堆叠 */}
       <section className="agent-wizard__identity">
         <Field className="agent-wizard__identity-avatar">
-          <FieldLabel>头像</FieldLabel>
+          <FieldLabel>形象</FieldLabel>
           <div
-            className="agent-wizard__logo-preview agent-wizard__logo-upload"
+            className="agent-wizard__logo-preview"
             role="button"
             tabIndex={0}
-            title="点击上传 / 更换头像"
-            onClick={() => fileRef.current?.click()}
+            title="点击进入形象设计"
+            onClick={() => setDesignerOpen(true)}
             onKeyDown={(e) => {
               if (e.key === 'Enter' || e.key === ' ') {
                 e.preventDefault()
-                fileRef.current?.click()
+                setDesignerOpen(true)
               }
             }}
           >
             {draft.logo ? (
-              <img src={draft.logo} alt="头像" className="agent-wizard__logo-img" />
+              <img src={draft.logo} alt="形象预览" className="agent-wizard__logo-img" />
             ) : (
-              <div className="agent-wizard__logo-empty">
-                <ImagePlus size={22} />
-                <span className="agent-wizard__logo-tip">点击上传</span>
-              </div>
-            )}
-            {draft.logo && (
-              <button
-                type="button"
-                className="agent-wizard__logo-clear"
-                title="移除头像"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  patch({ logo: undefined })
-                }}
-              >
-                <Trash2 size={13} />
-              </button>
+              <PixelAgent appearance={previewAppearance} size={96} motion={false} />
             )}
           </div>
-          <input
-            ref={fileRef}
-            type="file"
-            accept="image/*"
-            hidden
-            onChange={(e) => pickLogo(e.target.files?.[0])}
+          <span className="agent-wizard__hint">
+            {overrideHint
+              ? '当前为历史头像；保存形象后将生成像素快照替换它'
+              : '点击进入形象设计，捏一个专属像素小人'}
+          </span>
+          <AppearanceModal
+            open={designerOpen}
+            initial={previewAppearance}
+            scenario={draft.scenario}
+            seed={draft.identifier}
+            onCancel={() => setDesignerOpen(false)}
+            onSave={(cfg, logo) => {
+              patch({ logo, appearance: cfg })
+              setDesignerOpen(false)
+            }}
           />
-          <span className="agent-wizard__hint">点击上传或替换（可选）</span>
         </Field>
 
         <div className="agent-wizard__identity-fields">

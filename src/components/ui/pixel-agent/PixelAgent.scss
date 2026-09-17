@@ -1,0 +1,86 @@
+/**
+ * PixelAgent 样式 v2：像素锐利 + 弹窗预览帧动画（全部 opacity 帧，无 transform，不糊边）。
+ *
+ * - 动画只在 .is-motion（弹窗预览）下生效；快照 / 缩略图（motion=false）渲染 A 帧静帧；
+ * - pa-fa / pa-fb：工作打字两帧交替；pa-dot1..3：思考点错峰闪烁；
+ *   pa-alert / pa-drop：出错感叹号与汗滴闪烁；
+ * - 系统「减少动画」开启时冻结在 A 帧（隐藏 B 帧），画面不重叠。
+ */
+.pixel-agent {
+  display: block;
+  image-rendering: pixelated;
+
+  .pa-fb {
+    opacity: 0;
+  }
+
+  &.is-motion {
+    &.pixel-agent--working .pa-fa {
+      animation: pa-show-a 0.5s steps(1, end) infinite;
+    }
+    &.pixel-agent--working .pa-fb {
+      animation: pa-show-b 0.5s steps(1, end) infinite;
+    }
+    &.pixel-agent--thinking .pa-dot1 {
+      animation: pa-blink 1.2s steps(1, end) infinite;
+    }
+    &.pixel-agent--thinking .pa-dot2 {
+      animation: pa-blink 1.2s steps(1, end) 0.4s infinite;
+    }
+    &.pixel-agent--thinking .pa-dot3 {
+      animation: pa-blink 1.2s steps(1, end) 0.8s infinite;
+    }
+    &.pixel-agent--error .pa-alert {
+      animation: pa-blink 0.9s steps(1, end) infinite;
+    }
+    &.pixel-agent--error .pa-drop {
+      animation: pa-blink 0.6s steps(1, end) 0.3s infinite;
+    }
+  }
+}
+
+@keyframes pa-show-a {
+  0%,
+  49.9% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+@keyframes pa-show-b {
+  0%,
+  49.9% {
+    opacity: 0;
+  }
+  50%,
+  100% {
+    opacity: 1;
+  }
+}
+@keyframes pa-blink {
+  0%,
+  49.9% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0.15;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pixel-agent.is-motion .pa-fa,
+  .pixel-agent.is-motion .pa-fb,
+  .pixel-agent.is-motion .pa-dot1,
+  .pixel-agent.is-motion .pa-dot2,
+  .pixel-agent.is-motion .pa-dot3,
+  .pixel-agent.is-motion .pa-alert,
+  .pixel-agent.is-motion .pa-drop {
+    animation: none !important;
+  }
+  .pixel-agent.is-motion .pa-fb {
+    opacity: 0;
+  }
+}

@@ -8,6 +8,8 @@
  *    src/core/file/model-file.ts（例如 MODEL_CATEGORY_OPTIONS）。
  */
 
+import type { PixelAgentAppearance } from '@/components/ui/pixel-agent'
+
 /**
  * 模型接入能力分类（一级菜单「LLM」下的六大类）。
  *  - text       文本模型：对话 / 补全
@@ -198,6 +200,8 @@ export interface KnowledgeAsset {
 export interface AgentInfo {
   id: string
   logo?: string
+  /** 拟人化像素形象配置（形象设计弹窗再编辑源；undefined=从未生成/仅历史上传） */
+  appearance?: PixelAgentAppearance
   scenario?: string
   name: string
   identifier: string
@@ -267,6 +271,8 @@ export interface AgentUpsertInput {
   name: string
   identifier: string
   logo?: string
+  /** 拟人化像素形象配置（形象设计弹窗再编辑源，JSON 序列化落 agent_info.appearance） */
+  appearance?: PixelAgentAppearance
   scenario?: string
   description?: string
   systemPrompt?: string

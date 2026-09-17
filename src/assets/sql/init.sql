@@ -190,6 +190,7 @@ CREATE TABLE IF NOT EXISTS agent_info
 (
     id                  TEXT    PRIMARY KEY,
     logo                TEXT,
+    appearance          TEXT,   -- 拟人化像素形象配置 JSON（形象设计弹窗的再编辑源；NULL=从未生成/仅历史上传头像）
     scenario            TEXT,
     name                TEXT    NOT NULL,
     identifier          TEXT    NOT NULL,

@@ -16,6 +16,7 @@
  *  - 非 Tauri 环境（浏览器 dev）回退 localStorage，保证可调试。
  */
 import { isTauri } from '@/core/config'
+import { normalizeAppearance } from '@/components/ui/pixel-agent'
 import type {
   AgentInfo,
   AgentMcpToolRef,
@@ -55,6 +56,8 @@ function rowToAgent(r: AgentInfoRow): AgentInfo {
   return {
     id: r.id,
     logo: r.logo ?? undefined,
+    // 形象配置：NULL=从未用形象设计生成过（或仅历史上传）；坏 JSON 归一化为默认（走 logo 回退展示）
+    appearance: r.appearance ? normalizeAppearance(safeParse<unknown>(r.appearance, null)) : undefined,
     scenario: r.scenario ?? undefined,
     name: r.name,
     identifier: r.identifier,
@@ -246,6 +249,7 @@ export async function upsertAgent(input: AgentUpsertInput): Promise<AgentInfo[]>
     const next: AgentInfo = {
       id,
       logo: input.logo,
+      appearance: input.appearance,
       scenario: input.scenario,
       name: input.name,
       identifier: input.identifier,
@@ -319,12 +323,13 @@ export async function upsertAgent(input: AgentUpsertInput): Promise<AgentInfo[]>
   const db = await getDb()
   await db.execute(
     `INSERT INTO agent_info
-       (id, logo, scenario, name, identifier, description, system_prompt, welcome_message,
+       (id, logo, appearance, scenario, name, identifier, description, system_prompt, welcome_message,
         llm_id, llm_config, tts_id, tts_config, stt_id, stt_config,
         is_active, auto_tool_exec_mode, allow_sandbox, memory_mode, plan_auto_approve_mode, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET
         logo                = excluded.logo,
+        appearance          = excluded.appearance,
         scenario            = excluded.scenario,
         name                = excluded.name,
         identifier          = excluded.identifier,
@@ -346,6 +351,8 @@ export async function upsertAgent(input: AgentUpsertInput): Promise<AgentInfo[]>
     [
       id,
       input.logo ?? null,
+      // 形象配置 JSON；未生成过存 NULL（保留「仅历史上传」语义，避免空对象覆盖）
+      input.appearance ? JSON.stringify(input.appearance) : null,
       input.scenario ?? null,
       input.name,
       input.identifier,

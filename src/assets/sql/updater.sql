@@ -396,3 +396,7 @@ CREATE TABLE IF NOT EXISTS plugin_run_log
 CREATE INDEX IF NOT EXISTS idx_plugin_run_log_plugin ON plugin_run_log (plugin_id, created_at DESC);
 
 -- ============================================================
+-- ---------- v24：agent_info 新增 appearance（Pixel Agent 形象设计配置 JSON） ----------
+-- 形象设计弹窗的再编辑源：保存形象时生成 PNG dataURL 写 logo（展示源），结构化配置写本列。
+-- NULL = 从未使用形象设计生成过（或仅历史上传头像）。
+ALTER TABLE agent_info ADD COLUMN appearance TEXT;
