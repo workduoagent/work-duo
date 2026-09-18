@@ -121,6 +121,38 @@ pub struct VectorHit {
     pub score: f32,
 }
 
+/// `artifacts` 表一行：L2 `.wd_mem/artifacts` 分节片段（#20260918006）。
+/// 与 memories 不同——内容权威就在 Lance（无 SQLite 对应表），检索结果直接取列。
+/// id = `{path}#{section_index}`；content_digest = 文件级摘要（同文件各节共享，
+/// 用于「digest 未变跳过重嵌」的增量判定）。
+#[derive(Debug, Clone)]
+pub struct ArtifactVectorRow {
+    pub id: String,
+    /// 隔离键：工程绑定的工作空间路径（同 workspace 多 agent 共享知识资产）。
+    pub project_id: String,
+    /// `.wd_mem` 下相对路径（如 `.wd_mem/artifacts/auth-flow.md`）。
+    pub path: String,
+    /// 分节标题（无标题文件 = None）。
+    pub heading: Option<String>,
+    pub content: String,
+    pub content_digest: String,
+    pub embedding: Option<Vec<f32>>,
+    pub embedding_model: Option<String>,
+    pub updated_at: i64,
+}
+
+/// artifacts 检索命中：id/距离之外直接带内容列（Lance 内联，无需回查元数据）。
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ArtifactHit {
+    pub id: String,
+    pub path: String,
+    pub heading: Option<String>,
+    pub content: String,
+    /// LanceDB `_distance`（越小越相似）
+    pub score: f32,
+}
+
 /* ---------------- 实现 ---------------- */
 
 pub struct LanceDbVectorStore {
@@ -321,6 +353,186 @@ impl LanceDbVectorStore {
             .await
             .map(|_| ())
             .map_err(|e| format!("LanceDB 删除失败：{e}"))
+    }
+
+    /// upsert `artifacts`（按 id merge：`{path}#{section_index}` 幂等）。
+    pub async fn upsert_artifacts(&self, rows: &[ArtifactVectorRow]) -> Result<(), String> {
+        let Some(dim) = rows.iter().find_map(|r| r.embedding.as_ref().map(|v| v.len())) else {
+            return Ok(()); // 全部无向量：无内容可写，跳过
+        };
+        self.ensure_table(VectorTable::Artifacts, dim).await?;
+        let table = self.table_ref(VectorTable::Artifacts).await?;
+
+        let mut flat: Vec<f32> = Vec::with_capacity(rows.len() * dim);
+        let mut nulls: Vec<bool> = Vec::with_capacity(rows.len());
+        for r in rows {
+            match &r.embedding {
+                Some(v) if v.len() == dim => {
+                    flat.extend_from_slice(v);
+                    nulls.push(true);
+                }
+                _ => {
+                    flat.extend(std::iter::repeat(0.0f32).take(dim));
+                    nulls.push(false);
+                }
+            }
+        }
+        let values = Float32Array::from(flat);
+        let embedding = FixedSizeListArray::new(
+            Arc::new(Field::new("item", DataType::Float32, true)),
+            dim as i32,
+            Arc::new(values),
+            Some(NullBuffer::from(nulls)),
+        );
+
+        let batch = RecordBatch::try_new(
+            schema_for(VectorTable::Artifacts, dim),
+            vec![
+                Arc::new(StringArray::from(
+                    rows.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(),
+                )),
+                Arc::new(StringArray::from(
+                    rows.iter().map(|r| r.project_id.as_str()).collect::<Vec<_>>(),
+                )),
+                Arc::new(StringArray::from(
+                    rows.iter().map(|r| r.path.as_str()).collect::<Vec<_>>(),
+                )),
+                Arc::new(StringArray::from(
+                    rows.iter().map(|r| r.heading.as_deref()).collect::<Vec<_>>(),
+                )),
+                Arc::new(StringArray::from(
+                    rows.iter().map(|r| r.content.as_str()).collect::<Vec<_>>(),
+                )),
+                Arc::new(StringArray::from(
+                    rows.iter()
+                        .map(|r| r.content_digest.as_str())
+                        .collect::<Vec<_>>(),
+                )),
+                Arc::new(embedding),
+                Arc::new(StringArray::from(
+                    rows.iter()
+                        .map(|r| r.embedding_model.as_deref())
+                        .collect::<Vec<_>>(),
+                )),
+                Arc::new(Int64Array::from(
+                    rows.iter().map(|r| r.updated_at).collect::<Vec<_>>(),
+                )),
+            ],
+        )
+        .map_err(|e| format!("构建 artifacts 记录批失败：{e}"))?;
+
+        let schema = batch.schema();
+        let reader = arrow_array::RecordBatchIterator::new(vec![Ok(batch)], schema);
+        let mut merge = table.merge_insert(&["id"]);
+        merge
+            .when_matched_update_all(None)
+            .when_not_matched_insert_all();
+        merge
+            .execute(Box::new(reader))
+            .await
+            .map_err(|e| format!("LanceDB upsert artifacts 失败：{e}"))?;
+        Ok(())
+    }
+
+    /// artifacts 向量检索：标量谓词（project_id）先滤再向量；返回内容列（Lance 内联）。
+    pub async fn search_artifacts(
+        &self,
+        query: &[f32],
+        filter: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<ArtifactHit>, String> {
+        let table = self.table_ref(VectorTable::Artifacts).await?;
+        let mut vq = table
+            .query()
+            .nearest_to(query.to_vec())
+            .map_err(|e| format!("构建向量查询失败：{e}"))?;
+        if let Some(f) = filter {
+            vq = vq.only_if(f);
+        }
+        let batches = vq
+            .limit(limit)
+            .execute()
+            .await
+            .map_err(|e| format!("LanceDB artifacts 检索失败：{e}"))?;
+
+        let mut hits = Vec::new();
+        use futures_util::StreamExt;
+        let mut stream = batches;
+        while let Some(batch) = stream.next().await {
+            let batch = batch.map_err(|e| format!("读取检索结果失败：{e}"))?;
+            let col_str = |name: &str| -> Option<Vec<Option<String>>> {
+                batch
+                    .column_by_name(name)
+                    .and_then(|c| c.as_any().downcast_ref::<StringArray>())
+                    .map(|a| {
+                        // heading 等列可空：null 必须显式判（StringArray::value 对 null 行是未定义行为）
+                        (0..a.len())
+                            .map(|i| (!a.is_null(i)).then(|| a.value(i).to_string()))
+                            .collect()
+                    })
+            };
+            let ids = col_str("id").ok_or("检索结果缺 id 列")?;
+            let paths = col_str("path").ok_or("检索结果缺 path 列")?;
+            let headings = col_str("heading");
+            let contents = col_str("content").ok_or("检索结果缺 content 列")?;
+            let dist = batch
+                .column_by_name("_distance")
+                .and_then(|c| c.as_any().downcast_ref::<Float32Array>())
+                .map(|a| a.values().to_vec());
+            for i in 0..ids.len() {
+                let score = dist
+                    .as_ref()
+                    .and_then(|d| d.get(i).copied())
+                    .unwrap_or(f32::MAX);
+                hits.push(ArtifactHit {
+                    // col_str 产 Vec<Option<String>>（null 列显式 None）：get(i).cloned() 得
+                    // Option<Option<String>>，flatten 后 unwrap_or_default 回落到空串。
+                    id: ids.get(i).cloned().flatten().unwrap_or_default(),
+                    path: paths.get(i).cloned().flatten().unwrap_or_default(),
+                    heading: headings.as_ref().and_then(|h| h.get(i).cloned()).flatten(),
+                    content: contents.get(i).cloned().flatten().unwrap_or_default(),
+                    score,
+                });
+            }
+        }
+        Ok(hits)
+    }
+
+    /// 无向量条件查询：取命中过滤条件的任意一行 `content_digest`。
+    /// artifacts 按文件级 digest 增量：所有节共享同一文件 digest，取一行即知整文件是否变更。
+    /// 表不存在 / 无命中 = Ok(None)（调用方据此走全量写入路径，表由 upsert 惰性创建）。
+    pub async fn query_artifact_file_digest(
+        &self,
+        filter: &str,
+    ) -> Result<Option<String>, String> {
+        // 先查表存在性：新库 / 首次索引时 artifacts 表尚不存在，必须视为 Ok(None)
+        // 走全量写入（此前直接 open 表返回 Err，导致首次归档索引链整体断裂——006 真机首测实锤）。
+        let names = self.table_names().await?;
+        if !names.iter().any(|n| n == VectorTable::Artifacts.name()) {
+            return Ok(None);
+        }
+        let table = self.table_ref(VectorTable::Artifacts).await?;
+        let batches = table
+            .query()
+            .only_if(filter)
+            .limit(1)
+            .execute()
+            .await
+            .map_err(|e| format!("LanceDB artifacts digest 查询失败：{e}"))?;
+        use futures_util::StreamExt;
+        let mut stream = batches;
+        while let Some(batch) = stream.next().await {
+            let batch = batch.map_err(|e| format!("读取 digest 查询结果失败：{e}"))?;
+            if batch.num_rows() == 0 {
+                continue;
+            }
+            let digest = batch
+                .column_by_name("content_digest")
+                .and_then(|c| c.as_any().downcast_ref::<StringArray>())
+                .and_then(|a| (a.len() > 0).then(|| a.value(0).to_string()));
+            return Ok(digest);
+        }
+        Ok(None)
     }
 
     /// 通用按谓词删除（表内全量清理 / 级联删除用）。

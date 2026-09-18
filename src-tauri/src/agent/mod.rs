@@ -17,6 +17,7 @@
 
 pub mod approval;
 pub mod artifacts;
+pub mod artifact_index;
 pub mod choice;
 pub mod commands;
 pub mod context;

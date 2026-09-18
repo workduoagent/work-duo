@@ -396,7 +396,10 @@ impl AgentTool for ReadFileTool {
 
 /* ----------------------------- write_file ----------------------------- */
 
-pub struct WriteFileTool;
+pub struct WriteFileTool {
+    /// 应用句柄（#20260918006：写 .wd_mem/artifacts/*.md 后异步索引用）。
+    pub app: AppHandle,
+}
 
 #[async_trait]
 impl AgentTool for WriteFileTool {
@@ -505,6 +508,19 @@ impl AgentTool for WriteFileTool {
                     content.len(),
                     started.elapsed().as_millis()
                 );
+                // #20260918006：写 .wd_mem/artifacts/*.md 视为知识归档，异步索引进 LanceDB
+                // （与 archive_artifact 同管道；digest 未变自动跳过）。fire-and-forget。
+                if let Some(ws) = &ctx.workspace {
+                    let ws_lossy = ws.to_string_lossy().to_string();
+                    if is_artifacts_md_rel(path) {
+                        super::artifact_index::spawn_artifact_index_sync(
+                            self.app.clone(),
+                            ws_lossy,
+                            path.to_string(),
+                            content.to_string(),
+                        );
+                    }
+                }
                 Ok(format!("已写入 {} 字节到 {}", content.len(), abs.display()))
             }
             Err(e) => {
@@ -522,10 +538,21 @@ impl AgentTool for WriteFileTool {
 
 /* ----------------------------- archive_artifact（长期记忆固化闭环） ----------------------------- */
 
+/// 判断相对路径是否为 `.wd_mem/artifacts/` 下的 Markdown 文件（#20260918006 向量索引范围）。
+/// 宽松匹配：不区分大小写、容忍正反斜杠；仅 .md 纳入（分节切块器面向 Markdown）。
+fn is_artifacts_md_rel(rel: &str) -> bool {
+    let norm = rel.replace('\\', "/");
+    let lower = norm.to_lowercase();
+    lower.starts_with(".wd_mem/artifacts/") && lower.ends_with(".md")
+}
+
 /// 归档工具：把本次任务沉淀的「设计蓝图 / 架构约定 / 避坑法则」写入 `.wd_mem/artifacts/{name}.md`，
 /// 构成长期记忆（语义记忆）的主动沉淀闭环。需用户审批；路径经 `PathGuard` 校验 + TOCTOU 句柄复核，
 /// 确保不逃逸工作空间。
-pub struct ArchiveArtifactTool;
+pub struct ArchiveArtifactTool {
+    /// 应用句柄（#20260918006：归档成功后异步索引进 LanceDB artifacts 用）。
+    pub app: AppHandle,
+}
 
 #[async_trait]
 impl AgentTool for ArchiveArtifactTool {
@@ -647,6 +674,16 @@ impl AgentTool for ArchiveArtifactTool {
                     content.len(),
                     started.elapsed().as_millis()
                 );
+                // #20260918006：归档成功后异步索引进 LanceDB artifacts（分节切块 → embed →
+                // upsert；digest 未变跳过）。fire-and-forget，失败仅日志不影响归档结果。
+                if let Some(ws) = &ctx.workspace {
+                    super::artifact_index::spawn_artifact_index_sync(
+                        self.app.clone(),
+                        ws.to_string_lossy().to_string(),
+                        rel.clone(),
+                        content.to_string(),
+                    );
+                }
                 Ok(format!(
                     "已归档 {} 字节到 .wd_mem/artifacts/{}",
                     content.len(),
@@ -734,7 +771,10 @@ impl AgentTool for AnchorMemoryTool {
 
 /* ----------------------------- edit_file ----------------------------- */
 
-pub struct EditFileTool;
+pub struct EditFileTool {
+    /// 应用句柄（#20260918006：编辑 .wd_mem/artifacts/*.md 后异步索引用）。
+    pub app: AppHandle,
+}
 
 #[async_trait]
 impl AgentTool for EditFileTool {
@@ -887,6 +927,19 @@ impl AgentTool for EditFileTool {
                     updated_bytes,
                     started.elapsed().as_millis()
                 );
+                // #20260918006：编辑 .wd_mem/artifacts/*.md 同样触发异步索引（与 write_file
+                // 同管道；digest 未变自动跳过，变了删旧分节重写）。fire-and-forget。
+                if let Some(ws) = &ctx.workspace {
+                    let ws_lossy = ws.to_string_lossy().to_string();
+                    if is_artifacts_md_rel(path) {
+                        super::artifact_index::spawn_artifact_index_sync(
+                            self.app.clone(),
+                            ws_lossy,
+                            path.to_string(),
+                            updated,
+                        );
+                    }
+                }
                 Ok(format!("已在 {} 完成 1 处替换", abs.display()))
             }
             Err(e) => {
@@ -3064,14 +3117,14 @@ fn is_post_completion_recommendation(graph: &KnowledgeGraph, session_id: &str) -
 
 pub fn register_native_tools(registry: &mut ToolRegistry, app: &AppHandle, sandbox_enabled: bool, memory_mode: &str) {
     registry.register(Arc::new(ReadFileTool));
-    registry.register(Arc::new(WriteFileTool));
-    registry.register(Arc::new(ArchiveArtifactTool));
+    registry.register(Arc::new(WriteFileTool { app: app.clone() }));
+    registry.register(Arc::new(ArchiveArtifactTool { app: app.clone() }));
     // 记忆锚定工具仅在记忆模式非 off 时注册：off 模式既不放提示引导、也不注册工具，
     // 与能力层单一事实源原则一致（提示与能力必须同源，否则模型会绕过）。
     if memory_mode != "off" {
         registry.register(Arc::new(AnchorMemoryTool { app: app.clone() }));
     }
-    registry.register(Arc::new(EditFileTool));
+    registry.register(Arc::new(EditFileTool { app: app.clone() }));
     registry.register(Arc::new(ListDirectoryTool));
     // 存在性闭环前置工具：始终注册（ReadSafe），供模型在 read/write/edit/list 前显式判断路径类型，
     // 同时这些工具内部也已 bake probe_path 强制前置校验，双保险。

@@ -1437,6 +1437,36 @@ category 取值：decision（决策）/ code_pattern（代码模式）/ user_pre
         }
     }
 
+    // L2 项目知识片段注入（#20260918006）：按本轮 prompt 向量检索 .wd_mem/artifacts
+    // 分节片段 top-k（隔离键 = 工作空间路径，同工程多 agent 共享）。与「文件名清单 +
+    // MEMORY.md 全量注入」既有通道叠加；嵌入未配置 / 无命中 / 检索失败 = 静默跳过，
+    // 绝不阻断任务启动。与记忆宫殿解耦：off 模式仍注入（知识资产 ≠ agent 记忆）。
+    if session_id.is_some() {
+        if let Some(ws) = workspace.as_deref() {
+            if let Some(pr) = prompt.as_deref() {
+                if !pr.trim().is_empty() {
+                    match crate::agent::artifact_index::recall_artifact_snippets(
+                        app, &pool, ws, pr, crate::agent::artifact_index::RECALL_SNIPPET_TOP_K,
+                    )
+                    .await
+                    {
+                        Ok(block) if !block.is_empty() => {
+                            system_prompt.push_str("\n\n");
+                            system_prompt.push_str(&block);
+                            tracing::info!(
+                                "[agent] load_config: 已注入 .wd_mem/artifacts 相关知识片段"
+                            );
+                        }
+                        Ok(_) => {}
+                        Err(e) => {
+                            tracing::info!("[agent] load_config: artifacts 片段检索跳过：{e}")
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // HTTP 请求主机白名单（app_config.http_allowed_hosts）：空 = 不限制；非空 = 仅允许命中主机（含子域）。
     let http_allowed_hosts = {
         let row = sqlx::query("SELECT value FROM app_config WHERE key = 'http_allowed_hosts'")
