@@ -27,6 +27,8 @@ import {
   Layers,
   Quote,
   Sparkles,
+  Loader2,
+  DatabaseZap,
 } from 'lucide-react'
 import { Button, Card, Input, Modal } from '@/components/ui'
 import { useNotify } from '@/components/ui/notify'
@@ -42,6 +44,28 @@ import {
   Input as AntInput,
 } from 'antd'
 import { isTauri } from '@/core/config'
+
+/** 语义召回状态（vector_status 命令返回，camelCase）。 */
+interface VectorEmbeddingCfg {
+  modelName: string
+  dimsHint?: number | null
+  protocol: string
+}
+interface VectorStatus {
+  path: string
+  connected: boolean
+  tables: string[]
+  embedding: VectorEmbeddingCfg | null
+  stats: { calls: number; texts: number }
+}
+/** 向量回填进度事件载荷（agent-memory-backfill）。 */
+interface BackfillProgress {
+  done: number
+  total: number
+  ok: number
+  failed: number
+  finished: boolean
+}
 import type {
   MemoryItem,
   MemoryCategory,
@@ -205,6 +229,39 @@ export default function MemoryPalace() {
     category: 'other',
   })
   const [compactions, setCompactions] = useState<ContextCompactedPayload[]>([])
+  // 语义召回状态（#20260918004）：vector_status 快照 + 回填进度
+  const [vecStatus, setVecStatus] = useState<VectorStatus | null>(null)
+  const [backfilling, setBackfilling] = useState(false)
+  const [progress, setProgress] = useState<BackfillProgress | null>(null)
+
+  const loadVectorStatus = useCallback(async () => {
+    if (!isTauri) return
+    try {
+      setVecStatus(await invoke<VectorStatus>('vector_status', {}))
+    } catch {
+      /* 状态条非关键路径，失败静默（保持上次快照） */
+    }
+  }, [])
+
+  const runBackfill = useCallback(async () => {
+    if (!isTauri || backfilling) return
+    setBackfilling(true)
+    setProgress(null)
+    try {
+      const r = await invoke<{ total: number; ok: number; failed: number; finished: boolean }>(
+        'backfill_memory_vectors',
+        {},
+      )
+      if (r.total === 0) message.info('暂无存量记忆需要回填')
+      else if (r.failed > 0) message.warning(`回填完成：成功 ${r.ok} 条，失败 ${r.failed} 条（详见日志）`)
+      else message.success(`回填完成：${r.ok} 条记忆已全部向量化`)
+    } catch (e) {
+      message.error(`回填失败：${typeof e === 'string' ? e : '未知错误'}`)
+    } finally {
+      setBackfilling(false)
+      void loadVectorStatus()
+    }
+  }, [backfilling, isTauri, loadVectorStatus, message])
 
   const loadAll = useCallback(async () => {
     setLoading(true)
@@ -233,6 +290,7 @@ export default function MemoryPalace() {
     let offRecall: UnlistenFn | undefined
     let offAnchored: UnlistenFn | undefined
     let offCompact: UnlistenFn | undefined
+    let offBackfill: UnlistenFn | undefined
     let alive = true
     void (async () => {
       offRecall = await listen<MemoryRecalledPayload>('agent-memory-recalled', (ev) => {
@@ -252,19 +310,25 @@ export default function MemoryPalace() {
       offCompact = await listen<ContextCompactedPayload>('agent-context-compacted', (ev) => {
         setCompactions((prev) => [ev.payload, ...prev].slice(0, 8))
       })
+      // 向量回填进度（逐批推送，finished=true 收尾）
+      offBackfill = await listen<BackfillProgress>('agent-memory-backfill', (ev) => {
+        setProgress(ev.payload)
+      })
     })()
     return () => {
       alive = false
       offRecall?.()
       offAnchored?.()
       offCompact?.()
+      offBackfill?.()
       void alive
     }
   }, [isTauri])
 
   useEffect(() => {
     void loadAll()
-  }, [loadAll])
+    void loadVectorStatus()
+  }, [loadAll, loadVectorStatus])
 
   const filtered = useMemo(() => {
     const kw = keyword.trim().toLowerCase()
@@ -386,6 +450,63 @@ export default function MemoryPalace() {
         </div>
       </header>
 
+      {/* 语义召回状态条（#20260918004）：能力状态 + 向量库健康 + 嵌入统计 + 存量回填 */}
+      <div className="mp__recall" data-on={vecStatus?.embedding ? '1' : '0'}>
+        <div className="mp__recall-cell">
+          {vecStatus?.embedding ? (
+            <Tag color="green">语义召回已启用</Tag>
+          ) : (
+            <Tag>未配置 · 关键词召回模式</Tag>
+          )}
+          {vecStatus?.embedding && (
+            <span className="mp__recall-meta">
+              {vecStatus.embedding.modelName}
+              {vecStatus.embedding.dimsHint ? ` · ${vecStatus.embedding.dimsHint} 维` : ''}
+            </span>
+          )}
+        </div>
+        <div className="mp__recall-cell">
+          <span
+            className={`mp__recall-dot${vecStatus?.connected ? ' is-ok' : ''}`}
+            title={vecStatus?.connected ? 'LanceDB 已连接' : 'LanceDB 未连接（检索降级关键词）'}
+          />
+          <span className="mp__recall-meta" title={vecStatus?.path}>
+            向量库{vecStatus?.connected ? '已连接' : '未连接'}（{vecStatus?.tables.length ?? 0} 表）
+          </span>
+          <span className="mp__recall-meta">
+            嵌入 {vecStatus?.stats.calls ?? 0} 次 / {vecStatus?.stats.texts ?? 0} 条
+          </span>
+        </div>
+        <div className="mp__recall-cell mp__recall-cell--end">
+          {backfilling && progress && progress.total > 0 && (
+            <span className="mp__recall-bar">
+              <span
+                className="mp__recall-bar__fill"
+                style={{ width: `${Math.min(100, Math.round((progress.done / progress.total) * 100))}%` }}
+              />
+            </span>
+          )}
+          <span className="mp__recall-meta">
+            {backfilling
+              ? progress?.total
+                ? `回填中 ${progress.done}/${progress.total}`
+                : '回填中…'
+              : `存量 ${memories.length} 条`}
+          </span>
+          <Tooltip title={vecStatus?.embedding ? '把全部存量记忆批量向量化（换模型后重算也用此按钮）' : '先在 LLM 模块配置「向量模型」后再回填'}>
+            <Button
+              variant="soft"
+              size="sm"
+              disabled={!vecStatus?.embedding || backfilling}
+              onClick={() => void runBackfill()}
+            >
+              {backfilling ? <Loader2 size={14} className="mp-spin" /> : <DatabaseZap size={14} />}
+              回填向量
+            </Button>
+          </Tooltip>
+        </div>
+      </div>
+
       <div className="mp__layout">
         {/* 主区：搜索 + 卡片网格 */}
         <div className="mp__main">
@@ -427,7 +548,11 @@ export default function MemoryPalace() {
                     <h3 className="mp-grid-item__title" title={m.key}>
                       {m.key}
                     </h3>
-                    <p className="mp-grid-item__content">{m.content}</p>
+                    {/* 换行折叠为空格再交给 line-clamp 截断：原文含「路径。\n1) 列表」时，
+                        直接截断会把路径+编号切成半行，视觉上像渲染报错（真机 2026-09-18 反馈）。 */}
+                    <p className="mp-grid-item__content" title={m.content}>
+                      {m.content.replace(/\s*\n+\s*/g, ' ')}
+                    </p>
 
                     <div className="mp-grid-item__footer">
                       <Tooltip title="引用次数">

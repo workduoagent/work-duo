@@ -54,6 +54,83 @@
   flex: 0 0 auto;
 }
 
+/* ---------------- 语义召回状态条（#20260918004） ---------------- */
+.mp__recall {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  flex-wrap: wrap;
+  padding: 10px 14px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-background-soft, var(--color-background));
+
+  &[data-on='1'] {
+    border-color: var(--color-success-border, var(--color-border));
+  }
+}
+
+.mp__recall-cell {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+
+  &--end {
+    margin-left: auto;
+    flex: 0 0 auto;
+  }
+}
+
+.mp__recall-meta {
+  color: var(--color-foreground-muted);
+  font-size: 0.8125rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 320px;
+}
+
+.mp__recall-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-border-strong);
+  flex: 0 0 auto;
+
+  &.is-ok {
+    background: var(--color-success);
+    box-shadow: 0 0 0 3px var(--color-success-bg, transparent);
+  }
+}
+
+.mp__recall-bar {
+  display: inline-block;
+  width: 140px;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--color-border);
+  overflow: hidden;
+
+  &__fill {
+    display: block;
+    height: 100%;
+    border-radius: 3px;
+    background: var(--color-brand-600);
+    transition: width 0.25s ease;
+  }
+}
+
+.mp-spin {
+  animation: mp-rotate 0.9s linear infinite;
+}
+
+@keyframes mp-rotate {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+
 /* ---------------- 主区 + 侧栏 两栏 ---------------- */
 .mp__layout {
   display: grid;

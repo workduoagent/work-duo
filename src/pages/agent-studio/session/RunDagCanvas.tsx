@@ -548,12 +548,14 @@ function DagFlow({
   const wrapRef = useRef<HTMLDivElement>(null)
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; step: number } | null>(null)
 
-  // 仅在「节点/边数量」变化时自动 fit（运行中状态变化不重置视图）；结构稳定则保留用户平移/缩放
-  const structSig = `${nodes.length}x${edges.length}`
+  // 仅在「规划步骤数」变化时自动 fit（新步骤展开时总览一次）；工具节点追加（含重试批次）
+  // 不再触发——真机 2026-09-18：每个工具调用都 fit 一次，执行期画布每隔几秒被拉回全景，
+  // 用户正在查看的节点被强行带走（表现为「图被重置」）。运行中保持用户当前视口。
+  const planSig = planSteps.length
   useEffect(() => {
     const t = setTimeout(() => fitView({ padding: 0.18, duration: 280 }), 80)
     return () => clearTimeout(t)
-  }, [structSig, fitView])
+  }, [planSig, fitView])
 
   const onNodeClick = useCallback(
     (_: unknown, node: Node) => {

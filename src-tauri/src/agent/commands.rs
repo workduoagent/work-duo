@@ -127,6 +127,7 @@ pub async fn run_agent_task(
         input.disabled_plugin_ids.clone(),
         input.enabled_plugin_ids.clone(),
         input.attachments.clone(),
+        Some(input.prompt.clone()),
     )
     .await?;
 
@@ -557,6 +558,7 @@ pub async fn branch_from_step(app: AppHandle, input: BranchFromStepInput) -> Res
         None, // disabled_plugin_ids：分支规划阶段不剔除插件
         None, // enabled_plugin_ids：分支规划阶段不临时并入插件
         None, // attachments：分支规划阶段不携带附件
+        None, // prompt：分支规划无 session，记忆召回保持 ref_count 序
     )
     .await?;
 
@@ -757,7 +759,7 @@ fn guess_mime(ext: &str) -> String {
 ///
 /// 注：tauri-plugin-sql 2.x 的 `DbPool::select` 为 `pub(crate)`，外部 crate 不可直接调用，
 /// 因此这里经插件托管的 `DbInstances` 取出 `sqlite::Pool`，改用 sqlx 直查。
-async fn load_config(
+pub async fn load_config(
     app: &AppHandle,
     agent_id: &str,
     workspace: Option<String>,
@@ -771,6 +773,9 @@ async fn load_config(
     disabled_plugin_ids: Option<Vec<String>>,
     enabled_plugin_ids: Option<Vec<String>>,
     attachments: Option<Vec<crate::agent::types::AttachmentInput>>,
+    // 本轮用户 prompt（M1 语义召回）：Some 时记忆召回先走向量检索、失败自动落关键词链；
+    // None（分支规划/squad 装配等内部调用或无 session 场景）保持 ref_count 序，行为不变。
+    prompt: Option<String>,
 ) -> Result<AgentRuntimeConfig, String> {
     let instances = app.state::<DbInstances>();
     let guard = instances.0.read().await;
@@ -1404,8 +1409,11 @@ async fn load_config(
 
     // 记忆宫殿：自动召回 top-K 记忆注入系统提示（引用计数随运行累计，驱动热力图）。
     // 仅在真实任务运行（有 session_id）且记忆模式非 off 时召回；off 模式不读记忆库。
+    // M1：传本轮 prompt——嵌入已配置时先走向量语义召回，失败/未配置自动落关键词降级链。
     if session_id.is_some() && memory_mode != "off" {
-        let (recalled, block) = memory::recall_top_memories(app, Some(agent_id), memory::recall_top(), None).await;
+        let (recalled, block) =
+            memory::recall_top_memories(app, Some(agent_id), memory::recall_top(), prompt.as_deref())
+                .await;
         if !block.is_empty() {
             system_prompt.push_str("\n\n");
             system_prompt.push_str(&block);
@@ -1577,6 +1585,7 @@ pub async fn load_squad(app: &AppHandle, squad_id: &str) -> Result<SquadRuntimeC
             None, // disabled_plugin_ids
             None, // enabled_plugin_ids
             None, // attachments
+            None, // prompt：squad 装配无 session，记忆召回保持 ref_count 序
         )
         .await?;
 

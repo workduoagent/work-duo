@@ -574,7 +574,22 @@ impl KnowledgeGraph {
                 }
             }
         }
-        ctx.prior_summary = parts.join("\n");
+        // 烧钱护栏（2026-09-18 审计）：prior_summary 会进入后续每一步的每一轮 LLM 请求，
+        // 步骤多 / 摘要长时线性膨胀。保尾部裁剪（越靠后的步骤摘要对当前步越重要），
+        // 超限截头并注明省略，防止 context 无谓消耗。
+        const PRIOR_SUMMARY_MAX_CHARS: usize = 6000;
+        let joined = parts.join("\n");
+        ctx.prior_summary = if joined.chars().count() > PRIOR_SUMMARY_MAX_CHARS {
+            let tail: String = {
+                let skip = joined.chars().count() - PRIOR_SUMMARY_MAX_CHARS;
+                joined.chars().skip(skip).collect()
+            };
+            // 避免从字符中段截断语义：丢掉首行残片
+            let tail = tail.split_once('\n').map(|(_, r)| r).unwrap_or(&tail).to_string();
+            format!("（更早步骤摘要已省略）\n{tail}")
+        } else {
+            joined
+        };
         ctx.guidance = node
             .props
             .get("guidance")

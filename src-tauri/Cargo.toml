@@ -43,4 +43,12 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing-appender = "0.2"
 # zip 读写（含 deflate 压缩，自带 flate2，无需单独引入）；首梯队原生工具 zip_create / zip_extract 依赖。
 zip = "2"
+# 统一向量存储（记忆系统 v2）：嵌入式 LanceDB。
+# 注意：0.38/0.39 上游 bug —— Error::Http 变体在 `remote` feature 门内，而 job.rs
+# 无条件引用 → 默认 features 编不过，必须启用 remote（上游修复后可移除）。
+lancedb = { version = "0.38.0", features = ["remote"] }
+arrow = "58"
+arrow-array = "58"
+arrow-schema = "58"
+arrow-buffer = "58"
 

@@ -30,11 +30,15 @@ const WEAK_TASK_HINTS: &[&str] = &[
 ];
 
 /// 高风险信号关键词（命中即视为 HIGH 风险，强制走人工审批，哪怕开启自动执行）。
+/// 2026-09-18 误伤收窄：原表含「覆盖/改名/移除/删除/格式化/部署/发布/上线」等
+/// 高频技术词（子串匹配），「list 被 override 覆盖」「删除重复行」「格式化字符串」
+/// 这类正常开发表述全部被误判 HIGH → 敏感工具逐个弹审批卡（实测一次任务弹 13 次）。
+/// 现只保留**低误伤、高置信**的破坏性组合词；其余风险交由 LLM 分类与工具级审批兜底。
 const RISK_HINTS: &[&str] = &[
-    "删除", "移除", "卸载", "清空", "格式化", "重启", "kill", "杀进程", "改名", "覆盖",
-    "授权", "提权", "改密码", "部署", "上线", "发布", "付款", "转账", "删除文件", "格式化磁盘",
-    "delete", "remove", "uninstall", "purge", "format", "drop", "truncate", "rm -rf",
-    "reboot", "shutdown", "deploy", "publish", "payment", "transfer",
+    "删除文件", "删除目录", "删除数据库", "删除整个", "格式化磁盘", "格式化硬盘",
+    "清空数据库", "清空目录", "清空磁盘", "清空全部", "rm -rf", "drop table",
+    "drop database", "truncate table", "reboot", "shutdown", "杀进程", "kill -9",
+    "卸载系统", "改密码", "提权", "付款", "转账", "关机",
 ];
 
 /// 意图分类入口：规则短路优先，灰色地带走 LLM 轻量分类。
@@ -189,4 +193,33 @@ fn extract_json_str(s: &str) -> &str {
 
 fn parse_intent_json(s: &str) -> Option<IntentProfile> {
     serde_json::from_str(extract_json_str(s)).ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 误伤回归（2026-09-18 外部评审链）：正常开发表述不得判 HIGH——
+    /// 此前「覆盖/删除/格式化/移除」子串误伤，导致 auto_exec 被强制覆盖、敏感工具逐个弹卡。
+    #[test]
+    fn risk_hints_not_triggered_by_common_dev_phrases() {
+        assert!(!has_risk_hint(
+            "list 和标量直接以 override 整体覆盖；断言嵌套 dict 合并正确、list 被 override 覆盖"
+        ));
+        assert!(!has_risk_hint("删除重复行与空行，清理格式化字符串占位符"));
+        assert!(!has_risk_hint("删除 __pycache__ 目录后重跑测试"));
+        assert!(!has_risk_hint("发布前先跑 deploy 脚本的 dry-run（不实际上线）"));
+        assert!(!has_risk_hint("remove duplicates from the list"));
+    }
+
+    /// 真破坏性表述必须命中（强制人工审批的设计语义保留）。
+    #[test]
+    fn risk_hints_still_catch_destructive_phrases() {
+        assert!(has_risk_hint("rm -rf C:\\WorkDuoTest"));
+        assert!(has_risk_hint("格式化磁盘后重装系统"));
+        assert!(has_risk_hint("drop table users"));
+        assert!(has_risk_hint("清空数据库重新导入"));
+        assert!(has_risk_hint("删除文件后再重建"));
+        assert!(has_risk_hint("帮我重启服务器 reboot"));
+    }
 }

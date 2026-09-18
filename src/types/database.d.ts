@@ -352,6 +352,8 @@ export interface AgentConversationRoundRow {
   updated_at: number
   /** 原始消息序列（含多模态图片 dataUrl），历史回显附件卡片用。 */
   raw_messages_json: string | null
+  /** 交错时间线 JSON（v26，ChatSegment[]）：旁白/工具/正文按真实时序；NULL=旧 round 回退旧渲染。 */
+  segments_json: string | null
 }
 
 /** MCP 工具定义表（mcp_tool_definition）行映射。

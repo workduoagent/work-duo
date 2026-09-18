@@ -457,11 +457,23 @@ impl AgentRuntime {
         if cfg.memory_mode == "forced" && result.success {
             // M0 输入增强：final_text 面向用户只含「已生成/更新 X」模板行（产物型步骤的
             // summary 被去 AI 味规则丢弃），提炼器无米下锅 → 追加各步 summary 作提炼素材。
-            let mut settle_input = result.final_text.clone();
+            // 烧钱护栏（2026-09-18 审计）：长任务步骤多/摘要长时全量拼接会顶高这次单发调用的
+            // input——提炼记忆不需要逐字全文，各段裁剪到够提炼即可。
+            let mut settle_input = crate::agent::runtime::clip(result.final_text.trim(), 4000);
             if !result.step_summaries.is_empty() {
                 settle_input.push_str("\n\n各步骤产出详情：\n");
                 for (i, s) in result.step_summaries.iter().enumerate() {
-                    settle_input.push_str(&format!("{}. {}\n", i + 1, s));
+                    settle_input.push_str(&format!("{}. {}\n", i + 1, crate::agent::runtime::clip(s.trim(), 600)));
+                }
+            }
+            // 补料（2026-09-18 实测）：模型常把长期约定写进 .wd_mem/ 文件而不调 anchor_memory，
+            // summary 又偷懒（「本步骤完成。」）→ 提炼器无米下锅误判无可沉淀。把本轮写入
+            // .wd_mem/ 的文件内容带给提炼器，forced 模式才能从文件内容补齐记忆宫殿条目。
+            if !result.wd_mem_notes.is_empty() {
+                settle_input.push_str("\n\n本轮写入记忆区（.wd_mem/）的文件内容摘录：\n");
+                for (path, content) in result.wd_mem_notes.iter() {
+                    settle_input
+                        .push_str(&format!("【{}】\n{}\n", path, crate::agent::runtime::clip(content, 1200)));
                 }
             }
             Self::forced_memory_settle(app, &cfg, &plan.goal_summary, &settle_input).await;
@@ -527,7 +539,9 @@ impl AgentRuntime {
     ) {
         let sys = "你是智能体的长期记忆提炼器。你的任务是把一次完成的任务中**可跨会话复用**的稳定知识，提炼成若干条长期记忆。\
 只沉淀真正值得长期保留的：用户明确表达的偏好/约束、已确认的技术决策/架构约定、踩过的坑与规避方式、可复用代码/脚本模式。\
-不要沉淀一次性任务步骤、临时草稿、当轮琐碎状态。";
+不要沉淀一次性任务步骤、临时草稿、当轮琐碎状态。\
+注意：交付内容里可能存在「预算耗尽收尾、暂定完成、建议人工复核」字样的步骤——这类步骤未经行为级验收，\
+提炼时只采纳用户显式表达的约定/偏好本身，不要把暂定步骤的执行结果当作已验证事实写入记忆。";
         let user = format!(
             "本次任务目标：\n{}\n\n最终交付内容：\n{}\n\n提炼判定规则（严格遵循）：\n\
 1. 若本次创建/修改的文件中包含「团队约定 / 编码规范 / 用户偏好 / 流程 / 技术决策」类内容，**必须**将其提炼为记忆条目（分类通常为 user_pref 或 decision）——此情形禁止回答「无」。\n\
@@ -795,8 +809,10 @@ fn tool_command(args: &Value) -> Option<String> {
         return Some(p);
     }
     let full = serde_json::to_string(args).unwrap_or_default();
-    if full.len() > 800 {
-        Some(format!("{}…", &full[..800]))
+    // 字符安全截断（不能用字节下标：中文多字节字符切在边界内会 panic，
+    // 实测 anchor_memory 的中文 args 触发 tokio worker panic → 任务静默卡死）。
+    if full.chars().count() > 800 {
+        Some(format!("{}…", full.chars().take(800).collect::<String>()))
     } else {
         Some(full)
     }
@@ -1395,6 +1411,8 @@ pub(crate) async fn call_llm(
         "[agent] call_llm: 非流式 usage prompt={} completion={}",
         usage.0, usage.1
     );
+    // 注：非流式通道（规划/提炼）不推送窗口占用——无 app 句柄且 input 量小（~1.4K），
+    // 窗口压力指标以执行期流式调用为准（agent-llm-usage）。
     let mut message = data
         .get("choices")
         .and_then(|c| c.as_array())
@@ -1506,6 +1524,12 @@ pub(crate) async fn call_llm_stream(
                 return last.unwrap();
             }
             Ok(o) => {
+                // 单次请求的真实窗口占用（2026-09-18 修正口径）：每次 LLM 请求完成即推送
+                // 该次的 prompt/completion——前端「窗口占用」环据此展示（此前误用任务级
+                // 累计，5 步任务的 91 万被显示成 713% 窗口）。
+                if o.usage.0 > 0 {
+                    events::emit_llm_usage(_app, o.usage.0, o.usage.1);
+                }
                 // 零输出（正文与 tool_calls 皆空）且非取消：疑似网关流式断流，
                 // 重试一次避免浪费已喂的 prompt 却拿不到任何 token。
                 let is_empty = o.content.trim().is_empty() && o.tool_calls.is_empty();

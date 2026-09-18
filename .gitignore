@@ -1,5 +1,6 @@
 
 /src-tauri/target-sb/
+/target-sb/
 # Logs
 logs
 *.log

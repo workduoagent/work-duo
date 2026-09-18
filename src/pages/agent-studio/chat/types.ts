@@ -51,6 +51,15 @@ export interface SuggestState {
   index: number
 }
 
+/** 交错时间线段（2026-09-18 用户体验重构）：模型说话（text）、工具调用（tool）、
+ * 思考旁白（thought，如「正在记录记忆」）按真实到达顺序排列，界面渲染与复制导出
+ * 均按此时序穿插（旁白行紧跟其触发的工具块）。tool 段按 callId 实时回查 toolSteps。 */
+export interface ChatSegment {
+  kind: 'text' | 'tool' | 'thought'
+  text?: string
+  callId?: string
+}
+
 export interface ChatMessage {
   id: string
   role: 'user' | 'agent'
@@ -60,6 +69,8 @@ export interface ChatMessage {
   thought?: string[]
   /** 该轮的工具调用步骤（绑定到消息，多轮互不串台）。 */
   toolSteps?: ToolStep[]
+  /** 交错时间线（与 toolSteps 同批回填）：有值时消息用段式渲染（说话/工具交错 + 结束后收叠）。 */
+  segments?: ChatSegment[]
   /** 该轮的规划步骤结构（绑定到消息，历史回显时重建「步骤 → 工具」嵌套视图；live 轮用运行时 planSteps）。 */
   planSteps?: PlanStep[]
   /** 回复完成时间戳（用于计算对话时长与本条耗时）。 */

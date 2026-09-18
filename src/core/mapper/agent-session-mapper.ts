@@ -77,6 +77,8 @@ function rowToRound(r: AgentConversationRoundRow): AgentConversationRound {
     outputTokens: r.output_tokens ?? undefined,
     startTime: r.start_time ?? undefined,
     endTime: r.end_time ?? undefined,
+    // 交错时间线（v26）：旁白/工具/正文按真实时序；旧 round NULL = undefined 回退旧渲染
+    segments: safeParse<Array<{ kind: string; text?: string; callId?: string }>>(r.segments_json, []),
     rawMessagesJson: r.raw_messages_json ?? undefined,
     createdAt: safeIso(r.created_at),
     updatedAt: safeIso(r.updated_at),
@@ -641,6 +643,7 @@ export async function updateRound(
       | 'assistantAnswer'
       | 'toolCallsSummary'
       | 'planStepsSummary'
+      | 'segments'
       | 'inputTokens'
       | 'outputTokens'
       | 'endTime'
@@ -657,6 +660,7 @@ export async function updateRound(
             assistantAnswer: patch.assistantAnswer ?? r.assistantAnswer,
             toolCallsSummary: patch.toolCallsSummary ?? r.toolCallsSummary,
             planStepsSummary: patch.planStepsSummary ?? r.planStepsSummary,
+            segments: patch.segments ?? r.segments,
             inputTokens: patch.inputTokens ?? r.inputTokens,
             outputTokens: patch.outputTokens ?? r.outputTokens,
             endTime: patch.endTime ?? r.endTime,
@@ -674,6 +678,7 @@ export async function updateRound(
         assistant_answer = COALESCE(?, assistant_answer),
         tool_calls_summary = COALESCE(?, tool_calls_summary),
         plan_steps = COALESCE(?, plan_steps),
+        segments_json = COALESCE(?, segments_json),
         input_tokens = COALESCE(?, input_tokens),
         output_tokens = COALESCE(?, output_tokens),
         end_time = COALESCE(?, end_time),
@@ -684,6 +689,7 @@ export async function updateRound(
       patch.assistantAnswer ?? null,
       patch.toolCallsSummary ? JSON.stringify(patch.toolCallsSummary) : null,
       patch.planStepsSummary ? JSON.stringify(patch.planStepsSummary) : null,
+      patch.segments ? JSON.stringify(patch.segments) : null,
       patch.inputTokens ?? null,
       patch.outputTokens ?? null,
       patch.endTime ?? null,

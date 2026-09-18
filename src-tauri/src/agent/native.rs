@@ -1191,6 +1191,32 @@ fn normalize_workspace_path(ws: &std::path::Path) -> String {
     s.replace('\\', "/")
 }
 
+/// future-safe 注入（外部评审 D05）：把注入行插到 shebang / 注释 / 空行 / `from __future__`
+/// 块**之后**——`from __future__` 前不得有任何其他语句，头部注入会让它 SyntaxError
+/// （实测模型反复踩坑浪费轮次）。遇 docstring/普通代码即停在当前位置之前。
+fn inject_workspace_line(src: &str, inject_line: &str) -> String {
+    let mut insert_at = 0usize;
+    for (i, raw) in src.lines().enumerate() {
+        let t = raw.trim();
+        if i == 0 && t.starts_with("#!") {
+            insert_at = i + 1;
+            continue;
+        }
+        if t.is_empty() || t.starts_with('#') || t.starts_with("from __future__") {
+            insert_at = i + 1;
+            continue;
+        }
+        break;
+    }
+    let mut out: Vec<&str> = src.lines().collect();
+    out.insert(insert_at.min(out.len()), inject_line);
+    let mut joined = out.join("\n");
+    if src.ends_with('\n') {
+        joined.push('\n');
+    }
+    joined
+}
+
 pub struct RunPythonSandboxTool {
     app: AppHandle,
 }
@@ -1218,7 +1244,8 @@ impl AgentTool for RunPythonSandboxTool {
              - 绝对禁止用 winget / choco / brew / apt / pip 安装系统级 Python 或任何系统软件——\
              这会脱离沙箱并污染用户本机环境；缺库时交给运行时自动安装即可。\n\
             本工具需用户审批，且要求该智能体已开启沙箱权限。\n\
-            脚本中已注入 `WORKSPACE` 变量（工作空间绝对路径字符串），文件操作请用 `os.path.join(WORKSPACE, '相对路径')` 拼接，不要使用相对路径直接 open。",
+            脚本中已注入 `WORKSPACE` 变量（工作空间绝对路径字符串，code 与 script_path 两路均注入），文件操作请用 `os.path.join(WORKSPACE, '相对路径')` 拼接，不要使用相对路径直接 open。\n\
+            ⚠️ 脚本执行前会被复制到沙箱临时目录：`__file__` 指向临时副本而非工作区，**严禁用 `__file__` 推断工作区/项目根**，一律用注入的 WORKSPACE 变量。",
             json!({
                 "code": {
                     "type": "string",
@@ -1294,10 +1321,9 @@ impl AgentTool for RunPythonSandboxTool {
             let p = dir.join(&safe_name);
             // 改动 2B：code 落盘前头部注入 WORKSPACE 常量（工作空间绝对路径），
             // 模型脚本里可直接引用，避免相对路径解析到临时目录导致 ENOENT。
-            let injected = format!(
-                "WORKSPACE = r\"{}\"\n{}",
-                normalize_workspace_path(&ws),
-                code
+            let injected = inject_workspace_line(
+                code,
+                &format!("WORKSPACE = r\"{}\"", normalize_workspace_path(&ws)),
             );
             std::fs::write(&p, &injected)
                 .map_err(|e| ToolError::ExecutionFailed(format!("写入脚本失败：{e}")))?;
@@ -1307,7 +1333,37 @@ impl AgentTool for RunPythonSandboxTool {
         } else if let Some(sp) = script_path {
             // 脚本路径同样受 PathGuard 约束（须在工作空间内）。
             let abs = PathGuard::check(sp, ctx)?;
-            abs.to_string_lossy().to_string()
+            // Fix（2026-09-18 真机烧钱事故）：script_path 脚本执行时会被复制到 mamba 临时目录
+            // （mamba_root/run_tmp/__sandbox_run_*.py），`__file__` 指向临时副本——模型用
+            // `Path(__file__).parents[n]` 推断工作区全部解析到 target\debug\...，反复迭代验证
+            // 脚本直至撞轮数上限。与 code 路径同款修复：读取原脚本、头部注入 WORKSPACE 常量，
+            // 落盘 .wd_mem/runtime/scripts/ 注入版（不覆盖原脚本）再执行，两路行为一致。
+            let ws = ctx.workspace.clone().ok_or_else(|| {
+                ToolError::PermissionDenied(
+                    "未提供工作空间，无法为 script_path 注入 WORKSPACE（请先绑定工程目录）".into(),
+                )
+            })?;
+            let src = std::fs::read_to_string(&abs)
+                .map_err(|e| ToolError::ExecutionFailed(format!("读取脚本失败：{e}")))?;
+            let stem = abs
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("script")
+                .chars()
+                .filter(|c| !matches!(c, '/' | '\\' | ':' | '"' | '<' | '>' | '|' | '?' | '*'))
+                .collect::<String>();
+            let dir = ws.join(".wd_mem").join("runtime").join("scripts");
+            std::fs::create_dir_all(&dir)
+                .map_err(|e| ToolError::ExecutionFailed(format!("创建脚本目录失败：{e}")))?;
+            let injected_path = dir.join(format!("injected_{stem}.py"));
+            let injected = inject_workspace_line(
+                &src,
+                &format!("WORKSPACE = r\"{}\"", normalize_workspace_path(&ws)),
+            );
+            std::fs::write(&injected_path, &injected)
+                .map_err(|e| ToolError::ExecutionFailed(format!("写入注入脚本失败：{e}")))?;
+            let checked = PathGuard::check(&injected_path.to_string_lossy(), ctx)?;
+            checked.to_string_lossy().to_string()
         } else {
             return Err(ToolError::InvalidArgs(
                 "run_python_sandbox 需要提供 code（Python 源码，推荐）或 script_path（工作空间内脚本绝对路径）之一".into(),
@@ -1327,7 +1383,14 @@ impl AgentTool for RunPythonSandboxTool {
         );
         let started = Instant::now();
         let mgr = self.app.state::<MambaManager>();
-        match run_python_in_sandbox(&self.app, &*mgr, env_name, resolved_script, ctx.workspace.as_deref()).await {
+        match run_python_in_sandbox(
+            &self.app,
+            &*mgr,
+            env_name,
+            resolved_script.clone(),
+            ctx.workspace.as_deref(),
+        )
+        .await {
             Ok(out) => {
                 // 透传退出码给 verifier：command_succeeded 直接读 exit_code（通用判定，与输出措辞无关）。
                 if let Ok(mut g) = ctx.run_outcomes.lock() {
@@ -1351,7 +1414,20 @@ impl AgentTool for RunPythonSandboxTool {
                     started.elapsed().as_millis(),
                     e
                 );
-                Err(ToolError::ExecutionFailed(e))
+                // 失败诊断增强（外部评审 D06）：语法类失败时附落盘脚本头部预览——
+                // 注入行位置/转义损坏在此一目了然（模型一轮即可自纠，不再盲试）。
+                let hint = if e.contains("SyntaxError") || e.contains("IndentationError") {
+                    match std::fs::read_to_string(&resolved_script) {
+                        Ok(content) => {
+                            let head: Vec<&str> = content.lines().take(8).collect();
+                            format!("\n[落盘脚本头部预览]\n{}", head.join("\n"))
+                        }
+                        Err(_) => String::new(),
+                    }
+                } else {
+                    String::new()
+                };
+                Err(ToolError::ExecutionFailed(format!("{e}{hint}")))
             }
         }
     }
@@ -1386,7 +1462,8 @@ impl AgentTool for RunNodeSandboxTool {
              - 绝对禁止用 `npm install -g` / 系统包管理器安装全局 Node 环境或任何系统软件——\
              这会脱离沙箱并污染用户本机环境；缺包时交给运行时自动安装即可。\n\
             本工具需用户审批，且要求该智能体已开启沙箱权限。\n\
-            脚本中已注入 `WORKSPACE` 常量（工作空间绝对路径），文件操作请用 `WORKSPACE + '/相对路径'` 拼接，不要使用相对路径直接 open。",
+            脚本中已注入 `WORKSPACE` 常量（工作空间绝对路径，code 与 script_path 两路均注入），文件操作请用 `WORKSPACE + '/相对路径'` 拼接，不要使用相对路径直接 open。\n\
+            ⚠️ 脚本执行前会被复制到临时目录：`__file__` / `import.meta.url` 指向临时副本而非工作区，**严禁用它们推断工作区/项目根**，一律用注入的 WORKSPACE 常量。",
             json!({
                 "code": {
                     "type": "string",
@@ -1461,10 +1538,12 @@ impl AgentTool for RunNodeSandboxTool {
             let p = dir.join(&safe_name);
             // 改动 2A：code 落盘前头部注入 WORKSPACE 常量（JSON 转义处理反斜杠/引号），
             // 模型脚本里可直接引用，避免相对路径解析到临时目录导致 ENOENT。
-            let injected = format!(
-                "const WORKSPACE = {};\n{}",
-                serde_json::to_string(&normalize_workspace_path(&ws)).unwrap_or_default(),
-                code
+            let injected = inject_workspace_line(
+                code,
+                &format!(
+                    "const WORKSPACE = {};",
+                    serde_json::to_string(&normalize_workspace_path(&ws)).unwrap_or_default()
+                ),
             );
             std::fs::write(&p, &injected)
                 .map_err(|e| ToolError::ExecutionFailed(format!("写入脚本失败：{e}")))?;
@@ -1473,7 +1552,43 @@ impl AgentTool for RunNodeSandboxTool {
             abs.to_string_lossy().to_string()
         } else if let Some(sp) = script_path {
             let abs = PathGuard::check(sp, ctx)?;
-            abs.to_string_lossy().to_string()
+            // Fix（同 Python 沙箱 2026-09-18）：Node 脚本执行时同样会被复制到临时目录，
+            // `__file__`/`import.meta.url` 指向临时副本——与 code 路径同款注入 WORKSPACE 常量，
+            // 落盘注入版（不覆盖原脚本，保留原后缀）再执行，两路行为一致。
+            let ws = ctx.workspace.clone().ok_or_else(|| {
+                ToolError::PermissionDenied(
+                    "未提供工作空间，无法为 script_path 注入 WORKSPACE（请先绑定工程目录）".into(),
+                )
+            })?;
+            let src = std::fs::read_to_string(&abs)
+                .map_err(|e| ToolError::ExecutionFailed(format!("读取脚本失败：{e}")))?;
+            let stem = abs
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("script")
+                .chars()
+                .filter(|c| !matches!(c, '/' | '\\' | ':' | '"' | '<' | '>' | '|' | '?' | '*'))
+                .collect::<String>();
+            let ext = abs
+                .extension()
+                .and_then(|e| e.to_str())
+                .map(|e| format!(".{e}"))
+                .unwrap_or_else(|| ".mjs".to_string());
+            let dir = ws.join(".wd_mem").join("runtime").join("scripts");
+            std::fs::create_dir_all(&dir)
+                .map_err(|e| ToolError::ExecutionFailed(format!("创建脚本目录失败：{e}")))?;
+            let injected_path = dir.join(format!("injected_{stem}{ext}"));
+            let injected = inject_workspace_line(
+                &src,
+                &format!(
+                    "const WORKSPACE = {};",
+                    serde_json::to_string(&normalize_workspace_path(&ws)).unwrap_or_default()
+                ),
+            );
+            std::fs::write(&injected_path, &injected)
+                .map_err(|e| ToolError::ExecutionFailed(format!("写入注入脚本失败：{e}")))?;
+            let checked = PathGuard::check(&injected_path.to_string_lossy(), ctx)?;
+            checked.to_string_lossy().to_string()
         } else {
             return Err(ToolError::InvalidArgs(
                 "run_node_sandbox 需要提供 code（JS/TS 源码，推荐）或 script_path（工作空间内脚本绝对路径）之一".into(),

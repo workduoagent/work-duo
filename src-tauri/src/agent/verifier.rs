@@ -448,6 +448,8 @@ pub fn verify_task(
     // 降级追踪：凡有条件是「降级视为通过」（而非客观命中），整步不能标已验证，
     // 必须回落到暂定（verified=false）——降级 = 无客观证据，与「无 criteria」同权。
     let mut degraded_notes: Vec<String> = Vec::new();
+    // 通过明细（evidence 可回放：列出每条命中的 criteria 与实测值，替代模板话术）。
+    let mut passed_notes: Vec<String> = Vec::new();
     for c in &task.success_criteria {
         let ct = c.check_type.to_lowercase();
         // 运行成功通用判定：直接读退出码，与输出措辞 / 语言 / emoji 无关（同 cargo check 契约）。
@@ -456,6 +458,8 @@ pub fn verify_task(
             if ok {
                 if detail.contains(DEGRADED_MARK) {
                     degraded_notes.push(detail);
+                } else {
+                    passed_notes.push(format!("[command_succeeded] {detail}"));
                 }
                 continue;
             }
@@ -468,6 +472,8 @@ pub fn verify_task(
             if ok {
                 if detail.contains(DEGRADED_MARK) {
                     degraded_notes.push(detail);
+                } else {
+                    passed_notes.push(format!("[{ct}] {detail}"));
                 }
                 continue;
             }
@@ -479,6 +485,8 @@ pub fn verify_task(
         if planner_ok {
             if planner_detail.contains(DEGRADED_MARK) {
                 degraded_notes.push(planner_detail);
+            } else {
+                passed_notes.push(format!("[{ct}] {planner_detail}"));
             }
             continue;
         }
@@ -488,6 +496,7 @@ pub fn verify_task(
             if real_detail.contains(DEGRADED_MARK) {
                 degraded_notes.push(real_detail);
             } else {
+                passed_notes.push(format!("[{ct}] {real_detail}（以工具实际写出文件核验）"));
                 tracing::info!(
                     "[agent] verifier: 计划 target 未命中，但以工具实际写出的文件通过 step 校验：{}",
                     real_detail
@@ -503,7 +512,11 @@ pub fn verify_task(
                 met: true,
                 details: String::new(),
                 verified: true,
-                evidence: "已通过本步声明的 success_criteria 客观校验".to_string(),
+                evidence: format!(
+                    "客观校验通过 {} 项：{}",
+                    passed_notes.len(),
+                    passed_notes.join("；")
+                ),
             }
         } else {
             VerificationResult {

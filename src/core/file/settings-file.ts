@@ -35,6 +35,8 @@ export interface AppSettings {
   skillPath: string
   /** 知识库存储根目录，默认 $APPDATA/.knowledge_base（与 app_config.knowledge_base_path 同键） */
   knowledgeBasePath: string
+  /** 向量库（LanceDB）数据根目录，默认 $APPDATA/.vectors（与 app_config.vector_path 同键） */
+  vectorPath: string
   /** 客户端通知，默认开启 */
   clientNotify: boolean
   /** 会话管理：超过设定小时数未对话自动开启新会话，默认关闭 */
@@ -54,6 +56,7 @@ export const CONFIG_KEYS = {
   workspacePath: 'workspace_path',
   skillPath: 'skill_path',
   knowledgeBasePath: 'knowledge_base_path',
+  vectorPath: 'vector_path',
   clientNotify: 'client_notify',
   sessionAutoNew: 'session_auto_new',
   sessionIdleHours: 'session_idle_hours',
@@ -68,6 +71,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   workspacePath: '$APPDATA/.workspace',
   skillPath: '$APPDATA/.skills',
   knowledgeBasePath: '$APPDATA/.knowledge_base',
+  vectorPath: '$APPDATA/.vectors',
   clientNotify: true,
   sessionAutoNew: false,
   sessionIdleHours: 24,
@@ -91,6 +95,7 @@ const RAW_STRING_KEYS = new Set<string>([
   CONFIG_KEYS.workspacePath,
   CONFIG_KEYS.skillPath,
   CONFIG_KEYS.knowledgeBasePath,
+  CONFIG_KEYS.vectorPath,
   CONFIG_KEYS.httpAllowedHosts,
 ])
 
@@ -163,6 +168,7 @@ export async function loadSettings(): Promise<AppSettings> {
       all[k.knowledgeBasePath],
       DEFAULT_SETTINGS.knowledgeBasePath,
     ),
+    vectorPath: parseValue<string>(all[k.vectorPath], DEFAULT_SETTINGS.vectorPath),
     clientNotify: parseValue<boolean>(
       all[k.clientNotify],
       DEFAULT_SETTINGS.clientNotify,
@@ -192,6 +198,7 @@ export async function saveSettings(next: AppSettings): Promise<void> {
       k.knowledgeBasePath,
       serializeValue(k.knowledgeBasePath, next.knowledgeBasePath),
     ),
+    setRawConfig(k.vectorPath, serializeValue(k.vectorPath, next.vectorPath)),
     setRawConfig(k.clientNotify, serializeValue(k.clientNotify, next.clientNotify)),
     setRawConfig(
       k.sessionAutoNew,

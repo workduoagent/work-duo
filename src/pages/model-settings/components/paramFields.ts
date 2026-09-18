@@ -134,7 +134,7 @@ export function getParamFields(category: string): ParamFieldDef[] {
       ]
     case 'embedding':
       return [
-        { key: 'dimensions', label: '向量维度', hint: 'v3 模型可调，如 256/1024/1536', control: 'number', min: 1, step: 1 },
+        { key: 'dimensions', label: '向量维度', hint: 'v3 模型可调，如 256/512/1024/1536（bge-small 系列为 512）', control: 'number', min: 1, step: 1 },
         { key: 'encodingFormat', label: '编码格式', control: 'select', options: [
           { label: 'float', value: 'float' },
           { label: 'base64', value: 'base64' },

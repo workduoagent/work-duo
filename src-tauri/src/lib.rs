@@ -98,7 +98,11 @@ pub fn run() {
             agent::wd_mem::wd_mem_read_project_memory,
             agent::wd_mem::wd_mem_write_project_memory,
             fs_helper::canonicalize_path,
-            fs_helper::migrate_storage_dir
+            fs_helper::migrate_storage_dir,
+            agent::embedding::probe_embedding,
+            agent::memory::backfill_memory_vectors,
+            agent::vector_store::vector_status,
+            agent::vector_store::set_vector_path
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

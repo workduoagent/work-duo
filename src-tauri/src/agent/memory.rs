@@ -16,11 +16,17 @@ use sqlx::Row;
 use sqlx::sqlite::SqlitePool;
 use tauri::AppHandle;
 
+use crate::agent::embedding;
 use crate::agent::events;
 use crate::agent::round_compactor;
+use crate::agent::vector_store;
 
 /// 自动召回注入的 top-K 记忆条数（运行时注入系统提示的记忆上限）。
 const MEMORY_RECALL_TOP: usize = 5;
+
+/// 记忆向量在 LanceDB `memories` 表中的 scope 标识（第三期 M1：agent 记忆统一此值，
+/// 与未来 squad/project 域区分；召回谓词按它先滤，防跨域串记忆）。
+const MEMORY_SCOPE: &str = "agent";
 
 /// 记忆分类枚举（与前端常量保持一致）。
 pub const MEMORY_CATEGORIES: &[&str] = &[
@@ -308,6 +314,9 @@ pub async fn anchor_memory(
     let item = get_by_id(&pool, &id).await?;
     // 锚定完成（手动或自动）即推送事件，前端「记忆宫殿」实时新增/更新卡片，无需重开页面。
     events::emit_memory_anchored(app, &item);
+    // M1 写路径双写：SQLite 权威落库后，后台异步嵌入并 upsert LanceDB（fire-and-forget，
+    // 失败仅日志——该条召回时自动回退关键词链，不打断锚定主流程）。
+    spawn_memory_vector_sync(app.clone(), item.clone());
     Ok(item)
 }
 
@@ -410,7 +419,10 @@ pub async fn update_memory(
             .await
             .map_err(|e| format!("更新记忆失败：{e}"))?;
     }
-    get_by_id(&pool, id).await
+    let item = get_by_id(&pool, id).await?;
+    // M1：key/content 变更后向量过期，后台重算 upsert（merge by id 幂等，失败仅日志）。
+    spawn_memory_vector_sync(app.clone(), item.clone());
+    Ok(item)
 }
 
 /// 删除一条记忆（外键 ON DELETE CASCADE 自动清理其事件日志）。
@@ -421,6 +433,13 @@ pub async fn delete_memory(app: &AppHandle, id: &str) -> Result<(), String> {
         .execute(&pool)
         .await
         .map_err(|e| format!("删除记忆失败：{e}"))?;
+    // M1 双删：SQLite 删除成功后同步删 LanceDB 向量（best-effort；万一残留，
+    // 向量召回取元数据时按 SQLite 为准自然滤除，不会出现幽灵条目）。
+    if let Some(vs) = vector_store::get_shared(app).await {
+        if let Err(e) = vs.delete_memories(&[id.to_string()]).await {
+            tracing::warn!("[memory] 向量双删失败（召回时按 SQLite 滤除兜底）id={id}：{e}");
+        }
+    }
     Ok(())
 }
 
@@ -493,9 +512,199 @@ fn overlap_score(query: &str, candidate: &str) -> usize {
     q.intersection(&c).count()
 }
 
-/// 运行时自动召回：从「全局 + 当前 agent」记忆中选取 top-K（ref_count 降序、updated_at 降序），
-/// 逐条 ref_count += 1、last_recalled=now、写 `recall` 事件并 emit `memory_recalled`，
-/// 然后拼成「记忆宫殿 · 召回」系统提示块返回（无记忆则返回空串）。
+/// 向量召回文本：key 与 content 拼接（与 M0 关键词重排的候选文本口径一致，key 提供短标题信号）。
+fn embed_text_of(key: &str, content: &str) -> String {
+    format!("{key}\n{content}")
+}
+
+/// LanceDB 标量谓词：仅召回「全局 + 当前 agent」的 agent 记忆（防多智能体串记忆）。
+/// agent_id 做单引号转义防谓词注入（id 为系统生成，防御性处理）。
+fn scope_filter(agent_id: Option<&str>) -> String {
+    match agent_id {
+        Some(a) => format!(
+            "scope = '{MEMORY_SCOPE}' AND (agent_id IS NULL OR agent_id = '{}')",
+            a.replace('\'', "''")
+        ),
+        None => format!("scope = '{MEMORY_SCOPE}' AND agent_id IS NULL"),
+    }
+}
+
+/// 写路径向量同步：嵌入 `key+content` 并 upsert 进 LanceDB `memories`（merge by id 幂等）。
+/// 嵌入未配置 / 向量库不可用 = Ok 跳过（存量条目等 004「回填向量」补齐）；网络/写入失败 = Err。
+async fn sync_memory_vector(app: &AppHandle, item: &MemoryItem) -> Result<(), String> {
+    let pool = get_pool(app).await?;
+    let Some(cfg) = embedding::load_default_embedding(&pool).await? else {
+        return Ok(()); // 未配置嵌入模型：静默跳过，召回自动落关键词降级链
+    };
+    let Some(vs) = vector_store::get_shared(app).await else {
+        return Ok(()); // 向量库不可用：同上降级
+    };
+    let text = embed_text_of(&item.key, &item.content);
+    let vec = embedding::embed_texts(app, &pool, &cfg, &[text])
+        .await?
+        .into_iter()
+        .next()
+        .ok_or("嵌入返回空向量")?;
+    vs.upsert_memories(&[vector_store::MemoryVectorRow {
+        id: item.id.clone(),
+        agent_id: item.agent_id.clone(),
+        project_id: None,
+        session_id: item.session_id.clone(),
+        scope: MEMORY_SCOPE.to_string(),
+        key: item.key.clone(),
+        content: item.content.clone(),
+        category: item.category.clone(),
+        embedding: Some(vec),
+        embedding_model: Some(cfg.model_name.clone()),
+        updated_at: item.updated_at,
+    }])
+    .await
+}
+
+/// 后台 fire-and-forget 向量同步：失败仅日志，绝不阻塞/打断锚定与更新主流程（失败=降级信号）。
+fn spawn_memory_vector_sync(app: AppHandle, item: MemoryItem) {
+    tauri::async_runtime::spawn(async move {
+        if let Err(e) = sync_memory_vector(&app, &item).await {
+            tracing::warn!(
+                "[memory] 向量同步失败（该条暂缺向量，召回时经关键词链兜底）id={}：{e}",
+                item.id
+            );
+        }
+    });
+}
+
+/// 一级语义召回：embed(prompt) → LanceDB 向量检索（scope+agent 谓词先滤再向量）→
+/// SQLite 取回元数据并按向量距离序（= 相关度序）重排。已删除条目经 IN 查询自然滤除。
+async fn recall_by_vector(
+    app: &AppHandle,
+    pool: &SqlitePool,
+    agent_id: Option<&str>,
+    prompt: &str,
+    k: usize,
+) -> Result<Vec<MemoryItem>, String> {
+    let cfg = embedding::load_default_embedding(pool)
+        .await?
+        .ok_or("未配置嵌入模型")?;
+    let vs = vector_store::get_shared(app)
+        .await
+        .ok_or("向量库不可用")?;
+    let query_vec = embedding::embed_texts(app, pool, &cfg, &[prompt.to_string()])
+        .await?
+        .into_iter()
+        .next()
+        .ok_or("嵌入返回空向量")?;
+    let hits = vs
+        .search_memories(&query_vec, Some(&scope_filter(agent_id)), k)
+        .await?;
+    if hits.is_empty() {
+        return Ok(Vec::new());
+    }
+    let ids: Vec<String> = hits.iter().map(|h| h.id.clone()).collect();
+    let placeholders = ids.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
+    // SQL 字符串必须先落局部变量：sqlx::query 借用它直至执行，行内临时值会立刻释放（E0716）。
+    let sql = format!("SELECT * FROM agent_memories WHERE id IN ({placeholders})");
+    let mut q = sqlx::query(&sql);
+    for id in &ids {
+        q = q.bind(id);
+    }
+    let rows = q
+        .fetch_all(pool)
+        .await
+        .map_err(|e| format!("取回召回元数据失败：{e}"))?;
+    let mut by_id: std::collections::HashMap<String, MemoryItem> = rows
+        .iter()
+        .map(|r| {
+            let it = row_to_item(r);
+            (it.id.clone(), it)
+        })
+        .collect();
+    // 向量序即相关序：按 hits 顺序重排（SQLite 已删的 id 自然被 filter_map 丢弃）。
+    Ok(ids
+        .into_iter()
+        .filter_map(|id| by_id.remove(&id))
+        .collect())
+}
+
+/// 二级关键词降级链（M0）：SQLite 候选（ref_count DESC）→ 字符 2-gram 重排 → top-K。
+/// `exclude_ids`：向量链已命中条目（补齐场景防重复）；prompt=None 时退化为 ref_count 序 top-K。
+async fn recall_by_keyword(
+    pool: &SqlitePool,
+    agent_id: Option<&str>,
+    k: usize,
+    prompt: Option<&str>,
+    exclude_ids: &[String],
+) -> Vec<MemoryItem> {
+    if k == 0 {
+        return Vec::new();
+    }
+    // 有 prompt 时放大候选池到 k×4 供重排（额外容纳剔除量）；无 prompt 时原 k。
+    let limit = (if prompt.is_some() { k * 4 } else { k }) + exclude_ids.len();
+    let Ok(rows) = sqlx::query(
+        "SELECT * FROM agent_memories WHERE agent_id IS NULL OR agent_id = ? \
+         ORDER BY ref_count DESC, updated_at DESC LIMIT ?",
+    )
+    .bind(agent_id.unwrap_or(""))
+    .bind(limit as i64)
+    .fetch_all(pool)
+    .await
+    else {
+        tracing::warn!("[memory] recall 关键词链: 查询失败");
+        return Vec::new();
+    };
+    let mut items: Vec<MemoryItem> = rows
+        .iter()
+        .map(row_to_item)
+        .filter(|i| !exclude_ids.iter().any(|e| e == &i.id))
+        .collect();
+    // M0 字符重排：有 prompt 时按 2-gram 重合度排序；stable sort 同分保持原 ref_count 序（全零回落）。
+    if let Some(p) = prompt {
+        items.sort_by(|a, b| {
+            let sa = overlap_score(p, &format!("{} {}", a.key, a.content));
+            let sb = overlap_score(p, &format!("{} {}", b.key, b.content));
+            sb.cmp(&sa)
+        });
+    }
+    items.truncate(k);
+    items
+}
+
+/// 召回收尾（两链共用）：逐条 ref_count+1 / last_recalled / recall 事件 / emit，并拼系统提示块。
+async fn bump_and_block(
+    pool: &SqlitePool,
+    app: &AppHandle,
+    mut items: Vec<MemoryItem>,
+) -> (Vec<MemoryItem>, String) {
+    let now = now_ms();
+    let mut block = String::from(
+        "### 记忆宫殿 · 召回的长期记忆\n以下是你此前沉淀、本次自动召回的关键记忆，处理任务时应优先参考：\n",
+    );
+    for item in &mut items {
+        if let Err(e) = sqlx::query(
+            "UPDATE agent_memories SET ref_count = ref_count + 1, last_recalled = ?, updated_at = ? WHERE id = ?",
+        )
+        .bind(now)
+        .bind(now)
+        .bind(&item.id)
+        .execute(pool)
+        .await
+        {
+            tracing::warn!("[memory] recall: 计数更新失败 {}：{e}", item.id);
+        }
+        log_event(pool, &item.id, "recall", now).await;
+        item.ref_count += 1;
+        item.last_recalled_at = Some(now);
+        events::emit_memory_recalled(app, item);
+        block.push_str(&format!("- [{}] {}\n", item.key, item.content));
+    }
+    (items, block)
+}
+
+/// 运行时自动召回（M1 三级降级链 + M2 可选精排）：
+/// ① 向量语义粗排（prompt 存在且嵌入已配置：embed query → LanceDB 检索 top-k×4）；
+/// ② 关键词降级链兜底/补齐（未配置/失败/粗排不足：SQLite ref_count 候选 + 2-gram 重排）；
+/// ③ ref_count 裸排序（无 prompt 时的基础序）；
+/// ④ M2 rerank 精排（可选级：配置了 rerank 模型时对粗排池精排取 top-K，失败/未配置保持粗排序）。
+/// 命中统一走 `bump_and_block` 累计引用计数并拼「记忆宫殿 · 召回」系统提示块。
 ///
 /// 由 `commands::load_config` 在组装系统提示的尾部注入，使记忆宫殿真正参与任务上下文，
 /// 且每次运行自然累积引用计数（驱动热力图）。
@@ -503,8 +712,7 @@ pub async fn recall_top_memories(
     app: &AppHandle,
     agent_id: Option<&str>,
     k: usize,
-    // 本轮 prompt：提供时先取 k×4 候选池，按字符 2-gram 重合度重排取 top-K；
-    // 全零重合因 stable sort 自然回落原 ref_count DESC 序。None 时退化为原行为（ref_count 序 top-K）。
+    // 本轮 prompt：Some 时先走向量语义召回，失败/不足自动落关键词链；None 时保持原 ref_count 序。
     prompt: Option<&str>,
 ) -> (Vec<MemoryItem>, String) {
     if k == 0 {
@@ -517,73 +725,197 @@ pub async fn recall_top_memories(
             return (Vec::new(), String::new());
         }
     };
-    let now = now_ms();
-    // 有 prompt 时放大候选池到 k×4 供重排；无 prompt 时原 k。
-    let limit = if prompt.is_some() { k * 4 } else { k };
-    let rows = match sqlx::query(
-        "SELECT * FROM agent_memories WHERE agent_id IS NULL OR agent_id = ? \
-         ORDER BY ref_count DESC, updated_at DESC LIMIT ?",
-    )
-    .bind(agent_id.unwrap_or(""))
-    .bind(limit as i64)
-    .fetch_all(&pool)
-    .await
-    {
-        Ok(r) => r,
-        Err(e) => {
-            tracing::warn!("[memory] recall_top_memories: 查询失败：{e}");
-            return (Vec::new(), String::new());
+
+    // ① 向量语义粗排（prompt 存在时）。候选池放大到 k×4（M2：为 rerank 精排留料）。
+    // 嵌入/向量库任一环失败 → 整体落降级链，绝不打断任务。
+    let mut items: Vec<MemoryItem> = Vec::new();
+    let coarse_k = k * 4;
+    if let Some(p) = prompt {
+        match recall_by_vector(app, &pool, agent_id, p, coarse_k).await {
+            Ok(hit) => items = hit,
+            Err(e) => {
+                tracing::info!("[memory] recall_top_memories: 向量召回未用上，降级关键词链：{e}")
+            }
         }
-    };
-    if rows.is_empty() {
+    }
+    // ② 关键词降级链兜底/补齐（排除向量已命中防重复），补到粗排池大小。
+    if items.len() < coarse_k {
+        let exclude: Vec<String> = items.iter().map(|i| i.id.clone()).collect();
+        let extra =
+            recall_by_keyword(&pool, agent_id, coarse_k - items.len(), prompt, &exclude).await;
+        items.extend(extra);
+    }
+    // ③ M2 rerank 精排（可选级）：未配置跳过、失败保持粗排序——管道任意一环故障不放大。
+    // 粗排命中数 ≤ k 时精排无收益，直接跳过。
+    if let Some(p) = prompt {
+        if items.len() > k {
+            match embedding::load_default_rerank(&pool).await {
+                Ok(Some(rc)) => {
+                    let docs: Vec<String> = items
+                        .iter()
+                        .map(|i| format!("{} {}", i.key, i.content))
+                        .collect();
+                    match embedding::rerank(app, &pool, &rc, p, &docs, k).await {
+                        Ok(pairs) if !pairs.is_empty() => {
+                            // 日志打 key 而非 id：用户真机验证时能直接看出「哪条被排前」
+                            let before: Vec<String> = items
+                                .iter()
+                                .take(k)
+                                .map(|i| crate::agent::runtime::clip(&i.key, 24))
+                                .collect();
+                            items = pairs
+                                .iter()
+                                .filter_map(|(idx, _)| items.get(*idx).cloned())
+                                .collect();
+                            let after: Vec<String> = items
+                                .iter()
+                                .map(|i| crate::agent::runtime::clip(&i.key, 24))
+                                .collect();
+                            if before != after {
+                                tracing::info!(
+                                    "[memory] rerank 精排生效：top-{k} 顺序调整 [{}] → [{}]",
+                                    before.join(" | "),
+                                    after.join(" | ")
+                                );
+                            }
+                        }
+                        Ok(_) => {}
+                        Err(e) => {
+                            tracing::info!("[memory] rerank 失败，保持粗排序：{e}")
+                        }
+                    }
+                }
+                Ok(None) => {}
+                Err(e) => tracing::info!("[memory] rerank 配置读取失败，保持粗排序：{e}"),
+            }
+        }
+    }
+    // ④ 截断至 k 并收尾（ref_count+1 / 事件 / 系统提示块）。
+    items.truncate(k);
+    if items.is_empty() {
         return (Vec::new(), String::new());
     }
+    bump_and_block(&pool, app, items).await
+}
 
-    // M0 字符重排：有 prompt 时按 2-gram 重合度排序取 top-K；stable sort 保证同分保持原 ref_count 序（全零回落）。
-    let ordered: Vec<sqlx::sqlite::SqliteRow> = if let Some(p) = prompt {
-        let mut scored: Vec<(usize, sqlx::sqlite::SqliteRow)> = rows
-            .into_iter()
-            .map(|r| {
-                let key: String = r.try_get("key").unwrap_or_default();
-                let content: String = r.try_get("content").unwrap_or_default();
-                let cand = format!("{} {}", key, content);
-                (overlap_score(p, &cand), r)
-            })
-            .collect();
-        scored.sort_by(|a, b| b.0.cmp(&a.0));
-        scored.into_iter().take(k).map(|(_, r)| r).collect()
-    } else {
-        rows.into_iter().take(k).collect()
-    };
+// ============================ 存量记忆向量回填（#20260918004） ============================
 
-    let mut items: Vec<MemoryItem> = Vec::new();
-    let mut block = String::from(
-        "### 记忆宫殿 · 召回的长期记忆\n以下是你此前沉淀、本次自动召回的关键记忆，处理任务时应优先参考：\n",
-    );
-    for row in &ordered {
-        let id: String = row.try_get("id").unwrap_or_default();
-        let key: String = row.try_get("key").unwrap_or_default();
-        let content: String = row.try_get("content").unwrap_or_default();
-        if let Err(e) = sqlx::query(
-            "UPDATE agent_memories SET ref_count = ref_count + 1, last_recalled = ?, updated_at = ? WHERE id = ?",
-        )
-        .bind(now)
-        .bind(now)
-        .bind(&id)
-        .execute(&pool)
-        .await
-        {
-            tracing::warn!("[memory] recall_top_memories: 计数更新失败 {id}：{e}");
-        }
-        log_event(&pool, &id, "recall", now).await;
-        let mut item = row_to_item(row);
-        item.ref_count += 1;
-        item.last_recalled_at = Some(now);
-        events::emit_memory_recalled(app, &item);
-        block.push_str(&format!("- [{}] {}\n", key, content));
-        items.push(item);
+/// 回填结果汇总（camelCase 序列化推前端）。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BackfillReport {
+    pub total: u32,
+    pub ok: u32,
+    pub failed: u32,
+    /// 语义：finished=false 时是中途失败中断（前端提示），true 为正常跑完。
+    pub finished: bool,
+}
+
+/// 回填重入保护：同一时刻只允许一个回填任务（命令级防连点/双开）。
+static BACKFILL_RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// tauri 命令（lib.rs 注册）：存量记忆批量向量化（带进度事件）。
+#[tauri::command]
+pub async fn backfill_memory_vectors(app: AppHandle) -> Result<BackfillReport, String> {
+    backfill_memory_inner(&app).await
+}
+
+/// 存量记忆批量向量化：全量拉 SQLite 记忆 → 分批（每批 16 条）嵌入 → 逐批 upsert LanceDB。
+/// upsert 为 merge by id 幂等——已有向量的条目会被重算覆盖，因此本命令同时承担
+/// 「未配置嵌入前的存量补齐」与「换模型后全量重算」（003 挪入的懒重算语义）两种场景。
+/// 进度经 `agent-memory-backfill` 事件逐批推送；失败条目跳过不中断（降级语义）。
+async fn backfill_memory_inner(app: &AppHandle) -> Result<BackfillReport, String> {
+    use std::sync::atomic::Ordering;
+    if BACKFILL_RUNNING
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
+        return Err("已有回填任务在进行中，请等待完成".into());
     }
-    (items, block)
+    let _guard = BackfillGuard;
+    let pool = get_pool(app).await?;
+    let Some(cfg) = embedding::load_default_embedding(&pool).await? else {
+        return Err("未配置嵌入模型（LLM 模块需有「向量模型」分类且已启用的模型）".into());
+    };
+    let Some(vs) = vector_store::get_shared(app).await else {
+        return Err("向量库不可用（请检查设置页「向量库存储目录」或查看日志）".into());
+    };
+    let rows = sqlx::query("SELECT * FROM agent_memories ORDER BY created_at ASC")
+        .fetch_all(&pool)
+        .await
+        .map_err(|e| format!("读取存量记忆失败：{e}"))?;
+    let items: Vec<MemoryItem> = rows.iter().map(row_to_item).collect();
+    let total = items.len() as u32;
+    if total == 0 {
+        return Ok(BackfillReport { total: 0, ok: 0, failed: 0, finished: true });
+    }
+
+    const BATCH: usize = 16;
+    let mut ok: u32 = 0;
+    let mut failed: u32 = 0;
+    let mut done: u32 = 0;
+    for chunk in items.chunks(BATCH) {
+        let texts: Vec<String> = chunk
+            .iter()
+            .map(|it| embed_text_of(&it.key, &it.content))
+            .collect();
+        let vecs = match embedding::embed_texts(app, &pool, &cfg, &texts).await {
+            Ok(v) => v,
+            Err(e) => {
+                // 整批嵌入失败（网络/鉴权）：计失败并继续下一批（下一批大概率同样失败，
+                // 但保持「跳过不中断」语义，最终汇报真实失败数）。
+                tracing::warn!("[memory] 回填：一批 {} 条嵌入失败：{e}", chunk.len());
+                failed += chunk.len() as u32;
+                done += chunk.len() as u32;
+                events::emit_memory_backfill_progress(
+                    app,
+                    &events::MemoryBackfillProgress { done, total, ok, failed, finished: done >= total },
+                );
+                continue;
+            }
+        };
+        let mut batch_rows: Vec<vector_store::MemoryVectorRow> = Vec::new();
+        for (it, v) in chunk.iter().zip(vecs) {
+            batch_rows.push(vector_store::MemoryVectorRow {
+                id: it.id.clone(),
+                agent_id: it.agent_id.clone(),
+                project_id: None,
+                session_id: it.session_id.clone(),
+                scope: MEMORY_SCOPE.to_string(),
+                key: it.key.clone(),
+                content: it.content.clone(),
+                category: it.category.clone(),
+                embedding: Some(v),
+                embedding_model: Some(cfg.model_name.clone()),
+                updated_at: it.updated_at,
+            });
+        }
+        match vs.upsert_memories(&batch_rows).await {
+            Ok(()) => ok += batch_rows.len() as u32,
+            Err(e) => {
+                tracing::warn!("[memory] 回填：一批 {} 条 upsert 失败：{e}", batch_rows.len());
+                failed += batch_rows.len() as u32;
+            }
+        }
+        done += chunk.len() as u32;
+        events::emit_memory_backfill_progress(
+            app,
+            &events::MemoryBackfillProgress { done, total, ok, failed, finished: done >= total },
+        );
+    }
+    tracing::info!(
+        "[memory] 回填完成：总 {total}，成功 {ok}，失败 {failed}（模型={}）",
+        cfg.model_name
+    );
+    Ok(BackfillReport { total, ok, failed, finished: true })
+}
+
+/// RAII 守卫：无论提前 return 还是 panic 都复位重入标志。
+struct BackfillGuard;
+impl Drop for BackfillGuard {
+    fn drop(&mut self) {
+        BACKFILL_RUNNING.store(false, std::sync::atomic::Ordering::SeqCst);
+    }
 }
 
 // ============================ 小分队协作记忆（Squad Blackboard） ============================
@@ -825,5 +1157,25 @@ mod tests {
             s_rel > s_unrel,
             "相关条 score {s_rel} 应 > 无关条 score {s_unrel}"
         );
+    }
+
+    // ── M1 向量召回：scope 谓词 / 嵌入文本 ──
+    #[test]
+    fn scope_filter_scopes_and_escapes() {
+        assert_eq!(scope_filter(None), "scope = 'agent' AND agent_id IS NULL");
+        assert_eq!(
+            scope_filter(Some("ag1")),
+            "scope = 'agent' AND (agent_id IS NULL OR agent_id = 'ag1')"
+        );
+        // 单引号转义防谓词注入
+        assert_eq!(
+            scope_filter(Some("a'b")),
+            "scope = 'agent' AND (agent_id IS NULL OR agent_id = 'a''b')"
+        );
+    }
+
+    #[test]
+    fn embed_text_joins_key_and_content() {
+        assert_eq!(embed_text_of("偏好", "深色主题"), "偏好\n深色主题");
     }
 }

@@ -7,7 +7,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type * as React from 'react'
 import type { ReactElement } from 'react'
-import { Copy, File, FileArchive, FileCode, FileImage, FileSpreadsheet, FileText, RefreshCw, Volume2 } from 'lucide-react'
+import { ClipboardList, Copy, File, FileArchive, FileCode, FileImage, FileSpreadsheet, FileText, RefreshCw, Volume2 } from 'lucide-react'
 import { openPath } from '@tauri-apps/plugin-opener'
 import { useNotify } from '@/components/ui/notify'
 import { isTauri } from '@/core/config'
@@ -175,46 +175,50 @@ export function FilePathCards({ content }: { content: string }) {
   )
 }
 
-/** token 环形图 + 悬浮明细：已消耗上下文（提示词 + 对话 + 工具）占上下文限制的比例。
- * 单一环，无中心数字，越接近 100% 颜色由绿→黄→红；悬浮显示上下文总数 / 输入占比 / 对话占比 / 工具占比。 */
+/** token 环形图 + 悬浮明细。
+ *  - 环：**最近一轮任务的输入 tokens / 上下文窗口**（真实的上下文压力指标）；
+ *    2026-09-18 修正：此前误用「会话累计消耗 ÷ 窗口」当占比，多轮会话动辄 1100% 造成误导——
+ *    累计是成本口径，不是窗口占用口径。
+ *  - 悬浮明细：窗口占用（最近一轮输入）+ 会话累计消耗 + 输入/对话/工具成本占比。 */
 export function TokenRing({
-  promptTokens,
-  completionTokens,
-  toolsTokens,
+  windowTokens,
+  sessionPrompt,
+  sessionCompletion,
+  sessionTools,
   limit,
 }: {
-  promptTokens: number
-  completionTokens: number
-  toolsTokens: number
+  windowTokens: number
+  sessionPrompt: number
+  sessionCompletion: number
+  sessionTools: number
   limit?: number
 }) {
   const size = 22
   const stroke = 3
   const r = (size - stroke) / 2
   const c = 2 * Math.PI * r
-  const used = promptTokens + completionTokens + toolsTokens
-  const ratio = limit && limit > 0 ? used / limit : 0
+  const ratio = limit && limit > 0 ? windowTokens / limit : 0
   const clamped = Math.max(0, Math.min(1, ratio))
   const filled = c * clamped
-  const color = used > 0 ? ringColor(ratio) : 'var(--color-border)'
+  const color = windowTokens > 0 ? ringColor(ratio) : 'var(--color-border)'
   const pct = limit && limit > 0 ? Math.round(ratio * 100) : null
-  const total = Math.max(1, used)
-  const inputPct = Math.round((promptTokens / total) * 100)
-  const completionPct = Math.round((completionTokens / total) * 100)
-  const toolPct = Math.round((toolsTokens / total) * 100)
+  const sessionTotal = Math.max(1, sessionPrompt + sessionCompletion + sessionTools)
+  const inputPct = Math.round((sessionPrompt / sessionTotal) * 100)
+  const completionPct = Math.round((sessionCompletion / sessionTotal) * 100)
+  const toolPct = Math.round((sessionTools / sessionTotal) * 100)
   return (
     <span
       className="agent-chat__token-ring"
       tabIndex={0}
       title={
-        pct !== null
-          ? `已消耗 ${used} / ${limit} tokens（${pct}%）`
-          : `已消耗 ${used} tokens`
+        pct !== null && limit
+          ? `最近一轮输入 ${windowTokens.toLocaleString()} / ${limit.toLocaleString()} tokens（${pct}% 窗口）`
+          : `最近一轮输入 ${windowTokens.toLocaleString()} tokens`
       }
     >
       <svg width={size} height={size}>
         <circle cx={size / 2} cy={size / 2} r={r} stroke="var(--color-border)" strokeWidth={stroke} fill="none" />
-        {used > 0 && (
+        {windowTokens > 0 && (
           <circle
             cx={size / 2}
             cy={size / 2}
@@ -231,7 +235,14 @@ export function TokenRing({
       </svg>
       <span className="agent-chat__token-pop">
         <div className="agent-chat__token-pop-title">
-          上下文总数：{used} tokens{pct !== null ? `（${pct}% 窗口）` : ''}
+          窗口占用（最近一轮输入）：{windowTokens.toLocaleString()} tokens
+          {pct !== null ? `（${pct}%）` : ''}
+        </div>
+        <div className="agent-chat__token-pop-row">
+          <span>会话累计消耗</span>
+          <span>
+            {(sessionPrompt + sessionCompletion + sessionTools).toLocaleString()} tokens
+          </span>
         </div>
         <div className="agent-chat__token-pop-row">
           <span>输入占比</span>
@@ -287,10 +298,13 @@ export function MessageActions({
   msg,
   agent,
   onRegenerate,
+  onCopyFull,
 }: {
   msg: ChatMessage
   agent: AgentInfo
   onRegenerate: () => void
+  /** 复制该条完整记录（正文 + 思考旁白与工具调用穿插），放在「重新生成」左侧。 */
+  onCopyFull?: () => void
 }) {
   const { message } = useNotify()
 
@@ -323,6 +337,15 @@ export function MessageActions({
         {agent.ttsId && (
           <button type="button" title="朗读" onClick={handleSpeak}>
             <Volume2 size={14} />
+          </button>
+        )}
+        {onCopyFull && (
+          <button
+            type="button"
+            title="复制完整记录（含思考与工具调用）"
+            onClick={onCopyFull}
+          >
+            <ClipboardList size={14} />
           </button>
         )}
         <button type="button" title="重新生成" onClick={onRegenerate}>

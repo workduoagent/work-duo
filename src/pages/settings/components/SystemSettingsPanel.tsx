@@ -7,6 +7,7 @@ import {
   Bell,
   MessagesSquare,
   BookOpen,
+  Database,
 } from 'lucide-react'
 import { Input, Switch, InputNumber } from '@/components/ui'
 import { Radio } from 'antd'
@@ -37,7 +38,7 @@ function Title({ icon, children }: { icon: ReactNode; children: ReactNode }) {
   )
 }
 
-type StorageKey = 'workspacePath' | 'skillPath' | 'knowledgeBasePath'
+type StorageKey = 'workspacePath' | 'skillPath' | 'knowledgeBasePath' | 'vectorPath'
 
 /** 存储目录选择行：展示当前真实路径 + 「选择目录」按钮（迁移中显示转圈并禁用）。 */
 function StorageDirRow({
@@ -110,14 +111,21 @@ export function SystemSettingsPanel({ settings, onChange }: Props) {
       const oldRaw = settings[key]
       setMigrating(key)
       try {
-        const report = await invoke<{ moved: number; skipped: boolean }>('migrate_storage_dir', {
-          oldPath: oldReal,
-          newPath: base,
-        })
-        if (report.skipped || report.moved === 0) {
-          message.success('已更新存储目录')
+        // 向量库目录迁移有专属语义：close → move → 更新配置 → reopen（LanceDB 连接常驻，
+        // 不能沿用通用 migrate_storage_dir，否则迁移后 Rust 侧仍持有旧目录句柄）。
+        if (key === 'vectorPath') {
+          await invoke<{ moved: number; skipped: boolean }>('set_vector_path', { newPath: base })
+          message.success('已更新向量库目录并重连')
         } else {
-          message.success(`已将 ${report.moved} 个项目迁移至新目录`)
+          const report = await invoke<{ moved: number; skipped: boolean }>('migrate_storage_dir', {
+            oldPath: oldReal,
+            newPath: base,
+          })
+          if (report.skipped || report.moved === 0) {
+            message.success('已更新存储目录')
+          } else {
+            message.success(`已将 ${report.moved} 个项目迁移至新目录`)
+          }
         }
         // Skill 存储目录变更：skill_info.path 落库为旧基址/<identifier>，需整列改写为新基址，
         // 否则前端 skillFs 与 Rust skill_adapter 仍读旧目录（知识库 path 现算不落库，无需处理）。
@@ -225,6 +233,15 @@ export function SystemSettingsPanel({ settings, onChange }: Props) {
         value={settings.knowledgeBasePath}
         migrating={migrating === 'knowledgeBasePath'}
         onPick={() => void pickDir('knowledgeBasePath', '.knowledge_base')}
+      />
+
+      <StorageDirRow
+        icon={<Database size={15} />}
+        title="向量库存储目录"
+        description="LanceDB 向量数据根目录（对应 app_config.vector_path），承载记忆 / 项目蓝图 / 知识库切片的语义检索。修改后自动迁移数据并重连。"
+        value={settings.vectorPath}
+        migrating={migrating === 'vectorPath'}
+        onPick={() => void pickDir('vectorPath', '.vectors')}
       />
 
       <h3 className="set-section__title">会话</h3>

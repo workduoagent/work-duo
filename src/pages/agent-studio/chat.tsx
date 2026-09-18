@@ -109,7 +109,7 @@ import { RunDagCanvas } from './session/RunDagCanvas'
 import { ToolStepLine } from './session/ToolStepLine'
 import { DecisionCenter } from './session/DecisionCenter'
 import { TakeoverPanel } from './session/TakeoverPanel'
-import type { ReadArtifactResult, BranchFromStepInput, BranchStep, PlanDAG, ContextCompactedPayload } from './session/types'
+import type { ReadArtifactResult, BranchFromStepInput, BranchStep, PlanDAG, ContextCompactedPayload, ToolStep } from './session/types'
 import type {
   AgentInfo,
   AgentConversationSession,
@@ -120,6 +120,7 @@ import type { McpToolDefinition } from '@/core/file/mcp-file'
 import type {
   BoundMcpServer,
   ChatMessage,
+  ChatSegment,
   PendingAttachment,
   SpeechLike,
   SuggestItem,
@@ -177,6 +178,61 @@ async function resolveWorkspaceDir(agent: AgentInfo): Promise<string | null> {
  * 对话中的文件路径卡片：自动识别 Agent 回复里的文件路径，以内联卡片展示。
  * ---------------------------------------------------------------- */
 
+/** 折叠的「思考与执行过程」块（2026-09-18 体验重构）：
+ * 任务结束后，思考旁白、中间叙述文本与全部工具行**按真实时序**收进此处（默认收起），
+ * 气泡正文只保留最终交付内容（最后一段模型文本），对话流恢复「一句问答一段回复」的干净形态。
+ * thought 段渲染为「- 文本」小行，与工具块穿插（用户期望形式）。 */
+function ProcessCollapse({
+  items,
+  toolById,
+  psOf,
+}: {
+  items: ChatSegment[]
+  toolById: Map<string, ToolStep>
+  psOf: (t?: ToolStep) => { verified?: boolean; evidence?: string } | undefined
+}) {
+  const [open, setOpen] = useState(false)
+  const toolCount = items.filter((s) => s.kind === 'tool').length
+  return (
+    <div className="agent-chat__proc">
+      <button type="button" className="agent-chat__proc-head" onClick={() => setOpen((v) => !v)}>
+        {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+        <span>思考与执行过程</span>
+        {toolCount > 0 && <span className="agent-chat__proc-n">{toolCount} 次工具调用</span>}
+      </button>
+      {open && (
+        <div className="agent-chat__proc-body">
+          {items.map((s, i) =>
+            s.kind === 'text' ? (
+              <div key={i} className="agent-chat__seg-text">
+                <MarkdownRenderer content={s.text ?? ''} />
+              </div>
+            ) : s.kind === 'thought' ? (
+              <div key={i} className="agent-chat__seg-thought">
+                - {s.text}
+              </div>
+            ) : (
+              (() => {
+                const t = toolById.get(s.callId ?? '')
+                if (!t) return null
+                const ps = psOf(t)
+                return (
+                  <ToolStepLine
+                    key={`${s.callId}-${i}`}
+                    step={t}
+                    verified={ps?.verified}
+                    evidence={ps?.evidence}
+                  />
+                )
+              })()
+            ),
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function AgentChatPage() {
   const { id = '' } = useParams<{ id: string }>()
   const navigate = useNavigate()
@@ -184,7 +240,7 @@ export default function AgentChatPage() {
 
   // 会话状态机（必须早于任何引用 session.* 的回调/依赖数组，否则 TDZ）。
   const session = useAgentSession()
-  const { toolSteps, streamingText, isStreaming, statusText, thoughts, planSteps, isRunning, pendingApproval, run, submitDecision, reset, cancel, lastTaskUsage, liveTokenUsage, taskError, artifacts, recovery, resolveRecovery, pendingChoice, submitChoice, planApproval, resolvePlanApproval } =
+  const { toolSteps, segments, lastLlmUsage, streamingText, isStreaming, statusText, thoughts, planSteps, isRunning, pendingApproval, run, submitDecision, reset, cancel, lastTaskUsage, liveTokenUsage, taskError, artifacts, recovery, resolveRecovery, pendingChoice, submitChoice, planApproval, resolvePlanApproval } =
     session
 
   const [agent, setAgent] = useState<AgentInfo | undefined>()
@@ -276,9 +332,21 @@ export default function AgentChatPage() {
   // 接管不再常驻 Tab，改为 recovery 非空时右栏底部情境升起。
   const [rightOpen, setRightOpen] = useState(false)
   const [rightTab, setRightTab] = useState<'graph' | 'process' | 'artifacts' | 'actions'>('graph')
-  // 右栏宽度（可鼠标拖拽调节）：默认即最大 680px——右栏现有 4 个 Tab（图/过程/产物/处置），
-  // 窄宽度下页签文字会竖排折行，默认给满
-  const [rightWidth, setRightWidth] = useState(680)
+  // 右栏宽度（可鼠标拖拽调节）：悬浮面板宽度。上限动态 clamp（窗口宽 - 左侧栏 - 主区最小 420px），
+  // 窄窗口自动收窄，避免悬浮面板盖满对话区。
+  const [rightWidth, setRightWidth] = useState(() => {
+    const max = Math.max(340, Math.min(680, window.innerWidth - 220 - 420))
+    return Math.min(680, max)
+  })
+  // 窗口尺寸变化时 clamp 右栏宽度（悬浮面板不再参与 flex 分配，需自行约束）
+  useEffect(() => {
+    const onResize = () => {
+      const max = Math.max(340, Math.min(680, window.innerWidth - 220 - 420))
+      setRightWidth((w) => Math.min(w, max))
+    }
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
   // 会话分组折叠态（自由会话 / 各工程分组）：仅会话内 UI 态，不持久化
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set())
   const toggleGroupFold = useCallback((groupId: string) => {
@@ -289,6 +357,37 @@ export default function AgentChatPage() {
       return next
     })
   }, [])
+
+  // 复制单条消息的完整记录（2026-09-18 用户指定位置：气泡底部动作栏）：
+  // 正文 + 思考旁白与工具调用**按真实时序穿插**（thought 段「- 文本」+ 工具块），Markdown 格式。
+  const copyMessageRecord = useCallback((m: ChatMessage) => {
+    const toolById = new Map<string, ToolStep>((m.toolSteps ?? []).map((t) => [t.callId ?? '', t]))
+    let body = ''
+    if (m.segments?.length) {
+      for (const s of m.segments) {
+        if (s.kind === 'text') {
+          body += `${s.text ?? ''}\n\n`
+        } else if (s.kind === 'thought') {
+          body += `- ${s.text ?? ''}\n\n`
+        } else {
+          const t = toolById.get(s.callId ?? '')
+          if (t) {
+            body += `> **工具** ${t.toolLabel || t.toolName}（${t.status}）\n> 参数：${(t.args ?? '').replace(/\n/g, ' ').slice(0, 300)}\n> 结果：${(t.result ?? '').replace(/\n/g, ' ').slice(0, 300)}\n\n`
+          }
+        }
+      }
+    } else {
+      body = `${m.content}\n\n`
+    }
+    if (!m.segments?.length && m.thought?.length) {
+      body += `**思考**\n${m.thought.map((t) => `- ${t}`).join('\n')}\n\n`
+    }
+    const text = `## 🤖 智能体\n\n${body.trim()}`
+    void navigator.clipboard
+      .writeText(text)
+      .then(() => message.success('已复制该条完整记录（含思考与工具调用）'))
+      .catch(() => message.error('复制失败：剪贴板不可用'))
+  }, [message])
   const resizingRef = useRef(false)
   const resizeElRef = useRef<HTMLDivElement>(null)
   const startResize = (e: React.MouseEvent) => {
@@ -297,9 +396,10 @@ export default function AgentChatPage() {
     resizeElRef.current?.classList.add('is-dragging')
     const onMove = (ev: MouseEvent) => {
       if (!resizingRef.current) return
-      // 右栏右侧留 14px margin；按指针位置反推右栏宽度
+      // 右栏右侧留 14px margin；按指针位置反推右栏宽度；上限随窗口动态 clamp
       const w = window.innerWidth - ev.clientX - 14
-      setRightWidth(Math.min(680, Math.max(300, w)))
+      const max = Math.max(340, Math.min(680, window.innerWidth - 220 - 420))
+      setRightWidth(Math.min(max, Math.max(300, w)))
     }
     const onUp = () => {
       resizingRef.current = false
@@ -793,9 +893,9 @@ export default function AgentChatPage() {
       // 欢迎语是静态提示，不参与流式回填：避免 reset() 清空 streamingText 后
       // 把欢迎语覆盖成空内容，导致界面误显示「思考中…」
       if (!last || last.role !== 'agent' || last.id === 'welcome') return prev
-      return [...prev.slice(0, -1), { ...last, content: streamingText, thought: thoughts, toolSteps }]
+      return [...prev.slice(0, -1), { ...last, content: streamingText, thought: thoughts, toolSteps, segments }]
     })
-  }, [streamingText, thoughts, toolSteps])
+  }, [streamingText, thoughts, toolSteps, segments])
 
   // 任务结束（完成/异常/取消）时，补全耗时、token 与历史持久化
   useEffect(() => {
@@ -833,6 +933,8 @@ export default function AgentChatPage() {
             status: s.status,
             summary: s.summary,
           })),
+          // 交错时间线持久化（v26）：刷新/历史加载后按原时序重建穿插渲染
+          segments,
           inputTokens,
           outputTokens,
           endTime: completedAt,
@@ -905,6 +1007,7 @@ export default function AgentChatPage() {
               content: answer,
               thought: thoughts,
               toolSteps,
+              segments,
               completedAt,
               durationMs,
               tokenCount: inputTokens + outputTokens,
@@ -915,7 +1018,7 @@ export default function AgentChatPage() {
       })
     }
     prevIsRunningRef.current = isRunning
-  }, [isRunning, streamingText, thoughts, toolSteps, planSteps, lastAgentContent, statusText, activeSessionId, removedSkillIds, removedMcpIds, disabledMcpToolIds, boundMcps, toolCount, skillCount, isTauri, lastTaskUsage])
+  }, [isRunning, streamingText, thoughts, toolSteps, planSteps, segments, lastAgentContent, statusText, activeSessionId, removedSkillIds, removedMcpIds, disabledMcpToolIds, boundMcps, toolCount, skillCount, isTauri, lastTaskUsage])
 
   // 输入框顶部拖拽手柄：向上拖动增大高度（底部锚定，自然向上扩展），而非原生 resize 只能向下拉。
   const startInputResize = useCallback((e: React.MouseEvent) => {
@@ -1727,7 +1830,12 @@ export default function AgentChatPage() {
       className="agent-chat"
       // 输入框实际高度（用户可拖拽拉高，最高 320px）作为 CSS 变量下发，
       // 供主内容区 / 右侧执行轨迹面板 / 宽度拖柄动态避让，避免拉高后输入框遮挡这些区域。
-      style={{ '--input-h': `${inputHeight}px` } as React.CSSProperties}
+      style={
+        {
+          '--input-h': `${inputHeight}px`,
+          '--right-w': `${rightWidth}px`,
+        } as React.CSSProperties
+      }
       onDragEnter={(e) => {
         // 整窗拖拽吸附：用 depth 计数嵌套 enter/leave，避免子元素冒泡导致遮罩闪烁。
         if (e.dataTransfer?.types && Array.from(e.dataTransfer.types).includes('Files')) {
@@ -2112,6 +2220,82 @@ export default function AgentChatPage() {
                       )}
                     </div>
                   )}
+                  {m.role === 'agent' && m.segments && m.segments.length > 0 ? (
+                    (() => {
+                      const segs = m.segments
+                      const toolById = new Map<string, ToolStep>(
+                        (m.toolSteps ?? []).map((t) => [t.callId ?? '', t]),
+                      )
+                      const psOf = (t?: ToolStep) =>
+                        t ? m.planSteps?.find((p) => p.step === t.step) : undefined
+                      const renderTool = (callId: string | undefined, i: number) => {
+                        const t = toolById.get(callId ?? '')
+                        if (!t) return null
+                        const ps = psOf(t)
+                        return (
+                          <ToolStepLine
+                            key={`${callId}-${i}`}
+                            step={t}
+                            verified={ps?.verified}
+                            evidence={ps?.evidence}
+                          />
+                        )
+                      }
+                      const renderText = (text: string | undefined, i: number) => (
+                        <div key={i} className="agent-chat__seg-text">
+                          <MarkdownRenderer content={text ?? ''} />
+                        </div>
+                      )
+                      const renderThought = (text: string | undefined, i: number) => (
+                        <div key={i} className="agent-chat__seg-thought">
+                          - {text}
+                        </div>
+                      )
+                      const renderSeg = (s: ChatSegment, i: number) =>
+                        s.kind === 'text'
+                          ? renderText(s.text, i)
+                          : s.kind === 'thought'
+                            ? renderThought(s.text, i)
+                            : renderTool(s.callId, i)
+                      // 运行中（最后一条且流式/运行态）：交错时间线全展开（旁白行+工具块穿插）
+                      if (isLastAgent && (isStreaming || isRunning)) {
+                        return (
+                          <div className="agent-chat__timeline">
+                            {segs.map(renderSeg)}
+                          </div>
+                        )
+                      }
+                      // 已结束：最后一个 text 段作为正文气泡（最终交付），其余段收进折叠块
+                      let lastTextIdx = -1
+                      for (let i = segs.length - 1; i >= 0; i--) {
+                        if (segs[i].kind === 'text') {
+                          lastTextIdx = i
+                          break
+                        }
+                      }
+                      const collapsed = segs.filter((_, i) => i !== lastTextIdx)
+                      const finalText = lastTextIdx >= 0 ? (segs[lastTextIdx].text ?? '') : m.content
+                      return (
+                        <>
+                          {collapsed.length > 0 && (
+                            <ProcessCollapse
+                              items={collapsed}
+                              toolById={toolById}
+                              psOf={psOf}
+                            />
+                          )}
+                          <div className="agent-chat__bubble">
+                            {finalText ? (
+                              <MarkdownRenderer content={finalText} />
+                            ) : (
+                              <span className="agent-chat__thinking">（智能体未返回文本内容）</span>
+                            )}
+                          </div>
+                        </>
+                      )
+                    })()
+                  ) : (
+                    <>
                   {(m.thought?.length ?? 0) > 0 && (
                     <ThoughtPanel
                       thoughts={m.thought ?? []}
@@ -2147,6 +2331,8 @@ export default function AgentChatPage() {
                       <span className="agent-chat__plain">{m.content}</span>
                     )}
                   </div>
+                    </>
+                  )}
                   {m.role === 'agent' && m.error && (
                     <div className="agent-chat__error-panel">
                       <div className="agent-chat__error-head">
@@ -2191,6 +2377,7 @@ export default function AgentChatPage() {
                       msg={m}
                       agent={agent}
                       onRegenerate={() => handleRegenerate(m.id)}
+                      onCopyFull={() => void copyMessageRecord(m)}
                     />
                   )}
                 </div>
@@ -2440,9 +2627,10 @@ export default function AgentChatPage() {
               <div className="agent-chat__toolbar-right">
                 <LiveTokenCounter usage={liveTokenUsage} running={isRunning} />
                 <TokenRing
-                  promptTokens={activeSession?.totalPromptTokens ?? 0}
-                  completionTokens={activeSession?.totalCompletionTokens ?? 0}
-                  toolsTokens={activeSession?.toolsTokens ?? 0}
+                  windowTokens={lastLlmUsage?.promptTokens ?? 0}
+                  sessionPrompt={activeSession?.totalPromptTokens ?? 0}
+                  sessionCompletion={activeSession?.totalCompletionTokens ?? 0}
+                  sessionTools={activeSession?.toolsTokens ?? 0}
                   limit={contextLength}
                 />
                 {isMultimodal && (

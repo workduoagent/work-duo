@@ -7,7 +7,7 @@
 import type { ChatAttachmentInput, PlanStep, ToolStep } from '../session/types'
 import type { AgentConversationRound, AgentConversationSession, AgentProject } from '@/types/core'
 import type { SessionTreeGroup } from '@/core/mapper/agent-session-mapper'
-import type { ChatMessage } from './types'
+import type { ChatMessage, ChatSegment } from './types'
 import { estimateTokens } from './file-helpers'
 
 /** 把历史轮次转为消息流（用于点击左侧会话加载）。 */
@@ -96,6 +96,38 @@ export function roundsToMessages(rounds: AgentConversationRound[]): ChatMessage[
           return acc
         }, [])
       : undefined
+    // 交错时间线（v26 segments_json）：旁白/工具/正文按真实时序持久化——历史加载直接重建穿插渲染。
+    // tool 段按 callId 回查上方重建的 toolSteps（hist- 前缀 id 与 toolCallsSummary 对齐）。
+    const segments: ChatSegment[] | undefined = Array.isArray(r.segments)
+      ? r.segments
+          .map((s): ChatSegment | null => {
+            if (s.kind === 'text' && typeof s.text === 'string') {
+              return { kind: 'text', text: s.text }
+            }
+            if (s.kind === 'thought' && typeof s.text === 'string') {
+              return { kind: 'thought', text: s.text }
+            }
+            if (s.kind === 'tool' && typeof s.callId === 'string') {
+              // callId 暂空，下方循环统一重映射为 hist-{roundId}-{序号}（与重建 toolSteps 对齐）
+              return { kind: 'tool', callId: '' }
+            }
+            return null
+          })
+          .filter((x): x is ChatSegment => x !== null)
+      : undefined
+    // 旧 round（无 segments）：tool 段 callId 需与 toolCallsSummary 重建的 hist- 前缀对齐——
+    // 上面的索引 i 基于 segments 原序，而 toolCallsSummary 重建按数组序——两者在持久化时同源，序号一致。
+    if (segments?.length) {
+      // 校正 tool 段 callId：与重建 toolSteps 的顺序索引对齐（toolCallsSummary 与 segments 中的
+      // tool 段按相同顺序持久化），逐个映射第 i 个 tool 段 → hist-{roundId}-{i}。
+      let ti = 0
+      for (const s of segments) {
+        if (s.kind === 'tool') {
+          s.callId = `hist-${r.id}-${ti}`
+          ti += 1
+        }
+      }
+    }
     msgs.push({
       id: `a-${r.id}`,
       role: 'agent',
@@ -104,6 +136,7 @@ export function roundsToMessages(rounds: AgentConversationRound[]): ChatMessage[
       thought: r.thinkingContent ? r.thinkingContent.split('\n') : undefined,
       toolSteps: toolSteps?.length ? toolSteps : undefined,
       planSteps: planSteps?.length ? planSteps : undefined,
+      segments: segments?.length ? segments : undefined,
       completedAt: r.endTime,
       durationMs: r.startTime && r.endTime ? r.endTime - r.startTime : undefined,
       tokenCount: (r.inputTokens ?? 0) + (r.outputTokens ?? 0) || estimateTokens(r.assistantAnswer ?? ''),

@@ -19,6 +19,7 @@
 import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { invoke } from '@tauri-apps/api/core'
+import type { ChatSegment } from '@/pages/agent-studio/chat/types'
 import { isTauri } from '@/core/config'
 import { useNotify } from '@/components/ui/notify'
 import type {
@@ -42,6 +43,10 @@ import { baseName, opAction, opOf, pathFromArgs } from './toolNarrate'
 export interface AgentSessionState {
   /** 当前任务的工具调用步骤列表（按发生顺序）。 */
   toolSteps: ToolStep[]
+  /** 交错时间线：模型说话（text）与工具调用（tool）按到达顺序排列（体验重构）。 */
+  segments: ChatSegment[]
+  /** 最近一次 LLM 请求的真实窗口占用（单次口径；liveTokenUsage 是任务级累计）。 */
+  lastLlmUsage: { promptTokens: number; completionTokens: number } | null
   /** 当前正在流式输出的助手文本（已拼接完整片段）。 */
   streamingText: string
   /** 本轮是否有文本在流（控制「思考中」动画与光标）。 */
@@ -107,6 +112,11 @@ export function useAgentSession(): AgentSessionState {
   const [isStreaming, setIsStreaming] = useState(false)
   const [statusText, setStatusText] = useState('')
   const [thoughts, setThoughts] = useState<string[]>([])
+  // 交错时间线（2026-09-18 体验重构）：模型说话与工具调用按到达顺序排列，
+  // 渲染时「说话→工具→参数/结果→继续说话」自然交错（替代正文/工具两轴分离）。
+  const [segments, setSegments] = useState<ChatSegment[]>([])
+  // 最近一次 LLM 请求的真实窗口占用（agent-llm-usage 单次口径；任务级累计走 liveTokenUsage）。
+  const [lastLlmUsage, setLastLlmUsage] = useState<{ promptTokens: number; completionTokens: number } | null>(null)
   // 三层流水线：阶段二规划生成的步骤进度条（plan_generated 填充，step_started/finished 更新状态）。
   const [planSteps, setPlanSteps] = useState<PlanStep[]>([])
   const [isRunning, setIsRunning] = useState(false)
@@ -323,23 +333,19 @@ export function useAgentSession(): AgentSessionState {
     async (input: RunAgentTaskInput) => {
       // 用 ref 实时值拦截，避免 useCallback 闭包里的 isRunning 是旧值。
       if (isRunningRef.current) return
-      // 新一轮：清空上一轮的工具步骤、流式文本与思考过程，但保留历史气泡（气泡由页面维护）。
-      stepsRef.current.clear()
-      flushSteps()
+      // 新一轮启动：保留上一轮的执行图/轨迹/产物（换幕延迟到 plan_generated 事件，
+      // 2026-09-18 反馈「旧图直接消失又重建一批」——旧图保留到新规划就绪再无缝切换）。
+      // 仅清对话流式文本与本轮运行态。
       currentStepRef.current = null
       setStreamingText('')
       setIsStreaming(false)
       setThoughts([])
-      setPlanSteps([])
+      // 新消息气泡开新时间线（segments 仅承载当前轮的说话/工具交错）
+      setSegments([])
       applyPendingApproval(null)
       setStatusText('')
       setLiveTokenUsage(null)
       setTaskError(null)
-      setArtifacts([])
-      // 每轮任务重置轨迹（意图 + 分层思考）：避免上一题的轨迹泄漏/混进本轮。
-      // 与 planSteps/artifacts 同批清空；reset() 在切/新建会话时也清这两份。
-      setTraceIntent(undefined)
-      setTraceThinking([])
       setPlanBranch(null)
       setRecovery(null)
       pendingChoiceRef.current = null
@@ -482,10 +488,12 @@ export function useAgentSession(): AgentSessionState {
   const reset = useCallback(() => {
     stepsRef.current.clear()
     flushSteps()
+    setLastLlmUsage(null)
     setStreamingText('')
     setIsStreaming(false)
     setStatusText('')
     setThoughts([])
+    setSegments([])
     setPendingApproval(null)
     setLiveTokenUsage(null)
     setTaskError(null)
@@ -574,7 +582,15 @@ export function useAgentSession(): AgentSessionState {
               const op = step.op ?? opOf(step.toolName)
               const target = baseName(step.path ?? pathFromArgs(step.args))
               const object = target && target !== '.' ? ` ${target}` : ''
-              setThoughts((prev) => [...prev, `正在${opAction(op)}${object}`])
+              const narration = `正在${opAction(op)}${object}`
+              setThoughts((prev) => [...prev, narration])
+              // 交错时间线：旁白段 + 工具段**同批相邻入列**——渲染/导出即「正在XXX」紧跟其
+              // 触发的工具块（用户期望的穿插形式）。finished 仅更新 toolSteps（按 callId 回查）。
+              setSegments((prev) => [
+                ...prev,
+                { kind: 'thought' as const, text: narration },
+                { kind: 'tool' as const, callId: step.callId },
+              ])
             }
             break
           case 'tool_finished':
@@ -587,10 +603,13 @@ export function useAgentSession(): AgentSessionState {
                 const target = baseName(step.path ?? pathFromArgs(step.args))
                 const object = target && target !== '.' ? `（${target}）` : ''
                 const reason = (step.result ?? '').replace(/\s+/g, ' ').trim().slice(0, 100)
+                const failNote = `${opAction(op)}失败${object}${reason ? `：${reason}` : ''}`
                 setThoughts((prev) => [
                   ...prev,
-                  `${opAction(op)}失败${object}${reason ? `：${reason}` : ''}`,
+                  failNote,
                 ])
+                // 失败旁白同样入时间线（紧跟失败的工具块之后）
+                setSegments((prev) => [...prev, { kind: 'thought' as const, text: failNote }])
               }
             }
             break
@@ -600,6 +619,15 @@ export function useAgentSession(): AgentSessionState {
               // 统一追加增量文本；避免旧逻辑在 chunk.done 时覆盖为当前片段导致前面内容丢失
               if (chunk.text) {
                 setStreamingText((prev) => prev + chunk.text)
+                // 交错时间线：末段是 text 则追加，否则新开 text 段——
+                // 段被 tool 段打断后，下个 chunk 自动开新段（说话/工具按到达顺序交错）。
+                setSegments((prev) => {
+                  const last = prev[prev.length - 1]
+                  if (last && last.kind === 'text') {
+                    return [...prev.slice(0, -1), { kind: 'text' as const, text: (last.text ?? '') + chunk.text }]
+                  }
+                  return [...prev, { kind: 'text' as const, text: chunk.text }]
+                })
               }
               if (chunk.done) {
                 setIsStreaming(false)
@@ -617,6 +645,8 @@ export function useAgentSession(): AgentSessionState {
             const msg = e.message
             if (msg) {
               setThoughts((prev) => [...prev, msg])
+              // 状态旁白（计划审批策略/意图分流等）同样入时间线，保持时序完整
+              setSegments((prev) => [...prev, { kind: 'thought' as const, text: msg }])
             }
             break
           }
@@ -624,7 +654,15 @@ export function useAgentSession(): AgentSessionState {
             if (e.message) setStatusText(`错误：${e.message}`)
             break
           case 'plan_generated':
-            // 阶段二规划生成：渲染步骤进度条（全部 pending）
+            // 阶段二规划生成：渲染步骤进度条（全部 pending）。
+            // 换幕时机（2026-09-18 用户反馈「旧图直接消失」）：新规划的 DAG 到手时才清空
+            // 上一轮的轨迹数据（工具步骤/产物/思考轨迹），run() 启动时不再清——
+            // 旧图保留到新图就绪，视觉上「无缝切换」而非「闪空后重建」。
+            stepsRef.current.clear()
+            flushSteps()
+            setArtifacts([])
+            setTraceIntent(undefined)
+            setTraceThinking([])
             if (e.plan?.tasks) {
               setPlanSteps(e.plan.tasks)
             }
@@ -776,6 +814,13 @@ export function useAgentSession(): AgentSessionState {
           if (ev.payload) setLiveTokenUsage(ev.payload)
         },
       )
+      // 单次 LLM 请求的真实窗口占用（窗口占用环数据源；任务级累计见 offToken）。
+      const offLlmUsage = await listen<{ promptTokens: number; completionTokens: number }>(
+        'agent-llm-usage',
+        (ev) => {
+          if (ev.payload) setLastLlmUsage(ev.payload)
+        },
+      )
       // 子任务产物登记（成功闭环并写库后推送），累计进「产物画廊」。
       const offArtifact = await listen<{ step: number; artifacts: ArtifactRef[] }>(
         'agent-artifact-created',
@@ -802,6 +847,7 @@ export function useAgentSession(): AgentSessionState {
         offDone()
         offErr()
         offToken()
+        offLlmUsage()
         offArtifact()
         offRecovery()
         offChoice()
@@ -809,7 +855,7 @@ export function useAgentSession(): AgentSessionState {
         offPlanBranch()
         return
       }
-      unlistenRef.current = [offEvent, offApproval, offDone, offErr, offToken, offArtifact, offRecovery, offChoice, offPlanApproval, offPlanBranch]
+      unlistenRef.current = [offEvent, offApproval, offDone, offErr, offToken, offLlmUsage, offArtifact, offRecovery, offChoice, offPlanApproval, offPlanBranch]
     }
 
     void reg()
@@ -822,6 +868,8 @@ export function useAgentSession(): AgentSessionState {
 
   return {
     toolSteps,
+    segments,
+    lastLlmUsage,
     streamingText,
     isStreaming,
     statusText,

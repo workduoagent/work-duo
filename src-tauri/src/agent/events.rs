@@ -41,6 +41,9 @@ pub const EVT_PLAN_APPROVAL_NEEDED: &str = "agent-plan-approval-needed";
 pub const EVT_PLAN_BRANCH: &str = "agent-plan-branch";
 /// 记忆召回：某条记忆被自动/手动召回（引用计数 +1）后推送，供「记忆宫殿」实时刷新引用计数热力图。
 pub const EVT_MEMORY_RECALLED: &str = "agent-memory-recalled";
+
+/// 记忆向量回填进度（#20260918004）：批量向量化存量记忆时逐批推送。
+pub const EVT_MEMORY_BACKFILL: &str = "agent-memory-backfill";
 /// 上下文压缩完成（结构化事件）：替代原先只发一句 `emit_status` 字符串，携带压缩轮数/摘要长度/
 /// 估算节省 token，供「记忆宫殿」「上下文健康」视图结构化展示。
 pub const EVT_CONTEXT_COMPACTED: &str = "agent-context-compacted";
@@ -267,6 +270,23 @@ pub fn emit_token_update(app: &AppHandle, prompt_tokens: u64, completion_tokens:
     emit(
         app,
         EVT_TOKEN_UPDATE,
+        &TokenUpdatePayload {
+            prompt_tokens,
+            completion_tokens,
+        },
+    );
+}
+
+/// 单次 LLM 请求的窗口占用（2026-09-18 修正）：每次 LLM 调用（流式/非流式）完成后推送
+/// 该次请求的真实 prompt/completion。此前前端只有任务级累计（跨所有子任务所有 ReAct 轮），
+/// 误当「窗口占用」展示（实测 5 步任务累计 912K 被显示成 713% 窗口——口径完全错误）。
+/// 真实的上下文压力指标 = 最近一次请求的 prompt / contextLength。
+pub const EVT_LLM_USAGE: &str = "agent-llm-usage";
+
+pub fn emit_llm_usage(app: &AppHandle, prompt_tokens: u64, completion_tokens: u64) {
+    emit(
+        app,
+        EVT_LLM_USAGE,
         &TokenUpdatePayload {
             prompt_tokens,
             completion_tokens,
@@ -650,4 +670,24 @@ pub fn emit_squad_memory_anchored(app: &AppHandle, item: &SquadMemoryItem) {
         EVT_SQUAD_MEMORY_ANCHORED,
         &SquadMemoryAnchoredPayload { item: item.clone() },
     );
+}
+
+/// 记忆向量回填进度载荷（#20260918004）。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MemoryBackfillProgress {
+    /// 已处理条数（含失败）。
+    pub done: u32,
+    /// 存量记忆总条数。
+    pub total: u32,
+    /// 本批成功条数（累计）。
+    pub ok: u32,
+    /// 本批失败条数（累计）。
+    pub failed: u32,
+    /// 是否已结束（最后一批置 true，前端收尾）。
+    pub finished: bool,
+}
+
+pub fn emit_memory_backfill_progress(app: &AppHandle, p: &MemoryBackfillProgress) {
+    emit(app, EVT_MEMORY_BACKFILL, p);
 }

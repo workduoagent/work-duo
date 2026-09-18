@@ -400,3 +400,13 @@ CREATE INDEX IF NOT EXISTS idx_plugin_run_log_plugin ON plugin_run_log (plugin_i
 -- 形象设计弹窗的再编辑源：保存形象时生成 PNG dataURL 写 logo（展示源），结构化配置写本列。
 -- NULL = 从未使用形象设计生成过（或仅历史上传头像）。
 ALTER TABLE agent_info ADD COLUMN appearance TEXT;
+-- ---------- v25：app_config 新增 vector_path（LanceDB 向量库数据根目录） ----------
+-- 记忆 / artifacts / 知识库切块向量统一存 LanceDB（默认 $APPDATA/.vectors）；
+-- SQLite 只存业务元数据，不存 embedding（设计稿 v2.0 §3.1）。INSERT OR IGNORE 幂等，存量库补默认值。
+INSERT OR IGNORE INTO app_config (key, value) VALUES ('vector_path', '$APPDATA/.vectors');
+
+-- ============================================================
+-- ---------- v26：agent_conversation_round 新增 segments_json（交错时间线持久化） ----------
+-- 思考旁白 / 工具调用 / 正文按真实时序穿插的时间线 JSON（ChatSegment[]）；
+-- 刷新 / 历史加载时据此重建穿插渲染；旧 round NULL = 回退旧渲染。
+ALTER TABLE agent_conversation_round ADD COLUMN segments_json TEXT;

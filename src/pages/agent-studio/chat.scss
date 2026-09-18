@@ -1,5 +1,6 @@
 /* 智能体会话页（WorkBuddy 式三段式：左会话列表 + 中消息流 + 底工具条） */
 .agent-chat {
+  position: relative;
   display: flex;
   width: 100%;
   height: 100%;
@@ -2785,22 +2786,24 @@
 }
 
 // ── 右侧 Tab 面板（Phase 3 §3.1）：执行轨迹 + 产物 + 画布，替代原底部面板 ──
+// 悬浮化（2026-09-18 用户反馈）：非全屏窗口下右栏原为 flex 子项，680px 宽度直接把
+// 对话区挤压成一条线。改为 absolute 悬浮层——对话区恒定全宽，右栏浮于其上，
+// 不再参与 flex 分配；bottom 避让 fixed 输入条（高度跟随 --input-h）。
 &__right {
-  flex: 0 0 auto;
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  bottom: calc(var(--input-h, 48px) + 110px + 14px);
   display: flex;
   flex-direction: column;
   min-height: 0;
-  // 层级高于 fixed 输入条（z-index:5）：输入框拉高时 footer 全宽白底不得盖住轨迹面板
-  // （footer 实际高度含工具条/提醒卡，高于 --input-h 预留值；层级兜底保证面板恒可见）。
-  position: relative;
-  z-index: 6;
-  // 宽度由内联 style 控制（默认 340px，可拖拽调节）；右侧 14px 避让视口边
-  // 与左侧栏对齐的留白；底部避让高度跟随 `--input-h`，输入框拉高时面板同步上移不被遮挡。
-  margin: 14px 14px calc(var(--input-h, 48px) + 110px) 0;
+  // 层级高于 fixed 输入条（z-index:5）与主区内容：悬浮面板恒可见。
+  z-index: 26;
   border-radius: var(--radius-card);
   border: 1px solid var(--color-border, #e5e5e5);
   background: var(--color-background-subtle, #fafafa);
-  box-shadow: var(--shadow-sm);
+  // 悬浮感：加强阴影与描边
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.16), var(--shadow-sm);
   overflow: hidden;
 
   .dark & {
@@ -3065,15 +3068,15 @@
   }
 }
 
-// 右栏拖拽调节手柄：位于主区与右栏之间，鼠标可横向拖动改变右栏宽度
+// 右栏拖拽调节手柄：右栏悬浮化后改 absolute 定位，贴着右栏左缘（right 随 --right-w 联动）
 &__resize {
-  position: relative;
-  flex: 0 0 5px;
-  align-self: stretch;
+  position: absolute;
+  top: 14px;
+  bottom: calc(var(--input-h, 48px) + 110px + 14px);
+  right: calc(var(--right-w, 560px) + 14px + 3px);
+  width: 7px;
   // 与右栏同层级：不被拉高后的 fixed 输入条盖住（拖拽手柄需始终可操作）
-  z-index: 6;
-  // 底部避让高度跟随 `--input-h`，与右栏、主区保持一致，输入框拉高时手柄同步上移。
-  margin: 14px 0 calc(var(--input-h, 48px) + 110px);
+  z-index: 26;
   cursor: col-resize;
   background: transparent;
   border-radius: 2px;
@@ -5221,4 +5224,78 @@
 .agent-chat__session.is-active.is-running::before {
   height: 60%;
   background-color: var(--color-info, #3B82F6);
+}
+
+
+.agent-chat {
+
+/* ---------------- 交错时间线 / 过程折叠块（2026-09-18 体验重构） ---------------- */
+  &__timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+  &__seg-text {
+  min-width: 0;
+  font-size: 0.9375rem;
+  line-height: 1.65;
+  color: var(--color-foreground);
+
+  p { margin: 0 0 6px; &:last-child { margin-bottom: 0; } }
+}
+
+  &__proc {
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-background-subtle, transparent);
+  overflow: hidden;
+}
+
+  &__proc-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 6px 10px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 0.8125rem;
+  color: var(--color-foreground-muted);
+  transition: color 0.15s ease, background 0.15s ease;
+
+  &:hover {
+    color: var(--color-foreground);
+    background: var(--color-border-faint, rgba(0, 0, 0, 0.03));
+  }
+}
+
+  &__proc-n {
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: var(--color-border);
+  font-size: 0.6875rem;
+}
+
+  &__proc-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px 10px;
+  border-top: 1px dashed var(--color-border);
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+  &__seg-thought {
+    font-size: 0.8125rem;
+    line-height: 1.6;
+    color: var(--color-foreground-muted);
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+
 }

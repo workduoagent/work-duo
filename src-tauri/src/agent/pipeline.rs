@@ -71,6 +71,11 @@ pub struct PipelineResult {
     /// 只保留「已生成/更新 X」模板行（去 AI 味），产物型步骤的 summary 不进 final_text——
     /// 提炼器若只读 final_text 会无米下锅。此处保留原文供记忆提炼使用。
     pub step_summaries: Vec<String>,
+    /// 本轮写入 `.wd_mem/` 的文件（路径, 内容 clip 1200）（2026-09-18 实测补料）：
+    /// 模型常把「长期约定」写进 .wd_mem 文件而不调 anchor_memory，提炼器只看 summary
+    /// 时完全看不到这些内容（实测 step summary 仅「本步骤完成。」→ 误判无可沉淀）。
+    /// 把文件内容带给提炼器，使 forced 模式能从文件内容提炼记忆宫殿条目。
+    pub wd_mem_notes: Vec<(String, String)>,
 }
 
 /// DAG 拓扑调度图中全部原子子任务（#10）。
@@ -152,6 +157,8 @@ pub async fn run_pipeline(
         })
         .count();
     let mut total_usage: (u64, u64) = (0, 0);
+    // 本轮写入 .wd_mem/ 的文件内容（路径, 内容 clip 1200）——记忆提炼补料（成功分支收集）。
+    let mut wd_mem_notes: Vec<(String, String)> = Vec::new();
 
     // 跨步骤累积工具输出流：本会话所有子任务运行类工具（沙箱 pytest 等）的 stdout 聚合。
     // 用于「运行测试」类步骤的客观校验——当模型把测试运行合并进更早的文件创建步骤时，
@@ -180,6 +187,7 @@ pub async fn run_pipeline(
                 cancelled: true,
                 cancel_reason: None,
                 step_summaries: Vec::new(),
+                wd_mem_notes: Vec::new(),
             };
         }
         // 拓扑就绪：status=pending 且全部 depends_on 源节点 status ∈ {completed, skipped}。
@@ -220,6 +228,7 @@ pub async fn run_pipeline(
                 cancelled: false,
                 cancel_reason: None,
                 step_summaries: Vec::new(),
+                wd_mem_notes: Vec::new(),
             };
         }
         // 串行：本批仅取 1 个（max_parallel=1），其余下轮（依赖解除后）再拾起。
@@ -273,6 +282,7 @@ pub async fn run_pipeline(
                     cancelled: true,
                     cancel_reason: None,
                     step_summaries: Vec::new(),
+                    wd_mem_notes: Vec::new(),
                 };
             }
             let task_node_id = &batch[i];
@@ -315,6 +325,26 @@ pub async fn run_pipeline(
                         );
                     }
                 }
+                // 收集本轮写入 .wd_mem/ 的文件内容（clip 1200）供记忆提炼补料——
+                // 模型常把长期约定写进 wd_mem 文件而不调 anchor_memory，提炼器只看
+                // summary 时完全看不到这些内容（2026-09-18 实测 step summary 仅「本步骤完成。」）。
+                if let Some(cf) = &out.changed_files {
+                    for f in cf {
+                        if f.replace('\\', "/").contains(".wd_mem/") && wd_mem_notes.len() < 8 {
+                            let abs = cfg
+                                .workspace
+                                .as_deref()
+                                .map(|w| std::path::Path::new(w).join(f))
+                                .unwrap_or_else(|| std::path::PathBuf::from(f));
+                            if let Ok(content) = std::fs::read_to_string(&abs) {
+                                wd_mem_notes.push((
+                                    f.clone(),
+                                    runtime::clip(content.trim(), 1200),
+                                ));
+                            }
+                        }
+                    }
+                }
                 // 成功闭环：补发 step_finished(ok=true)。否则前端步骤状态停在 running，
                 // 任务结束时会被 useAgentSession.finalizeStuckSteps 兜底误判为失败。
                 events::emit_step_finished(app, step, total, &title, true, &out.summary, out.verified, &out.evidence, false);
@@ -347,10 +377,30 @@ pub async fn run_pipeline(
                         .and_then(|n| n.props.get("retryCount").and_then(|v| v.as_u64()))
                         .unwrap_or(0) as usize
                         + 1;
-                    if attempts > MAX_TASK_RECOVERY_ATTEMPTS {
+                    // 烧钱护栏（2026-09-18 审计）：同因失败检测——上次失败签名与本次一致，
+                    // 说明重试后模型走了同样的老路（诊断回灌对同因无效），继续重试只是
+                    // 成倍白烧 token。同因且已有过 1 次重试 → 直接跳过止损。
+                    // 签名 = 失败摘要去空白前 120 字符（诊断回灌的是同一 summary，同因即同签名）。
+                    let fail_sig = |s: &str| {
+                        let norm: String = s.chars().filter(|c| !c.is_whitespace()).collect();
+                        norm.chars().take(120).collect::<String>()
+                    };
+                    let last_sig = graph
+                        .get_node(&task_node_id)
+                        .and_then(|n| n.props.get("failSig").and_then(|v| v.as_str()))
+                        .unwrap_or("")
+                        .to_string();
+                    let cur_sig = fail_sig(&out.summary);
+                    let same_cause = !last_sig.is_empty() && last_sig == cur_sig;
+                    if (same_cause && attempts > 1) || attempts > MAX_TASK_RECOVERY_ATTEMPTS {
+                        let reason = if same_cause {
+                            "同因失败，重试无效，提前止损"
+                        } else {
+                            "自动重试达上限"
+                        };
                         tracing::info!(
-                            "[agent] pipeline: 全自动模式(never) 步骤 {}/{} 自动重试达上限 {}，自动跳过",
-                            step, total, MAX_TASK_RECOVERY_ATTEMPTS
+                            "[agent] pipeline: 全自动模式(never) 步骤 {}/{} 自动跳过（{reason}）",
+                            step, total,
                         );
                         events::emit_status(app, &format!("步骤 {}/{}：全自动模式重试未闭环，自动跳过", step, total));
                         graph.update_node(
@@ -359,9 +409,11 @@ pub async fn run_pipeline(
                         );
                         events::emit_step_finished(app, step, total, &title, true, "（全自动模式自动跳过）", false, "（全自动模式自动跳过，未做客观校验）", true);
                     } else {
+                        // guidance 裁剪：失败摘要可能携带长错误全文，重灌前截断（回灌只做方向引导，
+                        // 不需要完整报错——完整报错模型上一轮已经看过）。
                         let guidance = format!(
                             "上次执行未闭环，失败原因如下，请基于该诊断自主修复后重试（不要重复同样的做法）：\n{}",
-                            out.summary
+                            runtime::clip(out.summary.trim(), 800)
                         );
                         tracing::info!(
                             "[agent] pipeline: 全自动模式(never) 步骤 {}/{} 自动接管重试（带诊断回灌）",
@@ -370,7 +422,7 @@ pub async fn run_pipeline(
                         events::emit_status(app, &format!("步骤 {}/{}：全自动模式自动重试（带诊断）", step, total));
                         graph.update_node(
                             &task_node_id,
-                            json!({ "status": "retrying", "retryCount": attempts, "guidance": guidance }),
+                            json!({ "status": "retrying", "retryCount": attempts, "guidance": guidance, "failSig": cur_sig }),
                         );
                         // 自动重试也显式置 retrying，让画布闪「重试中」再翻 running（与手动重试一致）。
                         events::emit_step_retrying(app, step, total, &title);
@@ -476,6 +528,7 @@ pub async fn run_pipeline(
                                     step, title
                                 )),
                                 step_summaries: Vec::new(),
+                                wd_mem_notes: Vec::new(),
                             };
                         }
                     }
@@ -567,6 +620,7 @@ pub async fn run_pipeline(
                             cancelled: true,
                             cancel_reason: None,
                             step_summaries: Vec::new(),
+                            wd_mem_notes: Vec::new(),
                         };
                     }
                 }
@@ -646,46 +700,60 @@ pub async fn run_pipeline(
     // 各成功步骤的模型 summary（M0 forced_memory_settle 输入增强）：与 review_lines 同步收集，
     // 供记忆提炼使用——final_text 面向用户不包含产物型步骤的 summary（去 AI 味），提炼器需要。
     let mut step_summaries: Vec<String> = Vec::new();
-    let review_lines: Vec<String> = tasks
-        .iter()
-        .filter_map(|n| {
-            let step = n.props.get("step").and_then(|v| v.as_u64()).unwrap_or(0);
-            let status = n.props.get("status").and_then(|v| v.as_str()).unwrap_or("");
-            let verified = n.props.get("verified").and_then(|v| v.as_bool()).unwrap_or(false);
-            let summary = n
-                .props
-                .get("summary")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .trim()
-                .to_string();
-            // 从图读取本步真实目标文件（planner 写入的 success_criteria.target），代码层约束，非 prompt。
-            let mut names: Vec<String> = Vec::new();
-            if let Some(plan) = graph.task_to_plan(&n.id) {
-                for t in plan.success_criteria.iter().filter_map(|c| c.target.clone()) {
-                    let t = t.trim();
-                    if t.is_empty() {
-                        continue;
-                    }
-                    let name = std::path::Path::new(t)
-                        .file_name()
-                        .and_then(|f| f.to_str())
-                        .unwrap_or(t)
-                        .to_string();
-                    if !names.contains(&name) {
-                        names.push(name);
-                    }
+    // 聚合中间结构（2026-09-18：先收集再组装，支持「相同兜底文案多步合并」，避免
+    // final_text 尾部出现 N 行一字不差的重复——用户实测三连重复观感极差）。
+    struct AggLine {
+        title: String,
+        content: String,
+    }
+    let mut lines: Vec<AggLine> = Vec::new();
+    for n in &tasks {
+        let step = n.props.get("step").and_then(|v| v.as_u64()).unwrap_or(0);
+        let status = n.props.get("status").and_then(|v| v.as_str()).unwrap_or("");
+        let verified = n.props.get("verified").and_then(|v| v.as_bool()).unwrap_or(false);
+        let title = n
+            .props
+            .get("title")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let summary = n
+            .props
+            .get("summary")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        // 从图读取本步真实目标文件（planner 写入的 success_criteria.target），代码层约束，非 prompt。
+        let mut names: Vec<String> = Vec::new();
+        if let Some(plan) = graph.task_to_plan(&n.id) {
+            for t in plan.success_criteria.iter().filter_map(|c| c.target.clone()) {
+                let t = t.trim();
+                if t.is_empty() {
+                    continue;
+                }
+                let name = std::path::Path::new(t)
+                    .file_name()
+                    .and_then(|f| f.to_str())
+                    .unwrap_or(t)
+                    .to_string();
+                if !names.contains(&name) {
+                    names.push(name);
                 }
             }
-            // 日志保留「步骤 N」便于定位（用户回复中不展示，去 AI 味、简洁）。
-            tracing::info!(
-                "[agent] pipeline: 回复聚合 步骤 {} status={} 产物={:?} summary_len={}",
-                step,
-                status,
-                names,
-                summary.len()
-            );
+        }
+        // 日志保留「步骤 N」便于定位（用户回复中不展示，去 AI 味、简洁）。
+        tracing::info!(
+            "[agent] pipeline: 回复聚合 步骤 {} status={} 产物={:?} summary_len={}",
+            step,
+            status,
+            names,
+            summary.len()
+        );
             // 回复面向用户，不展示「步骤 N」这类内部调度术语（用户明确要求去 AI 味、简洁）。
+            // 2026-09-18 用户反馈「正文就几行」：聚合行此前只有「已生成/更新 X」模板行——
+            // 与执行图的百级节点完全不成比例。现补上每步实质内容（summary clip 500），
+            // 让终态回复可读：产物清单 + 该步做了什么/结论是什么。
             let content = match status {
                 "completed" => {
                     if !summary.is_empty() {
@@ -693,39 +761,71 @@ pub async fn run_pipeline(
                         // 看到任务真实产出内容；final_text 对产物型步骤只保留模板行）。
                         step_summaries.push(summary.clone());
                     }
-                    if !names.is_empty() {
+                    let head = if !names.is_empty() {
                         format!("已生成/更新 {}", names.join("、"))
-                    } else if !summary.is_empty() {
-                        if verified {
-                            summary // 无文件任务但有客观校验：纯对话/读取，降级模型 summary（无污染风险）
-                        } else {
-                            format!("{summary}\n（暂定完成：无客观依据，建议人工确认）")
-                        }
                     } else if verified {
-                        "已完成".to_string()
+                        String::new()
                     } else {
-                        "已完成（暂定：无客观依据，建议人工确认）".to_string()
+                        "（暂定完成：无客观依据，建议人工确认）".to_string()
+                    };
+                    // 实质内容段：模型终态汇报截断展示（产物行 + 汇报正文，两者都给）。
+                    let body = if summary.is_empty() {
+                        String::new()
+                    } else {
+                        format!("\n{}", runtime::clip(&summary, 500))
+                    };
+                    if head.is_empty() {
+                        body.trim_start().to_string()
+                    } else {
+                        format!("{head}{body}")
                     }
                 }
-                "failed" => {
-                    if !summary.is_empty() {
-                        format!("执行失败 - {}", summary)
-                    } else {
-                        "执行失败".to_string()
-                    }
+            "failed" => {
+                if !summary.is_empty() {
+                    format!("执行失败 - {}", summary)
+                } else {
+                    "执行失败".to_string()
                 }
-                "skipped" => "已跳过".to_string(),
-                _ => {
-                    if !summary.is_empty() {
-                        summary
-                    } else {
-                        return None;
-                    }
+            }
+            "skipped" => {
+                if title.is_empty() {
+                    "已跳过".to_string()
+                } else {
+                    // 跳过行带步骤标题：用户从终态回复即可知道哪一步没完成、没完成的是什么
+                    format!("已跳过：{title}（预算耗尽或重试无效，未产出交付，建议单独重跑该步）")
                 }
-            };
-            Some(content)
-        })
-        .collect();
+            }
+            _ => {
+                if !summary.is_empty() {
+                    summary
+                } else {
+                    continue;
+                }
+            }
+        };
+        lines.push(AggLine { title, content });
+    }
+    // 相同 content 合并（兜底成功闭环的多步文案一字不差时）：一行汇总 + 列出步骤名。
+    // 例：三行「本步骤已通过客观校验完成…」→「本步骤已通过客观校验完成…（落实测试规范、落实 CLI 设计约定、落实日志输出约定）」
+    let mut review_lines: Vec<String> = Vec::new();
+    let mut i = 0usize;
+    while i < lines.len() {
+        let content = lines[i].content.clone();
+        let mut same = Vec::new();
+        let mut j = i;
+        while j < lines.len() && lines[j].content == content {
+            if !lines[j].title.is_empty() {
+                same.push(lines[j].title.clone());
+            }
+            j += 1;
+        }
+        if same.len() > 1 {
+            review_lines.push(format!("{content}（{}）", same.join("、")));
+        } else {
+            review_lines.push(content);
+        }
+        i = j;
+    }
     let final_text = if review_lines.is_empty() {
         "任务已完成。".to_string()
     } else {
@@ -740,6 +840,7 @@ pub async fn run_pipeline(
         usage: total_usage,
         success: true,
         step_summaries,
+        wd_mem_notes,
         cancelled: false,
         cancel_reason: None,
     }
@@ -1038,6 +1139,47 @@ async fn run_subtask(
                             usage,
                         );
                     }
+                    // 烧钱护栏：4xx 客户端错误（鉴权/参数/上下文超限等）重试必然同因复败，
+                    // 每次重试都是一次全量 input 白烧——立即失败上抛，仅 408/429/5xx/网络错误
+                    // 属瞬态可退避重试。
+                    if let Some(code) = llm_err
+                        .strip_prefix("HTTP ")
+                        .and_then(|s| s.split(&['：', ':'][..]).next())
+                        .and_then(|s| s.trim().parse::<u16>().ok())
+                    {
+                        let transient = code == 408 || code == 429 || code >= 500;
+                        if !transient {
+                            tracing::warn!(
+                                "[agent] pipeline: 子任务 step={} 第 {} 轮 LLM 返回不可恢复错误 HTTP {}，不重试直接失败：{}",
+                                task.step, round, code, runtime::clip(&llm_err, 200)
+                            );
+                            return (
+                                SubTaskOutput {
+                                    step: task.step,
+                                    title: task.title.clone(),
+                                    summary: format!("LLM 调用失败（HTTP {code}，不可恢复）：{llm_err}"),
+                                    success: false,
+                                    cancelled: false,
+                                    skipped: false,
+                                    failed_command: last_failed_command.clone(),
+                                    verified: false,
+                                    evidence: String::new(),
+                                    changed_files: if changed_files.is_empty() {
+                                        None
+                                    } else {
+                                        Some(changed_files.clone())
+                                    },
+                                    read_files: if read_files.is_empty() {
+                                        None
+                                    } else {
+                                        Some(read_files.clone())
+                                    },
+                                    artifacts: vec![],
+                                },
+                                usage,
+                            );
+                        }
+                    }
                     llm_attempt += 1;
                     if llm_attempt > max_llm_retry {
                         tracing::info!(
@@ -1317,12 +1459,14 @@ async fn run_subtask(
             );
         }
 
-        // 工具轮：计入预算；超过上限且仍要调用工具 → 判定受阻
-        // （产物可能已生成，但模型未能自行收敛）。终态汇报轮在上面的分支单独放行。
+        // 工具轮：计入预算；超过上限且仍要调用工具 → 先跑客观校验兜底，再判定受阻。
+        // （产物可能已生成，模型只是没发终态汇报、把预算花在反复验证上。真机实测 2026-09-18：
+        // step2 在 pytest 全绿后第 9 轮被熔断误判失败 → 全自动模式带诊断重试 3 次，单次任务
+        // 烧掉 210 万 input tokens。熔断先过 verifier：criteria 客观满足 → 按成功闭环，不再重试。）
         tool_iterations += 1;
         if tool_iterations > MAX_SUBTASK_ITERATIONS {
             tracing::info!(
-                "[agent] pipeline: 子任务 step={} 超过 {} 个工具轮仍未收敛（总轮 {}）",
+                "[agent] pipeline: 子任务 step={} 超过 {} 个工具轮仍未收敛（总轮 {}），先客观校验再判定",
                 task.step, MAX_SUBTASK_ITERATIONS, round,
             );
             // 超轮上限也把已产出输出并入会话累积，避免后续步骤因缺证据误判。
@@ -1331,6 +1475,139 @@ async fn run_subtask(
                     if !prev.contains(o) {
                         prev.push(o.clone());
                     }
+                }
+            }
+            // 熔断客观校验兜底：criteria 存在且满足 → 按成功闭环（与正常闭环同一校验口径）。
+            if !task.success_criteria.is_empty() {
+                let actual_written: Vec<std::path::PathBuf> = changed_files
+                    .iter()
+                    .filter_map(|p| {
+                        let pb = std::path::Path::new(p.trim());
+                        if pb.is_absolute() {
+                            Some(pb.to_path_buf())
+                        } else {
+                            ctx.workspace.as_ref().map(|w| w.join(pb))
+                        }
+                    })
+                    .collect();
+                let mut combined_outputs = tool_outputs.clone();
+                if let Ok(prev) = session_tool_outputs.lock() {
+                    for o in prev.iter() {
+                        if !combined_outputs.contains(o) {
+                            combined_outputs.push(o.clone());
+                        }
+                    }
+                }
+                let result = crate::agent::verifier::verify_task(
+                    &task,
+                    ctx.workspace.as_deref(),
+                    &actual_written,
+                    &combined_outputs,
+                );
+                if result.met {
+                    // 弱/强验收分级（外部评审 D01/D04）：criteria 全为「存在性检查」时，
+                    // 熔断收尾只能算「初核通过」——文件存在 ≠ 行为达标（实测 CLI 退出码
+                    // 未改、pytest 有失败仍被记成功）。存在性验收的熔断步骤标暂定，
+                    // 不得打「客观校验通过」；含行为级断言（command_succeeded/text_contains 等）
+                    // 的步骤才可按已验证闭环。
+                    let existence_only = task.success_criteria.iter().all(|c| {
+                        let ct = c.check_type.to_lowercase();
+                        matches!(ct.as_str(), "file_exists" | "file_nonempty" | "directory_exists")
+                    });
+                    let verified_flag = result.verified && !existence_only;
+                    tracing::info!(
+                        "[agent] pipeline: 子任务 step={} 超轮熔断收尾（验收级别={}）evidence={}",
+                        task.step,
+                        if existence_only { "存在性初核，暂定" } else { "行为级，已验证" },
+                        runtime::clip(&result.evidence, 160),
+                    );
+                    let sources = crate::agent::artifacts::ArtifactSources {
+                        changed_files: &changed_files,
+                        success_targets: task
+                            .success_criteria
+                            .iter()
+                            .filter_map(|c| c.target.clone())
+                            .filter(|t| !t.is_empty())
+                            .collect(),
+                    };
+                    let artifacts = crate::agent::artifacts::register_artifacts(
+                        app, cfg, &task,
+                        "（超轮熔断，客观校验通过）模型未发终态汇报，按产物客观校验闭环",
+                        &sources,
+                    )
+                    .await;
+                    // 面向用户的 summary：不外泄「熔断/闭环」等内部机制术语；带步骤标题
+                    // （回复聚合对无 target 步骤原文展示 summary，多步相同文案时用户无法区分）。
+                    // 暂定级别必须显式披露「预算耗尽 + 建议人工复核」，禁止假绿。
+                    let friendly = if changed_files.is_empty() {
+                        if verified_flag {
+                            format!(
+                                "「{}」已通过客观校验完成（执行轮次达预算上限，产物经核验无误）",
+                                task.title
+                            )
+                        } else {
+                            format!(
+                                "「{}」预算耗尽收尾：产物初核通过，但未经行为级验收（暂定完成，建议人工复核）",
+                                task.title
+                            )
+                        }
+                    } else {
+                        let names: Vec<String> = changed_files
+                            .iter()
+                            .map(|p| {
+                                std::path::Path::new(p)
+                                    .file_name()
+                                    .and_then(|f| f.to_str())
+                                    .unwrap_or(p)
+                                    .to_string()
+                            })
+                            .collect();
+                        if verified_flag {
+                            format!(
+                                "「{}」已生成/更新 {}（执行轮次达预算上限，产物经客观校验无误）",
+                                task.title,
+                                names.join("、")
+                            )
+                        } else {
+                            format!(
+                                "「{}」已生成/更新 {}（执行轮次达预算上限，产物初核通过但未经行为级验收，暂定完成，建议人工复核）",
+                                task.title,
+                                names.join("、")
+                            )
+                        }
+                    };
+                    return (
+                        SubTaskOutput {
+                            step: task.step,
+                            title: task.title.clone(),
+                            summary: friendly,
+                            success: true,
+                            cancelled: false,
+                            skipped: false,
+                            failed_command: last_failed_command.clone(),
+                            verified: verified_flag,
+                            evidence: if verified_flag {
+                                format!("超轮收尾，行为级验收通过：{}", result.evidence)
+                            } else {
+                                format!(
+                                    "超轮收尾，仅存在性初核（criteria 无行为级断言），暂定完成：{}",
+                                    result.evidence
+                                )
+                            },
+                            changed_files: if changed_files.is_empty() {
+                                None
+                            } else {
+                                Some(changed_files.clone())
+                            },
+                            read_files: if read_files.is_empty() {
+                                None
+                            } else {
+                                Some(read_files.clone())
+                            },
+                            artifacts,
+                        },
+                        usage,
+                    );
                 }
             }
             return (
