@@ -677,6 +677,29 @@ pub async fn anchor_memory(app: AppHandle, input: AnchorMemoryInput) -> Result<M
     .await
 }
 
+/// M3 蒸馏候选：列出全部 pending（记忆宫殿「待确认」区）。
+#[tauri::command]
+pub async fn list_memory_candidates(
+    app: AppHandle,
+) -> Result<Vec<memory::MemoryCandidate>, String> {
+    memory::list_memory_candidates(&app).await
+}
+
+/// M3 蒸馏候选：采纳（anchor_memory auto_merge 转入正表 + 向量回写）。
+#[tauri::command]
+pub async fn confirm_memory_candidate(
+    app: AppHandle,
+    id: String,
+) -> Result<MemoryItem, String> {
+    memory::confirm_memory_candidate(&app, &id).await
+}
+
+/// M3 蒸馏候选：忽略（标 rejected，不再出现）。
+#[tauri::command]
+pub async fn reject_memory_candidate(app: AppHandle, id: String) -> Result<(), String> {
+    memory::reject_memory_candidate(&app, &id).await
+}
+
 /// 更新记忆入参（update_memory 命令）。
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]

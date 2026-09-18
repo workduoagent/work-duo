@@ -66,6 +66,17 @@ interface BackfillProgress {
   failed: number
   finished: boolean
 }
+/** M3 蒸馏候选（#20260918007）：压缩提炼的待确认记忆（agent_memory_candidates 行）。 */
+interface MemoryCandidateItem {
+  id: string
+  agentId: string | null
+  sessionId: string | null
+  key: string
+  content: string
+  category: MemoryCategory
+  source: string
+  createdAt: number
+}
 import type {
   MemoryItem,
   MemoryCategory,
@@ -233,6 +244,11 @@ export default function MemoryPalace() {
   const [vecStatus, setVecStatus] = useState<VectorStatus | null>(null)
   const [backfilling, setBackfilling] = useState(false)
   const [progress, setProgress] = useState<BackfillProgress | null>(null)
+  // M3 蒸馏候选（#20260918007）：压缩提炼的「待确认」记忆
+  const [candidates, setCandidates] = useState<MemoryCandidateItem[]>([])
+  const [candBusyId, setCandBusyId] = useState<string | null>(null)
+  // 主区视图切换：记忆列表 / 蒸馏待确认
+  const [view, setView] = useState<'memories' | 'candidates'>('memories')
 
   const loadVectorStatus = useCallback(async () => {
     if (!isTauri) return
@@ -263,16 +279,49 @@ export default function MemoryPalace() {
     }
   }, [backfilling, isTauri, loadVectorStatus, message])
 
+  const loadCandidates = useCallback(async () => {
+    if (!isTauri) return
+    try {
+      setCandidates(await invoke<MemoryCandidateItem[]>('list_memory_candidates', {}))
+    } catch {
+      /* 待确认区非关键路径，失败静默 */
+    }
+  }, [])
+
+  const handleCandidate = useCallback(
+    async (id: string, action: 'confirm' | 'reject') => {
+      setCandBusyId(id)
+      try {
+        if (action === 'confirm') {
+          const item = await invoke<MemoryItem>('confirm_memory_candidate', { id })
+          message.success(`已转入记忆宫殿：${item.key}`)
+          setMemories((prev) => (prev.some((m) => m.id === item.id) ? prev : [item, ...prev]))
+          void loadVectorStatus()
+        } else {
+          await invoke('reject_memory_candidate', { id })
+        }
+        setCandidates((prev) => prev.filter((c) => c.id !== id))
+      } catch (e) {
+        message.error(`处置失败：${typeof e === 'string' ? e : '未知错误'}`)
+      } finally {
+        setCandBusyId(null)
+      }
+    },
+    [loadVectorStatus, message],
+  )
+
   const loadAll = useCallback(async () => {
     setLoading(true)
     try {
       if (isTauri) {
-        const [mems, heat] = await Promise.all([
+        const [mems, heat, cands] = await Promise.all([
           invoke<MemoryItem[]>('list_memories', {}),
           invoke<HeatmapPoint[]>('get_memory_heatmap', {}),
+          invoke<MemoryCandidateItem[]>('list_memory_candidates', {}).catch(() => [] as MemoryCandidateItem[]),
         ])
         setMemories(mems)
         setHeatmap(heat)
+        setCandidates(cands)
       } else {
         setMemories(MOCK_MEMORIES)
         setHeatmap(mockHeatmap())
@@ -309,6 +358,8 @@ export default function MemoryPalace() {
       })
       offCompact = await listen<ContextCompactedPayload>('agent-context-compacted', (ev) => {
         setCompactions((prev) => [ev.payload, ...prev].slice(0, 8))
+        // M3：蒸馏候选伴随压缩产生——压缩完成后顺带刷新待确认区。
+        void loadCandidates()
       })
       // 向量回填进度（逐批推送，finished=true 收尾）
       offBackfill = await listen<BackfillProgress>('agent-memory-backfill', (ev) => {
@@ -323,7 +374,7 @@ export default function MemoryPalace() {
       offBackfill?.()
       void alive
     }
-  }, [isTauri])
+  }, [isTauri, loadCandidates])
 
   useEffect(() => {
     void loadAll()
@@ -508,24 +559,87 @@ export default function MemoryPalace() {
       </div>
 
       <div className="mp__layout">
-        {/* 主区：搜索 + 卡片网格 */}
+        {/* 主区：视图切换（记忆列表 / 蒸馏待确认）+ 内容 */}
         <div className="mp__main">
-          <div className="mp__toolbar">
-            <Input
-              allowClear
-              placeholder="搜索关键词 / 记忆内容"
-              prefix={<Search size={14} color="var(--color-foreground-muted)" />}
-              value={keyword}
-              onChange={(e) => setKeyword(e.target.value)}
-              style={{ width: 320 }}
-            />
+          <div className="mp__views">
             <Segmented
-              className="mp__seg"
-              value={category}
-              onChange={(v) => setCategory(v as MemoryCategory | 'all')}
-              options={CATEGORIES.map((c) => ({ label: `${c.label}${counts[c.value] ? ` ${counts[c.value]}` : ''}`, value: c.value }))}
+              value={view}
+              onChange={(v) => setView(v as 'memories' | 'candidates')}
+              options={[
+                { label: `全部记忆 ${memories.length}`, value: 'memories' },
+                { label: `待确认 ${candidates.length}`, value: 'candidates' },
+              ]}
             />
           </div>
+
+          {view === 'candidates' ? (
+            <div className="mp__cands">
+              {candidates.length === 0 ? (
+                <div className="mp-grid-empty">
+                  <Empty description="暂无待确认候选——会话压缩蒸馏出的记忆候选会出现在这里" />
+                </div>
+              ) : (
+                <>
+                  <div className="mp__cands-head">
+                    <span className="mp__recall-meta">
+                      会话压缩时智能体提炼的记忆候选：采纳后进入长期记忆并参与召回，忽略后不再出现
+                    </span>
+                  </div>
+                  <div className="mp__cands-list">
+                    {candidates.map((c) => (
+                      <div key={c.id} className="mp__cand">
+                        <div className="mp__cand-body">
+                          <div className="mp__cand-key">
+                            <Tag color={CATEGORIES.find((x) => x.value === c.category)?.color ?? 'default'}>
+                              {CAT_LABEL[c.category] ?? c.category}
+                            </Tag>
+                            <span className="mp__cand-key-text">{c.key}</span>
+                          </div>
+                          <div className="mp__cand-content" title={c.content}>
+                            {c.content}
+                          </div>
+                        </div>
+                        <div className="mp__cand-actions">
+                          <Button
+                            size="sm"
+                            disabled={candBusyId === c.id}
+                            onClick={() => void handleCandidate(c.id, 'confirm')}
+                          >
+                            采纳
+                          </Button>
+                          <Button
+                            variant="soft"
+                            size="sm"
+                            disabled={candBusyId === c.id}
+                            onClick={() => void handleCandidate(c.id, 'reject')}
+                          >
+                            忽略
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+          ) : (
+            <>
+              <div className="mp__toolbar">
+                <Input
+                  allowClear
+                  placeholder="搜索关键词 / 记忆内容"
+                  prefix={<Search size={14} color="var(--color-foreground-muted)" />}
+                  value={keyword}
+                  onChange={(e) => setKeyword(e.target.value)}
+                  style={{ width: 320 }}
+                />
+                <Segmented
+                  className="mp__seg"
+                  value={category}
+                  onChange={(v) => setCategory(v as MemoryCategory | 'all')}
+                  options={CATEGORIES.map((c) => ({ label: `${c.label}${counts[c.value] ? ` ${counts[c.value]}` : ''}`, value: c.value }))}
+                />
+              </div>
 
           <Spin spinning={loading} wrapperClassName="mp__spin">
             {filtered.length > 0 ? (
@@ -606,6 +720,8 @@ export default function MemoryPalace() {
               )
             )}
           </Spin>
+            </>
+          )}
         </div>
 
         {/* 侧栏：热力图 + 压缩事件 */}

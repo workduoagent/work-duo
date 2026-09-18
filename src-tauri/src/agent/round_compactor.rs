@@ -530,6 +530,92 @@ pub(crate) async fn trigger_background_compaction(
                         success: true,
                     },
                 );
+
+                // M3 蒸馏（#20260918007）：独立轻量调用从新摘要提炼候选（同调用双段契约在
+                // 超长压缩 prompt 下必被模型忽略——真机 111K 字符实测实锤）→
+                // forced 直接自动转入（anchor_memory auto_merge=M0 护栏+去噪+向量回写全套）；
+                // active 等其余模式落 pending，记忆宫殿「待确认」区等用户处置；off 模式不蒸馏。
+                let mut distill_candidates: Vec<(String, String, String)> = Vec::new();
+                if cfg_bg.memory_mode != "off" {
+                    match execute_distill_call(&cfg_bg, &new_summary).await {
+                        Ok(c) => distill_candidates = c,
+                        Err(e) => {
+                            tracing::warn!("[Compactor] 蒸馏调用失败（本轮跳过蒸馏）：{e}");
+                        }
+                    }
+                }
+                if !distill_candidates.is_empty() {
+                    let mut confirmed = 0usize;
+                    let mut pending = 0usize;
+                    for (key, category, content) in &distill_candidates {
+                        if cfg_bg.memory_mode == "forced" {
+                            match crate::agent::memory::anchor_memory(
+                                &app_bg,
+                                Some(&cfg_bg.agent_id),
+                                Some(&sid),
+                                key,
+                                content,
+                                category,
+                                false,
+                                true,
+                            )
+                            .await
+                            {
+                                Ok(_) => confirmed += 1,
+                                Err(e) => tracing::debug!(
+                                    "[Compactor] 蒸馏候选被护栏拦截（key={key}）：{e}"
+                                ),
+                            }
+                        } else {
+                            // 同 agent+key 已有 pending 时跳过（压缩周期性触发，防重复堆积）。
+                            let dup = sqlx::query(
+                                "SELECT 1 FROM agent_memory_candidates \
+                                 WHERE agent_id = ? AND key = ? AND status = 'pending' LIMIT 1",
+                            )
+                            .bind(&cfg_bg.agent_id)
+                            .bind(key)
+                            .fetch_optional(&pool)
+                            .await
+                            .ok()
+                            .flatten();
+                            if dup.is_some() {
+                                continue;
+                            }
+                            let cid = format!("cand_{}_{}", now_ms(), pending + confirmed);
+                            if let Err(e) = sqlx::query(
+                                "INSERT INTO agent_memory_candidates \
+                                 (id, agent_id, session_id, key, content, category, source, status, created_at) \
+                                 VALUES (?, ?, ?, ?, ?, ?, 'distill', 'pending', ?)",
+                            )
+                            .bind(&cid)
+                            .bind(&cfg_bg.agent_id)
+                            .bind(&sid)
+                            .bind(key)
+                            .bind(content)
+                            .bind(category)
+                            .bind(now_ms())
+                            .execute(&pool)
+                            .await
+                            {
+                                tracing::warn!("[Compactor] 蒸馏候选落库失败（key={key}）：{e}");
+                                continue;
+                            }
+                            pending += 1;
+                        }
+                    }
+                    if confirmed > 0 || pending > 0 {
+                        tracing::info!(
+                            "[Compactor] 蒸馏完成：自动转入 {} 条 / pending {} 条（mode={}）",
+                            confirmed,
+                            pending,
+                            cfg_bg.memory_mode
+                        );
+                        events::emit_status(
+                            &app_bg,
+                            format!("会话蒸馏：{confirmed} 条已入记忆宫殿，{pending} 条待确认").as_str(),
+                        );
+                    }
+                }
             }
             Err(err) => {
                 tracing::error!("[Compactor] 后台压缩失败：{err}");
@@ -558,7 +644,35 @@ async fn resolve_project_root(pool: &SqlitePool, session_id: &str) -> Option<Str
         .filter(|s| !s.trim().is_empty())
 }
 
+/// 解析蒸馏候选行（`key | category | content`）；NONE/空行/标题行/列表符/缺字段行跳过。
+fn parse_candidate_lines(text: &str) -> Vec<(String, String, String)> {
+    let mut candidates = Vec::new();
+    for line in text.lines() {
+        let line = line.trim();
+        if line.is_empty()
+            || line.starts_with('#')
+            || line.starts_with('-')
+            || line.starts_with('*')
+            || line.eq_ignore_ascii_case("none")
+        {
+            continue;
+        }
+        let parts: Vec<&str> = line.splitn(3, '|').map(|s| s.trim()).collect();
+        if parts.len() < 3 || parts[0].is_empty() || parts[2].is_empty() {
+            continue;
+        }
+        candidates.push((
+            parts[0].to_string(),
+            parts[1].to_string(),
+            parts[2].to_string(),
+        ));
+    }
+    candidates
+}
+
 /// 执行压缩大模型调用（按规范 SummaryPrompt 契约生成结构化状态摘要）。
+/// M3 修订：蒸馏候选改为**独立轻量调用**（execute_distill_call）——真机实测超长压缩
+/// prompt（111K 字符）下模型注意力全在摘要 schema，同调用内追加第二产出段必被忽略。
 async fn execute_summary_call(
     cfg: &AgentRuntimeConfig,
     old_summary: Option<&str>,
@@ -632,4 +746,92 @@ Your job is to merge the Existing Summary and the Target Conversation Rounds int
         crate::agent::runtime::clip(&summary, 500)
     );
     Ok(summary)
+}
+
+/// 独立蒸馏调用（M3）：输入压缩后的摘要（数 K 字符级，专注度高），提炼值得升入
+/// 长期记忆的候选行。含 few-shot 示例保格式遵守率。失败 = Err（上层降级跳过蒸馏）。
+async fn execute_distill_call(
+    cfg: &AgentRuntimeConfig,
+    summary: &str,
+) -> Result<Vec<(String, String, String)>, String> {
+    let system_rule = r#"你是长期记忆提炼器。从会话状态摘要中提炼「可跨会话复用的稳定知识」候选。
+
+只提炼这些：
+- 用户明确表达的偏好或约束
+- 已确认的技术决策 / 架构约定
+- 踩过的坑与规避方式
+- 可复用的代码 / 脚本模式
+
+绝不提炼：一次性任务步骤、临时文件内容、当轮琐碎状态、单纯的文件清单。
+
+输出格式（严格每行一条，无其他文本）：
+关键词 | 分类 | 内容
+其中分类取 decision（决策）/ code_pattern（代码模式）/ user_pref（用户偏好）/ architecture（架构）/ fix（避坑）/ other（其他）之一。
+
+示例：
+script-dir-convention | user_pref | Python 工具脚本统一放 .wd_mem/runtime/scripts/，文件名 snake_case
+api-timeout-decision | decision | 对外 API 超时统一 30 秒、重试不超过 3 次
+concurrent-refresh-pitfall | fix | 并发刷新令牌会互踢，客户端需 single-flight 加锁
+
+若摘要中没有任何值得沉淀的内容，只输出一个词：NONE"#;
+
+    let messages = vec![
+        json!({ "role": "system", "content": system_rule }),
+        json!({ "role": "user", "content": format!("会话状态摘要：\n{summary}") }),
+    ];
+    let (choice, _usage) = call_llm(cfg, &messages, &[]).await?;
+    let raw = choice
+        .get("content")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    if raw.is_empty() {
+        return Ok(Vec::new());
+    }
+    let candidates = parse_candidate_lines(&raw);
+    tracing::info!(
+        "[Compactor] 蒸馏调用完成：提炼候选 {} 条（原始输出预览：{}）",
+        candidates.len(),
+        crate::agent::runtime::clip(&raw, 200)
+    );
+    Ok(candidates)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_candidate_lines;
+
+    #[test]
+    fn parse_basic_candidate_lines() {
+        let raw = "jwt-choice | decision | 登录采用 JWT 双 token\nrefresh-lock | fix | 并发刷新需 single-flight 加锁";
+        let cands = parse_candidate_lines(raw);
+        assert_eq!(cands.len(), 2);
+        assert_eq!(cands[0].0, "jwt-choice");
+        assert_eq!(cands[0].1, "decision");
+        assert!(cands[0].2.contains("双 token"));
+        assert_eq!(cands[1].0, "refresh-lock");
+    }
+
+    #[test]
+    fn parse_skips_none_and_bad_lines() {
+        let raw = "NONE\n\n只有两个字段 | decision\nok-key | fix | 合法内容";
+        let cands = parse_candidate_lines(raw);
+        assert_eq!(cands.len(), 1, "NONE 与缺字段行跳过，实得：{cands:?}");
+        assert_eq!(cands[0].0, "ok-key");
+    }
+
+    #[test]
+    fn parse_tolerates_decorated_lines() {
+        let raw = "### 标题跳过\n- 带列表符的行跳过\n* 星号列表也跳过\ngood | other | 内容";
+        let cands = parse_candidate_lines(raw);
+        assert_eq!(cands.len(), 1);
+        assert_eq!(cands[0].0, "good");
+    }
+
+    #[test]
+    fn parse_empty_and_none_only() {
+        assert!(parse_candidate_lines("").is_empty());
+        assert!(parse_candidate_lines("NONE").is_empty());
+    }
 }

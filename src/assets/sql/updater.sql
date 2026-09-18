@@ -410,3 +410,22 @@ INSERT OR IGNORE INTO app_config (key, value) VALUES ('vector_path', '$APPDATA/.
 -- 思考旁白 / 工具调用 / 正文按真实时序穿插的时间线 JSON（ChatSegment[]）；
 -- 刷新 / 历史加载时据此重建穿插渲染；旧 round NULL = 回退旧渲染。
 ALTER TABLE agent_conversation_round ADD COLUMN segments_json TEXT;
+
+-- ============================================================
+-- ---------- v27：记忆蒸馏候选表（M3 #20260918007） ----------
+-- 会话压缩蒸馏的「值得升入长期记忆」候选 pending 区；active 模式等用户确认，
+-- forced 模式不落此表（引擎直接自动转入）。新装库 init.sql 已含该表。
+CREATE TABLE IF NOT EXISTS agent_memory_candidates
+(
+    id         TEXT    PRIMARY KEY,
+    agent_id   TEXT,
+    session_id TEXT,
+    key        TEXT    NOT NULL,
+    content    TEXT    NOT NULL,
+    category   TEXT    NOT NULL DEFAULT 'other',
+    source     TEXT    NOT NULL DEFAULT 'distill',
+    status     TEXT    NOT NULL DEFAULT 'pending',
+    created_at INTEGER NOT NULL,
+    decided_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_mem_candidates_agent ON agent_memory_candidates(agent_id, status);

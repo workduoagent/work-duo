@@ -382,6 +382,108 @@ async fn find_similar_memory(
     }
 }
 
+/* ---------------- M3 蒸馏候选（#20260918007）：列表 / 确认转入 / 忽略 ---------------- */
+
+/// 蒸馏候选条目（记忆宫殿「待确认」区列表项）。
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MemoryCandidate {
+    pub id: String,
+    pub agent_id: Option<String>,
+    pub session_id: Option<String>,
+    pub key: String,
+    pub content: String,
+    pub category: String,
+    pub source: String,
+    pub created_at: i64,
+}
+
+/// 列出全部 pending 状态的蒸馏候选（按创建时间倒序）。
+pub async fn list_memory_candidates(app: &AppHandle) -> Result<Vec<MemoryCandidate>, String> {
+    let pool = get_pool(app).await?;
+    let rows = sqlx::query(
+        "SELECT id, agent_id, session_id, key, content, category, source, created_at \
+         FROM agent_memory_candidates WHERE status = 'pending' ORDER BY created_at DESC",
+    )
+    .fetch_all(&pool)
+    .await
+    .map_err(|e| format!("查蒸馏候选失败：{e}"))?;
+    Ok(rows
+        .iter()
+        .map(|r| MemoryCandidate {
+            id: r.try_get("id").unwrap_or_default(),
+            agent_id: r.try_get("agent_id").ok().flatten(),
+            session_id: r.try_get("session_id").ok().flatten(),
+            key: r.try_get("key").unwrap_or_default(),
+            content: r.try_get("content").unwrap_or_default(),
+            category: r.try_get("category").unwrap_or_default(),
+            source: r.try_get("source").unwrap_or_default(),
+            created_at: r.try_get("created_at").unwrap_or_default(),
+        })
+        .collect())
+}
+
+/// 采纳候选：转正为长期记忆（走 anchor_memory auto_merge 全套：M0 护栏 + 去噪合并 +
+/// 向量回写），候选标记 confirmed。返回转入后的记忆条目。
+pub async fn confirm_memory_candidate(
+    app: &AppHandle,
+    id: &str,
+) -> Result<MemoryItem, String> {
+    let pool = get_pool(app).await?;
+    let row = sqlx::query(
+        "SELECT agent_id, session_id, key, content, category FROM agent_memory_candidates \
+         WHERE id = ? AND status = 'pending'",
+    )
+    .bind(id)
+    .fetch_optional(&pool)
+    .await
+    .map_err(|e| format!("读蒸馏候选失败：{e}"))?
+    .ok_or_else(|| "候选不存在或已处置".to_string())?;
+    let agent_id: Option<String> = row.try_get("agent_id").ok().flatten();
+    let session_id: Option<String> = row.try_get("session_id").ok().flatten();
+    let key: String = row.try_get("key").unwrap_or_default();
+    let content: String = row.try_get("content").unwrap_or_default();
+    let category: String = row.try_get("category").unwrap_or_default();
+
+    // auto_merge=true：候选是压缩 LLM 自动提炼的，转入必须过 M0 护栏 + 去噪（防重复入库）。
+    let item = anchor_memory(
+        app,
+        agent_id.as_deref(),
+        session_id.as_deref(),
+        &key,
+        &content,
+        &category,
+        false,
+        true,
+    )
+    .await?;
+    sqlx::query("UPDATE agent_memory_candidates SET status = 'confirmed', decided_at = ? WHERE id = ?")
+        .bind(now_ms())
+        .bind(id)
+        .execute(&pool)
+        .await
+        .map_err(|e| format!("更新候选状态失败：{e}"))?;
+    Ok(item)
+}
+
+/// 忽略候选：标记 rejected（不再出现在待确认区，不转正）。
+pub async fn reject_memory_candidate(app: &AppHandle, id: &str) -> Result<(), String> {
+    let pool = get_pool(app).await?;
+    let res = sqlx::query(
+        "UPDATE agent_memory_candidates SET status = 'rejected', decided_at = ? \
+         WHERE id = ? AND status = 'pending'",
+    )
+    .bind(now_ms())
+    .bind(id)
+    .execute(&pool)
+    .await
+    .map_err(|e| format!("忽略候选失败：{e}"))?;
+    if res.rows_affected() == 0 {
+        return Err("候选不存在或已处置".into());
+    }
+    Ok(())
+}
+
 /// 更新一条记忆的部分字段（仅更新提供的非空字段）。
 pub async fn update_memory(
     app: &AppHandle,

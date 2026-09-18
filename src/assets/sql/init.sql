@@ -482,6 +482,27 @@ CREATE TABLE IF NOT EXISTS agent_memory_events
 );
 CREATE INDEX IF NOT EXISTS idx_memory_events_mem ON agent_memory_events(memory_id, created_at);
 
+-- ============ 记忆蒸馏候选表（agent_memory_candidates） ============
+-- M3 会话压缩蒸馏（#20260918007）：压缩 LLM 提炼的「值得升入长期记忆的候选」先落此表，
+-- 记忆宫殿出「待确认」区：active 模式等用户采纳（confirm → anchor_memory 转入正表 +
+-- 向量回写）/ 忽略（reject，不再出现）；forced 模式不落此表（引擎直接自动转入，走 M0 护栏）。
+--   source   候选来源：distill（会话压缩蒸馏）/ settle（任务级提炼，预留）；
+--   status   pending → confirmed / rejected（decided_at 记录处置时间）。
+CREATE TABLE IF NOT EXISTS agent_memory_candidates
+(
+    id         TEXT    PRIMARY KEY,
+    agent_id   TEXT,
+    session_id TEXT,
+    key        TEXT    NOT NULL,
+    content    TEXT    NOT NULL,
+    category   TEXT    NOT NULL DEFAULT 'other',
+    source     TEXT    NOT NULL DEFAULT 'distill',
+    status     TEXT    NOT NULL DEFAULT 'pending',
+    created_at INTEGER NOT NULL,
+    decided_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_mem_candidates_agent ON agent_memory_candidates(agent_id, status);
+
 -- ============ 小分队定义表（agent_squad） ============
 -- 一群「人」(Agent) 按协作模式处理同一事务（项目/任务）的团队定义。
 --   id             本地 UUID（文本主键）；
