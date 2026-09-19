@@ -1627,6 +1627,61 @@ async fn run_subtask(
                     );
                 }
             }
+            // 熔断强制总结轮（K2 真机热修）：criteria 为空时客观校验无据可依，直接判失败
+            // 会触发全自动接管重试 → 模型重蹈「纯检索不收敛」覆辙（真机实锤：知识库整理任务
+            // 9 轮 30+ 次 kb_search 正文恒空 → 熔断 → 重跑 → 再循环）。此处追加一轮
+            // 「禁止调用工具、立即基于已有资料输出最终结果」的强制总结：产出非空正文 →
+            // 按暂定完成收尾（模型自主输出无法客观核验，标暂定并提示人工复核）。
+            if task.success_criteria.is_empty() {
+                messages.push(serde_json::json!({
+                    "role": "user",
+                    "content": "工具调用预算已用尽。禁止再调用任何工具。请立即基于以上已检索/执行得到的全部资料，输出本任务的最终整理结果（按任务要求组织，如要点列表），并注明信息来源与未确认的细节。"
+                }));
+                let forced = runtime::call_llm_stream(app, cfg, &messages, &[], cancel, None, None).await;
+                match forced {
+                    Ok(outcome) => {
+                        usage.0 += outcome.usage.0;
+                        usage.1 += outcome.usage.1;
+                        let text = outcome.content.trim().to_string();
+                        if text.chars().count() >= 10 {
+                            let summary = runtime::clip(&text, 500);
+                            tracing::info!(
+                                "[agent] pipeline: 子任务 step={} 熔断强制总结生效（{}字符），按暂定完成收尾",
+                                task.step,
+                                text.chars().count()
+                            );
+                            return (
+                                SubTaskOutput {
+                                    step: task.step,
+                                    title: task.title.clone(),
+                                    summary,
+                                    success: true,
+                                    cancelled: false,
+                                    skipped: false,
+                                    failed_command: last_failed_command.clone(),
+                                    verified: false,
+                                    evidence: "预算耗尽强制总结：模型基于已检索资料自主输出（暂定完成，建议人工复核）".into(),
+                                    changed_files: if changed_files.is_empty() {
+                                        None
+                                    } else {
+                                        Some(changed_files.clone())
+                                    },
+                                    read_files: if read_files.is_empty() {
+                                        None
+                                    } else {
+                                        Some(read_files.clone())
+                                    },
+                                    artifacts: vec![],
+                                },
+                                usage,
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!("[agent] pipeline: 子任务 step={} 熔断强制总结调用失败：{e}", task.step);
+                    }
+                }
+            }
             return (
                 SubTaskOutput {
                     step: task.step,

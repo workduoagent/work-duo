@@ -144,6 +144,18 @@ export interface AgentSkillRefRow {
   updated_at: number
 }
 
+/** 智能体 × 知识库关联表（agent_kb_ref，第四期 K2）行映射。
+ * kb_id 引用 knowledge_base.id；绑定关系决定 native__kb_search 的检索范围与注册与否。
+ */
+export interface AgentKbRefRow {
+  id: string
+  agent_id: string
+  kb_id: string
+  is_active: number // SQLite 布尔：0 / 1
+  created_at: number
+  updated_at: number
+}
+
 /** 小分队定义表（agent_squad）行映射。
  * - logo：团队头像 Base64 字符串（可空）；
  * - mode：协作模式 orchestrator / pipeline / chat；

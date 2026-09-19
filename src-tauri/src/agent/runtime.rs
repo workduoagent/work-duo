@@ -162,6 +162,8 @@ impl AgentRuntime {
         let mut base = self.native.lock().await.clone();
         // 沙箱模式下不注册 execute_command（宿主 shell），能力层与提示层保持一致
         native::register_native_tools(&mut base, app, cfg.allow_sandbox, &cfg.memory_mode);
+        // 知识库检索工具（K2）：仅在绑定了知识库时注册（提示与能力同源）
+        native::register_kb_search_tool(&mut base, app, cfg.kb_ids.clone());
         // MCP：按 mcp_id 分组，逐 server 注册（复用现有 mcp::call_mcp_tool 透传）
         let mut by_server: std::collections::BTreeMap<String, Vec<crate::agent::mcp_adapter::MountedMcpTool>> =
             Default::default();

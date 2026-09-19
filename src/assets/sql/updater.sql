@@ -440,3 +440,17 @@ ALTER TABLE knowledge_asset ADD COLUMN indexed_at INTEGER;
 ALTER TABLE knowledge_asset ADD COLUMN meta_data TEXT;
 -- 嵌入维度表级记录（LanceDB 向量列建表即固定）；空串=尚未索引过，首次成功索引时回填实际维度。
 INSERT OR IGNORE INTO app_config (key, value) VALUES ('kb_embed_dim', '');
+
+-- ============================================================
+-- ---------- v29：智能体 × 知识库关联表（K2） ----------
+-- 绑定关系决定 native__kb_search 的检索范围与工具注册与否（未绑定不注册）。新装库 init.sql 已含该表。
+CREATE TABLE IF NOT EXISTS agent_kb_ref
+(
+    id         TEXT    PRIMARY KEY,
+    agent_id   TEXT    NOT NULL,
+    kb_id      TEXT    NOT NULL,
+    is_active  INTEGER NOT NULL DEFAULT 1,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    CONSTRAINT uk_agent_kb UNIQUE (agent_id, kb_id)
+);

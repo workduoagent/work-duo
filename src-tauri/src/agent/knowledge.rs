@@ -828,6 +828,124 @@ async fn run_rebuild(app: &AppHandle, kb_id: &str) -> Result<(), String> {
     Ok(())
 }
 
+/* ---------------- 检索（K2：native__kb_search 消费） ---------------- */
+
+/// 知识库检索命中（工具出参；来源信息齐备可溯源）。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KbSearchHit {
+    pub id: String,
+    pub kb_id: String,
+    pub asset_id: String,
+    /// 源文件相对路径
+    pub origin_file_path: String,
+    /// 层级路径 / 面包屑（可空）
+    pub path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub breadcrumbs: Option<String>,
+    /// chunk 类型（text/table/code）
+    pub chunk_type: String,
+    /// 命中内容（已裁剪）
+    pub content: String,
+    /// 相关度得分（Lance L2 距离，越小越相似；关键词降级路径 = -1.0）
+    pub score: f32,
+    /// 检索通道：vector / keyword
+    pub channel: String,
+}
+
+/// 检索内容裁剪上限（工具出参防超长）。
+const SEARCH_CONTENT_CLIP: usize = 600;
+
+/// 知识库检索管道（K2 设计稿 §5.3）：向量近邻 → 关键词 LIKE 降级 → 空清单。
+/// `kb_ids` 为空 = 未绑定，返回空（工具层不应注册，此处兜底防呆）。
+pub(crate) async fn kb_search(
+    app: &AppHandle,
+    kb_ids: &[String],
+    query: &str,
+    top_k: usize,
+) -> Result<Vec<KbSearchHit>, String> {
+    let query = query.trim();
+    if kb_ids.is_empty() || query.is_empty() {
+        return Ok(Vec::new());
+    }
+    let pool = get_pool(app).await?;
+    let Some(vs) = vector_store::get_shared(app).await else {
+        return Err("向量库不可用".into());
+    };
+    let kb_filter = format!(
+        "kb_id IN ({})",
+        kb_ids.iter().map(|id| format!("'{}'", esc(id))).collect::<Vec<_>>().join(", ")
+    );
+    let top_k = top_k.clamp(1, 20);
+
+    // 通道一：向量检索
+    if let Some(cfg) = embedding::load_default_embedding(&pool).await? {
+        let qvec = embedding::embed_texts(app, &pool, &cfg, &[query.to_string()])
+            .await?
+            .into_iter()
+            .next()
+            .ok_or("嵌入返回空向量")?;
+        let hits = vs.search_kb_chunks(&qvec, Some(&kb_filter), top_k).await?;
+        if !hits.is_empty() {
+            return Ok(hits
+                .into_iter()
+                .map(|h| KbSearchHit {
+                    content: clip_chars(&h.content, SEARCH_CONTENT_CLIP),
+                    channel: "vector".into(),
+                    score: h.score,
+                    id: h.id,
+                    kb_id: h.kb_id,
+                    asset_id: h.asset_id,
+                    origin_file_path: h.origin_file_path,
+                    path: h.path,
+                    breadcrumbs: h.breadcrumbs,
+                    chunk_type: h.chunk_type,
+                })
+                .collect());
+        }
+    }
+
+    // 通道二：关键词 LIKE 降级（嵌入未配置 / 向量无命中）。取查询词空格分词（≤5 个）OR 匹配。
+    let terms: Vec<String> = query
+        .split_whitespace()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .take(5)
+        .collect();
+    let terms = if terms.is_empty() { vec![query.to_string()] } else { terms };
+    let like_clause = terms
+        .iter()
+        .map(|t| format!("(content LIKE '%{}%' OR raw_text LIKE '%{}%')", esc(t), esc(t)))
+        .collect::<Vec<_>>()
+        .join(" OR ");
+    let kw_filter = format!("{kb_filter} AND ({like_clause})");
+    let rows = vs.query_kb_chunks_by_keyword(&kw_filter, top_k).await?;
+    Ok(rows
+        .into_iter()
+        .map(|h| KbSearchHit {
+            content: clip_chars(&h.content, SEARCH_CONTENT_CLIP),
+            channel: "keyword".into(),
+            score: -1.0,
+            id: h.id,
+            kb_id: h.kb_id,
+            asset_id: h.asset_id,
+            origin_file_path: h.origin_file_path,
+            path: h.path,
+            breadcrumbs: h.breadcrumbs,
+            chunk_type: h.chunk_type,
+        })
+        .collect())
+}
+
+/// 字符安全裁剪（超长加省略号）。
+fn clip_chars(s: &str, max: usize) -> String {
+    let mut out: String = s.chars().take(max).collect();
+    if s.chars().count() > max {
+        out.push('…');
+    }
+    out
+}
+
 /* ---------------- 单测 ---------------- */
 
 #[cfg(test)]

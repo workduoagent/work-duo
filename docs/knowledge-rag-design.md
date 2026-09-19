@@ -178,7 +178,7 @@ kb_search(query, kb_ids?, tags?)
 
 ## 6. 边界与失败语义（对齐全局降级原则）
 
-1. **LanceDB 任何一步失败** → 上层降级：同步命令返回 Err 由前端 console 记录（fire-and-forget），检索降级关键词，**绝不阻塞 KB 文件管理主流程**。所有 Lance 访问原语（query / delete / upsert）对「表不存在」一律幂等视为空结果（006 教训 + 2026-09-19 真机推广：重建 force 路径先删后写，表刚被 schema 迁移清除时 delete 不得断裂）。
+1a. **检索收敛护栏（K2 真机热修 2026-09-19）**：①native__kb_search 单任务内计数，超过 6 次后在返回 JSON 注入 notice「立即基于已检索资料整理答案，勿重复检索」；②流水线熔断（8 工具轮）且 success_criteria 为空时，先追加一轮「禁止调工具、立即输出最终结果」的强制总结（无工具 LLM 调用），产出非空正文按**暂定完成**收尾——替代原先「判失败→自动接管重跑→模型重蹈纯检索循环」的死循环（真机实锤：9 轮 30+ 次 kb_search 正文恒空）。 → 上层降级：同步命令返回 Err 由前端 console 记录（fire-and-forget），检索降级关键词，**绝不阻塞 KB 文件管理主流程**。所有 Lance 访问原语（query / delete / upsert）对「表不存在」一律幂等视为空结果（006 教训 + 2026-09-19 真机推广：重建 force 路径先删后写，表刚被 schema 迁移清除时 delete 不得断裂）。
 2. **嵌入未配置**：切块入库、向量 null、`indexed_at` 照常回写；检索走关键词 2-gram。
 3. **不支持格式**（v1 的 .pdf/.docx/.png 等）：`result=unsupported`，资产可见、状态徽标「不支持检索」，不产出 chunks；将来接解析器后 rebuild 一键补齐。
 4. **幂等**：sync 以 digest 为判据天然幂等；rebuild 重入保护；remove 先删 Lance 再改 SQLite（失败可重入）。
@@ -212,7 +212,7 @@ kb_search(query, kb_ids?, tags?)
 |---|---|---|
 | **K1a** | vector_store v2 schema + 迁移判定 + knowledge.rs（chunker/sync/remove）+ 命令三件套 + 单测 | 大 · ✅ 2026-09-19（cargo 72 passed） |
 | **K1b** | 前端钩子（mapper 三数据变更点全覆盖）+ 详情页重建按钮/进度/状态摘要 | 中 · ✅ 2026-09-19（tsc CLEAN，待真机验收） |
-| **K2'** | `native__kb_search` 工具 + `agent_kb_ref` 绑定装配 + planner 大纲（沿用第三期原设计，检索管道对接 §5.3） | 中 |
+| **K2'** | `native__kb_search` 工具 + `agent_kb_ref` 绑定装配 + planner 大纲（沿用第三期原设计，检索管道对接 §5.3） | 中 · ✅ 2026-09-19 真机验收通过（四案例：事实核对 score=0.774 / 收敛护栏 8 轮闭环 / 忠实性 100% / 否定测试防幻觉） |
 | **K3'** | 引用展示：命中片段卡片 + 标签云 + （bbox 字段就绪，PDF 查看器跳原文随解析器接入后启用） | 中 |
 
 K1a → K1b 可串行；K2' 依赖 K1b 的真机验收；K3' 收官。

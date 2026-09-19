@@ -1511,6 +1511,16 @@ category 取值：decision（决策）/ code_pattern（代码模式）/ user_pre
         }
     };
 
+    // ===== 知识库绑定装配（K2 第四期）：绑定关系驱动 native__kb_search 注册与 planner 大纲 =====
+    let kb_ids: Vec<String> = sqlx::query("SELECT kb_id FROM agent_kb_ref WHERE agent_id = ? ORDER BY created_at ASC")
+        .bind(agent_id)
+        .fetch_all(&pool)
+        .await
+        .map_err(|e| format!("查询知识库绑定失败：{e}"))?
+        .iter()
+        .filter_map(|r| r.try_get::<Option<String>, _>("kb_id").ok().flatten())
+        .collect();
+
     Ok(AgentRuntimeConfig {
         agent_id: agent_id.to_string(),
         system_prompt,
@@ -1531,6 +1541,7 @@ category 取值：decision（决策）/ code_pattern（代码模式）/ user_pre
         http_allowed_hosts,
         network_proxy: crate::net::load_network_proxy(&pool).await,
         plugin_tools,
+        kb_ids,
     })
 }
 

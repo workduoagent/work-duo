@@ -249,6 +249,20 @@ CREATE TABLE IF NOT EXISTS agent_skill_ref
     CONSTRAINT uk_agent_skill UNIQUE (agent_id, skill_id)
 );
 
+-- ============ 智能体 × 知识库关联表（agent_kb_ref，第四期 K2） ============
+-- kb_id 引用 knowledge_base.id；智能体绑定的知识库决定 native__kb_search 的检索范围
+-- （未绑定的智能体不注册该工具，提示与能力同源）。
+CREATE TABLE IF NOT EXISTS agent_kb_ref
+(
+    id         TEXT    PRIMARY KEY,
+    agent_id   TEXT    NOT NULL,
+    kb_id      TEXT    NOT NULL,
+    is_active  INTEGER NOT NULL DEFAULT 1,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    CONSTRAINT uk_agent_kb UNIQUE (agent_id, kb_id)
+);
+
 -- 种子：录入既有硬编码（value 与旧业务数据一致，零迁移）。
 -- INSERT OR IGNORE：手动改过的 label 不会被覆盖；新增自定义项不会冲突。
 INSERT OR IGNORE INTO scenario_category (id, scope, value, label, created_at, updated_at) VALUES

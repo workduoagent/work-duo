@@ -215,6 +215,9 @@ pub struct AgentRuntimeConfig {
     /// P1 起暂由 `load_config` 置空（装配延 P2），但字段与结构体先行落地以免后续改动面扩散。
     #[allow(dead_code)] // P2 runtime.rs 读取；P1 仅置空
     pub plugin_tools: Vec<MountedUserPlugin>,
+    /// 已绑定的知识库 id（K2，agent_kb_ref）：非空时注册 `native__kb_search` 工具并在
+    /// planner 能力大纲中列出（提示与能力同源——未绑定时两者都不出现）。
+    pub kb_ids: Vec<String>,
 }
 
 /* ================= 三层流水线架构（意图分流 → DAG 规划 → 微 ReAct 执行） ================= */

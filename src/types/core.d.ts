@@ -262,6 +262,16 @@ export interface AgentSkillRef {
   updatedAt: string
 }
 
+/** 智能体绑定的知识库（对应 agent_kb_ref 表，第四期 K2）。 */
+export interface AgentKbRef {
+  id: string
+  agentId: string
+  kbId: string
+  isActive: boolean
+  createdAt: string
+  updatedAt: string
+}
+
 /** 智能体的工具计数（列表卡片展示用，不落库）。 */
 export interface AgentRefCounts {
   /** 已绑定的 MCP 工具数 */
@@ -303,6 +313,8 @@ export interface AgentUpsertInput {
   skillIds: string[]
   /** 挂载的本地插件 id（P2 新增；写入 agent_plugin_ref） */
   pluginIds?: string[]
+  /** 绑定的知识库 id（第四期 K2；写入 agent_kb_ref，决定 native__kb_search 检索范围） */
+  kbIds?: string[]
 }
 
 /**

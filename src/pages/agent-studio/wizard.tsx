@@ -14,6 +14,7 @@ import {
   getAgent,
   listAgentMcpTools,
   listAgentSkills,
+  listAgentKbs,
   upsertAgent,
   generateAgentIdentifier,
 } from '@/core/mapper/agent-mapper'
@@ -25,6 +26,7 @@ import { StepModel } from './components/StepModel'
 import { StepMcp } from './components/StepMcp'
 import { StepSkill } from './components/StepSkill'
 import { StepPlugin } from './components/StepPlugin'
+import { StepKnowledge } from './components/StepKnowledge'
 import { createEmptyDraft, draftFromAgent, draftToInput, type AgentDraft, MAX_MCP_SERVERS, MAX_MCP_TOOLS, MAX_SKILLS, MAX_PLUGINS } from './draft'
 import './wizard.scss'
 
@@ -34,6 +36,7 @@ const STEPS = [
   { key: 'mcp', title: '配置 MCP', desc: '按工具粒度挂载' },
   { key: 'skill', title: '编排 Skill', desc: '技能编排' },
   { key: 'plugin', title: '本地插件', desc: '挂载自定义函数工具' },
+  { key: 'kb', title: '绑定知识库', desc: 'RAG 检索范围' },
 ] as const
 
 const IDENTIFIER_RE = /^[a-zA-Z0-9_-]+$/
@@ -76,11 +79,12 @@ export default function AgentWizardPage() {
         setModels(modelList)
 
         if (id) {
-          const [agent, mcpRefs, skillRefs, pluginRefs] = await Promise.all([
+          const [agent, mcpRefs, skillRefs, pluginRefs, kbRefs] = await Promise.all([
             getAgent(id),
             listAgentMcpTools(id),
             listAgentSkills(id),
             listAgentPlugins(id),
+            listAgentKbs(id),
           ])
           if (!alive) return
           if (!agent) {
@@ -88,7 +92,7 @@ export default function AgentWizardPage() {
             navigate('/agent-studio', { replace: true })
             return
           }
-          setDraft(draftFromAgent(agent, mcpRefs, skillRefs, pluginRefs.map((p) => p.id)))
+          setDraft(draftFromAgent(agent, mcpRefs, skillRefs, pluginRefs.map((p) => p.id), kbRefs.map((k) => k.kbId)))
         }
       } catch (e) {
         message.error(`加载失败：${e instanceof Error ? e.message : String(e)}`)
@@ -237,6 +241,7 @@ export default function AgentWizardPage() {
         {step === 2 && <StepMcp draft={draft} patch={patch} />}
         {step === 3 && <StepSkill draft={draft} patch={patch} />}
         {step === 4 && <StepPlugin draft={draft} patch={patch} />}
+        {step === 5 && <StepKnowledge draft={draft} patch={patch} />}
       </div>
 
       <button

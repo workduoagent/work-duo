@@ -838,6 +838,78 @@ impl LanceDbVectorStore {
         Ok(None)
     }
 
+    /// 关键词降级查询（K2 检索管道通道二）：无向量、纯标量谓词（LIKE 由调用方拼入 filter）。
+    /// 表不存在 = Ok(空)（幂等）。score 恒 -1.0（无距离语义）。
+    pub async fn query_kb_chunks_by_keyword(
+        &self,
+        filter: &str,
+        limit: usize,
+    ) -> Result<Vec<KbChunkHit>, String> {
+        let names = self.table_names().await?;
+        if !names.iter().any(|n| n == VectorTable::KbChunks.name()) {
+            return Ok(Vec::new());
+        }
+        let table = self.table_ref(VectorTable::KbChunks).await?;
+        let batches = table
+            .query()
+            .only_if(filter)
+            .limit(limit)
+            .execute()
+            .await
+            .map_err(|e| format!("LanceDB kb_chunks 关键词查询失败：{e}"))?;
+
+        let mut hits = Vec::new();
+        use futures_util::StreamExt;
+        let mut stream = batches;
+        while let Some(batch) = stream.next().await {
+            let batch = batch.map_err(|e| format!("读取关键词查询结果失败：{e}"))?;
+            let col_str = |name: &str| -> Option<Vec<Option<String>>> {
+                batch
+                    .column_by_name(name)
+                    .and_then(|c| c.as_any().downcast_ref::<StringArray>())
+                    .map(|a| {
+                        (0..a.len())
+                            .map(|i| (!a.is_null(i)).then(|| a.value(i).to_string()))
+                            .collect()
+                    })
+            };
+            let ids = col_str("id").ok_or("查询结果缺 id 列")?;
+            let kb_ids = col_str("kb_id").ok_or("查询结果缺 kb_id 列")?;
+            let asset_ids = col_str("asset_id").ok_or("查询结果缺 asset_id 列")?;
+            let idx = batch
+                .column_by_name("chunk_index")
+                .and_then(|c| c.as_any().downcast_ref::<arrow_array::Int32Array>())
+                .map(|a| a.values().to_vec());
+            let types = col_str("type").ok_or("查询结果缺 type 列")?;
+            let contents = col_str("content").ok_or("查询结果缺 content 列")?;
+            let paths = col_str("path").ok_or("查询结果缺 path 列")?;
+            let breadcrumbs = col_str("breadcrumbs");
+            let origin_paths = col_str("origin_file_path");
+            for i in 0..ids.len() {
+                hits.push(KbChunkHit {
+                    id: ids.get(i).cloned().flatten().unwrap_or_default(),
+                    kb_id: kb_ids.get(i).cloned().flatten().unwrap_or_default(),
+                    asset_id: asset_ids.get(i).cloned().flatten().unwrap_or_default(),
+                    chunk_index: idx.as_ref().and_then(|v| v.get(i).copied()).unwrap_or(0),
+                    chunk_type: types.get(i).cloned().flatten().unwrap_or_default(),
+                    content: contents.get(i).cloned().flatten().unwrap_or_default(),
+                    path: paths.get(i).cloned().flatten().unwrap_or_default(),
+                    breadcrumbs: breadcrumbs
+                        .as_ref()
+                        .and_then(|b| b.get(i).cloned())
+                        .flatten(),
+                    origin_file_path: origin_paths
+                        .as_ref()
+                        .and_then(|o| o.get(i).cloned())
+                        .flatten()
+                        .unwrap_or_default(),
+                    score: -1.0,
+                });
+            }
+        }
+        Ok(hits)
+    }
+
     /// 删除整张表（K1' schema 迁移 / 维度变化重建用）。表不存在时幂等 Ok。
     pub async fn drop_table(&self, name: &str) -> Result<(), String> {
         let names = self.table_names().await?;

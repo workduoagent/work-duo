@@ -58,6 +58,8 @@ export interface AgentDraft {
   skillIds: string[]
   /** 已挂载的本地插件 id（P2 新增，保存写入 agent_plugin_ref） */
   pluginIds: string[]
+  /** 已绑定的知识库 id（第四期 K2，保存写入 agent_kb_ref） */
+  kbIds: string[]
 }
 
 /** 新建时的空草稿（identifier 由调用方预先随机生成，便于用户直接看到可改） */
@@ -73,15 +75,17 @@ export function createEmptyDraft(identifier: string): AgentDraft {
     mcpTools: [],
     skillIds: [],
     pluginIds: [],
+    kbIds: [],
   }
 }
 
-/** 编辑时：把主表 + 两张关联表的行还原成草稿（pluginIds 为本地插件 id 列表，P2 新增） */
+/** 编辑时：把主表 + 关联表的行还原成草稿（pluginIds / kbIds 为 id 列表，P2 / K2 新增） */
 export function draftFromAgent(
   agent: AgentInfo,
   mcpRefs: AgentMcpToolRef[],
   skillRefs: AgentSkillRef[],
   pluginIds: string[] = [],
+  kbIds: string[] = [],
 ): AgentDraft {
   return {
     name: agent.name,
@@ -106,6 +110,7 @@ export function draftFromAgent(
     mcpTools: mcpRefs.map((r) => ({ mcpId: r.mcpId, toolId: r.toolId })),
     skillIds: skillRefs.map((r) => r.skillId),
     pluginIds,
+    kbIds,
   }
 }
 
@@ -137,5 +142,6 @@ export function draftToInput(draft: AgentDraft, id?: string): AgentUpsertInput {
     mcpTools: draft.mcpTools,
     skillIds: draft.skillIds,
     pluginIds: draft.pluginIds,
+    kbIds: draft.kbIds,
   }
 }

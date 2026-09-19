@@ -162,6 +162,15 @@ fn capability_outline(cfg: &AgentRuntimeConfig) -> String {
         );
     }
     caps.push("工作空间记忆管理：沉淀或提取 .wd_mem/ 历史工件与长期记忆；".to_string());
+    // 知识库检索（K2）：仅在绑定了知识库时列入能力大纲（与工具注册同源）。
+    // 明确「优先检索而非臆测」，避免规划员把「查资料」规划成凭记忆编造。
+    if !cfg.kb_ids.is_empty() {
+        caps.push(
+            "知识库检索（native__kb_search(query)：检索已绑定知识库中的文档片段，返回源文件与层级位置可溯源）；\
+             涉及事实、配置、领域知识的问题应**优先检索知识库核对**，而非凭记忆臆测；"
+                .to_string(),
+        );
+    }
     let mut lines: Vec<String> = Vec::with_capacity(caps.len() + 2);
     for (i, c) in caps.iter().enumerate() {
         lines.push(format!("{}. {}", i + 1, c));

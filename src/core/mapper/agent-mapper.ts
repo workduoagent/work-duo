@@ -19,6 +19,7 @@ import { isTauri } from '@/core/config'
 import { normalizeAppearance } from '@/components/ui/pixel-agent'
 import type {
   AgentInfo,
+  AgentKbRef,
   AgentMcpToolRef,
   AgentRefCounts,
   AgentSkillRef,
@@ -28,6 +29,7 @@ import type {
 } from '@/types/core'
 import type {
   AgentInfoRow,
+  AgentKbRefRow,
   AgentMcpRefRow,
   AgentSkillRefRow,
 } from '@/types/database'
@@ -198,6 +200,24 @@ export async function listAgentSkills(agentId: string): Promise<AgentSkillRef[]>
     [agentId],
   )
   return rows.map(rowToSkillRef)
+}
+
+/** 列出某智能体绑定的知识库（按创建时间升序，第四期 K2）。 */
+export async function listAgentKbs(agentId: string): Promise<AgentKbRef[]> {
+  if (!isTauri) return []
+  const db = await getDb()
+  const rows = await db.select<AgentKbRefRow[]>(
+    'SELECT * FROM agent_kb_ref WHERE agent_id = ? ORDER BY created_at ASC',
+    [agentId],
+  )
+  return rows.map((r) => ({
+    id: r.id,
+    agentId: r.agent_id,
+    kbId: r.kb_id,
+    isActive: r.is_active === 1,
+    createdAt: safeIso(r.created_at),
+    updatedAt: safeIso(r.updated_at),
+  }))
 }
 
 /**
@@ -404,6 +424,16 @@ export async function upsertAgent(input: AgentUpsertInput): Promise<AgentInfo[]>
     )
   }
 
+  // 知识库绑定（K2 第四期）：先删后插，与向导勾选结果一致
+  await db.execute('DELETE FROM agent_kb_ref WHERE agent_id = ?', [id])
+  for (const kbId of input.kbIds ?? []) {
+    await db.execute(
+      `INSERT INTO agent_kb_ref (id, agent_id, kb_id, is_active, created_at, updated_at)
+       VALUES (?, ?, ?, 1, ?, ?)`,
+      [crypto.randomUUID(), id, kbId, now, now],
+    )
+  }
+
   return listAgents()
 }
 
@@ -433,6 +463,7 @@ export async function deleteAgent(id: string): Promise<AgentInfo[]> {
   await db.execute('DELETE FROM agent_mcp_ref WHERE agent_id = ?', [id])
   await db.execute('DELETE FROM agent_skill_ref WHERE agent_id = ?', [id])
   await db.execute('DELETE FROM agent_plugin_ref WHERE agent_id = ?', [id])
+  await db.execute('DELETE FROM agent_kb_ref WHERE agent_id = ?', [id])
   await db.execute('DELETE FROM agent_info WHERE id = ?', [id])
   return listAgents()
 }
