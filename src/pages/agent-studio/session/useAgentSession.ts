@@ -57,6 +57,8 @@ export interface AgentSessionState {
   thoughts: string[]
   /** 三层流水线：任务步骤进度条（阶段二规划生成，运行中实时更新状态）。 */
   planSteps: PlanStep[]
+  /** #20260919003：任务启动 → 规划就绪的窗口期标志（右栏显示「正在启动」占位）。 */
+  planning: boolean
   /** 是否有任务在后台运行（禁用输入框 / 显示停止态）。 */
   isRunning: boolean
   /** 待用户审批的高危操作（非 null 时弹窗）。 */
@@ -136,6 +138,10 @@ export function useAgentSession(): AgentSessionState {
   // 轨迹视图：意图分类结果（intent_classified）与分层思考片段（thinking_chunk）。
   const [traceIntent, setTraceIntent] = useState<IntentClassified | undefined>(undefined)
   const [traceThinking, setTraceThinking] = useState<ThinkingChunk[]>([])
+  // #20260919003：任务启动 → plan_generated（或终态）之间的「启动窗口」标志。
+  // run() 启动即清空上一轮全部轨迹，此标志驱动右栏显示「正在启动任务」占位，
+  // 避免清空后 5~15s 规划期出现空白闪断（2026-09-18 热修④的回归防护）。
+  const [planning, setPlanning] = useState(false)
   // §3.2 分支重规划结果（plan_branch_generated 事件携带，驱动画布对比横幅 + 应用按钮）。
   const [planBranch, setPlanBranch] = useState<PlanBranchGenerated | null>(null)
   // 步骤级恢复：子任务自动重试耗尽仍失败时挂起，等待用户决策（重试/跳过/接管）。
@@ -336,15 +342,23 @@ export function useAgentSession(): AgentSessionState {
     async (input: RunAgentTaskInput) => {
       // 用 ref 实时值拦截，避免 useCallback 闭包里的 isRunning 是旧值。
       if (isRunningRef.current) return
-      // 新一轮启动：保留上一轮的执行图/轨迹/产物（换幕延迟到 plan_generated 事件，
-      // 2026-09-18 反馈「旧图直接消失又重建一批」——旧图保留到新规划就绪再无缝切换）。
-      // 仅清对话流式文本与本轮运行态。
+      // 新一轮启动：**立即清空上一轮全部轨迹**（执行图/工具步骤/产物/分层思考/意图），
+      // 修复 #20260919003「新任务启动阶段显示上一轮思考过程与 DAG」——
+      // 2026-09-18 热修④的「换幕延迟到 plan_generated」留下 5~15s 残留窗口（意图分类+
+      // 规划期间右栏挂着上一轮终态），修订为「启动即清 + planning 占位防闪空」。
       currentStepRef.current = null
       setStreamingText('')
       setIsStreaming(false)
       setThoughts([])
       // 新消息气泡开新时间线（segments 仅承载当前轮的说话/工具交错）
       setSegments([])
+      stepsRef.current.clear()
+      flushSteps()
+      setPlanSteps([])
+      setArtifacts([])
+      setTraceIntent(undefined)
+      setTraceThinking([])
+      setPlanning(true)
       applyPendingApproval(null)
       setStatusText('')
       setLiveTokenUsage(null)
@@ -508,6 +522,7 @@ export function useAgentSession(): AgentSessionState {
     setToolSteps([])
     setTraceIntent(undefined)
     setTraceThinking([])
+    setPlanning(false)
     setPlanBranch(null)
     setRecovery(null)
     setPlanApproval(null)
@@ -539,6 +554,7 @@ export function useAgentSession(): AgentSessionState {
       if (isRunningRef.current) {
         setIsStreaming(false)
         setRunning(false)
+        setPlanning(false)
         setStatusText('')
       }
     }, 3000)
@@ -658,14 +674,14 @@ export function useAgentSession(): AgentSessionState {
             break
           case 'plan_generated':
             // 阶段二规划生成：渲染步骤进度条（全部 pending）。
-            // 换幕时机（2026-09-18 用户反馈「旧图直接消失」）：新规划的 DAG 到手时才清空
-            // 上一轮的轨迹数据（工具步骤/产物/思考轨迹），run() 启动时不再清——
-            // 旧图保留到新图就绪，视觉上「无缝切换」而非「闪空后重建」。
+            // 换幕时机（#20260919003 修订）：run() 启动时已立即清空上一轮轨迹（期间由
+            // planning 占位顶住），此处新 DAG 到手即替换占位——既无残留也无闪空。
             stepsRef.current.clear()
             flushSteps()
             setArtifacts([])
             setTraceIntent(undefined)
             setTraceThinking([])
+            setPlanning(false)
             if (e.plan?.tasks) {
               setPlanSteps(e.plan.tasks)
             }
@@ -798,6 +814,7 @@ export function useAgentSession(): AgentSessionState {
           setStatusText('')
           setRecovery(null)
           setPlanApproval(null)
+          setPlanning(false)
           // 终态清扫：收敛残留的 running 步骤（见 finalizeStuckSteps 注释）
           finalizeStuckSteps()
           // 完成后保留思考过程，方便回看智能体做了什么（新一轮 run 时在入口清空）
@@ -811,6 +828,7 @@ export function useAgentSession(): AgentSessionState {
         setStatusText(`任务异常：${ev.payload}`)
         setRecovery(null)
         setPlanApproval(null)
+        setPlanning(false)
         // 终态清扫：异常结束时同样收敛残留的 running 步骤
         finalizeStuckSteps()
         // 异常时也保留已产生的思考过程，便于排查失败原因
@@ -928,5 +946,6 @@ export function useAgentSession(): AgentSessionState {
     submitChoice,
     trace: { intent: traceIntent, thinking: traceThinking },
     planBranch,
+    planning,
   }
 }

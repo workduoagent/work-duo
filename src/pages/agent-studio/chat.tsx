@@ -2793,6 +2793,7 @@ export default function AgentChatPage() {
                 toolSteps={toolSteps}
                 artifacts={artifacts}
                 planBranch={session.planBranch}
+                planning={session.planning}
                 onPreviewArtifact={handlePreviewArtifact}
                 onBranchFromStep={handleBranchFromStep}
                 onApplyBranch={handleApplyBranch}
@@ -2804,6 +2805,7 @@ export default function AgentChatPage() {
                 thinking={session.trace.thinking}
                 planSteps={planSteps}
                 toolSteps={toolSteps}
+                planning={session.planning}
               />
             ) : rightTab === 'actions' ? (
               <DecisionCenter

@@ -50,6 +50,8 @@ interface RunDagCanvasProps {
   onApplyBranch: () => void
   /** 放弃分支对比。 */
   onDismissBranch: () => void
+  /** #20260919003：任务启动 → 规划就绪的窗口期，空态显示「正在启动」占位。 */
+  planning?: boolean
 }
 
 // ── 布局常量 ──
@@ -447,9 +449,15 @@ export function RunDagCanvas(props: RunDagCanvasProps) {
     return (
       <div className="agent-dag">
         <div className="agent-dag__empty">
-          发送一次任务后，这里会展示本轮执行 DAG：
-          <br />
-          规划步骤（左侧脊柱）+ 每步内部实际调用的工具（向右展开再垂直下落，呈 L 形鱼骨骨刺），拖拽平移 · 滚轮缩放 · 点击节点看详情。
+          {props.planning
+            ? '⏳ 正在启动任务：意图分类与规划中，新执行 DAG 就绪后在此展示…'
+            : (
+              <>
+                发送一次任务后，这里会展示本轮执行 DAG：
+                <br />
+                规划步骤（左侧脊柱）+ 每步内部实际调用的工具（向右展开再垂直下落，呈 L 形鱼骨骨刺），拖拽平移 · 滚轮缩放 · 点击节点看详情。
+              </>
+            )}
         </div>
       </div>
     )

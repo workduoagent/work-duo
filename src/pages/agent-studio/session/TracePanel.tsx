@@ -8,6 +8,8 @@ interface TracePanelProps {
   thinking: ThinkingChunk[]
   planSteps: PlanStep[]
   toolSteps: ToolStep[]
+  /** #20260919003：任务启动 → 规划就绪的窗口期，空态显示「正在启动」占位而非静态文案。 */
+  planning?: boolean
 }
 
 const LAYER_META: Record<ThinkingChunk['layer'], { label: string; color: string }> = {
@@ -97,7 +99,7 @@ function useTypedText(text: string, active: boolean, groupKey: number) {
   return shown
 }
 
-export function TracePanel({ intent, thinking, planSteps, toolSteps }: TracePanelProps) {
+export function TracePanel({ intent, thinking, planSteps, toolSteps, planning = false }: TracePanelProps) {
   // 工具调用默认折叠：工具调用很多时全部展开会撑高右栏，默认收起、点击标题展开。
   const [toolsOpen, setToolsOpen] = useState(false)
   // 规划步骤默认全部展开（让用户看到每步详情）；单步可独立收叠。
@@ -138,7 +140,11 @@ export function TracePanel({ intent, thinking, planSteps, toolSteps }: TracePane
   if (!hasData) {
     return (
       <div className="agent-trace">
-        <div className="agent-trace__empty">运行一次任务后，这里会展示执行轨迹：意图分类 → 规划 → 工具调用 → 分层思考。</div>
+        <div className="agent-trace__empty">
+          {planning
+            ? '⏳ 正在启动任务：意图分类与规划中，新轨迹就绪后在此展示…'
+            : '运行一次任务后，这里会展示执行轨迹：意图分类 → 规划 → 工具调用 → 分层思考。'}
+        </div>
       </div>
     )
   }
