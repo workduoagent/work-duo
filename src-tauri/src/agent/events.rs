@@ -47,6 +47,8 @@ pub const EVT_MEMORY_BACKFILL: &str = "agent-memory-backfill";
 /// 上下文压缩完成（结构化事件）：替代原先只发一句 `emit_status` 字符串，携带压缩轮数/摘要长度/
 /// 估算节省 token，供「记忆宫殿」「上下文健康」视图结构化展示。
 pub const EVT_CONTEXT_COMPACTED: &str = "agent-context-compacted";
+/// 知识库索引进度（K1'）：单资产同步/全量重建时逐批推送（parse/chunk/embed/upsert/done/skip/error）。
+pub const EVT_KB_INDEX_PROGRESS: &str = "agent-kb-index-progress";
 
 /// `agent-event` 载荷。
 #[derive(Debug, Clone, Serialize)]
@@ -690,4 +692,27 @@ pub struct MemoryBackfillProgress {
 
 pub fn emit_memory_backfill_progress(app: &AppHandle, p: &MemoryBackfillProgress) {
     emit(app, EVT_MEMORY_BACKFILL, p);
+}
+
+/// 知识库索引进度（K1'）。`phase`：upsert=资产完成 / skip=格式跳过 / error=失败 /
+/// done=整体收尾（finished=true）。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KbIndexProgress {
+    pub kb_id: String,
+    pub phase: String,
+    /// 已处理资产数（含跳过/失败）。
+    pub done: u32,
+    /// 资产总数。
+    pub total: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub asset_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+    /// 是否已结束（最后一批/整体收尾置 true，前端收尾）。
+    pub finished: bool,
+}
+
+pub fn emit_kb_index_progress(app: &AppHandle, p: &KbIndexProgress) {
+    emit(app, EVT_KB_INDEX_PROGRESS, p);
 }

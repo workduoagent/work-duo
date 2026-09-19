@@ -60,6 +60,9 @@ export interface KnowledgeBaseRow {
  * - type：资产大类（1-文档 2-图片 3-音频 4-视频 5-网页）；
  * - file_ext：扩展名（不含点、小写）；file_size：文件字节数；
  * - file_path：相对知识库根目录的路径（如 'docs/a.txt'）；
+ * - digest：文件内容 hash（Rust 侧增量索引判据，NULL=未索引；v28 K1'）；
+ * - indexed_at：最近成功索引时间 epoch 毫秒（NULL=待索引/不支持格式）；
+ * - meta_data：资产级 JSON 字符串（标签云 tags 等业务元数据）；
  * - created_at / updated_at：epoch 毫秒（整型）。
  */
 export interface KnowledgeAssetRow {
@@ -70,6 +73,9 @@ export interface KnowledgeAssetRow {
   file_ext: string | null
   file_size: number
   file_path: string
+  digest: string | null
+  indexed_at: number | null
+  meta_data: string | null
   created_at: number
   updated_at: number
 }

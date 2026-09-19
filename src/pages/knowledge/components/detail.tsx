@@ -19,14 +19,19 @@ import {
   HardDrive,
   BookOpen,
   Locate,
+  DatabaseZap,
 } from 'lucide-react'
-import { Empty, Spin, Modal } from 'antd'
+import { Empty, Spin, Modal, Progress } from 'antd'
 import { Button, Input, Field, FieldLabel } from '@/components/ui'
 import { useNotify } from '@/components/ui/notify'
+import { isTauri } from '@/core/config'
+import { invoke } from '@tauri-apps/api/core'
+import { listen } from '@tauri-apps/api/event'
 import {
   getKnowledgeBase,
   refreshAssets,
   deleteAssetsUnderPath,
+  listAssets,
 } from '@/core/mapper/knowledge-mapper.ts'
 import {
   readKbFileTree,
@@ -251,6 +256,83 @@ export default function KnowledgeDetailPage() {
     setLocateNonce((n) => n + 1)
   }
 
+  /* ----------------------------- 知识库索引（K1' 第四期） ----------------------------- */
+
+  /** 索引进度事件载荷（Rust agent-kb-index-progress）。 */
+  interface KbIndexProgressPayload {
+    kbId: string
+    phase: string
+    done: number
+    total: number
+    assetId?: string
+    message?: string
+    finished: boolean
+  }
+
+  /** 索引状态摘要（indexedAt 非空视为已索引）。 */
+  const [indexStat, setIndexStat] = useState<{ indexed: number; total: number } | null>(null)
+  /** 重建运行态（null = 空闲）。 */
+  const [rebuild, setRebuild] = useState<{ running: boolean; done: number; total: number; message?: string } | null>(null)
+  const kbIdRef = useRef<string | null>(null)
+  useEffect(() => {
+    kbIdRef.current = kb?.id ?? null
+  }, [kb?.id])
+
+  const loadIndexStat = useCallback(async () => {
+    if (!id || !isTauri) return
+    try {
+      const assets = await listAssets(id)
+      const indexed = assets.filter((a) => !!a.indexedAt).length
+      setIndexStat({ indexed, total: assets.length })
+    } catch {
+      /* 状态摘要失败静默（不影响文件管理） */
+    }
+  }, [id])
+
+  useEffect(() => {
+    void loadIndexStat()
+  }, [loadIndexStat])
+
+  // 监听索引进度事件：按 kbId 过滤（其他知识库的重建不串台）
+  useEffect(() => {
+    if (!isTauri) return
+    let alive = true
+    let off: (() => void) | undefined
+    void listen<KbIndexProgressPayload>('agent-kb-index-progress', (ev) => {
+      const p = ev.payload
+      if (!alive || p.kbId !== kbIdRef.current) return
+      setRebuild({ running: !p.finished, done: p.done, total: p.total, message: p.message })
+      if (p.finished) {
+        if (p.phase === 'done' && p.message) message.success(p.message)
+        void loadIndexStat()
+      }
+    }).then((un) => {
+      if (!alive) un()
+      else off = un
+    })
+    return () => {
+      alive = false
+      off?.()
+    }
+  }, [loadIndexStat, message])
+
+  async function handleRebuild() {
+    if (!kb || !isTauri) return
+    try {
+      const r = await invoke<{ started: boolean; reason?: string }>('kb_rebuild_index', {
+        input: { kbId: kb.id },
+      })
+      if (!r.started) {
+        setRebuild({ running: true, done: 0, total: 0 })
+        message.warning(r.reason || '重建任务进行中')
+        return
+      }
+      setRebuild({ running: true, done: 0, total: 0 })
+    } catch (e) {
+      message.error(`重建失败：${e instanceof Error ? e.message : String(e)}`)
+    }
+  }
+
   if (loading) {
     return (
       <div className="kb-detail">
@@ -292,6 +374,37 @@ export default function KnowledgeDetailPage() {
                 </span>
                 <span className="kb-detail__meta-item">更新于 {formatRelativeTime(kb.updatedAt)}</span>
               </div>
+              {/* K1' 索引行：重建按钮 + 状态摘要 + 进度（仅 Tauri 环境展示） */}
+              {isTauri && (
+                <div className="kb-detail__index-row">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    disabled={!!rebuild?.running}
+                    onClick={handleRebuild}
+                    title="重新解析并索引全部文件（md/txt）"
+                  >
+                    <DatabaseZap size={14} />
+                    重建索引
+                  </Button>
+                  {indexStat && (
+                    <span className="kb-detail__index-stat">
+                      已索引 {indexStat.indexed}/{indexStat.total} 个资产
+                    </span>
+                  )}
+                  {rebuild?.running && (
+                    <div className="kb-detail__index-progress">
+                      <Progress
+                        percent={rebuild.total ? Math.round((rebuild.done / rebuild.total) * 100) : 0}
+                        size="small"
+                      />
+                      <span className="kb-detail__index-progress-msg" title={rebuild.message}>
+                        {rebuild.message || '正在重建…'}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         ) : null}

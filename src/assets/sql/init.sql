@@ -91,6 +91,8 @@ INSERT OR IGNORE INTO app_config (key, value) VALUES ('session_auto_new', 'false
 INSERT OR IGNORE INTO app_config (key, value) VALUES ('session_idle_hours', '24');
 -- 知识库存储根路径（默认 $APPDATA/.knowledge_base，可在「设置」页修改）。
 INSERT OR IGNORE INTO app_config (key, value) VALUES ('knowledge_base_path', '$APPDATA/.knowledge_base');
+-- 知识库嵌入向量维度（表级，LanceDB kb_chunks 向量列建表即固定）；空串=尚未索引过，首次成功索引时回填。
+INSERT OR IGNORE INTO app_config (key, value) VALUES ('kb_embed_dim', '');
 
 -- 向量库（LanceDB）数据根路径（默认 $APPDATA/.vectors，可在「设置」页修改）。
 -- 记忆 / artifacts / 知识库切块的向量全部存 LanceDB；SQLite 只存业务元数据（设计稿 v2.0 §3.1）。
@@ -318,6 +320,9 @@ CREATE TABLE IF NOT EXISTS knowledge_base
 --   file_path  存储路径（相对知识库根目录，如 'docs/a.txt'，原 PG file_path）；
 --   created_at / updated_at：epoch 毫秒（整型，原 PG timestamp(6) 转 INTEGER）。
 -- 唯一约束：kb_id + file_path（同一知识库内路径唯一确定一个文件）。
+-- v28（K1' 知识库 RAG）：digest=文件内容 hash（增量索引判据）；indexed_at=最近成功索引时间
+-- （NULL=未索引/不支持格式）；meta_data=资产级 JSON（标签云 tags 等业务元数据；
+-- chunk 级正文与向量权威在 LanceDB kb_chunks，SQLite 不存 embedding）。
 CREATE TABLE IF NOT EXISTS knowledge_asset
 (
     id          TEXT    PRIMARY KEY,
@@ -327,6 +332,9 @@ CREATE TABLE IF NOT EXISTS knowledge_asset
     file_ext    TEXT,
     file_size   INTEGER NOT NULL DEFAULT 0,
     file_path   TEXT    NOT NULL,
+    digest      TEXT,
+    indexed_at  INTEGER,
+    meta_data   TEXT,
     created_at  INTEGER NOT NULL,
     updated_at  INTEGER NOT NULL,
     CONSTRAINT uk_kb_asset UNIQUE (kb_id, file_path)

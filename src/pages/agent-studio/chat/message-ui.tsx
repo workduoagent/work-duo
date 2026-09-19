@@ -77,10 +77,16 @@ export function useTypewriter(text: string, active: boolean, speed = 10) {
     // 注意：此处不清理定时器，否则 text 高频更新会把打字机清停导致卡住
   }, [text, active, speed])
 
-  // 组件卸载时清理定时器，避免向已卸载组件 setState
+  // 组件卸载时清理定时器，避免向已卸载组件 setState。
+  // 关键：清理后必须复位 null——React StrictMode 双挂载（cleanup → 重跑 effect）时若残留旧 id，
+  // 启动 guard（timerRef.current == null）会误判「定时器仍在」而永不重启，打字机卡死在空串
+  // （2026-09-19 真机实锤：思考段全部渲染成空行）。判空用 != null 而非真值（定时器 id 可能为 0）。
   useEffect(() => {
     return () => {
-      if (timerRef.current) clearTimeout(timerRef.current)
+      if (timerRef.current != null) {
+        clearTimeout(timerRef.current)
+        timerRef.current = null
+      }
     }
   }, [])
 

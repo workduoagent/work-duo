@@ -233,6 +233,24 @@ function ProcessCollapse({
   )
 }
 
+/**
+ * 运行中的思考段（#20260918011 工作空间模式打字机）：
+ * 时间线此前把 thought 段当静态文本渲染（旁白/推理整段蹦出）。这里复用现成 useTypewriter
+ * 逐字流出——段内文本增量续写时打字机继续推进，已打完的段自然静止（不回退、不重打）。
+ */
+function ThoughtSegmentLine({ text, active = false }: { text?: string; active?: boolean }) {
+  const full = text ?? ''
+  // 30ms/字（≈33 字/秒）：8ms 对十几字旁白仅 ~150ms 一闪而过，肉眼感知不到打字机（真机反馈）；
+  // 30ms 时一行旁白约 0.6s、一段推理 1.5~3s，节奏清晰可读。
+  const shown = useTypewriter(full, active, 30)
+  return (
+    <div className="agent-chat__seg-thought">
+      - {active ? shown : full}
+      {active && shown.length < full.length && <span className="agent-chat__type-caret" />}
+    </div>
+  )
+}
+
 export default function AgentChatPage() {
   const { id = '' } = useParams<{ id: string }>()
   const navigate = useNavigate()
@@ -2246,22 +2264,23 @@ export default function AgentChatPage() {
                           <MarkdownRenderer content={text ?? ''} />
                         </div>
                       )
-                      const renderThought = (text: string | undefined, i: number) => (
-                        <div key={i} className="agent-chat__seg-thought">
-                          - {text}
-                        </div>
-                      )
-                      const renderSeg = (s: ChatSegment, i: number) =>
-                        s.kind === 'text'
-                          ? renderText(s.text, i)
-                          : s.kind === 'thought'
-                            ? renderThought(s.text, i)
-                            : renderTool(s.callId, i)
-                      // 运行中（最后一条且流式/运行态）：交错时间线全展开（旁白行+工具块穿插）
+                      // 运行中（最后一条且流式/运行态）：交错时间线全展开（旁白行+工具块穿插）。
+                      // 思考段（推理 + 旁白）走打字机逐字流出；已打完的段保持全文不动。
                       if (isLastAgent && (isStreaming || isRunning)) {
+                        const live = isStreaming || isRunning
                         return (
                           <div className="agent-chat__timeline">
-                            {segs.map(renderSeg)}
+                            {segs.map((s, i) =>
+                              s.kind === 'thought' ? (
+                                // 仅最后一个段参与打字（串行）：被新段顶替的段由 hook 非激活分支直接补全，
+                                // 避免多行并发打字（#20260918011 真机反馈）。
+                                <ThoughtSegmentLine key={i} text={s.text} active={live && i === segs.length - 1} />
+                              ) : s.kind === 'text' ? (
+                                renderText(s.text, i)
+                              ) : (
+                                renderTool(s.callId, i)
+                              ),
+                            )}
                           </div>
                         )
                       }
@@ -2371,7 +2390,11 @@ export default function AgentChatPage() {
                       </div>
                     </div>
                   )}
-                  {m.role === 'agent' && <FilePathCards content={isLastAgent ? displayedContent : m.content} />}
+                  {/* 文件路径卡片：从正文提取路径渲染。打字进行中（最后一条且流式）不渲染——
+                      否则正文里的路径先打完整，卡片会提前挂出打断阅读（#20260918011 真机反馈）。 */}
+                  {m.role === 'agent' && !(isLastAgent && isStreaming) && (
+                    <FilePathCards content={isLastAgent ? displayedContent : m.content} />
+                  )}
                   {m.role === 'agent' && m.completedAt && (
                     <MessageActions
                       msg={m}
@@ -2778,7 +2801,7 @@ export default function AgentChatPage() {
             ) : rightTab === 'process' ? (
               <TracePanel
                 intent={session.trace.intent}
-                thinking={[]}
+                thinking={session.trace.thinking}
                 planSteps={planSteps}
                 toolSteps={toolSteps}
               />

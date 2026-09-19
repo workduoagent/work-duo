@@ -26,6 +26,7 @@ pub mod round_compactor;
 pub mod events;
 pub mod graph;
 pub mod intent;
+pub mod knowledge;
 pub mod memory;
 pub mod native;
 pub mod pipeline;

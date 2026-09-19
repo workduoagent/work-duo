@@ -645,3 +645,34 @@
   font-size: 12px;
   white-space: pre-wrap;
 }
+
+/* K1 第四期：知识库索引行（重建按钮 + 状态摘要 + 进度） */
+.kb-detail__index-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+
+.kb-detail__index-stat {
+  font-size: 12px;
+  color: var(--color-foreground-muted);
+  white-space: nowrap;
+}
+
+.kb-detail__index-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 220px;
+}
+
+.kb-detail__index-progress-msg {
+  font-size: 12px;
+  color: var(--color-foreground-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

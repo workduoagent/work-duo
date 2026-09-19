@@ -23,6 +23,7 @@ import {
   renameKbDir,
   walkKbAssets,
 } from '@/core/file/kbFs'
+import { fireKbRemoveAsset, fireKbSyncAsset } from './kb-index-hooks'
 
 const DEFAULT_KB_PATH = '$APPDATA/.knowledge_base'
 
@@ -69,6 +70,9 @@ function rowToAsset(r: KnowledgeAssetRow): KnowledgeAsset {
     fileExt: r.file_ext ?? undefined,
     fileSize: r.file_size,
     filePath: r.file_path,
+    digest: r.digest ?? null,
+    indexedAt: r.indexed_at ?? null,
+    metaData: r.meta_data ?? null,
     createdAt: safeIso(r.created_at),
     updatedAt: safeIso(r.updated_at),
   }
@@ -248,10 +252,22 @@ export async function deleteKnowledgeBase(kb: KnowledgeBase): Promise<KnowledgeB
     return list
   }
   const db = await getDb()
+  // 先级联清理向量段（需要资产 id 清单，删行后即无从查起）
+  await deleteKnowledgeBaseAssets(kb.id)
   await db.execute('DELETE FROM knowledge_asset WHERE kb_id = ?', [kb.id])
   await db.execute('DELETE FROM knowledge_base WHERE id = ?', [kb.id])
   if (kb.path) await removeKbDir(kb.path)
   return listKnowledgeBases()
+}
+// 整库删除：级联清理该库全部资产的向量段（fire-and-forget，幂等）
+async function deleteKnowledgeBaseAssets(kbId: string): Promise<void> {
+  if (!isTauri) return
+  const db = await getDb()
+  const rows = await db.select<KnowledgeAssetRow[]>(
+    'SELECT id FROM knowledge_asset WHERE kb_id = ?',
+    [kbId],
+  )
+  for (const r of rows) fireKbRemoveAsset(kbId, r.id)
 }
 
 /** 列出某知识库的全部资产（按 file_path 排序）。 */
@@ -271,10 +287,16 @@ export async function listAssets(kbId: string): Promise<KnowledgeAsset[]> {
 export async function deleteAssetsUnderPath(kbId: string, relPath: string): Promise<void> {
   if (!isTauri) return
   const db = await getDb()
+  // 先取将被删除的资产 id 清单（删除后无从查起），级联清理向量段
+  const doomed = await db.select<KnowledgeAssetRow[]>(
+    'SELECT id FROM knowledge_asset WHERE kb_id = ? AND (file_path = ? OR file_path LIKE ?)',
+    [kbId, relPath, `${relPath}/%`],
+  )
   await db.execute(
     'DELETE FROM knowledge_asset WHERE kb_id = ? AND (file_path = ? OR file_path LIKE ?)',
     [kbId, relPath, `${relPath}/%`],
   )
+  for (const r of doomed) fireKbRemoveAsset(kbId, r.id)
 }
 
 /**
@@ -289,20 +311,56 @@ export async function refreshAssets(kb: KnowledgeBase): Promise<{
   return syncAssets(kb.id, kb.path)
 }
 
-/** 仅写 knowledge_asset（create / refresh 内部复用：先删后插），并回写 knowledge_base 聚合值。
- *  返回聚合后的 { fileCount, fileSize }。 */
+/**
+ * 重新扫描知识库目录并同步 knowledge_asset，回写 knowledge_base 的 file_count / file_size 冗余列。
+ * v28（K1'）：改为**按 (kb_id, file_path) 保 id 的 upsert**——不再先删后插。asset id 是
+ * LanceDB kb_chunks 向量段的关联键，重扫时 id 漂移会让已索引段变孤儿；同路径资产
+ * 保留原 id 与 digest/indexed_at/meta_data（Rust 增量索引据此跳过未变更文件）。
+ * 磁盘上消失的路径：删除行（其 Lance 段由 Rust kb_rebuild_index / kb_sync 的清理语义回收）。
+ * 返回聚合后的 { fileCount, fileSize }。
+ */
 async function syncAssets(id: string, folder: string): Promise<{ fileCount: number; fileSize: number }> {
   const db = await getDb()
-  await db.execute('DELETE FROM knowledge_asset WHERE kb_id = ?', [id])
+  const existing = await db.select<KnowledgeAssetRow[]>(
+    'SELECT * FROM knowledge_asset WHERE kb_id = ?',
+    [id],
+  )
+  const byPath = new Map(existing.map((r) => [r.file_path, r]))
   const assets = await walkKbAssets(folder)
   const now = Date.now()
+  const seenPaths = new Set<string>()
+  /** 需要触发索引的资产（新增 / 元数据变化——Rust 侧以 digest+path 最终判定是否真的重切） */
+  const toSync: string[] = []
   for (const a of assets) {
+    seenPaths.add(a.filePath)
+    const prev = byPath.get(a.filePath)
+    if (prev) {
+      // 同路径已存在：保留 id / digest / indexed_at / meta_data，仅刷新可变元数据
+      if (prev.file_size !== a.sizeBytes || prev.name !== a.name || prev.type !== a.type) {
+        await db.execute(
+          `UPDATE knowledge_asset SET name = ?, type = ?, file_size = ?, updated_at = ? WHERE id = ?`,
+          [a.name, a.type, a.sizeBytes, now, prev.id],
+        )
+        toSync.push(prev.id)
+      }
+      continue
+    }
+    const newId = crypto.randomUUID()
     await db.execute(
-      `INSERT INTO knowledge_asset (id, kb_id, name, type, file_ext, file_size, file_path, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [crypto.randomUUID(), id, a.name, a.type, a.fileExt, a.sizeBytes, a.filePath, now, now],
+      `INSERT INTO knowledge_asset (id, kb_id, name, type, file_ext, file_size, file_path, digest, indexed_at, meta_data, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, ?, ?)`,
+      [newId, id, a.name, a.type, a.fileExt, a.sizeBytes, a.filePath, now, now],
     )
+    toSync.push(newId)
   }
+  // 磁盘上消失的路径 → 删行（Lance 旧段由 Rust 侧同步/重建的清理语义回收）
+  const removed = existing.filter((r) => !seenPaths.has(r.file_path))
+  for (const r of removed) {
+    await db.execute('DELETE FROM knowledge_asset WHERE id = ?', [r.id])
+  }
+  // 索引联动（fire-and-forget）：新增/变化 → 增量同步；消失 → 级联清理
+  for (const assetId of toSync) fireKbSyncAsset(id, assetId)
+  for (const r of removed) fireKbRemoveAsset(id, r.id)
   const fileCount = assets.length
   const fileSize = assets.reduce((s, a) => s + a.sizeBytes, 0)
   // 回写 knowledge_base 冗余聚合列（列表/详情页直读，避免每次 LEFT JOIN）

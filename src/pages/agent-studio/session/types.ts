@@ -235,8 +235,8 @@ export interface IntentClassified {
 
 /** 分层思考片段（thinking_chunk 事件携带）。 */
 export interface ThinkingChunk {
-  /** plan=规划 / exec=执行 / selfcheck=自检 */
-  layer: 'plan' | 'exec' | 'selfcheck'
+  /** plan=规划 / exec=执行 / selfcheck=自检 / chat=简单对话 */
+  layer: 'plan' | 'exec' | 'selfcheck' | 'chat'
   text: string
   done: boolean
 }

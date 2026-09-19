@@ -479,8 +479,9 @@ impl AgentRuntime {
             Self::forced_memory_settle(app, &cfg, &plan.goal_summary, &settle_input).await;
         }
 
-        // 阶段四：合并全局执行视图，一次性推送终态文本（前端打字机渲染）。
-        events::emit_text_chunk(app, &result.final_text, false);
+        // 阶段四：合并全局执行视图，切片流式推送终态文本（#20260918011 工作空间模式打字机：
+        // 原实现一次性整段下发，观感「一起输出」；改为与自由会话同款逐片流式，推完再收尾 done）。
+        Self::stream_final_text(app, &result.final_text, &self.cancel_flag).await;
         events::emit_text_chunk(app, "", true);
 
         // token 用量 = 规划 + 各子任务累计，写回会话表并随事件带出。
@@ -526,6 +527,32 @@ impl AgentRuntime {
         }
         return;
 
+    }
+
+    /// 终态文本切片流式推送（#20260918011 工作空间模式打字机）：复合任务此前把聚合后的最终回复
+    /// 一次性整段下发（前端观感「一起蹦出来」，与自由会话的逐字流式不一致）。这里沿用同款
+    /// `text_chunk` 协议按字符块切片推送（总量自适应，约 1.5~2s 推完），推送完再由调用方收尾
+    /// `done=true`；长回复不会拖到几十秒（片长随总量放大）。取消标志置位后立即停止推送。
+    /// 注意：一律按 `chars()` 切分（中文多字节安全，禁止 &s[..n] 字节切片）。
+    async fn stream_final_text(app: &AppHandle, text: &str, cancel: &Arc<AtomicBool>) {
+        if text.is_empty() {
+            return;
+        }
+        let chars: Vec<char> = text.chars().collect();
+        let total = chars.len();
+        // 目标约 120 片：片长随总量放大（长回复加速，保证总时长可控），最小 2 字符/片
+        let step = std::cmp::max(2, (total + 119) / 120);
+        let mut i = 0usize;
+        while i < total {
+            if cancel.load(Ordering::SeqCst) {
+                break;
+            }
+            let end = std::cmp::min(total, i + step);
+            let piece: String = chars[i..end].iter().collect();
+            events::emit_text_chunk(app, &piece, false);
+            i = end;
+            tokio::time::sleep(std::time::Duration::from_millis(16)).await;
+        }
     }
 
     /// 强制记忆模式的引擎级确定性沉淀：流水线成功收尾后，引擎自己调 LLM 总结本次任务可复用的长期记忆，
@@ -673,6 +700,12 @@ impl AgentRuntime {
             Some(&|delta: &str| {
                 if !delta.is_empty() {
                     events::emit_text_chunk(app, delta, false);
+                }
+            }),
+            // reasoning 思考流式（#20260918011）：chat 层逐批推送（节流在 call_llm_stream 内）。
+            Some(&|delta: &str| {
+                if !delta.is_empty() {
+                    events::emit_thinking_chunk(app, delta, false, "chat");
                 }
             }),
         )
@@ -1502,11 +1535,13 @@ pub(crate) async fn call_llm_stream(
     tools: &[Value],
     cancel: &Arc<AtomicBool>,
     on_text: Option<&(dyn Fn(&str) + Send + Sync)>,
+    on_reasoning: Option<&(dyn Fn(&str) + Send + Sync)>,
 ) -> Result<StreamOutcome, String> {
     const MAX_RETRY: usize = 1;
     let mut last: Option<Result<StreamOutcome, String>> = None;
     for attempt in 0..=MAX_RETRY {
-        let outcome = call_llm_stream_once(_app, cfg, messages, tools, cancel, on_text).await;
+        let outcome =
+            call_llm_stream_once(_app, cfg, messages, tools, cancel, on_text, on_reasoning).await;
         match outcome {
             // 用户主动取消：绝不重试，直接透传错误（「停止 / 接管」路径依赖此行为）。
             Err(e) if e.contains("取消") => return Err(e),
@@ -1563,6 +1598,7 @@ async fn call_llm_stream_once(
     tools: &[Value],
     cancel: &Arc<AtomicBool>,
     on_text: Option<&(dyn Fn(&str) + Send + Sync)>,
+    on_reasoning: Option<&(dyn Fn(&str) + Send + Sync)>,
 ) -> Result<StreamOutcome, String> {
     let _ = _app; // 事件推送已上移到 ReAct 循环，本函数只做拉流聚合
     if cfg.llm_base_url.is_empty() || cfg.llm_model_name.is_empty() {
@@ -1671,6 +1707,11 @@ async fn call_llm_stream_once(
     let mut buf: Vec<u8> = Vec::new();
     let mut content = String::new();
     let mut reasoning = String::new();
+    // reasoning 增量节流（#20260918011）：reasoning delta 很碎且量大（reasoning 模型单轮
+    // 可烧 18K 思考 tokens），逐 delta emit 会造成 Tauri 事件风暴卡 UI。按「累计 ≥80 字符
+    // 或距上次推送 ≥150ms」合并推送；流结束时 flush 余量。
+    let mut r_throttle_buf = String::new();
+    let mut r_last_flush = Instant::now();
     let mut chunk_count = 0usize;
     let mut line_count = 0usize;
     let mut parse_error_count = 0usize;
@@ -1713,13 +1754,26 @@ async fn call_llm_stream_once(
             }
             match serde_json::from_str::<Value>(data) {
                 Ok(json) => {
-                    let (content_delta, _reasoning_delta) =
+                    let (content_delta, reasoning_piece) =
                         absorb_stream_delta(&json, &mut content, &mut reasoning, &mut tc_acc);
                     // 增量推流：每收到一片正文 delta 立即经回调向前端 emit 一个 text_chunk，
                     // 实现 SIMPLE_CHAT 等路径的逐字流式输出；ReAct 内部请求传 None 关闭。
                     if let Some(cb) = on_text {
                         if !content_delta.is_empty() {
                             cb(&content_delta);
+                        }
+                    }
+                    // reasoning 增量（#20260918011）：累积节流后推送（见 r_throttle_buf 注释）。
+                    if let Some(cb) = on_reasoning {
+                        if !reasoning_piece.is_empty() {
+                            r_throttle_buf.push_str(&reasoning_piece);
+                            if r_throttle_buf.chars().count() >= 80
+                                || r_last_flush.elapsed().as_millis() >= 150
+                            {
+                                cb(&r_throttle_buf);
+                                r_throttle_buf.clear();
+                                r_last_flush = Instant::now();
+                            }
                         }
                     }
                     // 累计真实 token 用量（prompt / completion）
@@ -1753,12 +1807,16 @@ async fn call_llm_stream_once(
             let data = line.trim_start_matches("data:").trim();
             if data != "[DONE]" {
                 if let Ok(json) = serde_json::from_str::<Value>(data) {
-                    let (content_delta, _reasoning_delta) =
+                    let (content_delta, reasoning_piece) =
                         absorb_stream_delta(&json, &mut content, &mut reasoning, &mut tc_acc);
                     if let Some(cb) = on_text {
                         if !content_delta.is_empty() {
                             cb(&content_delta);
                         }
+                    }
+                    // reasoning 增量只入节流缓冲，flush 交给下方流结束的统一兜底（此处不再单独推送）。
+                    if !reasoning_piece.is_empty() {
+                        r_throttle_buf.push_str(&reasoning_piece);
                     }
                     if let Some(u) = json.get("usage").and_then(|v| v.as_object()) {
                         if let (Some(p), Some(c)) = (
@@ -1770,6 +1828,14 @@ async fn call_llm_stream_once(
                     }
                 }
             }
+        }
+    }
+
+    // 流结束：flush reasoning 节流余量（#20260918011）。
+    if let Some(cb) = on_reasoning {
+        if !r_throttle_buf.is_empty() {
+            cb(&r_throttle_buf);
+            r_throttle_buf.clear();
         }
     }
 

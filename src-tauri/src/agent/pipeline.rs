@@ -1104,7 +1104,24 @@ async fn run_subtask(
         let mut llm_attempt = 0u32;
         let mut llm_err: String;
         loop {
-            match runtime::call_llm_stream(app, cfg, &messages, &tools, cancel, None).await {
+            // reasoning 思考流式（#20260918011）：exec 层逐批推送（节流在 call_llm_stream 内）；
+            // 轮末由 emit_thinking_chunk(done=true) 收尾（见下方 reasoning 终态处理）。
+            let on_reasoning = |delta: &str| {
+                if !delta.is_empty() {
+                    events::emit_thinking_chunk(app, delta, false, "exec");
+                }
+            };
+            match runtime::call_llm_stream(
+                app,
+                cfg,
+                &messages,
+                &tools,
+                cancel,
+                None,
+                Some(&on_reasoning),
+            )
+            .await
+            {
                 Ok(o) => {
                     outcome = o;
                     break;
@@ -1646,10 +1663,11 @@ async fn run_subtask(
 
         // 把模型在决定调用工具之前的「真实推理/规划」推送给前端思考面板
         // （reasoning 为 DeepSeek 风格独立思考字段；content 多为规划/分析短文）。
-        // 以分层 thinking_chunk（layer=exec）推送，供轨迹视图按层着色区分（规划层 plan 由 planner 推送）。
+        // #20260918011：增量已在 call_llm_stream 回调中逐批推送（layer=exec, done=false），
+        // 这里只补 done=true 收尾标记（空文本，前端按层闭合该思考块）。
         let reasoning_trim = outcome.reasoning.trim().to_string();
         if !reasoning_trim.is_empty() {
-            events::emit_thinking_chunk(app, &reasoning_trim, true, "exec");
+            events::emit_thinking_chunk(app, "", true, "exec");
         }
         let content_trim = outcome.content.trim().to_string();
         if !content_trim.is_empty() {

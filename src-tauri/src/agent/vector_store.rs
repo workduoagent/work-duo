@@ -71,14 +71,24 @@ pub fn schema_for(table: VectorTable, dim: usize) -> SchemaRef {
             Field::new("content", DataType::Utf8, false),
             Field::new("content_digest", DataType::Utf8, false),
         ],
+        // K1'（第四期设计稿 §2.1）：kb_chunks v2 通用 chunk 表。
+        // 相比 M1 版新增 type/raw_text/breadcrumbs/page_idx/bbox/origin_file_path/meta_data；
+        // heading 并入 path/breadcrumbs 后移除。page_idx/bbox 为 JSON 数组字符串
+        // （v1 TXT/MD 恒空占位，将来接入 MinerU 类解析器直接填充，表结构零改动）。
         VectorTable::KbChunks => vec![
             Field::new("id", DataType::Utf8, false),
             Field::new("kb_id", DataType::Utf8, false),
             Field::new("asset_id", DataType::Utf8, false),
-            Field::new("path", DataType::Utf8, false),
-            Field::new("heading", DataType::Utf8, true),
             Field::new("chunk_index", DataType::Int32, false),
+            Field::new("type", DataType::Utf8, false),
+            Field::new("raw_text", DataType::Utf8, false),
             Field::new("content", DataType::Utf8, false),
+            Field::new("path", DataType::Utf8, false),
+            Field::new("breadcrumbs", DataType::Utf8, true),
+            Field::new("page_idx", DataType::Utf8, true),
+            Field::new("bbox", DataType::Utf8, true),
+            Field::new("origin_file_path", DataType::Utf8, false),
+            Field::new("meta_data", DataType::Utf8, true),
             Field::new("content_digest", DataType::Utf8, false),
         ],
         VectorTable::SessionSummaries => vec![
@@ -151,6 +161,55 @@ pub struct ArtifactHit {
     pub content: String,
     /// LanceDB `_distance`（越小越相似）
     pub score: f32,
+}
+
+/// `kb_chunks` 表一行（K1' 第四期设计稿 §2.1）：知识库资产切块的向量域行。
+/// id = `{asset_id}#{chunk_index}`；content_digest = 文件级摘要（同资产各 chunk 共享）。
+/// `chunk_type` 对应 Lance 列名 `type`（Rust 关键字回避）；page_idx/bbox 为 JSON 数组
+/// 字符串占位（v1 TXT/MD 恒空，MinerU 类解析器接入后填充）。
+#[derive(Debug, Clone)]
+pub struct KbChunkVectorRow {
+    pub id: String,
+    pub kb_id: String,
+    pub asset_id: String,
+    pub chunk_index: i32,
+    pub chunk_type: String,
+    pub raw_text: String,
+    pub content: String,
+    pub path: String,
+    pub breadcrumbs: Option<String>,
+    pub page_idx: Option<String>,
+    pub bbox: Option<String>,
+    pub origin_file_path: String,
+    pub meta_data: Option<String>,
+    pub content_digest: String,
+    pub embedding: Option<Vec<f32>>,
+    pub embedding_model: Option<String>,
+    pub updated_at: i64,
+}
+
+/// kb_chunks 检索命中（K2' `native__kb_search` 消费；内容列 Lance 内联直接取）。
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KbChunkHit {
+    pub id: String,
+    pub kb_id: String,
+    pub asset_id: String,
+    pub chunk_index: i32,
+    pub chunk_type: String,
+    pub content: String,
+    pub path: String,
+    pub breadcrumbs: Option<String>,
+    pub origin_file_path: String,
+    /// LanceDB `_distance`（越小越相似）
+    pub score: f32,
+}
+
+/// 资产级索引信息（增量判定用）：Lance 中该资产任一 chunk 的文件 digest 与源路径。
+#[derive(Debug, Clone)]
+pub struct KbAssetIndexInfo {
+    pub digest: String,
+    pub origin_file_path: String,
 }
 
 /* ---------------- 实现 ---------------- */
@@ -535,8 +594,271 @@ impl LanceDbVectorStore {
         Ok(None)
     }
 
+    /// upsert `kb_chunks`（K1'：按 id merge，`{asset_id}#{chunk_index}` 幂等）。
+    /// `dim` 由调用方提供（嵌入探测值或 `app_config.kb_embed_dim` 表级记录）：
+    /// - 行携带向量 → 校验维度一致（不一致 = 模型已换而表未重建，显式 Err 提示走 rebuild）；
+    /// - 行全部无向量（嵌入未配置的占位写入）→ 直接复用传入 dim 建表/写 null 向量行。
+    pub async fn upsert_kb_chunks(
+        &self,
+        rows: &[KbChunkVectorRow],
+        dim: usize,
+    ) -> Result<(), String> {
+        if rows.is_empty() {
+            return Ok(());
+        }
+        for r in rows {
+            if let Some(v) = &r.embedding {
+                if v.len() != dim {
+                    return Err(format!(
+                        "kb_chunks 向量维度不匹配（期望 {dim}，实得 {}）——嵌入模型已更换，请执行知识库重建索引",
+                        v.len()
+                    ));
+                }
+            }
+        }
+        self.ensure_table(VectorTable::KbChunks, dim).await?;
+        let table = self.table_ref(VectorTable::KbChunks).await?;
+
+        let mut flat: Vec<f32> = Vec::with_capacity(rows.len() * dim);
+        let mut nulls: Vec<bool> = Vec::with_capacity(rows.len());
+        for r in rows {
+            match &r.embedding {
+                Some(v) if v.len() == dim => {
+                    flat.extend_from_slice(v);
+                    nulls.push(true);
+                }
+                _ => {
+                    flat.extend(std::iter::repeat(0.0f32).take(dim));
+                    nulls.push(false);
+                }
+            }
+        }
+        let values = Float32Array::from(flat);
+        let embedding = FixedSizeListArray::new(
+            Arc::new(Field::new("item", DataType::Float32, true)),
+            dim as i32,
+            Arc::new(values),
+            Some(NullBuffer::from(nulls)),
+        );
+
+        let batch = RecordBatch::try_new(
+            schema_for(VectorTable::KbChunks, dim),
+            vec![
+                Arc::new(StringArray::from(
+                    rows.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(),
+                )),
+                Arc::new(StringArray::from(
+                    rows.iter().map(|r| r.kb_id.as_str()).collect::<Vec<_>>(),
+                )),
+                Arc::new(StringArray::from(
+                    rows.iter().map(|r| r.asset_id.as_str()).collect::<Vec<_>>(),
+                )),
+                Arc::new(arrow_array::Int32Array::from(
+                    rows.iter().map(|r| r.chunk_index).collect::<Vec<_>>(),
+                )),
+                Arc::new(StringArray::from(
+                    rows.iter().map(|r| r.chunk_type.as_str()).collect::<Vec<_>>(),
+                )),
+                Arc::new(StringArray::from(
+                    rows.iter().map(|r| r.raw_text.as_str()).collect::<Vec<_>>(),
+                )),
+                Arc::new(StringArray::from(
+                    rows.iter().map(|r| r.content.as_str()).collect::<Vec<_>>(),
+                )),
+                Arc::new(StringArray::from(
+                    rows.iter().map(|r| r.path.as_str()).collect::<Vec<_>>(),
+                )),
+                Arc::new(StringArray::from(
+                    rows.iter().map(|r| r.breadcrumbs.as_deref()).collect::<Vec<_>>(),
+                )),
+                Arc::new(StringArray::from(
+                    rows.iter().map(|r| r.page_idx.as_deref()).collect::<Vec<_>>(),
+                )),
+                Arc::new(StringArray::from(
+                    rows.iter().map(|r| r.bbox.as_deref()).collect::<Vec<_>>(),
+                )),
+                Arc::new(StringArray::from(
+                    rows.iter()
+                        .map(|r| r.origin_file_path.as_str())
+                        .collect::<Vec<_>>(),
+                )),
+                Arc::new(StringArray::from(
+                    rows.iter().map(|r| r.meta_data.as_deref()).collect::<Vec<_>>(),
+                )),
+                Arc::new(StringArray::from(
+                    rows.iter()
+                        .map(|r| r.content_digest.as_str())
+                        .collect::<Vec<_>>(),
+                )),
+                Arc::new(embedding),
+                Arc::new(StringArray::from(
+                    rows.iter()
+                        .map(|r| r.embedding_model.as_deref())
+                        .collect::<Vec<_>>(),
+                )),
+                Arc::new(Int64Array::from(
+                    rows.iter().map(|r| r.updated_at).collect::<Vec<_>>(),
+                )),
+            ],
+        )
+        .map_err(|e| format!("构建 kb_chunks 记录批失败：{e}"))?;
+
+        let schema = batch.schema();
+        let reader = arrow_array::RecordBatchIterator::new(vec![Ok(batch)], schema);
+        let mut merge = table.merge_insert(&["id"]);
+        merge
+            .when_matched_update_all(None)
+            .when_not_matched_insert_all();
+        merge
+            .execute(Box::new(reader))
+            .await
+            .map_err(|e| format!("LanceDB upsert kb_chunks 失败：{e}"))?;
+        Ok(())
+    }
+
+    /// kb_chunks 向量检索：标量谓词（kb_id / asset_id 集合）先滤再向量，内容列内联返回。
+    pub async fn search_kb_chunks(
+        &self,
+        query: &[f32],
+        filter: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<KbChunkHit>, String> {
+        let table = self.table_ref(VectorTable::KbChunks).await?;
+        let mut vq = table
+            .query()
+            .nearest_to(query.to_vec())
+            .map_err(|e| format!("构建向量查询失败：{e}"))?;
+        if let Some(f) = filter {
+            vq = vq.only_if(f);
+        }
+        let batches = vq
+            .limit(limit)
+            .execute()
+            .await
+            .map_err(|e| format!("LanceDB kb_chunks 检索失败：{e}"))?;
+
+        let mut hits = Vec::new();
+        use futures_util::StreamExt;
+        let mut stream = batches;
+        while let Some(batch) = stream.next().await {
+            let batch = batch.map_err(|e| format!("读取检索结果失败：{e}"))?;
+            let col_str = |name: &str| -> Option<Vec<Option<String>>> {
+                batch
+                    .column_by_name(name)
+                    .and_then(|c| c.as_any().downcast_ref::<StringArray>())
+                    .map(|a| {
+                        (0..a.len())
+                            .map(|i| (!a.is_null(i)).then(|| a.value(i).to_string()))
+                            .collect()
+                    })
+            };
+            let ids = col_str("id").ok_or("检索结果缺 id 列")?;
+            let kb_ids = col_str("kb_id").ok_or("检索结果缺 kb_id 列")?;
+            let asset_ids = col_str("asset_id").ok_or("检索结果缺 asset_id 列")?;
+            let idx = batch
+                .column_by_name("chunk_index")
+                .and_then(|c| c.as_any().downcast_ref::<arrow_array::Int32Array>())
+                .map(|a| a.values().to_vec());
+            let types = col_str("type").ok_or("检索结果缺 type 列")?;
+            let contents = col_str("content").ok_or("检索结果缺 content 列")?;
+            let paths = col_str("path").ok_or("检索结果缺 path 列")?;
+            let breadcrumbs = col_str("breadcrumbs");
+            let origin_paths = col_str("origin_file_path");
+            let dist = batch
+                .column_by_name("_distance")
+                .and_then(|c| c.as_any().downcast_ref::<Float32Array>())
+                .map(|a| a.values().to_vec());
+            for i in 0..ids.len() {
+                let score = dist
+                    .as_ref()
+                    .and_then(|d| d.get(i).copied())
+                    .unwrap_or(f32::MAX);
+                hits.push(KbChunkHit {
+                    id: ids.get(i).cloned().flatten().unwrap_or_default(),
+                    kb_id: kb_ids.get(i).cloned().flatten().unwrap_or_default(),
+                    asset_id: asset_ids.get(i).cloned().flatten().unwrap_or_default(),
+                    chunk_index: idx.as_ref().and_then(|v| v.get(i).copied()).unwrap_or(0),
+                    chunk_type: types.get(i).cloned().flatten().unwrap_or_default(),
+                    content: contents.get(i).cloned().flatten().unwrap_or_default(),
+                    path: paths.get(i).cloned().flatten().unwrap_or_default(),
+                    breadcrumbs: breadcrumbs
+                        .as_ref()
+                        .and_then(|b| b.get(i).cloned())
+                        .flatten(),
+                    origin_file_path: origin_paths
+                        .as_ref()
+                        .and_then(|o| o.get(i).cloned())
+                        .flatten()
+                        .unwrap_or_default(),
+                    score,
+                });
+            }
+        }
+        Ok(hits)
+    }
+
+    /// 无向量条件查询：取该资产任一 chunk 的（文件 digest, origin_file_path）。
+    /// 增量判定：digest 相同且路径相同 → 跳过；路径变化（改名/移动）→ 重写刷新元数据。
+    /// 表不存在 / 无命中 = Ok(None)（调用方据此走全量写入路径，表由 upsert 惰性创建；
+    /// 006 教训：必须先把「表不存在」当空结果，否则首次索引链整体断裂）。
+    pub async fn query_kb_asset_digest(
+        &self,
+        filter: &str,
+    ) -> Result<Option<KbAssetIndexInfo>, String> {
+        let names = self.table_names().await?;
+        if !names.iter().any(|n| n == VectorTable::KbChunks.name()) {
+            return Ok(None);
+        }
+        let table = self.table_ref(VectorTable::KbChunks).await?;
+        let batches = table
+            .query()
+            .only_if(filter)
+            .limit(1)
+            .execute()
+            .await
+            .map_err(|e| format!("LanceDB kb_chunks digest 查询失败：{e}"))?;
+        use futures_util::StreamExt;
+        let mut stream = batches;
+        while let Some(batch) = stream.next().await {
+            let batch = batch.map_err(|e| format!("读取 digest 查询结果失败：{e}"))?;
+            if batch.num_rows() == 0 {
+                continue;
+            }
+            let read_str = |name: &str| -> Option<String> {
+                batch
+                    .column_by_name(name)
+                    .and_then(|c| c.as_any().downcast_ref::<StringArray>())
+                    .and_then(|a| (a.len() > 0).then(|| a.value(0).to_string()))
+            };
+            return Ok(Some(KbAssetIndexInfo {
+                digest: read_str("content_digest").unwrap_or_default(),
+                origin_file_path: read_str("origin_file_path").unwrap_or_default(),
+            }));
+        }
+        Ok(None)
+    }
+
+    /// 删除整张表（K1' schema 迁移 / 维度变化重建用）。表不存在时幂等 Ok。
+    pub async fn drop_table(&self, name: &str) -> Result<(), String> {
+        let names = self.table_names().await?;
+        if !names.iter().any(|n| n == name) {
+            return Ok(());
+        }
+        self.conn
+            .drop_table(name, &[])
+            .await
+            .map_err(|e| format!("LanceDB 删除表 {name} 失败：{e}"))
+    }
+
     /// 通用按谓词删除（表内全量清理 / 级联删除用）。
+    /// 表不存在 = 幂等 Ok（006 教训推广：新库首次索引链中「先删旧段」不得因表未建而断裂——
+    /// 2026-09-19 真机实锤：重建 force 路径跳过 digest 查询直接删除，表刚被 schema 迁移
+    /// 清除时 here 崩溃导致整轮重建失败）。
     pub async fn delete_by_filter(&self, table: VectorTable, filter: &str) -> Result<(), String> {
+        let names = self.table_names().await?;
+        if !names.iter().any(|n| n == table.name()) {
+            return Ok(());
+        }
         let t = self.table_ref(table).await?;
         t.delete(filter)
             .await
@@ -866,6 +1188,31 @@ mod tests {
             names2.contains(&"kb_id".to_string())
                 && names2.contains(&"chunk_index".to_string())
         );
+        // K1' v2 通用 chunk 表：必须包含用户拍板的必备列（asset_id / meta_data / type 等）
+        for col in [
+            "id",
+            "kb_id",
+            "asset_id",
+            "chunk_index",
+            "type",
+            "raw_text",
+            "content",
+            "path",
+            "breadcrumbs",
+            "page_idx",
+            "bbox",
+            "origin_file_path",
+            "meta_data",
+            "content_digest",
+            "embedding",
+            "embedding_model",
+            "updated_at",
+        ] {
+            assert!(
+                names2.iter().any(|n| n == col),
+                "kb_chunks v2 缺列 {col}，实得：{names2:?}"
+            );
+        }
     }
 }
 

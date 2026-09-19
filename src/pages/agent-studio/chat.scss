@@ -3368,6 +3368,23 @@
     word-break: break-word;
   }
 
+  // #20260918011 打字机揭示中（revealed < 全文）的光标
+  &__think-caret {
+    display: inline-block;
+    width: 1px;
+    height: 12px;
+    margin-left: 2px;
+    vertical-align: -2px;
+    background: currentColor;
+    animation: agent-trace-caret-blink 0.8s steps(1) infinite;
+  }
+
+  @keyframes agent-trace-caret-blink {
+    50% {
+      opacity: 0;
+    }
+  }
+
   &__plan,
   &__tools {
     display: flex;

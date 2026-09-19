@@ -172,6 +172,9 @@ export function useAgentSession(): AgentSessionState {
   // 当前活跃子任务序号（按 step_started/finished 维护）：用于给 tool_started/finished
   // 打 `step` 标签，前端把工具按所属步骤归组渲染成「步骤 → 工具」嵌套视图。
   const currentStepRef = useRef<number | null>(null)
+  // #20260918011 消息流思考面板：模型 reasoning 增量是否正在续写 thoughts 的最后一行。
+  // true=后续 delta 拼进末行（同一思考块连续打字）；false=下一段思考另起一行。旁白/状态行会插断。
+  const reasoningOpenRef = useRef(false)
 
   const setRunning = useCallback((value: boolean) => {
     isRunningRef.current = value
@@ -725,14 +728,46 @@ export function useAgentSession(): AgentSessionState {
             break
           case 'thinking_chunk':
             if (e.chunk) {
+              const chunk = e.chunk
               setTraceThinking((prev) => [
                 ...prev,
                 {
-                  layer: (e.chunk?.layer as ThinkingChunk['layer']) ?? 'exec',
-                  text: e.chunk!.text,
-                  done: e.chunk!.done,
+                  layer: (chunk?.layer as ThinkingChunk['layer']) ?? 'exec',
+                  text: chunk!.text,
+                  done: chunk!.done,
                 },
               ])
+              // #20260918011 真机热修：reasoning 之前只进 traceThinking（右栏轨迹此前根本
+              // 没接线，等于用户永远看不到模型思考）。现在同时续写消息流思考面板（thoughts
+              // 末行 + segments 时间线 thought 段），与旁白/工具行自然交错——复用 ThoughtPanel
+              // 现成打字机逐字流出。done=true 闭合当前思考块，下一段另起一行。
+              if (chunk.done && !chunk.text) {
+                // 轮末收尾标记（空文本）：仅闭合当前思考块
+                reasoningOpenRef.current = false
+              } else if (chunk.text && !chunk.done) {
+                // 先取快照再分头更新：两个 setState 的 updater 都用同一个 wasOpen 判定，
+                // 避免第一个 updater 改 flag 导致第二个误判重复拼接。
+                const wasOpen = reasoningOpenRef.current
+                reasoningOpenRef.current = true
+                setThoughts((prev) => {
+                  if (wasOpen && prev.length > 0) {
+                    return [...prev.slice(0, -1), prev[prev.length - 1] + chunk.text]
+                  }
+                  return [...prev, chunk.text]
+                })
+                setSegments((prev) => {
+                  const last = prev[prev.length - 1]
+                  if (wasOpen && last && last.kind === 'thought') {
+                    return [...prev.slice(0, -1), { kind: 'thought' as const, text: (last.text ?? '') + chunk.text }]
+                  }
+                  return [...prev, { kind: 'thought' as const, text: chunk.text }]
+                })
+              } else if (chunk.text) {
+                // done=true 且带文本：整块单发（plan/selfcheck 层），整行追加
+                reasoningOpenRef.current = false
+                setThoughts((prev) => [...prev, chunk.text])
+                setSegments((prev) => [...prev, { kind: 'thought' as const, text: chunk.text }])
+              }
             }
             break
           case 'plan_branch_generated':

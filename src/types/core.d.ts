@@ -182,6 +182,12 @@ export interface KnowledgeAsset {
   fileExt?: string
   fileSize: number
   filePath: string
+  /** 文件内容 hash（Rust 侧增量索引判据，NULL=未索引；v28 K1'） */
+  digest?: string | null
+  /** 最近成功索引时间 epoch 毫秒（NULL=待索引/不支持格式） */
+  indexedAt?: number | null
+  /** 资产级 JSON 字符串（标签云 tags 等业务元数据） */
+  metaData?: string | null
   createdAt: string
   updatedAt: string
 }

@@ -105,7 +105,10 @@ pub fn run() {
             agent::embedding::probe_embedding,
             agent::memory::backfill_memory_vectors,
             agent::vector_store::vector_status,
-            agent::vector_store::set_vector_path
+            agent::vector_store::set_vector_path,
+            agent::commands::kb_sync_asset,
+            agent::commands::kb_remove_asset,
+            agent::commands::kb_rebuild_index
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

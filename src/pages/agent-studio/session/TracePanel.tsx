@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Bot, GitBranch, Sparkles, Wrench, ShieldAlert, CheckCircle2, XCircle, Loader2, ChevronRight, ChevronDown, AlertTriangle, RefreshCw } from 'lucide-react'
 import { MarkdownRenderer } from '@/components/markdown/MarkdownRenderer'
 import type { IntentClassified, PlanStep, ThinkingChunk, ToolStep } from './types'
@@ -14,6 +14,7 @@ const LAYER_META: Record<ThinkingChunk['layer'], { label: string; color: string 
   plan: { label: '规划', color: 'var(--color-trace-plan, #6366F1)' },
   exec: { label: '执行', color: 'var(--color-trace-exec, #3B82F6)' },
   selfcheck: { label: '自检', color: 'var(--color-trace-selfcheck, #F59E0B)' },
+  chat: { label: '思考', color: 'var(--color-trace-chat, #8B5CF6)' },
 }
 
 const RISK_META: Record<string, { label: string; color: string }> = {
@@ -32,6 +33,70 @@ function StepStatusIcon({ status }: { status?: PlanStep['status'] }) {
   return <span className="agent-trace__dot" />
 }
 
+// #20260918011 打字机揭示（v2 常速版）：实测网关会把 reasoning 增量攒成大坨突发下发，
+// 追赶式揭示（v1）会让每坨瞬间打完——观感仍是「一阵一阵刷」。v2 改常速逐字（≈60 字/秒）：
+// 开放中的思考块匀速吐字（积压 >120 字按比例加速，滞后上限约 2s）；闭合后快速收尾（≈0.4s）。
+// 仅最后一个思考块需要动画，历史块直接全文（与 message-ui 的 useTypewriter 同款防堆叠模式）。
+function useTypedText(text: string, active: boolean, groupKey: number) {
+  const [shown, setShown] = useState('')
+  const idxRef = useRef(0)
+  const textRef = useRef(text)
+  const activeRef = useRef(active)
+  const keyRef = useRef<number | null>(null)
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  textRef.current = text
+  activeRef.current = active
+
+  useEffect(() => {
+    if (keyRef.current === null) {
+      // 首挂：已有内容直接全显（历史回放不动画），后续新增内容从零开始打字
+      keyRef.current = groupKey
+      idxRef.current = textRef.current.length
+      setShown(textRef.current)
+      return
+    }
+    if (keyRef.current !== groupKey) {
+      // 换思考块（新一轮开始 / 轨迹清空）：从零开始打新块
+      keyRef.current = groupKey
+      idxRef.current = 0
+      setShown('')
+    }
+  }, [groupKey])
+
+  useEffect(() => {
+    const tick = () => {
+      const target = textRef.current
+      if (idxRef.current > target.length) idxRef.current = target.length
+      if (idxRef.current >= target.length) {
+        timerRef.current = null
+        return
+      }
+      const remaining = target.length - idxRef.current
+      const step = activeRef.current
+        ? remaining > 120
+          ? Math.ceil(remaining / 120)
+          : 1
+        : Math.max(2, Math.ceil(remaining / 25))
+      idxRef.current = Math.min(target.length, idxRef.current + step)
+      setShown(target.slice(0, idxRef.current))
+      timerRef.current = setTimeout(tick, 16)
+    }
+    // 仅在无运行中定时器且有欠账时启动，避免高频 text 更新堆叠定时器（同 useTypewriter 模式）
+    if (timerRef.current == null && idxRef.current < textRef.current.length) {
+      timerRef.current = setTimeout(tick, 16)
+    }
+  }, [text, active])
+
+  // 组件卸载时清理定时器，避免向已卸载组件 setState
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current)
+    }
+  }, [])
+
+  return shown
+}
+
 export function TracePanel({ intent, thinking, planSteps, toolSteps }: TracePanelProps) {
   // 工具调用默认折叠：工具调用很多时全部展开会撑高右栏，默认收起、点击标题展开。
   const [toolsOpen, setToolsOpen] = useState(false)
@@ -42,6 +107,33 @@ export function TracePanel({ intent, thinking, planSteps, toolSteps }: TracePane
   const toggleStep = (step: number) => {
     setStepCollapsed((prev) => ({ ...prev, [step]: !prev[step] }))
   }
+
+  // #20260918011：流式 delta 逐 chunk 追加（done=false），同层连续 chunk 拼接为一个思考块
+  //（done=true 收尾闭合）——数据结构与渲染分离，渲染层再做逐字揭示。
+  const groups = useMemo(() => {
+    const gs: Array<{ layer: ThinkingChunk['layer']; text: string; open: boolean }> = []
+    for (const t of thinking) {
+      const lastGroup = gs[gs.length - 1]
+      if (lastGroup && lastGroup.layer === t.layer && lastGroup.open && !t.done) {
+        lastGroup.text += t.text
+      } else {
+        gs.push({ layer: t.layer, text: t.text, open: !t.done })
+      }
+    }
+    return gs
+  }, [thinking])
+
+  // 打字机目标：仅最后一个思考块参与动画；轨迹清空（plan_generated 换幕）→ 世代+1 强制从头打。
+  const prevLenRef = useRef(0)
+  const genRef = useRef(0)
+  if (groups.length < prevLenRef.current) genRef.current += 1
+  prevLenRef.current = groups.length
+  const lastGroup = groups.length > 0 ? groups[groups.length - 1] : undefined
+  const typed = useTypedText(
+    lastGroup?.text ?? '',
+    lastGroup?.open ?? false,
+    genRef.current * 1000 + groups.length - 1,
+  )
 
   if (!hasData) {
     return (
@@ -87,14 +179,21 @@ export function TracePanel({ intent, thinking, planSteps, toolSteps }: TracePane
             <span>分层思考</span>
           </div>
           <div className="agent-trace__thinking">
-            {thinking.map((t, i) => {
-              const meta = LAYER_META[t.layer] ?? LAYER_META.exec
+            {groups.map((g, i) => {
+              const meta = LAYER_META[g.layer] ?? LAYER_META.exec
+              const isLast = i === groups.length - 1
+              const text = isLast ? typed : g.text
+              // 揭示中（或思考块仍开放等待后续 delta）显示打字光标
+              const typing = isLast && (typed.length < g.text.length || g.open)
               return (
                 <div key={i} className="agent-trace__think" style={{ borderLeftColor: meta.color }}>
                   <span className="agent-trace__think-tag" style={{ color: meta.color }}>
                     {meta.label}
                   </span>
-                  <span className="agent-trace__think-text">{t.text}</span>
+                  <span className="agent-trace__think-text">
+                    {text}
+                    {typing && <span className="agent-trace__think-caret" />}
+                  </span>
                 </div>
               )
             })}

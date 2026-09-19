@@ -37,6 +37,7 @@ use crate::agent::types::BranchStep;
 use crate::agent::types::PlanBranchGenerated;
 use crate::agent::types::PlanDAG;
 use crate::agent::types::ReadArtifactResult;
+use crate::agent::knowledge;
 use crate::agent::memory::{self, HeatmapPoint, MemoryItem};
 use crate::agent::types::{
     SquadChatConfig, SquadMemberConfig, SquadRunStrategy, SquadRuntimeConfig,
@@ -1954,4 +1955,38 @@ pub async fn list_squad_memories(
 #[tauri::command]
 pub async fn delete_squad_memory(app: AppHandle, id: String) -> Result<(), String> {
     crate::agent::memory::delete_squad_memory(&app, &id).await
+}
+// ============================ 知识库 RAG 索引（K1 第四期，设计稿 docs/knowledge-rag-design.md） ============================
+
+/// 前端入参：单资产索引命令（sync / remove 共用）。
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KbAssetInput {
+    pub kb_id: String,
+    pub asset_id: String,
+}
+
+/// 单资产增量同步：前端 kbFs 写入点 fire-and-forget 调用；digest 未变幂等跳过。
+#[tauri::command]
+pub async fn kb_sync_asset(app: AppHandle, input: KbAssetInput) -> Result<knowledge::KbSyncReport, String> {
+    knowledge::sync_asset_index(&app, &input.kb_id, &input.asset_id, false).await
+}
+
+/// 级联清理资产向量段（删除资产/文件后调用；幂等）。
+#[tauri::command]
+pub async fn kb_remove_asset(app: AppHandle, input: KbAssetInput) -> Result<(), String> {
+    knowledge::remove_asset_index(&app, &input.kb_id, &input.asset_id).await
+}
+
+/// 前端入参：全量重建。
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KbRebuildInput {
+    pub kb_id: String,
+}
+
+/// 全量重建（详情页按钮）：spawn 异步 + agent-kb-index-progress 进度事件；重入保护。
+#[tauri::command]
+pub async fn kb_rebuild_index(app: AppHandle, input: KbRebuildInput) -> Result<knowledge::KbRebuildAccepted, String> {
+    knowledge::spawn_rebuild_kb_index(app, input.kb_id).await
 }

@@ -429,3 +429,14 @@ CREATE TABLE IF NOT EXISTS agent_memory_candidates
     decided_at INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_mem_candidates_agent ON agent_memory_candidates(agent_id, status);
+
+-- ============================================================
+-- ---------- v28：知识库 RAG 索引（K1 第二期重设计，设计稿 docs/knowledge-rag-design.md） ----------
+-- 资产级索引状态与增量判据；chunk 正文与向量权威在 LanceDB kb_chunks（SQLite 不存 embedding）。
+-- digest=文件内容 hash（增量索引判据，NULL=未索引）；indexed_at=最近成功索引时间；
+-- meta_data=资产级 JSON（标签云 tags 等业务元数据）。
+ALTER TABLE knowledge_asset ADD COLUMN digest TEXT;
+ALTER TABLE knowledge_asset ADD COLUMN indexed_at INTEGER;
+ALTER TABLE knowledge_asset ADD COLUMN meta_data TEXT;
+-- 嵌入维度表级记录（LanceDB 向量列建表即固定）；空串=尚未索引过，首次成功索引时回填实际维度。
+INSERT OR IGNORE INTO app_config (key, value) VALUES ('kb_embed_dim', '');
