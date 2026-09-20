@@ -165,9 +165,17 @@ pub(crate) fn build_request_messages(
         }
     }
 
-    // [Slot 3..M] 活跃窗口轮次无损还原
-    for round in active_rounds {
-        messages.extend(round.restore_messages());
+    // [Slot 3..M] 活跃窗口轮次还原；历史轮（除最后一个）压缩 kb_search 结果正文。
+    // K3-4 #6（2026-09-20）：SIMPLE_CHAT 的 raw_messages_json 全量含工具结果，无损还原导致
+    // 历史轮 kb_search 命中正文逐轮回带（Q1 实证 5 轮 50K、K2 案例 2 session 107K 的根因）。
+    // 历史轮正文替换为「chunk id + 位置尾段 + score」摘要，需要原文可重新检索（成本低）。
+    let last_idx = active_rounds.len().saturating_sub(1);
+    for (ri, round) in active_rounds.iter().enumerate() {
+        let mut msgs = round.restore_messages();
+        if ri != last_idx {
+            compact_history_kb_hits(&mut msgs);
+        }
+        messages.extend(msgs);
     }
 
     // [Slot M+1] 当前提问
@@ -177,6 +185,102 @@ pub(crate) fn build_request_messages(
 }
 
 /* ----------------------------- 写路径：轮次回填与滚动压缩 ----------------------------- */
+
+/// K3-4 #6：压缩历史轮次中 native__kb_search 的 tool 结果正文。
+/// 只处理「assistant.tool_calls 中 function.name=native__kb_search 的 call_id」配对的
+/// tool 消息；其余工具结果（write_file 等）语义上不可丢，保持原样。
+pub(crate) fn compact_history_kb_hits(messages: &mut [Value]) {
+    let mut kb_call_ids: std::collections::HashSet<String> = Default::default();
+    for m in messages.iter() {
+        if m.get("role").and_then(|r| r.as_str()) != Some("assistant") {
+            continue;
+        }
+        if let Some(tcs) = m.get("tool_calls").and_then(|t| t.as_array()) {
+            for tc in tcs {
+                let name = tc
+                    .get("function")
+                    .and_then(|f| f.get("name"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                let id = tc.get("id").and_then(|v| v.as_str()).unwrap_or("");
+                if name == "native__kb_search" && !id.is_empty() {
+                    kb_call_ids.insert(id.to_string());
+                }
+            }
+        }
+    }
+    if kb_call_ids.is_empty() {
+        return;
+    }
+    for m in messages.iter_mut() {
+        if m.get("role").and_then(|r| r.as_str()) != Some("tool") {
+            continue;
+        }
+        let tcid = m
+            .get("tool_call_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        if !kb_call_ids.contains(&tcid) {
+            continue;
+        }
+        let content = m
+            .get("content")
+            .and_then(|c| c.as_str())
+            .unwrap_or("")
+            .to_string();
+        let compacted = summarize_kb_hit_content(&content);
+        if let Some(obj) = m.as_object_mut() {
+            obj.insert("content".into(), Value::String(compacted));
+        }
+    }
+}
+
+/// kb_search 结果文本 → 摘要（chunk id + 位置尾段 + score）。兼容顶层数组与
+/// {hits:[...]} 包装两种返回形态；解析失败（如「未找到」提示文本）按短文本保留。
+fn summarize_kb_hit_content(content: &str) -> String {
+    let parsed: Result<Value, _> = serde_json::from_str(content);
+    let hits = parsed.ok().and_then(|v| {
+        if let Some(arr) = v.as_array() {
+            Some(arr.clone())
+        } else {
+            v.get("hits").and_then(|h| h.as_array()).cloned()
+        }
+    });
+    match hits {
+        Some(arr) if !arr.is_empty() => {
+            let mut parts: Vec<String> = Vec::new();
+            for h in &arr {
+                let id = h.get("id").and_then(|v| v.as_str()).unwrap_or("?").to_string();
+                let loc = h
+                    .get("breadcrumbs")
+                    .and_then(|v| v.as_str())
+                    .or_else(|| h.get("path").and_then(|v| v.as_str()))
+                    .unwrap_or("");
+                let tail = loc.rsplit('>').next().unwrap_or(loc).trim().to_string();
+                let score = h.get("score").and_then(|v| v.as_f64()).unwrap_or(-1.0);
+                parts.push(format!("{id}[{tail} {score:.2}]"));
+            }
+            format!(
+                "[历史 kb_search 结果已压缩：原 {} 条命中，正文省略，需要原文请重新检索] {}",
+                parts.len(),
+                parts.join(" | ")
+            )
+        }
+        _ => {
+            let n = content.chars().count();
+            if n > 200 {
+                format!(
+                    "{}…[历史结果已截断]",
+                    content.chars().take(200).collect::<String>()
+                )
+            } else {
+                content.to_string()
+            }
+        }
+    }
+}
+
 
 /// 第 N 轮 ReAct 循环结束后，把当前轮产生的完整消息序列（`raw_messages_json`）回填进轮次表。
 pub(crate) async fn persist_round_raw(app: &AppHandle, round_id: &str, raw_messages_json: &str) {
@@ -800,7 +904,8 @@ concurrent-refresh-pitfall | fix | 并发刷新令牌会互踢，客户端需 si
 
 #[cfg(test)]
 mod tests {
-    use super::parse_candidate_lines;
+    use super::{compact_history_kb_hits, parse_candidate_lines};
+    use serde_json::json;
 
     #[test]
     fn parse_basic_candidate_lines() {
@@ -833,5 +938,52 @@ mod tests {
     fn parse_empty_and_none_only() {
         assert!(parse_candidate_lines("").is_empty());
         assert!(parse_candidate_lines("NONE").is_empty());
+    }
+
+    #[test]
+    fn compact_history_kb_hits_only_kb_pairs() {
+        let mut msgs = vec![
+            json!({ "role": "user", "content": "q" }),
+            json!({ "role": "assistant", "tool_calls": [
+                { "id": "c1", "type": "function", "function": { "name": "native__kb_search", "arguments": "{}" } },
+                { "id": "c2", "type": "function", "function": { "name": "native__write_file", "arguments": "{}" } }
+            ]}),
+            json!({ "role": "tool", "tool_call_id": "c1", "content": "[{\"id\":\"a#41\",\"breadcrumbs\":\"A > B > 3.3 骨架\",\"score\":0.77},{\"id\":\"a#42\",\"breadcrumbs\":\"A > B > 3.1 网格\",\"score\":0.81}]" }),
+            json!({ "role": "tool", "tool_call_id": "c2", "content": "已写入 100 字节到 x.md" }),
+        ];
+        compact_history_kb_hits(&mut msgs);
+        let c1 = msgs[2]["content"].as_str().unwrap();
+        assert!(
+            c1.contains("已压缩") && c1.contains("a#41") && c1.contains("3.3 骨架") && c1.contains("0.77"),
+            "实际压缩结果：{c1}"
+        );
+        // 非 kb_search 的工具结果语义上不可丢，保持原样
+        assert_eq!(msgs[3]["content"], "已写入 100 字节到 x.md");
+    }
+
+    #[test]
+    fn compact_kb_short_notice_text_kept() {
+        let mut msgs = vec![
+            json!({ "role": "assistant", "tool_calls": [
+                { "id": "c1", "type": "function", "function": { "name": "native__kb_search", "arguments": "{}" } }
+            ]}),
+            json!({ "role": "tool", "tool_call_id": "c1", "content": "知识库中未找到与查询相关的片段。" }),
+        ];
+        compact_history_kb_hits(&mut msgs);
+        assert_eq!(msgs[1]["content"], "知识库中未找到与查询相关的片段。");
+    }
+
+    #[test]
+    fn compact_kb_long_non_json_truncated() {
+        let long = "x".repeat(500);
+        let mut msgs = vec![
+            json!({ "role": "assistant", "tool_calls": [
+                { "id": "c1", "type": "function", "function": { "name": "native__kb_search", "arguments": "{}" } }
+            ]}),
+            json!({ "role": "tool", "tool_call_id": "c1", "content": long }),
+        ];
+        compact_history_kb_hits(&mut msgs);
+        let c = msgs[1]["content"].as_str().unwrap();
+        assert!(c.chars().count() < 300 && c.ends_with("[历史结果已截断]"));
     }
 }

@@ -264,6 +264,14 @@ export async function upsertAgent(input: AgentUpsertInput): Promise<AgentInfo[]>
   const isUpdate = Boolean(input.id)
   const id = input.id || crypto.randomUUID()
 
+  // 半写入修复（#20260920001，2026-09-20 MCP 自测实锤）：此前 mcpTools/skillIds 缺失时
+  // agent_info 已落库、后续遍历才抛 not iterable——留下无关联表的脏行且 identifier 占用
+  // UNIQUE。数组字段必须在任何写库动作之前归一化。
+  const mcpTools = Array.isArray(input.mcpTools) ? input.mcpTools : []
+  const skillIds = Array.isArray(input.skillIds) ? input.skillIds : []
+  const pluginIds = Array.isArray(input.pluginIds) ? input.pluginIds : []
+  const kbIds = Array.isArray(input.kbIds) ? input.kbIds : []
+
   if (!isTauri) {
     const list = lsRead<AgentInfo>(LS_AGENT)
     const next: AgentInfo = {
@@ -299,7 +307,7 @@ export async function upsertAgent(input: AgentUpsertInput): Promise<AgentInfo[]>
 
     const mcpRefs = lsRead<AgentMcpToolRef>(LS_MCP).filter((r) => r.agentId !== id)
     mcpRefs.push(
-      ...input.mcpTools.map((t) => ({
+      ...mcpTools.map((t) => ({
         id: crypto.randomUUID(),
         agentId: id,
         mcpId: t.mcpId,
@@ -313,7 +321,7 @@ export async function upsertAgent(input: AgentUpsertInput): Promise<AgentInfo[]>
 
     const skillRefs = lsRead<AgentSkillRef>(LS_SKILL).filter((r) => r.agentId !== id)
     skillRefs.push(
-      ...input.skillIds.map((skillId) => ({
+      ...skillIds.map((skillId) => ({
         id: crypto.randomUUID(),
         agentId: id,
         skillId,
@@ -327,7 +335,7 @@ export async function upsertAgent(input: AgentUpsertInput): Promise<AgentInfo[]>
     // 本地插件绑定（P2 新增；键与 plugin-mapper 的 localStorage 回退保持一致）
     const pluginRefs = lsRead<{ id: string; agentId: string; pluginId: string; isActive: boolean; createdAt: string; updatedAt: string }>('work-duo:agent-plugins').filter((r) => r.agentId !== id)
     pluginRefs.push(
-      ...(input.pluginIds ?? []).map((pluginId) => ({
+      ...pluginIds.map((pluginId) => ({
         id: crypto.randomUUID(),
         agentId: id,
         pluginId,
@@ -397,7 +405,7 @@ export async function upsertAgent(input: AgentUpsertInput): Promise<AgentInfo[]>
 
   // 关联表：先删后插，保证与向导勾选结果完全一致
   await db.execute('DELETE FROM agent_mcp_ref WHERE agent_id = ?', [id])
-  for (const t of input.mcpTools) {
+  for (const t of mcpTools) {
     await db.execute(
       `INSERT INTO agent_mcp_ref (id, agent_id, mcp_id, tool_id, is_active, created_at, updated_at)
        VALUES (?, ?, ?, ?, 1, ?, ?)`,
@@ -406,7 +414,7 @@ export async function upsertAgent(input: AgentUpsertInput): Promise<AgentInfo[]>
   }
 
   await db.execute('DELETE FROM agent_skill_ref WHERE agent_id = ?', [id])
-  for (const skillId of input.skillIds) {
+  for (const skillId of skillIds) {
     await db.execute(
       `INSERT INTO agent_skill_ref (id, agent_id, skill_id, is_active, created_at, updated_at)
        VALUES (?, ?, ?, 1, ?, ?)`,
@@ -416,7 +424,7 @@ export async function upsertAgent(input: AgentUpsertInput): Promise<AgentInfo[]>
 
   // 本地插件绑定（P2 新增）：先删后插，与向导勾选结果一致
   await db.execute('DELETE FROM agent_plugin_ref WHERE agent_id = ?', [id])
-  for (const pluginId of input.pluginIds ?? []) {
+  for (const pluginId of pluginIds) {
     await db.execute(
       `INSERT INTO agent_plugin_ref (id, agent_id, plugin_id, is_active, created_at, updated_at)
        VALUES (?, ?, ?, 1, ?, ?)`,
@@ -426,7 +434,7 @@ export async function upsertAgent(input: AgentUpsertInput): Promise<AgentInfo[]>
 
   // 知识库绑定（K2 第四期）：先删后插，与向导勾选结果一致
   await db.execute('DELETE FROM agent_kb_ref WHERE agent_id = ?', [id])
-  for (const kbId of input.kbIds ?? []) {
+  for (const kbId of kbIds) {
     await db.execute(
       `INSERT INTO agent_kb_ref (id, agent_id, kb_id, is_active, created_at, updated_at)
        VALUES (?, ?, ?, 1, ?, ?)`,

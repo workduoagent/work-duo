@@ -323,12 +323,28 @@ fn chunk_section(
     }
 }
 
-/// 噪声 chunk 判定（纯函数，可单测）：剔除字母/数字后不含任何实质字符的块。
-/// CJK 汉字属 Unicode Letter，`is_alphanumeric()` 已覆盖，无需单独区间。
-/// 覆盖：md 水平分隔线（`---`）、星号/下划线分隔线、纯符号行、表格分隔行漏判进
-/// text 等场景（K3-1 真机实证 `---` 独立成块占 top_k 名额 · #20260918010 问题 #3）。
-fn is_noise_chunk(content: &str) -> bool {
-    !content.chars().any(|c| c.is_alphanumeric())
+/// 噪声 chunk 判定（纯函数，可单测）。规则：
+/// ① 各类型通用：剔除字母/数字后不含实质字符（分隔线/纯符号行）——CJK 属 Unicode
+///    Letter，`is_alphanumeric()` 已覆盖（K3-1 真机实证 `---` 独立成块占 top_k · #3）。
+/// ② 仅 text：剔除 markdown 标题行后有效字数 < 6。轮 6 复测实证：「内部：」（2 字碎片
+///    score 0.48 排 top1）与「### 2.3 调色板」类纯标题块占 top_k 名额、嵌入不可靠，
+///    且标题信息已在 breadcrumbs/path 中；heading 黏进首块时由正文行兜底。
+///    table/code 不受 ② 约束——2 行小表、单行脚本有结构价值。
+const MIN_EFFECTIVE_CHUNK_CHARS: usize = 6;
+
+fn is_noise_chunk(content: &str, chunk_type: &str) -> bool {
+    if !content.chars().any(|c| c.is_alphanumeric()) {
+        return true;
+    }
+    if chunk_type != "text" {
+        return false;
+    }
+    let effective: usize = content
+        .lines()
+        .filter(|l| !l.trim_start().starts_with('#'))
+        .map(|l| l.chars().filter(|c| c.is_alphanumeric()).count())
+        .sum();
+    effective < MIN_EFFECTIVE_CHUNK_CHARS
 }
 
 /// 组装单 chunk（标题前缀进 raw_text；type 单块保留语义）。
@@ -341,7 +357,7 @@ fn push_chunk(
     content: &str,
 ) {
     let content = content.trim().to_string();
-    if content.chars().count() < 2 || is_noise_chunk(&content) {
+    if content.chars().count() < 2 || is_noise_chunk(&content, chunk_type) {
         return;
     }
     let raw_text = match breadcrumbs {
@@ -861,16 +877,46 @@ pub struct KbSearchHit {
     pub channel: String,
 }
 
-/// 检索内容裁剪上限（工具出参防超长）。
-const SEARCH_CONTENT_CLIP: usize = 600;
+/// 检索内容裁剪上限（工具出参防超长）。K3-4 分级裁剪：首条（最优命中）保全景。
+/// 修订（2026-09-20 轮 3 复测）：code/table 属枚举/字段表类结构化内容，300 字截断会
+/// 腰斩色值表/分区表导致模型误判「结果不足」——与首条同限。
+/// 修订（2026-09-20 轮 7 复测）：调色板 chunk 实际 ~700 字被 600 腰斩（outfit 差 1 行），
+/// 模型重检又被 seen 去重挡住 → 首检即拿全比依赖重取通路可靠，code/table 提到 1200。
+const SEARCH_CONTENT_CLIP_FIRST: usize = 1200;
+const SEARCH_CONTENT_CLIP_REST: usize = 300;
+
+/// 按命中序位与 chunk 类型决定裁剪上限。
+fn clip_limit_for(idx: usize, chunk_type: &str) -> usize {
+    if idx == 0 {
+        return SEARCH_CONTENT_CLIP_FIRST;
+    }
+    match chunk_type {
+        "code" | "table" => SEARCH_CONTENT_CLIP_FIRST,
+        _ => SEARCH_CONTENT_CLIP_REST,
+    }
+}
+
+/// 相关性距离阈值（Lance L2，score 越小越相似）。2026-09-20 实测标定（bge-small-zh-v1.5）：
+/// 相关查询命中 score<0.95、无关查询最近邻 score>1.0，分布天然分离——超过该阈值的命中
+/// 直接过滤（视作「无相关内容」）。⚠️ 换嵌入模型后此值需重新标定。
+const KB_SCORE_RELEVANCE_MAX: f32 = 1.0;
+
+/// 相关性判定（K3-4）：score ≤ 阈值视为相关；关键词降级路径 score=-1.0 恒相关（LIKE 已是字面匹配）。
+fn is_relevant_score(score: f32) -> bool {
+    score < 0.0 || score <= KB_SCORE_RELEVANCE_MAX
+}
 
 /// 知识库检索管道（K2 设计稿 §5.3）：向量近邻 → 关键词 LIKE 降级 → 空清单。
 /// `kb_ids` 为空 = 未绑定，返回空（工具层不应注册，此处兜底防呆）。
+/// `full` = 返回未裁剪正文（上限 4000 字防极端）：用于「重检命中已全部见过」时
+/// 恢复完整原文——裁剪分级 + 去重叠加曾导致超长 chunk（如调色板 ~700 字）永远拿不回
+/// 完整版（2026-09-20 轮 4 实锤）。
 pub(crate) async fn kb_search(
     app: &AppHandle,
     kb_ids: &[String],
     query: &str,
     top_k: usize,
+    full: bool,
 ) -> Result<Vec<KbSearchHit>, String> {
     let query = query.trim();
     if kb_ids.is_empty() || query.is_empty() {
@@ -884,7 +930,7 @@ pub(crate) async fn kb_search(
         "kb_id IN ({})",
         kb_ids.iter().map(|id| format!("'{}'", esc(id))).collect::<Vec<_>>().join(", ")
     );
-    let top_k = top_k.clamp(1, 20);
+    let top_k = top_k.clamp(1, 8);
 
     // 通道一：向量检索
     if let Some(cfg) = embedding::load_default_embedding(&pool).await? {
@@ -894,11 +940,20 @@ pub(crate) async fn kb_search(
             .next()
             .ok_or("嵌入返回空向量")?;
         let hits = vs.search_kb_chunks(&qvec, Some(&kb_filter), top_k).await?;
+        // K3-4：score 阈值过滤——无关查询的最近邻（distance>1.0）直接丢弃；
+        // 全部被滤掉时落到关键词通道做最后一次字面匹配，仍空则由上层返回「未找到」。
+        let hits: Vec<_> = hits.into_iter().filter(|h| is_relevant_score(h.score)).collect();
         if !hits.is_empty() {
+            // K3-4 分级裁剪：首条（最优命中）保 600 字全景，其余 300 字要点。
             return Ok(hits
                 .into_iter()
-                .map(|h| KbSearchHit {
-                    content: clip_chars(&h.content, SEARCH_CONTENT_CLIP),
+                .enumerate()
+                .map(|(idx, h)| KbSearchHit {
+                    content: if full {
+                        clip_chars(&h.content, 4000)
+                    } else {
+                        clip_chars(&h.content, clip_limit_for(idx, &h.chunk_type))
+                    },
                     channel: "vector".into(),
                     score: h.score,
                     id: h.id,
@@ -930,8 +985,13 @@ pub(crate) async fn kb_search(
     let rows = vs.query_kb_chunks_by_keyword(&kw_filter, top_k).await?;
     Ok(rows
         .into_iter()
-        .map(|h| KbSearchHit {
-            content: clip_chars(&h.content, SEARCH_CONTENT_CLIP),
+        .enumerate()
+        .map(|(idx, h)| KbSearchHit {
+            content: if full {
+                clip_chars(&h.content, 4000)
+            } else {
+                clip_chars(&h.content, clip_limit_for(idx, &h.chunk_type))
+            },
             channel: "keyword".into(),
             score: -1.0,
             id: h.id,
@@ -972,6 +1032,32 @@ mod tests {
     }
 
     #[test]
+    fn relevance_score_threshold_matches_calibration() {
+        // 2026-09-20 标定：相关命中 <0.95，无关最近邻 >1.0（bge-small-zh L2 距离）
+        assert!(is_relevant_score(0.55));
+        assert!(is_relevant_score(0.85));
+        assert!(is_relevant_score(0.95));
+        assert!(is_relevant_score(1.0)); // 边界：恰在阈值内保留（保守，宁多勿漏）
+        assert!(!is_relevant_score(1.05));
+        assert!(!is_relevant_score(1.08));
+        // 关键词降级路径恒相关
+        assert!(is_relevant_score(-1.0));
+    }
+
+    #[test]
+    fn clip_limit_tiers_by_chunk_type() {
+        // 首条一律全景（轮 7 修订：调色板 ~700 字 chunk 曾被 600 腰斩且重检被
+        // seen 去重挡住 → code/table 提到 1200，首检即拿全优先于依赖重取通路）
+        assert_eq!(clip_limit_for(0, "text"), 1200);
+        assert_eq!(clip_limit_for(0, "code"), 1200);
+        // 结构化内容（枚举/字段表）截断伤害大，与首条同限
+        assert_eq!(clip_limit_for(1, "code"), 1200);
+        assert_eq!(clip_limit_for(3, "table"), 1200);
+        // 叙述类压缩
+        assert_eq!(clip_limit_for(1, "text"), 300);
+    }
+
+    #[test]
     fn windows_overlap_and_cover() {
         let text = "a".repeat(1000);
         let ws = sliding_windows(&text, 800, 80);
@@ -1007,7 +1093,7 @@ mod tests {
 
     #[test]
     fn md_table_and_code_blocks_typed() {
-        let md = "# 数据\n| a | b |\n|---|---|\n| 1 | 2 |\n正文段落。\n```python\nprint(1)\n```\n结尾。";
+        let md = "# 数据\n| a | b |\n|---|---|\n| 1 | 2 |\n正文段落内容较长，确保文本块不被噪声门槛过滤。\n```python\nprint(1)\n```\n结尾内容同样足够长，保证保留为独立文本块。";
         let chunks = chunk_asset(md, true);
         assert!(chunks.iter().any(|c| c.chunk_type == "table"), "应有 table 块");
         assert!(chunks.iter().any(|c| c.chunk_type == "code"), "应有 code 块");
@@ -1020,34 +1106,66 @@ mod tests {
 
     #[test]
     fn noise_chunks_filtered_md_and_txt() {
-        // 纯函数：分隔线/纯符号 = 噪声；有字母数字/CJK = 实质
-        assert!(is_noise_chunk("---"));
-        assert!(is_noise_chunk("***"));
-        assert!(is_noise_chunk("___"));
-        assert!(is_noise_chunk("| --- | --- |")); // 表格分隔行漏判进 text
-        assert!(is_noise_chunk("。！？"));
-        assert!(!is_noise_chunk("## 8. 决策记录"));
-        assert!(!is_noise_chunk("记忆系统 v2 选型 LanceDB"));
+        // 纯函数：分隔线/纯符号/碎片/纯标题 = 噪声；有实质内容 = 保留（text 场景）
+        assert!(is_noise_chunk("---", "text"));
+        assert!(is_noise_chunk("***", "text"));
+        assert!(is_noise_chunk("___", "text"));
+        assert!(is_noise_chunk("| --- | --- |", "text")); // 表格分隔行漏判进 text
+        assert!(is_noise_chunk("。！？", "text"));
+        // 轮 6 真机实证的碎片/纯标题噪声（占 top_k 名额、嵌入不可靠）
+        assert!(is_noise_chunk("内部：", "text"));
+        assert!(is_noise_chunk("### 6.1 结构", "text"));
+        assert!(is_noise_chunk("## 8. 决策记录", "text"));
+        assert!(is_noise_chunk("### 2.3 调色板", "text"));
+        assert!(is_noise_chunk("### 0.2 信息流", "text"));
+        // 真实内容必须保留（防误伤回归）
+        assert!(!is_noise_chunk("记忆系统 v2 选型 LanceDB", "text"));
+        assert!(!is_noise_chunk(
+            "阴影：容器 `::after` 硬边椭圆色块，不用 blur。",
+            "text"
+        ));
+        assert!(!is_noise_chunk(
+            "分段/页签：发型 | 眼 | 嘴 | 配饰 | 服装 | 道具",
+            "text"
+        ));
+        // table/code 不受 text 短内容规则约束（防误伤：小表格/单行脚本有结构价值）
+        assert!(!is_noise_chunk("| a | b |\n|---|---|\n| 1 | 2 |", "table"));
+        assert!(!is_noise_chunk("print(1)", "code"));
+        // 纯符号规则对 table/code 仍生效
+        assert!(is_noise_chunk("---", "table"));
+        assert!(is_noise_chunk("---", "code"));
 
-        // md：标题间的水平分隔线不得独立成块（K3-1 真机实证 `---` 占 top_k 名额）
-        let md = "# 甲\n正文甲。\n---\n## 乙\n正文乙。\n---\n| a | b |\n|---|---|\n| 1 | 2 |";
+        // md（贴近真机形态：heading+空行）：纯标题块滤除，实质内容保留
+        let md = "# 甲\n\n正文甲内容足够长，不会被噪声规则过滤。\n\n---\n## 乙\n\n正文乙内容同样足够长，确保保留。\n\n| a | b |\n|---|---|\n| 1 | 2 |";
         let chunks = chunk_asset(md, true);
         assert!(!chunks.is_empty(), "实质内容不得被误杀");
         for c in &chunks {
-            assert!(!is_noise_chunk(&c.content), "噪声块入库: {:?}", c.content);
+            assert!(
+                !is_noise_chunk(&c.content, &c.chunk_type),
+                "噪声块入库: {:?}",
+                c.content
+            );
         }
         assert!(chunks.iter().any(|c| c.content.contains("正文甲")), "分隔线两侧实质内容保留");
         assert!(chunks.iter().any(|c| c.chunk_type == "table"), "表格不受影响");
 
+        // heading 黏进首块时由正文兜底（剔除标题行后仍有有效内容）
+        let md3 = "# 丙节\n实质内容足够长，保留为有效块。";
+        let c3 = chunk_asset(md3, true);
+        assert!(c3.iter().any(|c| c.content.contains("实质内容足够长")), "黏合块正文兜底保留");
+
         // txt 纯滑窗路径同样过滤（分隔线行混入）
         let txt = "实质内容第一段。\n---\n实质内容第二段。";
         let tchunks = chunk_asset(txt, false);
-        assert!(tchunks.iter().all(|c| !is_noise_chunk(&c.content)));
+        assert!(tchunks.iter().all(|c| !is_noise_chunk(&c.content, &c.chunk_type)));
 
         // 真机案例复现（chunk #33）：标题下仅分隔线 → 该节只产出 `---` 块，必须整体滤除
-        let md2 = "# 丙\n---\n# 丁\n实质内容。";
+        let md2 = "# 丙\n---\n# 丁\n实质内容比较丰富，足够保留为有效块。";
         let c2 = chunk_asset(md2, true);
-        assert!(c2.iter().all(|c| !is_noise_chunk(&c.content)), "仅分隔线的节不得成块");
+        assert!(
+            c2.iter().all(|c| !is_noise_chunk(&c.content, &c.chunk_type)),
+            "仅分隔线的节不得成块"
+        );
         assert!(c2.iter().any(|c| c.content.contains("实质内容")), "相邻实质节保留");
     }
 

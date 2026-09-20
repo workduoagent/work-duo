@@ -614,7 +614,9 @@ agentId(必填) / prompt(必填) / workspace(可选, 工作区路径) / sessionI
 attachments / planOverride / preCompleted / initialContext / disabledSkillIds / disabledMcpIds / disabledMcpToolIds / \
 enabledSkillIds / enabledMcpIds / disabledPluginIds / enabledPluginIds。\n\
 【自由会话 vs 任务会话】不传 workspace/sessionId/roundId = 自由会话（无产物持久化，仅事件流+轨迹缓冲）；\
-传入 workspace 且前端已建 sessionId+roundId = 任务会话（run_task 结束回填 agent_conversation_round 的 thinking_content/assistant_answer/raw_messages_json）。\n\
+传入 workspace 且前端已建 sessionId+roundId = 任务会话（run_task 终态仅自动回填 raw_messages_json）。\n\
+【必做-结果回填】任务会话在 wait_task 终态后，必须取 agent_get_run_trace 的 reply/thinking 经 agent_round_update 回填 \
+assistantAnswer/thinkingContent——否则 agent_conversation_round 的正文列为空，UI 会话历史抽查不到本次问答（2026-09-20 实锤）。\n\
 【注意】get_run_logs 只回 Rust tracing 日志（不含思考/轨迹/正文）；完整轨迹请用 agent_get_run_trace（事件流缓冲，含 thinking/reply/plan/steps）。",
             json!({
                 "type": "object",

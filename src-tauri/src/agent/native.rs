@@ -3165,6 +3165,7 @@ pub fn register_kb_search_tool(registry: &mut ToolRegistry, app: &AppHandle, kb_
         app: app.clone(),
         kb_ids,
         call_count: std::sync::atomic::AtomicUsize::new(0),
+        seen_chunks: std::sync::Mutex::new(std::collections::HashSet::new()),
     }));
 }
 
@@ -3172,6 +3173,11 @@ pub fn register_kb_search_tool(registry: &mut ToolRegistry, app: &AppHandle, kb_
 /// 模型陷入纯检索循环，9 轮 30+ 次 kb_search 正文恒空）。工具实例生命周期 = 单次任务
 /// 注册（registry 每次 run 重建），计数天然 per-run。
 const KB_SEARCH_SOFT_LIMIT: usize = 6;
+
+/// K3-4 护栏硬化（#5，2026-09-20）：软 notice 实测会被模型无视继续检索（复测 14 次案例），
+/// 超过硬上限后直接拒绝执行检索（连嵌入+Lance 查询开销都省掉），强制收敛。
+/// 注意：计数移到 execute 入口后，失败/被拒的调用同样占额度（防滥用语义）。
+const KB_SEARCH_HARD_LIMIT: usize = 10;
 
 /// 知识库检索工具（K2）：语义优先、关键词降级，返回可溯源片段（源文件 + 层级路径）。
 /// 只读（ReadSafe），无需审批。
@@ -3181,6 +3187,8 @@ pub struct KbSearchTool {
     kb_ids: Vec<String>,
     /// 本任务内已执行的检索次数。
     call_count: std::sync::atomic::AtomicUsize,
+    /// K3-4 任务内去重：已返回过的 chunk id（防止多轮检索重复付同一段内容的 token）。
+    seen_chunks: std::sync::Mutex<std::collections::HashSet<String>>,
 }
 
 #[async_trait]
@@ -3194,7 +3202,7 @@ impl AgentTool for KbSearchTool {
             "检索已绑定的知识库（Markdown/TXT 文档），返回与查询最相关的资料片段（含源文件路径与层级位置，可溯源）。回答事实性、配置类、领域知识问题时应优先调用本工具核对资料，而非凭记忆臆测。只读，无需审批。",
             json!({
                 "query": { "type": "string", "description": "检索查询（自然语言，可含关键词）" },
-                "top_k": { "type": "integer", "description": "返回片段数上限，默认 5，最大 20" }
+                "top_k": { "type": "integer", "description": "返回片段数上限，默认 5，最大 8；除非确需多角度覆盖，保持默认即可" }
             }),
             &["query"],
         )
@@ -3212,27 +3220,114 @@ impl AgentTool for KbSearchTool {
         if query.is_empty() {
             return Err(ToolError::InvalidArgs("kb_search 缺少 query 参数".into()));
         }
+        // 护栏硬化（#5）：先取号再干活——超过硬上限直接拒绝执行，强制模型基于已有资料作答。
+        let n = self
+            .call_count
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+            + 1;
+        if n > KB_SEARCH_HARD_LIMIT {
+            return Ok(serde_json::to_string(&serde_json::json!({
+                "blocked": true,
+                "notice": format!(
+                    "已达本任务知识库检索硬上限（{} 次），本次检索未执行。你已拥有足够的检索资料，请立即基于已有信息输出最终答案，不要再尝试调用本工具。",
+                    KB_SEARCH_HARD_LIMIT
+                ),
+            }))
+            .map_err(|e| ToolError::ExecutionFailed(format!("序列化检索结果失败：{e}")))?);
+        }
         let top_k = args.get("top_k").and_then(|v| v.as_u64()).unwrap_or(5) as usize;
-        let hits = crate::agent::knowledge::kb_search(&self.app, &self.kb_ids, &query, top_k)
+        let hits = crate::agent::knowledge::kb_search(&self.app, &self.kb_ids, &query, top_k, false)
             .await
             .map_err(ToolError::ExecutionFailed)?;
         if hits.is_empty() {
             return Ok("知识库中未找到与查询相关的片段。".into());
         }
-        let hits_json = serde_json::to_value(&hits)
-            .map_err(|e| ToolError::ExecutionFailed(format!("序列化检索结果失败：{e}")))?;
-        // 收敛引导（软上限）：超限后包装返回，注入「立即整理答案」的强提示，
-        // 把模型从「无限换词再检索」循环里拽出来（配合同任务内的强制总结熔断）。
-        let n = self
-            .call_count
-            .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
-            + 1;
-        if n > KB_SEARCH_SOFT_LIMIT {
+        // K3-4 任务内去重：过滤本任务已返回过的 chunk（省重复 token）；全部重复时
+        // 直接给收敛指令而非空列表（避免模型把「空」误读为「知识库没有」而臆测）。
+        // 轮 7 实锤：模型重检同一内容时，目标 chunk 被 seen 过滤，而 fresh 里只有
+        // 次要新命中 → full 通路（仅在 fresh 全空时触发）没开，模型永远拿不回被
+        // 截断的正文。此处记录「score 优于 fresh 全部」的重复命中（L2 距离越小越
+        // 相关）= 模型明确重检想要的旧内容，供下方 full 重取附带完整原文。
+        let (fresh_hits, duplicate_count, better_dup_ids) = {
+            let mut seen = self
+                .seen_chunks
+                .lock()
+                .map_err(|_| ToolError::ExecutionFailed("kb_search 去重锁中毒".into()))?;
+            let mut fresh = Vec::new();
+            let mut dup_ids: Vec<(String, f32)> = Vec::new();
+            for h in hits {
+                if seen.insert(h.id.clone()) {
+                    fresh.push(h);
+                } else {
+                    dup_ids.push((h.id, h.score));
+                }
+            }
+            let best_fresh = fresh.first().map(|h| h.score).unwrap_or(f32::INFINITY);
+            let better: Vec<String> = dup_ids
+                .iter()
+                .filter(|(_, s)| *s < best_fresh)
+                .map(|(id, _)| id.clone())
+                .collect();
+            (fresh, dup_ids.len(), better)
+        };
+        if fresh_hits.is_empty() {
+            // K3-4 修订（2026-09-20 轮 4 实锤）：全重复时重取完整原文——裁剪分级+去重叠加
+            // 曾导致超长 chunk（调色板 ~700 字）被 600 上限腰斩且永远拿不回完整版。
+            let full_hits =
+                crate::agent::knowledge::kb_search(&self.app, &self.kb_ids, &query, top_k, true)
+                    .await
+                    .map_err(ToolError::ExecutionFailed)?;
             return Ok(serde_json::to_string(&serde_json::json!({
                 "notice": format!(
-                    "注意：本任务已执行 {} 次知识库检索，返回内容已大量覆盖相关章节。请立即基于已检索到的资料整理最终答案；除非确有明确的信息缺口，不要再重复检索。",
-                    n
+                    "该查询命中的 {} 个片段此前已返回过（截断版）；以下为未截断的完整原文，请以此为准整理最终答案，无需再次检索。",
+                    duplicate_count
                 ),
+                "hits": full_hits,
+            }))
+            .map_err(|e| ToolError::ExecutionFailed(format!("序列化检索结果失败：{e}")))?);
+        }
+        // 轮 7 修订：fresh 非空但存在「更优重复命中」时，full 重取其完整原文附带返回
+        // （上限 2 个，token 有界）——重取通路的最后一块拼图：只要模型明确重检旧内容，
+        // 就能拿回完整版，不再依赖「本次命中全部重复」这个过窄的触发条件。
+        let mut out_hits = fresh_hits;
+        let mut extra_notice = String::new();
+        if !better_dup_ids.is_empty() {
+            let full_hits =
+                crate::agent::knowledge::kb_search(&self.app, &self.kb_ids, &query, top_k, true)
+                    .await
+                    .map_err(ToolError::ExecutionFailed)?;
+            let extras: Vec<_> = full_hits
+                .into_iter()
+                .filter(|h| better_dup_ids.contains(&h.id))
+                .take(2)
+                .collect();
+            let extra_n = extras.len();
+            if extra_n > 0 {
+                out_hits.extend(extras);
+                extra_notice = format!(
+                    "另有 {extra_n} 个本次重检命中、此前被截断的片段，其未截断完整原文已附在结果尾部，请以此为准整理最终答案。"
+                );
+            }
+        }
+        let hits_json = serde_json::to_value(&out_hits)
+            .map_err(|e| ToolError::ExecutionFailed(format!("序列化检索结果失败：{e}")))?;
+        // 收敛引导（软上限）：超限后包装返回，注入「立即整理答案」的强提示，
+        // 把模型从「无限换词再检索」循环里拽出来（硬上限在 execute 入口短路）。
+        if n > KB_SEARCH_SOFT_LIMIT {
+            let mut notice = format!(
+                "注意：本任务已执行 {} 次知识库检索（硬上限 {} 次）。多数章节应已覆盖；若确有明确的信息缺口可继续检索，否则请立即基于已有资料整理最终答案。",
+                n, KB_SEARCH_HARD_LIMIT
+            );
+            notice.push_str(&extra_notice);
+            return Ok(serde_json::to_string(&serde_json::json!({
+                "notice": notice,
+                "hits": hits_json,
+            }))
+            .map_err(|e| ToolError::ExecutionFailed(format!("序列化检索结果失败：{e}")))?);
+        }
+        if !extra_notice.is_empty() {
+            return Ok(serde_json::to_string(&serde_json::json!({
+                "notice": extra_notice,
                 "hits": hits_json,
             }))
             .map_err(|e| ToolError::ExecutionFailed(format!("序列化检索结果失败：{e}")))?);

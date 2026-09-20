@@ -30,9 +30,9 @@ scope: AGENT
 | `llmId`（必填，大脑） | `agent_list_models` | `category∈{text,multimodal}` 且 `enabled=1`；需工具调用优先 `tool_calls=1` |
 | `llmConfig`（必填副本） | `agent_list_models` 的 `config` 列 | **选中 llmId 后必须把对应行 `config` 解析为对象、原样写入 `llmConfig`**；漏写=UI 未展开参数卡=模型无参调用（漏配）。ttsId/sttId 同理写 ttsConfig/sttConfig |
 | `ttsId` / `sttId`（可选） | `agent_list_models` | 分别对应 `category=tts` / `stt` |
-| `mcpTools` | `agent_list_mcps` + `agent_list_mcp_tools` | 元素 `{mcpId, toolId}`；服务≤3，工具总数≤10 |
-| `skillIds` | `agent_list_skills` | 数组，≤3 |
-| `pluginIds` | `agent_list_plugins` | 数组，≤10 |
+| `mcpTools` | `agent_list_mcps` + `agent_list_mcp_tools` | 元素 `{mcpId, toolId}`；服务≤3，工具总数≤10。**必传（不挂也要传 `[]`）**——省略报 `input.mcpTools is not iterable`（handler 直接遍历） |
+| `skillIds` | `agent_list_skills` | 数组，≤3。建议与 `pluginIds` 一样**显式传**（不挂传 `[]`，与 mcpTools 同一遍历路径） |
+| `pluginIds` | `agent_list_plugins` | 数组，≤10。建议显式传 `[]` |
 | `kbIds` | `agent_list_kbs` | 数组，无上限；绑定后获得 `native__kb_search` |
 | `scenario` | `agent_list_scenarios` | 取 `value`（如 `office-efficiency`） |
 | `name` / `identifier` | — | `identifier` 须匹配 `^[a-zA-Z0-9_-]+$` 且唯一 |
@@ -63,9 +63,31 @@ scope: AGENT
 ## 五、常见坑
 
 - `mcpTools` 的 `toolId` 必须是 `agent_list_mcp_tools` 返回的**工具 id**，不是服务 id。
-- `identifier` 一旦与既有 Agent 冲突会触发 UNIQUE 约束报错；自测用例建议带唯一后缀（如 `_selftest`）。
+- `identifier` 一旦与既有 Agent 冲突会触发 UNIQUE 约束报错；自测用例建议带唯一后缀（如 `_selftest`）。**实测（2026-09-20）：`agent_ui_delete` 之后 identifier 仍然占用 UNIQUE**（疑似软删或复用清单未清），复用同名 identifier 前先换新后缀最稳（如 `-r2`）。
 - 选模型时不要选 `enabled=0` 或 `category` 不匹配的；否则运行时不可用。
 - KB 绑定的是知识库 id；若知识库尚未索引（LanceDB 无向量），检索会空回，需先在 UI 触发索引。
 - **`llmConfig` 必须复制模型 `config`**：`agent_list_models` 返回每行带 `config`（JSON 字符串，内容即该模型所属 category 的参数对象）。选中模型后须解析并原样写入 `llmConfig`。**绝对不能省略**——省略后模型以无参方式调用，等价于 UI 步骤2从未点开参数卡，属漏配（这是自检最容易漏的一步）。
 - **行为策略四字段必须显式赋值**：`isActive`/`autoToolExecMode`/`allowSandbox`/`memoryMode`/`planAutoApproveMode` 要在 payload 里写死。注意 **UI 向导默认 `allowSandbox=true`，但 `upsertAgent` 的兜底默认是 `false`**——省略会让落库值与 UI 表现不一致。
 - **MCP 挂载必须落到具体工具**：凡 `mcpTools` 挂了 MCP 服务，必须再经 `agent_list_mcp_tools({mcp_id})` 选出具体工具，以 `{mcpId, toolId}` 写入；只挂服务不勾工具=该服务对智能体实际不可用。
+
+## 六、自测闭环链路（MCP 驱动全流程，2026-09-20 实测沉淀）
+
+装配完成后，用 MCP 驱动该智能体跑任务并留下可抽查记录的**完整六步链**（缺最后一步 UI 无记录）：
+
+```
+1. agent_session_create({agentIdentifier, sessionName?})   → 建会话（拿 sessionId）
+2. agent_round_create({sessionId, roundIndex, userQuestion}) → 建轮次（拿 roundId；roundIndex 从 0 自增）
+3. agent_run_task({agentId, prompt, sessionId, roundId})    → 启动任务（拿 run_id）
+4. agent_wait_task({run_id, timeout_ms})                    → 等终态（done/error）
+5. agent_get_run_trace()                                    → 拉完整轨迹（reply/thinking/events/counts）
+6. agent_round_update({roundId, patch:{assistantAnswer, thinkingContent, inputTokens, outputTokens, endTime}})
+   → 【必做】回填正文与思考——漏了这步 agent_conversation_round 正文为空，UI 会话历史抽查不到（工具描述曾有误导，
+     称后端终态自动回填，实际仅回填 raw_messages_json；2026-09-20 实锤并在 mcp_server.rs 修正描述）
+```
+
+要点：
+- **多轮任务**：每轮重复 2~6 步，`roundIndex` 递增；run_task 换新 roundId。
+- **自由会话 vs 任务会话**：不传 sessionId/roundId = 自由会话（无持久化记录，UI 查不到）——要抽查必须走任务会话。
+- **核查数据**：trace 的 events 里 `tool_finished.result` 是工具原始返回（kb_search 命中含 id/breadcrumbs/originFilePath/score），
+  `step_finished.plan.summary` 是步骤完整结论；token 看 `agent-task-done` 事件的 payload。
+- **自测体管理**：identifier 带唯一后缀（`_selftest`/`-r2`）；删除后同名可重建（delete=硬删）；需要留档抽查时**不要删**智能体与会话。

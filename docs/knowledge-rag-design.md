@@ -218,3 +218,21 @@ kb_search(query, kb_ids?, tags?)
 K1a → K1b 可串行；K2' 依赖 K1b 的真机验收；K3' 收官。
 
 > **✅ K1 真机验收通过（2026-09-19 22:58）**：pixel-agent-design.md → 90 chunks（dim=512，embedded=true，7 批 upsert），kb_chunks.lance 落盘确认；schema 迁移（旧表 drop）、惰性建表、批量嵌入、进度事件全链路闭环。增量/删除路径与主路径共用 digest 判定，日常使用即验收。
+
+> **✅ K3 引擎侧自测记录（2026-09-20，WorkDuo 内建 MCP 自测闭环——agent_list_* → agent_ui_create → agent_run_task → get_run_trace 全链自主驱动，三用例全绿）**
+>
+> | 用例 | 结果 |
+> |---|---|
+> | 检索主链路 | kb_search 命中带完整溯源字段（id=assetId#chunk_index / breadcrumbs / originFilePath / channel / score），K3-1 引用卡片数据源引擎侧完全就绪；回复精准（正确区分前端 TS 快照函数与 HTTP API） |
+> | 收敛护栏实战 | 14 次检索，notice 自第 7 次连续注入，模型换 8 个角度 query 补全信息后自然收敛输出——未熔断未重跑；回复每节带来源，末尾主动声明「未明确展开的内容不作臆测」 |
+> | 否定测试 | 明确答「没有找到相关内容」并解释检索结果为何无关，零编造 |
+>
+> **自测产出优化输入（并入 K3-4）**：
+> 1. **score 阈值过滤（新增候选）**：无关查询最近邻 score>1.0、相关查询<0.95，分布天然分离——可加阈值过滤或 `low_relevance` 标记，助模型果断判「无相关内容」并省 token；
+> 2. **top_k 收口**：模型仍偶传 top_k=10，需工具层硬 clamp（≤8）+ schema 描述引导默认 5（未传时默认 5 已实测良好，单任务 prompt 29.6K）；
+> 3. **收敛护栏硬化**：notice 为软引导，实测模型收 notice 后仍续检 7 次（换角度非纯重复）——可加二级硬约束：notice 后再超 N 次直接返回「已达检索上限，请立即作答」；
+> 4. **任务内 seen-chunk 去重**：多轮检索重复命中同一 chunk 仍全量返回，应过滤或标注「(已在上文)」。
+> 3. **收敛护栏硬化（候选）**：notice 为软引导，实测模型收 notice 后仍续检 7 次（换角度非纯重复）——可加二级硬约束：notice 后再超 N 次直接返回「已达检索上限，请立即作答」；
+> 4. **任务内 seen-chunk 去重**：多轮检索重复命中同一 chunk 仍全量返回，应过滤或标注「(已在上文)」。
+>
+> **装配坑位（已回写 SKILL 2026-09-20）**：`mcpTools` 必传（省略报 not iterable）；`agent_ui_delete` 后 identifier 仍占 UNIQUE（待查软删语义）。
