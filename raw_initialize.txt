@@ -1,2 +1,0 @@
-
-{"id":318665,"jsonrpc":"2.0","result":{"capabilities":{"tools":{}},"protocolVersion":"2024-11-05","serverInfo":{"name":"workduo-mcp","version":"0.1.0"}
