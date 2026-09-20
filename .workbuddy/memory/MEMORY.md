@@ -42,8 +42,14 @@ M0 护栏 / M1 嵌入+LanceDB / M1 记忆召回管道 / M2 rerank / M2 artifacts
 - **K2 检索工具+绑定 ✅**（native__kb_search + agent_kb_ref DDL v29 + planner 大纲；收敛护栏+四案例全绿真机验收）
 - **K3 引用展示+标签云+上下文优化 🚧 逐子任务实现中**（#20260918010）
   - **K3-1 命中片段卡片 ✅ 收口**（`KbSearchCitations` + 统一分发 `ToolResultView`：对话/规划/执行图三渲染位，解耦——kb_search 渲染仅一处；Q1 双轮真机验收通过，源文件可打开）
-  - **Q1 顺带 4 问题**：**#3 切块噪声 ✅**（`is_noise_chunk` 纯函数收口 `push_chunk`，cargo 73 passed；生效需对 KB **重建索引**）；**#2 幽灵产物去重 ✅**（`resolve_artifact_entries`+`physical_key` 按物理文件去重、真实来源优先，cargo 78 passed）→ 🔲 **#1 intent 空响应**（`intent.rs:97` 已两次复现，空 content 降级 COMPOSITE_TASK 误走规划+写文件）→ 🔲 **#4 = K3-4**
+  - **Q1 顺带 4 问题**：**#3 切块噪声 ✅**（`is_noise_chunk` 纯函数收口 `push_chunk`，cargo 73 passed；生效需对 KB **重建索引**）；**#2 幽灵产物去重 ✅**（`resolve_artifact_entries`+`physical_key` 按物理文件去重、真实来源优先，cargo 78 passed）→ **#1 intent 空响应 ✅**（解析失败重试一次 + `fallback()` 信号定向降级（强工具信号→COMPOSITE / 无→SIMPLE_CHAT）+ planner 知识问答降耗约定（纯问答单步检索作答禁写文件），cargo 80 passed）→ 🔲 **#4 = K3-4**
   - **K3-2 任务级引用汇总 ⬜** / **K3-3 标签云+标签筛选 ⬜** / **K3-4 上下文成本优化 ⬜**（Q1 实证：事实问答 5 轮 prompt 50096 tokens，历史 hits 全量回带）
+
+## WorkDuo 自测闭环（内建 MCP Server）✅ MVP1 跑通
+- 架构：WorkDuo 自身即标准 MCP Server（`src-tauri/src/mcp_server.rs`，监听 `127.0.0.1:18755/mcp`，Streamable HTTP）；9 工具=引擎层 4（`agent_run_task`/`agent_get_status`/`agent_wait_task`/`agent_get_run_logs`）+ UI 意图层 5（`agent_ui_create/update/delete/get/list`）。
+- 前端零侵入桥 `src/core/mcpBridge.ts`：`listen('mcp:intent')`→真实 `upsertAgent/deleteAgent/getAgent/listAgents`→`invoke('mcp_resolve_result')`；UI 工具回包已瘦身为单条（`slim`），不再透传整表。
+- 连接器：`~/.workbuddy/mcp.json`→`workduo-mcp`（HTTP URL）。
+- MVP1 验收：sample-case.agent-crud-001 端到端 CRUD 全绿（真实 workduo.db、自清理）；曾发现回包过大（create/update/delete 透传整表 ~100K）→ 已修复为瘦身单条。
 
 ## 待办主线（非 K 系列）
 - 20260919002 单 Agent 后台运行/多任务隔离（run lock 全局→per-agent+并发上限+TaskManager）🔲

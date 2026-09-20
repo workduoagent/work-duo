@@ -196,3 +196,46 @@ fn is_writable(dir: &std::path::Path) -> bool {
         Err(_) => false,
     }
 }
+
+/// 自测闭环专用：读取当日 Rust 运行日志（每日滚动文件 `workduo.log.YYYY-MM-DD`）。
+///
+/// - `cursor`：起始行索引（从 0 计），仅返回该索引之后的行；用于「增量 tail」。
+/// - `since_ts`：ISO 时间前缀过滤，行首 `[YYYY-MM-DD HH:MM:SS.mmm]`，只返回该时间之后的日志。
+/// - `level`：可选等级过滤（INFO/WARN/ERROR/DEBUG），按 `]-LEVEL-` 匹配。
+/// - `limit`：最多返回行数（从末尾截取）。
+///
+/// 纯读命令，不改动任何产品逻辑；落盘路径复用 `choose_logs_dir` 的优先级策略。
+#[tauri::command]
+pub fn get_run_logs(
+    app: tauri::AppHandle,
+    cursor: Option<usize>,
+    since_ts: Option<String>,
+    level: Option<String>,
+    limit: Option<usize>,
+) -> Result<Vec<String>, String> {
+    let dir = choose_logs_dir(&app);
+    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+    let path = dir.join(format!("workduo.log.{today}"));
+    let content = std::fs::read_to_string(&path).map_err(|e| format!("读取日志失败: {e}"))?;
+    let mut lines: Vec<String> = content.lines().map(|l| l.to_string()).collect();
+
+    if let Some(ts) = since_ts.as_ref() {
+        // 行首形如 `[2026-09-09 14:40:12.345]`，取 [1..24) 与时间戳比较（含方括号）。
+        lines.retain(|l| l.get(1..24).map(|t| t >= ts.as_str()).unwrap_or(false));
+    }
+    if let Some(lv) = level.as_ref() {
+        let up = lv.to_uppercase();
+        let needle = format!("]-{up}-");
+        lines.retain(|l| l.contains(&needle));
+    }
+    if let Some(c) = cursor {
+        let skip = c.min(lines.len());
+        lines = lines.split_off(skip);
+    }
+    if let Some(lim) = limit {
+        if lines.len() > lim {
+            lines = lines.split_off(lines.len() - lim);
+        }
+    }
+    Ok(lines)
+}

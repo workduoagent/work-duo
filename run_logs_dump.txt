@@ -1,0 +1,200 @@
+[2026-09-20 15:09:14.129][work_duo_lib::agent::events][call_llm_stream][src\agent\events.rs:89]-INFO-[agent] emit `agent-llm-usage` ok
+[2026-09-20 15:09:14.130][work_duo_lib::agent::runtime][-][src\agent\runtime.rs:747]-INFO-[agent] run_simple_chat: 终态文本 113 字符：当前无法调用 `native__kb_search` 检索 WorkDuo 方案设计知识库，因此不能依据权威资料概括其核心架构或与「小队（Squad）协作」的关系。  
+知识库未覆盖（或当前不可检索）该内容，避免据此编造结论。
+[2026-09-20 15:09:14.131][work_duo_lib::agent::events][-][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:09:14.132][work_duo_lib::agent::events][-][src\agent\events.rs:89]-INFO-[agent] emit `agent-task-done` ok
+[2026-09-20 15:11:58.735][work_duo_lib::agent::commands][-][src\agent\commands.rs:964]-INFO-[agent] load_config: 数据库连接已就绪 (sqlite:workduo.db)
+[2026-09-20 15:11:58.736][work_duo_lib::agent::commands][-][src\agent\commands.rs:972]-INFO-[agent] load_config: 已找到智能体 0abb2852-1509-4d08-a05a-7b4a4f315a35
+[2026-09-20 15:11:58.738][work_duo_lib::agent::commands][-][src\agent\commands.rs:1474]-INFO-[agent] load_config 完成: llm_id=bb9ab960-6615-439a-b5bc-95d2a65173b3 model=MiniMax-M3 mcp_tools=0 skill_tools=0 plugins=0 auto_exec=false sandbox=true system_prompt=744字符 附件数=0
+[2026-09-20 15:11:58.740][work_duo_lib::agent::runtime][-][src\agent\runtime.rs:201]-INFO-[agent] run_task: 工具注册完成，共 18 个工具（原生 + Skill + MCP + 插件）
+[2026-09-20 15:11:58.740][work_duo_lib::agent::runtime][-][src\agent\runtime.rs:1365]-INFO-[agent] call_llm: 请求 URL=https://api.apiget.store/v1/chat/completions model=MiniMax-M3 是否带 Key=true
+[2026-09-20 15:11:58.740][work_duo_lib::agent::runtime][-][src\agent\runtime.rs:1407]-INFO-[agent] call_llm: reasoning=true 归一化为 {}（网关要求字典）
+[2026-09-20 15:11:58.740][work_duo_lib::agent::runtime][-][src\agent\runtime.rs:1416]-INFO-[agent] call_llm: 请求体预览（已脱敏/截断）={"contextLength":128000,"maxImages":5,"maxTokens":4096,"messages":[{"content":"你是一个意图分类器。评估用户输入的任务复杂度。若属于日常打招呼、单一常识问答、简单文本润色，判定为 SIMPLE_CHAT；若涉及文件操作、数据抓取、代码执行、环境检查或多步骤业务，判定为 COMPOSITE_TASK。同时评估执行策略：requires_planning（是否需拆解规划）、requires_tool（是否需调用工具）、risk_level（low/medium/high/critical，涉及删除/安装/执行/改系统/部署等为 high）、requires_approval（是否必须人工审批）、requires_artifact（是否产出文件）。只输出一行 JSON，不要任何多余文本：{\"intent_type\":\"SIMPLE_CHAT 或 COMPOSITE_TASK\",\"reason\":\"一句话理由\",\"requires_planning\":true,\"requires_tool\":true,\"risk_level\":\"medium\",\"requires_approval\":false,\"requires_artifact\":true}","role":"system"},{"content":"请基于你绑定的 WorkDuo 方案设计知识库，用不超过 3 句话概括 WorkDuo 的核心架构，并说明它和「小队（Squad）协作」的关系。","role":"user"}],"model":"MiniMax-M3","reasoning":{},"stream":false,"supportedInputs":["image"],"temperature":0.7,"topP":1,"visionDetail":"auto"} 
+[2026-09-20 15:12:04.864][work_duo_lib::agent::runtime][-][src\agent\runtime.rs:1435]-INFO-[agent] call_llm: 收到 HTTP 200 OK（耗时=6123ms）
+[2026-09-20 15:12:04.867][work_duo_lib::agent::runtime][-][src\agent\runtime.rs:1447]-INFO-[agent] call_llm: 非流式响应 JSON 大小=660字符 choices=1 
+[2026-09-20 15:12:04.868][work_duo_lib::agent::runtime][-][src\agent\runtime.rs:1465]-INFO-[agent] call_llm: 非流式 usage prompt=252 completion=121
+[2026-09-20 15:12:04.869][work_duo_lib::agent::intent][-][src\agent\intent.rs:107]-WARN-[agent] intent: 第1次分类结果解析失败 content=
+[2026-09-20 15:12:04.870][work_duo_lib::agent::runtime][-][src\agent\runtime.rs:1365]-INFO-[agent] call_llm: 请求 URL=https://api.apiget.store/v1/chat/completions model=MiniMax-M3 是否带 Key=true
+[2026-09-20 15:12:04.871][work_duo_lib::agent::runtime][-][src\agent\runtime.rs:1407]-INFO-[agent] call_llm: reasoning=true 归一化为 {}（网关要求字典）
+[2026-09-20 15:12:04.872][work_duo_lib::agent::runtime][-][src\agent\runtime.rs:1416]-INFO-[agent] call_llm: 请求体预览（已脱敏/截断）={"contextLength":128000,"maxImages":5,"maxTokens":4096,"messages":[{"content":"你是一个意图分类器。评估用户输入的任务复杂度。若属于日常打招呼、单一常识问答、简单文本润色，判定为 SIMPLE_CHAT；若涉及文件操作、数据抓取、代码执行、环境检查或多步骤业务，判定为 COMPOSITE_TASK。同时评估执行策略：requires_planning（是否需拆解规划）、requires_tool（是否需调用工具）、risk_level（low/medium/high/critical，涉及删除/安装/执行/改系统/部署等为 high）、requires_approval（是否必须人工审批）、requires_artifact（是否产出文件）。只输出一行 JSON，不要任何多余文本：{\"intent_type\":\"SIMPLE_CHAT 或 COMPOSITE_TASK\",\"reason\":\"一句话理由\",\"requires_planning\":true,\"requires_tool\":true,\"risk_level\":\"medium\",\"requires_approval\":false,\"requires_artifact\":true}","role":"system"},{"content":"请基于你绑定的 WorkDuo 方案设计知识库，用不超过 3 句话概括 WorkDuo 的核心架构，并说明它和「小队（Squad）协作」的关系。","role":"user"}],"model":"MiniMax-M3","reasoning":{},"stream":false,"supportedInputs":["image"],"temperature":0.7,"topP":1,"visionDetail":"auto"} 
+[2026-09-20 15:12:20.398][work_duo_lib::agent::runtime][-][src\agent\runtime.rs:1435]-INFO-[agent] call_llm: 收到 HTTP 200 OK（耗时=15526ms）
+[2026-09-20 15:12:20.398][work_duo_lib::agent::runtime][-][src\agent\runtime.rs:1447]-INFO-[agent] call_llm: 非流式响应 JSON 大小=659字符 choices=1 
+[2026-09-20 15:12:20.398][work_duo_lib::agent::runtime][-][src\agent\runtime.rs:1465]-INFO-[agent] call_llm: 非流式 usage prompt=252 completion=127
+[2026-09-20 15:12:20.399][work_duo_lib::agent::intent][-][src\agent\intent.rs:107]-WARN-[agent] intent: 第2次分类结果解析失败 content=
+[2026-09-20 15:12:20.399][work_duo_lib::agent::events][-][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:12:20.399][work_duo_lib::agent::runtime][-][src\agent\runtime.rs:225]-INFO-[agent] run_task: 意图判定 = SIMPLE_CHAT reason=分类结果解析失败 risk=low 需规划=false 需工具=false 需审批=false
+[2026-09-20 15:12:20.399][work_duo_lib::agent::runtime][-][src\agent\runtime.rs:247]-INFO-[agent] run_task: 意图 = SIMPLE_CHAT 风险=low 需规划=false 需工具=false（不推送前端）
+[2026-09-20 15:12:20.399][work_duo_lib::agent::runtime][-][src\agent\runtime.rs:257]-INFO-[agent] run_task: 核心参数 agent=0abb2852-1509-4d08-a05a-7b4a4f315a35 auto_exec=false allow_sandbox=true memory_mode="off" workspace=None intent=SIMPLE_CHAT risk=low
+[2026-09-20 15:12:20.399][work_duo_lib::agent::context][-][src\agent\context.rs:310]-INFO-[agent] context: 无 session_id，仅装配 [system + 当前提问]（不含历史）
+[2026-09-20 15:12:20.399][work_duo_lib::agent::runtime][-][src\agent\runtime.rs:710]-INFO-[agent] run_simple_chat: 单次流式调用（上下文=2条消息[裁剪前2条]）
+[2026-09-20 15:12:20.400][work_duo_lib::agent::runtime][call_llm_stream_once][src\agent\runtime.rs:1630]-INFO-[agent] call_llm_stream: 请求 URL=https://api.apiget.store/v1/chat/completions model=MiniMax-M3 是否带 Key=true
+[2026-09-20 15:12:20.400][work_duo_lib::agent::runtime][call_llm_stream_once][src\agent\runtime.rs:1673]-INFO-[agent] call_llm_stream: reasoning=true 归一化为 {}
+[2026-09-20 15:12:20.400][work_duo_lib::agent::runtime][call_llm_stream_once][src\agent\runtime.rs:1682]-INFO-[agent] call_llm_stream: 请求体预览（已脱敏/截断）={"contextLength":128000,"maxImages":5,"maxTokens":4096,"messages":[{"content":"# 角色\n你是「WorkDuo方案设计助手」，是 WorkDuo 软件**方案设计知识库**的专属问答专家，只服务于方案、架构、设计文档、技术选型类问题。\n\n# 知识来源（核心约束，最高优先级）\n- 你已绑定【WorkDuo方案设计】知识库（标识符 wd_design）。\n- 回答任何涉及方案、架构、模块划分、设计文档、实现思路、接口/DDL/版本号等**事实性内容**时，**必须先调用知识库检索工具 `native__kb_search`** 取回权威资料，再基于检索结果组织答案。\n- **严禁**脱离知识库凭空编造具体事实（模块名、接口名、DDL 版本号、字段含义等）。若知识库未覆盖，必须明确告知「知识库未覆盖该内容」，可基于通用工程经验补充，但须显式标注为「非官方推断」。\n\n# 工作准则\n1. **检索优先**：凡与 WorkDuo 方案设计相关的提问，先检索后作答，不在无依据时直接给出设计结论。\n2. **引用可溯**：引用知识库内容时，点明来源要点（所属模块 / 文档主题 / 版本），便于用户核对。\n3. **结构化输出**：方案对比或设计取舍使用表格或分级列表，结论前置。\n4. **范围聚焦**：仅聚焦 WorkDuo 方案设计域；对纯闲聊或与 WorkDuo 无关的通用编程问题，礼貌引导回主题。\n5. **自身约束**：本助手记忆模式已关闭（不持久化会话记忆）、计划审批策略为「从不审批」（纯问答、不触发人工审批），你无需发起需审批的复合任务。\n\n# 应答格式建议\n- 直接回答：结论 + 依据（来自知识库的要点）。\n- 方案对比：表格（维度 | 方案A | 方案B | 推荐）。\n- 不确定 / 缺资料：明确「知识库未覆盖」+ 可选的非官方推断（标注）。","role":"system"},{"content":"请基于你绑定的 WorkDuo 方案设计知识库，用不超过 3 句话概括 WorkDuo 的核心架构，并说明它和「小队（Squad）协作」的关系。","role":"user"}],"model":"MiniMax-M3","reasoning":{},"s…(共1129字符) 
+[2026-09-20 15:12:25.130][work_duo_lib::agent::runtime][call_llm_stream_once][src\agent\runtime.rs:1710]-INFO-[agent] call_llm_stream: 收到 HTTP 200 OK（耗时=4730ms）
+[2026-09-20 15:12:27.145][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:12:35.312][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:12:35.339][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:12:35.345][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:12:35.345][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:12:35.345][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:12:35.345][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:12:35.345][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:12:35.421][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:12:35.425][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:12:35.425][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:12:35.425][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:12:35.425][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:12:35.426][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:12:35.640][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:12:35.654][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:12:35.763][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:12:35.769][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:12:35.770][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:12:35.772][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:12:35.772][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:12:35.873][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:12:35.899][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:12:35.899][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:12:35.900][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:12:35.994][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:12:36.007][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:12:36.008][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:12:36.008][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:12:36.008][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:12:36.098][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:12:36.107][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:12:36.208][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:12:36.228][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:12:36.229][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:12:36.229][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:12:36.229][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:12:36.340][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:12:36.342][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:12:36.352][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:12:36.440][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:12:36.459][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:12:36.460][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:12:36.460][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:12:36.460][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:12:36.552][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:12:36.568][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:12:36.668][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:12:36.681][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:12:36.789][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:12:36.792][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:12:36.912][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:12:37.018][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:12:37.034][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:12:37.133][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:12:37.241][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:12:37.252][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:12:37.252][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:12:37.357][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:12:37.469][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:12:37.480][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:12:37.594][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:12:37.596][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:12:37.597][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:12:37.781][work_duo_lib::agent::runtime][call_llm_stream_once][src\agent\runtime.rs:1876]-INFO-[agent] call_llm_stream: SSE 聚合完成 chunks=63 lines=140 parse_errors=0 content=100字符 reasoning=124字符 tool_calls=0 总耗时=17381ms
+[2026-09-20 15:12:37.781][work_duo_lib::agent::events][call_llm_stream][src\agent\events.rs:89]-INFO-[agent] emit `agent-llm-usage` ok
+[2026-09-20 15:12:37.781][work_duo_lib::agent::runtime][-][src\agent\runtime.rs:747]-INFO-[agent] run_simple_chat: 终态文本 100 字符：当前会话无法调用 `native__kb_search`，因此无法依据 WorkDuo 方案设计知识库可靠概括其核心架构及与「小队（Squad）协作」的关系；为避免编造，暂不提供未经知识库核验的结论。
+[2026-09-20 15:12:37.781][work_duo_lib::agent::events][-][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:12:37.781][work_duo_lib::agent::events][-][src\agent\events.rs:89]-INFO-[agent] emit `agent-task-done` ok
+[2026-09-20 15:13:24.515][work_duo_lib::agent::commands][-][src\agent\commands.rs:964]-INFO-[agent] load_config: 数据库连接已就绪 (sqlite:workduo.db)
+[2026-09-20 15:13:24.515][work_duo_lib::agent::commands][-][src\agent\commands.rs:972]-INFO-[agent] load_config: 已找到智能体 0abb2852-1509-4d08-a05a-7b4a4f315a35
+[2026-09-20 15:13:24.516][work_duo_lib::agent::commands][-][src\agent\commands.rs:1474]-INFO-[agent] load_config 完成: llm_id=bb9ab960-6615-439a-b5bc-95d2a65173b3 model=MiniMax-M3 mcp_tools=0 skill_tools=0 plugins=0 auto_exec=false sandbox=true system_prompt=744字符 附件数=0
+[2026-09-20 15:13:24.517][work_duo_lib::agent::runtime][-][src\agent\runtime.rs:201]-INFO-[agent] run_task: 工具注册完成，共 18 个工具（原生 + Skill + MCP + 插件）
+[2026-09-20 15:13:24.518][work_duo_lib::agent::runtime][-][src\agent\runtime.rs:1365]-INFO-[agent] call_llm: 请求 URL=https://api.apiget.store/v1/chat/completions model=MiniMax-M3 是否带 Key=true
+[2026-09-20 15:13:24.518][work_duo_lib::agent::runtime][-][src\agent\runtime.rs:1407]-INFO-[agent] call_llm: reasoning=true 归一化为 {}（网关要求字典）
+[2026-09-20 15:13:24.518][work_duo_lib::agent::runtime][-][src\agent\runtime.rs:1416]-INFO-[agent] call_llm: 请求体预览（已脱敏/截断）={"contextLength":128000,"maxImages":5,"maxTokens":4096,"messages":[{"content":"你是一个意图分类器。评估用户输入的任务复杂度。若属于日常打招呼、单一常识问答、简单文本润色，判定为 SIMPLE_CHAT；若涉及文件操作、数据抓取、代码执行、环境检查或多步骤业务，判定为 COMPOSITE_TASK。同时评估执行策略：requires_planning（是否需拆解规划）、requires_tool（是否需调用工具）、risk_level（low/medium/high/critical，涉及删除/安装/执行/改系统/部署等为 high）、requires_approval（是否必须人工审批）、requires_artifact（是否产出文件）。只输出一行 JSON，不要任何多余文本：{\"intent_type\":\"SIMPLE_CHAT 或 COMPOSITE_TASK\",\"reason\":\"一句话理由\",\"requires_planning\":true,\"requires_tool\":true,\"risk_level\":\"medium\",\"requires_approval\":false,\"requires_artifact\":true}","role":"system"},{"content":"请基于你绑定的 WorkDuo 方案设计知识库，用不超过 3 句话概括 WorkDuo 的核心架构，并说明它和「小队（Squad）协作」的关系。","role":"user"}],"model":"MiniMax-M3","reasoning":{},"stream":false,"supportedInputs":["image"],"temperature":0.7,"topP":1,"visionDetail":"auto"} 
+[2026-09-20 15:13:45.160][work_duo_lib::agent::runtime][-][src\agent\runtime.rs:1435]-INFO-[agent] call_llm: 收到 HTTP 200 OK（耗时=20642ms）
+[2026-09-20 15:13:45.162][work_duo_lib::agent::runtime][-][src\agent\runtime.rs:1447]-INFO-[agent] call_llm: 非流式响应 JSON 大小=663字符 choices=1 
+[2026-09-20 15:13:45.163][work_duo_lib::agent::runtime][-][src\agent\runtime.rs:1465]-INFO-[agent] call_llm: 非流式 usage prompt=252 completion=157
+[2026-09-20 15:13:45.163][work_duo_lib::agent::intent][-][src\agent\intent.rs:107]-WARN-[agent] intent: 第1次分类结果解析失败 content=
+[2026-09-20 15:13:45.163][work_duo_lib::agent::runtime][-][src\agent\runtime.rs:1365]-INFO-[agent] call_llm: 请求 URL=https://api.apiget.store/v1/chat/completions model=MiniMax-M3 是否带 Key=true
+[2026-09-20 15:13:45.164][work_duo_lib::agent::runtime][-][src\agent\runtime.rs:1407]-INFO-[agent] call_llm: reasoning=true 归一化为 {}（网关要求字典）
+[2026-09-20 15:13:45.165][work_duo_lib::agent::runtime][-][src\agent\runtime.rs:1416]-INFO-[agent] call_llm: 请求体预览（已脱敏/截断）={"contextLength":128000,"maxImages":5,"maxTokens":4096,"messages":[{"content":"你是一个意图分类器。评估用户输入的任务复杂度。若属于日常打招呼、单一常识问答、简单文本润色，判定为 SIMPLE_CHAT；若涉及文件操作、数据抓取、代码执行、环境检查或多步骤业务，判定为 COMPOSITE_TASK。同时评估执行策略：requires_planning（是否需拆解规划）、requires_tool（是否需调用工具）、risk_level（low/medium/high/critical，涉及删除/安装/执行/改系统/部署等为 high）、requires_approval（是否必须人工审批）、requires_artifact（是否产出文件）。只输出一行 JSON，不要任何多余文本：{\"intent_type\":\"SIMPLE_CHAT 或 COMPOSITE_TASK\",\"reason\":\"一句话理由\",\"requires_planning\":true,\"requires_tool\":true,\"risk_level\":\"medium\",\"requires_approval\":false,\"requires_artifact\":true}","role":"system"},{"content":"请基于你绑定的 WorkDuo 方案设计知识库，用不超过 3 句话概括 WorkDuo 的核心架构，并说明它和「小队（Squad）协作」的关系。","role":"user"}],"model":"MiniMax-M3","reasoning":{},"stream":false,"supportedInputs":["image"],"temperature":0.7,"topP":1,"visionDetail":"auto"} 
+[2026-09-20 15:14:07.549][work_duo_lib::agent::runtime][-][src\agent\runtime.rs:1435]-INFO-[agent] call_llm: 收到 HTTP 200 OK（耗时=22385ms）
+[2026-09-20 15:14:07.549][work_duo_lib::agent::runtime][-][src\agent\runtime.rs:1447]-INFO-[agent] call_llm: 非流式响应 JSON 大小=724字符 choices=1 
+[2026-09-20 15:14:07.550][work_duo_lib::agent::runtime][-][src\agent\runtime.rs:1465]-INFO-[agent] call_llm: 非流式 usage prompt=252 completion=235
+[2026-09-20 15:14:07.550][work_duo_lib::agent::intent][-][src\agent\intent.rs:107]-WARN-[agent] intent: 第2次分类结果解析失败 content=
+[2026-09-20 15:14:07.551][work_duo_lib::agent::events][-][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:14:07.551][work_duo_lib::agent::runtime][-][src\agent\runtime.rs:225]-INFO-[agent] run_task: 意图判定 = SIMPLE_CHAT reason=分类结果解析失败 risk=low 需规划=false 需工具=false 需审批=false
+[2026-09-20 15:14:07.551][work_duo_lib::agent::runtime][-][src\agent\runtime.rs:247]-INFO-[agent] run_task: 意图 = SIMPLE_CHAT 风险=low 需规划=false 需工具=false（不推送前端）
+[2026-09-20 15:14:07.551][work_duo_lib::agent::runtime][-][src\agent\runtime.rs:257]-INFO-[agent] run_task: 核心参数 agent=0abb2852-1509-4d08-a05a-7b4a4f315a35 auto_exec=false allow_sandbox=true memory_mode="off" workspace=None intent=SIMPLE_CHAT risk=low
+[2026-09-20 15:14:07.551][work_duo_lib::agent::context][-][src\agent\context.rs:310]-INFO-[agent] context: 无 session_id，仅装配 [system + 当前提问]（不含历史）
+[2026-09-20 15:14:07.552][work_duo_lib::agent::runtime][-][src\agent\runtime.rs:710]-INFO-[agent] run_simple_chat: 单次流式调用（上下文=2条消息[裁剪前2条]）
+[2026-09-20 15:14:07.552][work_duo_lib::agent::runtime][call_llm_stream_once][src\agent\runtime.rs:1630]-INFO-[agent] call_llm_stream: 请求 URL=https://api.apiget.store/v1/chat/completions model=MiniMax-M3 是否带 Key=true
+[2026-09-20 15:14:07.553][work_duo_lib::agent::runtime][call_llm_stream_once][src\agent\runtime.rs:1673]-INFO-[agent] call_llm_stream: reasoning=true 归一化为 {}
+[2026-09-20 15:14:07.555][work_duo_lib::agent::runtime][call_llm_stream_once][src\agent\runtime.rs:1682]-INFO-[agent] call_llm_stream: 请求体预览（已脱敏/截断）={"contextLength":128000,"maxImages":5,"maxTokens":4096,"messages":[{"content":"# 角色\n你是「WorkDuo方案设计助手」，是 WorkDuo 软件**方案设计知识库**的专属问答专家，只服务于方案、架构、设计文档、技术选型类问题。\n\n# 知识来源（核心约束，最高优先级）\n- 你已绑定【WorkDuo方案设计】知识库（标识符 wd_design）。\n- 回答任何涉及方案、架构、模块划分、设计文档、实现思路、接口/DDL/版本号等**事实性内容**时，**必须先调用知识库检索工具 `native__kb_search`** 取回权威资料，再基于检索结果组织答案。\n- **严禁**脱离知识库凭空编造具体事实（模块名、接口名、DDL 版本号、字段含义等）。若知识库未覆盖，必须明确告知「知识库未覆盖该内容」，可基于通用工程经验补充，但须显式标注为「非官方推断」。\n\n# 工作准则\n1. **检索优先**：凡与 WorkDuo 方案设计相关的提问，先检索后作答，不在无依据时直接给出设计结论。\n2. **引用可溯**：引用知识库内容时，点明来源要点（所属模块 / 文档主题 / 版本），便于用户核对。\n3. **结构化输出**：方案对比或设计取舍使用表格或分级列表，结论前置。\n4. **范围聚焦**：仅聚焦 WorkDuo 方案设计域；对纯闲聊或与 WorkDuo 无关的通用编程问题，礼貌引导回主题。\n5. **自身约束**：本助手记忆模式已关闭（不持久化会话记忆）、计划审批策略为「从不审批」（纯问答、不触发人工审批），你无需发起需审批的复合任务。\n\n# 应答格式建议\n- 直接回答：结论 + 依据（来自知识库的要点）。\n- 方案对比：表格（维度 | 方案A | 方案B | 推荐）。\n- 不确定 / 缺资料：明确「知识库未覆盖」+ 可选的非官方推断（标注）。","role":"system"},{"content":"请基于你绑定的 WorkDuo 方案设计知识库，用不超过 3 句话概括 WorkDuo 的核心架构，并说明它和「小队（Squad）协作」的关系。","role":"user"}],"model":"MiniMax-M3","reasoning":{},"s…(共1129字符) 
+[2026-09-20 15:14:17.751][work_duo_lib::agent::runtime][call_llm_stream_once][src\agent\runtime.rs:1710]-INFO-[agent] call_llm_stream: 收到 HTTP 200 OK（耗时=10198ms）
+[2026-09-20 15:14:17.781][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:14:17.782][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:14:18.008][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:14:18.038][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:14:18.192][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:14:18.194][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:14:18.359][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:14:18.360][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:14:18.360][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:14:18.360][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:14:18.515][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:14:18.515][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:14:18.535][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:14:18.672][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:14:18.839][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:14:19.023][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:14:19.043][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:14:19.045][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:14:19.047][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:14:19.048][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:14:19.161][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:14:19.176][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:14:19.179][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:14:19.179][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:14:19.180][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:14:19.325][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:14:19.343][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:14:19.344][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:14:19.344][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:14:19.344][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:14:19.482][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:14:19.495][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:14:19.496][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:14:19.645][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:14:19.660][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:14:19.663][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:14:19.665][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:14:19.666][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:14:19.806][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:14:19.983][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:14:19.983][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:14:20.127][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:14:20.142][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:14:20.145][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:14:20.147][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:14:20.288][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:14:20.462][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:14:20.627][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:14:20.628][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:14:20.628][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:14:20.765][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:14:20.942][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:14:20.944][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:14:21.092][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:14:21.107][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:14:21.107][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:14:21.107][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:14:21.252][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:14:21.265][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:14:21.265][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:14:21.422][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:14:21.428][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:14:21.428][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:14:21.726][work_duo_lib::agent::events][call_llm_stream_once][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:14:21.726][work_duo_lib::agent::runtime][call_llm_stream_once][src\agent\runtime.rs:1876]-INFO-[agent] call_llm_stream: SSE 聚合完成 chunks=56 lines=136 parse_errors=0 content=100字符 reasoning=35字符 tool_calls=0 总耗时=14173ms
+[2026-09-20 15:14:21.727][work_duo_lib::agent::events][call_llm_stream][src\agent\events.rs:89]-INFO-[agent] emit `agent-llm-usage` ok
+[2026-09-20 15:14:21.727][work_duo_lib::agent::runtime][-][src\agent\runtime.rs:747]-INFO-[agent] run_simple_chat: 终态文本 100 字符：当前无法调用绑定的 `wd_design` 知识库，因此不能可靠概括 WorkDuo 的核心架构及其与「小队（Squad）协作」的关系。  
+知识库未覆盖或当前不可检索时，我不会凭空补充具体架构结论。
+[2026-09-20 15:14:21.727][work_duo_lib::agent::events][-][src\agent\events.rs:89]-INFO-[agent] emit `agent-event` ok
+[2026-09-20 15:14:21.727][work_duo_lib::agent::events][-][src\agent\events.rs:89]-INFO-[agent] emit `agent-task-done` ok

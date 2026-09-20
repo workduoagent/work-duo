@@ -4,7 +4,10 @@
 //! 产出 `IntentProfile`：`SIMPLE_CHAT`（直接单次流式输出）或 `COMPOSITE_TASK`（进规划链）。
 //!
 //! 为省一次 LLM 调用，先做**规则短路**：明显的闲聊/明显的复杂信号直接判定，
-//! 只有灰色地带才走 LLM 分类；分类失败一律降级为 COMPOSITE_TASK（宁可多规划，不可漏拆解）。
+//! 只有灰色地带才走 LLM 分类；分类失败按**信号定向降级**（#20260918010-#1）：
+//! 命中强工具信号维持 COMPOSITE_TASK（宁可多规划，不可漏拆解），无强工具信号降级 SIMPLE_CHAT
+//! ——Q1 两次实证：无强工具信号的事实问答被一律降级 COMPOSITE 后误走规划+写文件+多轮执行，
+//! 单次白烧约 5 万 tokens 并向工作空间写入用户未要求的文件；解析失败先重试一次（空响应瞬态自愈）。
 
 use serde_json::json;
 use serde_json::Value;
@@ -77,35 +80,46 @@ risk_level（low/medium/high/critical，涉及删除/安装/执行/改系统/部
     ];
 
     let started = std::time::Instant::now();
-    match runtime::call_llm(cfg, &messages, &[]).await {
-        Ok((resp, _usage)) => {
-            let content = extract_content(&resp);
-            match parse_intent_json(&content) {
-                Some(mut p) => {
-                    enrich(&mut p, prompt);
-                    tracing::info!(
-                        "[agent] intent: LLM 分类 → {}（{}ms）reason={} risk={} approval={}",
-                        p.intent_type,
-                        started.elapsed().as_millis(),
-                        runtime::clip(&p.reason, 200),
-                        p.risk_level,
-                        p.requires_approval,
-                    );
-                    p
-                }
-                None => {
-                    tracing::warn!(
-                        "[agent] intent: 分类结果解析失败，降级 COMPOSITE_TASK content={}",
-                        runtime::clip(&content, 300),
-                    );
-                    fallback("分类结果解析失败", prompt)
+    // 解析失败（含空响应）重试一次（#20260918010-#1 ②）：Q1 两次实证 MiniMax-M3 非流式分类
+    // 偶发空 content（系统性），空响应/坏 JSON 同属「本次调用无可用信号」，立即重试一次成本极低、
+    // 命中率高的瞬态自愈。调用层 Err 不重试：网关级故障立即重试成功率低、徒增延迟（4xx 类按
+    // 20260918001B 修A原则本就不重试），双重失败后走信号定向降级。
+    let mut parsed: Option<IntentProfile> = None;
+    for attempt in 1..=2 {
+        match runtime::call_llm(cfg, &messages, &[]).await {
+            Ok((resp, _usage)) => {
+                let content = extract_content(&resp);
+                match parse_intent_json(&content) {
+                    Some(mut p) => {
+                        enrich(&mut p, prompt);
+                        tracing::info!(
+                            "[agent] intent: LLM 分类 → {}（第{attempt}次尝试，{}ms）reason={} risk={} approval={}",
+                            p.intent_type,
+                            started.elapsed().as_millis(),
+                            runtime::clip(&p.reason, 200),
+                            p.risk_level,
+                            p.requires_approval,
+                        );
+                        parsed = Some(p);
+                        break;
+                    }
+                    None => {
+                        tracing::warn!(
+                            "[agent] intent: 第{attempt}次分类结果解析失败 content={}",
+                            runtime::clip(&content, 300),
+                        );
+                    }
                 }
             }
+            Err(e) => {
+                tracing::warn!("[agent] intent: 第{attempt}次分类调用失败：{e}");
+                break;
+            }
         }
-        Err(e) => {
-            tracing::warn!("[agent] intent: 分类调用失败：{e}，降级 COMPOSITE_TASK");
-            fallback("分类调用失败", prompt)
-        }
+    }
+    match parsed {
+        Some(p) => p,
+        None => fallback("分类结果解析失败", prompt),
     }
 }
 
@@ -167,12 +181,32 @@ fn has_risk_hint(prompt: &str) -> bool {
 }
 
 fn fallback(reason: &str, prompt: &str) -> IntentProfile {
-    // 宁可多规划（多耗一点 Token），不可把复杂任务误判成闲聊而直接裸答。
-    profile("COMPOSITE_TASK", reason, prompt)
+    // 降级方向随信号走，不再一律 COMPOSITE（#20260918010-#1 ①）：
+    // - 命中强工具信号（「明确要用电脑/工具干活」语义）→ 维持 COMPOSITE_TASK（宁可多规划，不可漏拆解——
+    //   强信号提示词裸答等于让模型臆造工具结果，误导风险更高）；
+    // - 无强工具信号（纯问答/闲聊/润色，Q1 实证的事实问答即此类）→ 降级 SIMPLE_CHAT：
+    //   误规划的代价（规划+写文件+多轮执行，单次白烧约 5 万 tokens）远大于裸答——会话历史、
+    //   记忆与 .wd_mem 片段注入仍可供答，且 0 工具绝无文件写入/命令执行风险。
+    // 风险轴安全：SIMPLE=low/0 工具；COMPOSITE 且命中 RISK_HINTS 仍经 profile() 强制 requires_approval。
+    let lower = prompt.to_lowercase();
+    let has_strong = STRONG_TOOL_HINTS.iter().any(|k| lower.contains(&k.to_lowercase()));
+    if has_strong {
+        profile("COMPOSITE_TASK", reason, prompt)
+    } else {
+        profile("SIMPLE_CHAT", reason, prompt)
+    }
 }
 
-/// 从完整 chat.completion JSON 中提取 choices[0].message.content。
+/// 从 `call_llm` 返回的归一化 message 对象中提取 content。
+///
+/// 重要：`runtime::call_llm` 返回的是 `choices[0].message` 这一层（已在 call_llm 内
+/// 将 content 规范化为字符串），**不是**完整响应信封。此前按 `choices[0].message.content`
+/// 取导致永远拿到空字符串 → 意图分类 100% 解析失败 → 一律降级 SIMPLE_CHAT → 知识库检索工具
+/// 永远无调用机会。这里直接取顶层 `content`，并保留对「完整信封」形态的兼容以防回归。
 fn extract_content(resp: &Value) -> String {
+    if let Some(s) = resp.get("content").and_then(|c| c.as_str()) {
+        return s.to_string();
+    }
     resp.get("choices")
         .and_then(|c| c.get(0))
         .and_then(|c| c.get("message"))
@@ -221,5 +255,34 @@ mod tests {
         assert!(has_risk_hint("清空数据库重新导入"));
         assert!(has_risk_hint("删除文件后再重建"));
         assert!(has_risk_hint("帮我重启服务器 reboot"));
+    }
+
+    /// 空响应根现象（Q1 两次实证 MiniMax-M3 偶发空 content）：空文本必须解析失败，
+    /// 走「重试一次 → 信号定向降级」链路，而非被误当有效分类结果。
+    #[test]
+    fn empty_content_fails_parse() {
+        assert!(parse_intent_json("").is_none());
+        assert!(parse_intent_json("   \n ").is_none());
+    }
+
+    /// 降级方向随信号走（#1 ①）：无强工具信号的事实问答降级 SIMPLE_CHAT（不再误走规划+写文件），
+    /// 命中强工具信号维持 COMPOSITE_TASK（宁可多规划）。
+    #[test]
+    fn fallback_direction_follows_tool_signals() {
+        // Q1 同类事实问答：无强工具关键词 → SIMPLE_CHAT（requires_planning/tool/artifact 全 false）。
+        let qa = fallback(
+            "分类结果解析失败",
+            "根据知识库讲讲统一 LanceDB 的决策记录是什么，为什么否决了 SQLite BLOB 方案",
+        );
+        assert!(qa.is_simple_chat(), "无强工具信号的事实问答应降级 SIMPLE_CHAT");
+        assert!(!qa.requires_planning && !qa.requires_tool && !qa.requires_artifact);
+
+        // 强工具信号提示词：维持 COMPOSITE_TASK（宁可多规划，不可漏拆解）。
+        let task = fallback(
+            "分类结果解析失败",
+            "帮我读取 config.json 并生成报表文件",
+        );
+        assert!(!task.is_simple_chat(), "命中强工具信号应维持 COMPOSITE_TASK");
+        assert!(task.requires_planning && task.requires_tool);
     }
 }

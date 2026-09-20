@@ -9,6 +9,8 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 
@@ -24,10 +26,33 @@ use tauri_plugin_sql::{DbInstances, DbPool};
 const MAX_SKILLS: usize = 3;
 const MAX_MCP_SERVERS: usize = 3;
 
+/// 自测闭环 run_id 自增序号（与毫秒时间戳组合，保证单次进程内唯一且可读）。
+static RUN_ID_SEQ: AtomicU64 = AtomicU64::new(0);
+
+/// 生成自测运行 id（如 `run-1715223456789-0`）。
+fn next_run_id() -> String {
+    let ts = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    let seq = RUN_ID_SEQ.fetch_add(1, Ordering::SeqCst);
+    format!("run-{ts}-{seq}")
+}
+
+/// 当前毫秒时间戳（用于运行记录）。
+fn now_ms() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
 use crate::agent::approval::ApprovalDecisionInput;
+use crate::agent::events;
 use crate::agent::mcp_adapter::MountedMcpTool;
 use crate::agent::recovery::RecoveryDecision;
 use crate::agent::runtime::AgentRuntime;
+use crate::agent::runtime::RunRecord;
 use crate::agent::skill_adapter::SkillToolWrapper;
 use crate::agent::tools::{PathGuard, ToolContext};
 use crate::agent::native::parse_host_allowlist;
@@ -151,6 +176,7 @@ pub async fn run_agent_task(
 
     // 锁已在上方入口处抢占（running_guard）：跨 spawn 持有，run_task 任意出口
     // （正常 / 取消 / panic）自动复位 running；本处不再抢锁。
+    events::reset_trace(); // 自测闭环：清空轨迹缓冲，保证只反映本次 run
     tauri::async_runtime::spawn(async move {
         let _running_guard = running_guard;
         tracing::info!("[agent] run_agent_task 后台任务已 spawn，开始 run_task");
@@ -159,6 +185,133 @@ pub async fn run_agent_task(
         tracing::info!("[agent] run_agent_task 后台任务 run_task 结束");
     });
     Ok(())
+}
+
+/// 自测闭环专用：启动一轮任务并返回 `run_id`，供 `get_status`/`wait_task` 轮询。
+///
+/// 内部**完全复用** `run_agent_task` 的既有链路（全局互斥锁 → `load_config` → spawn `run_task`），
+/// 仅额外在 `AgentRuntime::run_registry` 中写入一条 `running` 记录，并在 run_task 结束后置为 `done`。
+/// 不改变 `run_agent_task` 的任何既有行为（其 run_id 为 None，不入表），零侵入。
+#[tauri::command]
+pub async fn run_task_ex(
+    app: AppHandle,
+    runtime: State<'_, AgentRuntime>,
+    input: RunAgentTaskInput,
+) -> Result<String, String> {
+    let run_id = next_run_id();
+
+    let running_guard = match runtime.try_acquire_run_lock() {
+        Some(g) => g,
+        None => {
+            return Err("已有任务正在运行，请先等待其完成或点击停止。".into());
+        }
+    };
+
+    let cfg = load_config(
+        &app,
+        &input.agent_id,
+        input.workspace.clone(),
+        input.session_id.clone(),
+        input.round_id.clone(),
+        input.disabled_skill_ids.clone(),
+        input.disabled_mcp_ids.clone(),
+        input.disabled_mcp_tool_ids.clone(),
+        input.enabled_skill_ids.clone(),
+        input.enabled_mcp_ids.clone(),
+        input.disabled_plugin_ids.clone(),
+        input.enabled_plugin_ids.clone(),
+        input.attachments.clone(),
+        Some(input.prompt.clone()),
+    )
+    .await?;
+
+    {
+        let mut reg = runtime.run_registry.lock().await;
+        reg.insert(
+            run_id.clone(),
+            RunRecord {
+                run_id: run_id.clone(),
+                agent_id: input.agent_id.clone(),
+                session_id: input.session_id.clone(),
+                round_id: input.round_id.clone(),
+                status: "running".to_string(),
+                started_at: now_ms(),
+                finished_at: None,
+                error: None,
+            },
+        );
+    }
+
+    let app_clone = app.clone();
+    let rt = runtime.inner().clone();
+    let prompt = input.prompt.clone();
+    let plan_override = input.plan_override.clone();
+    let pre_completed: std::collections::HashSet<String> =
+        input.pre_completed.clone().unwrap_or_default().into_iter().collect();
+    let initial_context = input.initial_context.clone().unwrap_or_default();
+    let reg = runtime.run_registry.clone();
+    let rid = run_id.clone();
+
+    events::reset_trace(); // 自测闭环：清空轨迹缓冲，保证只反映本次 run
+    tauri::async_runtime::spawn(async move {
+        let _running_guard = running_guard;
+        rt.run_task(
+            &app_clone,
+            cfg,
+            prompt,
+            plan_override,
+            pre_completed,
+            initial_context,
+        )
+        .await;
+        let mut reg = reg.lock().await;
+        if let Some(rec) = reg.get_mut(&rid) {
+            rec.status = "done".to_string();
+            rec.finished_at = Some(now_ms());
+        }
+    });
+
+    Ok(run_id)
+}
+
+/// 自测闭环：按 `run_id` 查询单次运行状态。
+#[tauri::command]
+pub async fn get_status(
+    runtime: State<'_, AgentRuntime>,
+    run_id: String,
+) -> Result<RunRecord, String> {
+    let reg = runtime.run_registry.lock().await;
+    match reg.get(&run_id) {
+        Some(r) => Ok(r.clone()),
+        None => Err(format!("run_id 不存在: {run_id}")),
+    }
+}
+
+/// 自测闭环：轮询等待 `run_id` 进入终态（done/error），超时返回 Err。
+#[tauri::command]
+pub async fn wait_task(
+    runtime: State<'_, AgentRuntime>,
+    run_id: String,
+    timeout_ms: Option<u64>,
+) -> Result<RunRecord, String> {
+    let timeout = std::time::Duration::from_millis(timeout_ms.unwrap_or(300_000));
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        {
+            let reg = runtime.run_registry.lock().await;
+            match reg.get(&run_id) {
+                Some(r) if r.status == "done" || r.status == "error" => {
+                    return Ok(r.clone());
+                }
+                None => return Err(format!("run_id 不存在: {run_id}")),
+                _ => {}
+            }
+        }
+        if std::time::Instant::now() >= deadline {
+            return Err(format!("等待 run_id={run_id} 超时（{}ms）", timeout.as_millis()));
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    }
 }
 
 /// 回传审批决策。

@@ -12,11 +12,13 @@
 //!  - 熔断保护：单轮工具调用次数上限，防模型死循环；
 //!  - 客户端一律走云端 API（与项目架构定调一致）。
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use futures_util::StreamExt;
+use serde::Serialize;
 use serde_json::json;
 use serde_json::Value;
 use tauri::AppHandle;
@@ -69,6 +71,23 @@ pub struct AgentRuntime {
     /// 边审批策略授权集（15007）：计划批准/「记住」写入，命中同信号的后续操作放行。
     /// 任务级生命周期：run_task 启动重置（与 cancel_flag/recovery/plan_approval 同批）。
     pub approval_grants: Arc<crate::agent::policy::ApprovalGrants>,
+    /// 自测闭环运行注册表：run_id → 单次运行记录。仅由 `run_task_ex` 写入，
+    /// 供 `get_status`/`wait_task` 轮询，不改变既有 `run_agent_task` 行为（其 run_id 为 None，不入表）。
+    pub run_registry: Arc<tokio::sync::Mutex<HashMap<String, RunRecord>>>,
+}
+
+/// 自测闭环的单次运行记录，关联一次 `run_task_ex` 调用。
+#[derive(Clone, Serialize)]
+pub struct RunRecord {
+    pub run_id: String,
+    pub agent_id: String,
+    pub session_id: Option<String>,
+    pub round_id: Option<String>,
+    /// 状态机：`running` → `done` | `error`。
+    pub status: String,
+    pub started_at: i64,
+    pub finished_at: Option<i64>,
+    pub error: Option<String>,
 }
 
 /// 并发互斥守卫：生命周期结束（正常退出 / 取消 / 异常 / panic）时自动复位 `running`。
@@ -95,6 +114,7 @@ impl AgentRuntime {
             choice: Arc::new(ChoiceHub::new()),
             plan_approval: crate::agent::plan_approval::PlanApprovalHub::new(),
             approval_grants: Arc::new(crate::agent::policy::ApprovalGrants::new()),
+            run_registry: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         }
     }
 
@@ -200,7 +220,21 @@ impl AgentRuntime {
         // ────────────────────────────────────────────────────────────────────
 
         // 阶段一：意图分流（规则短路优先，灰色地带走轻量 LLM 分类）。
-        let intent = crate::agent::intent::classify_intent(&cfg, &prompt).await;
+        let mut intent = crate::agent::intent::classify_intent(&cfg, &prompt).await;
+        // KB 已绑定时强制走工具能力路径：纯 KB 问答（无「文件/代码/执行」强信号）会被判
+        // SIMPLE_CHAT，而 run_simple_chat 向模型传空工具集（&[]），native__kb_search 永远无调用
+        // 机会 → 知识库不可检索。故 KB 绑定 + SIMPLE_CHAT 时，强制 requires_tool，进入分支 B 的
+        // 流水线（registry 已含 native__kb_search），确保检索工具可被调用；纯问答不沉淀产物/写文件。
+        if !cfg.kb_ids.is_empty() && intent.is_simple_chat() {
+            tracing::info!(
+                "[agent] run_task: KB 已绑定({}个) 且意图=SIMPLE_CHAT → 强制 requires_tool 进入工具能力路径",
+                cfg.kb_ids.len()
+            );
+            intent.intent_type = "COMPOSITE_TASK".into();
+            intent.requires_tool = true;
+            intent.requires_planning = true;
+            intent.requires_artifact = false;
+        }
         events::emit_intent_classified(app, &intent);
         tracing::info!(
             "[agent] run_task: 意图判定 = {} reason={} risk={} 需规划={} 需工具={} 需审批={}",

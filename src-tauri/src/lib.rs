@@ -5,6 +5,7 @@ mod mamba_manager;
 mod bun_manager;
 mod fs_helper;
 mod logging;
+mod mcp_server;
 mod net;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -38,6 +39,7 @@ pub fn run() {
                 // 拉起小分队定时调度器与 API 触发服务（二者均依赖数据库就绪）。
                 agent::squad_scheduler::start_scheduler(handle.clone());
                 agent::squad_api_server::start_api_server(handle.clone());
+                mcp_server::start_mcp_server(handle.clone());
                 if let Err(e) = mamba_manager::ensure_default_env(&handle).await {
                     tracing::error!("[mamba] 默认环境初始化失败：{e}");
                 }
@@ -67,6 +69,9 @@ pub fn run() {
             bun_manager::delete_bun_env,
             bun_manager::run_node_script,
             agent::commands::run_agent_task,
+            agent::commands::run_task_ex,
+            agent::commands::get_status,
+            agent::commands::wait_task,
             agent::commands::run_squad_task,
             agent::commands::anchor_squad_memory,
             agent::commands::list_squad_memories,
@@ -102,6 +107,8 @@ pub fn run() {
             agent::wd_mem::wd_mem_write_project_memory,
             fs_helper::canonicalize_path,
             fs_helper::migrate_storage_dir,
+            logging::get_run_logs,
+            mcp_server::mcp_resolve_result,
             agent::embedding::probe_embedding,
             agent::memory::backfill_memory_vectors,
             agent::vector_store::vector_status,

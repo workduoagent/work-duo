@@ -7,8 +7,104 @@
 //!  - `agent-task-error`：整轮任务异常终止。
 
 use serde::Serialize;
+use std::sync::Mutex;
+use std::sync::OnceLock;
+use std::time::{SystemTime, UNIX_EPOCH};
+
 use tauri::AppHandle;
 use tauri::Emitter;
+
+// —— 自测闭环观测：全量事件轨迹缓冲（进程级，单 run 复用；run_task_ex / run_agent_task 启动前 reset）——
+// 用途：get_run_logs 只回 Rust tracing 日志，不含思考/轨迹/正文；事件流原本只推前端、自测通道无前端订阅。
+// 此缓冲把事件流落进程内存，由新增 MCP 工具 `agent_get_run_trace` 取出，供判断整链哪里断。
+static TRACE_EVENTS: OnceLock<Mutex<Vec<serde_json::Value>>> = OnceLock::new();
+static TRACE_THINKING: OnceLock<Mutex<String>> = OnceLock::new();
+static TRACE_REPLY: OnceLock<Mutex<String>> = OnceLock::new();
+
+fn trace_events() -> &'static Mutex<Vec<serde_json::Value>> {
+    TRACE_EVENTS.get_or_init(|| Mutex::new(Vec::new()))
+}
+fn trace_thinking() -> &'static Mutex<String> {
+    TRACE_THINKING.get_or_init(|| Mutex::new(String::new()))
+}
+fn trace_reply() -> &'static Mutex<String> {
+    TRACE_REPLY.get_or_init(|| Mutex::new(String::new()))
+}
+
+/// 自测闭环：清空轨迹缓冲（每次 run_task 启动前调用，保证缓冲只反映当次 run）。
+pub fn reset_trace() {
+    if let Ok(mut v) = trace_events().lock() {
+        v.clear();
+    }
+    if let Ok(mut s) = trace_thinking().lock() {
+        s.clear();
+    }
+    if let Ok(mut s) = trace_reply().lock() {
+        s.clear();
+    }
+}
+
+/// 自测闭环：写入一次事件（agent-event 的 text_chunk / thinking_chunk 由专门累加器处理，此处跳过以免刷屏）。
+pub fn push_event(event: &str, payload: &impl Serialize) {
+    if event == "agent-event" {
+        if let Ok(v) = serde_json::to_value(payload) {
+            match v.get("eventType").and_then(|x| x.as_str()) {
+                Some("text_chunk") | Some("thinking_chunk") => return,
+                _ => {}
+            }
+        }
+    }
+    if let Ok(v) = serde_json::to_value(payload) {
+        let mut arr = trace_events().lock().unwrap();
+        arr.push(serde_json::json!({
+            "event": event,
+            "payload": v,
+            "ts_ms": SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_millis() as i64)
+                .unwrap_or(0),
+        }));
+    }
+}
+
+/// 自测闭环：累计思考片段（thinking_chunk 的 text）。
+pub fn append_thinking(text: &str) {
+    if let Ok(mut s) = trace_thinking().lock() {
+        s.push_str(text);
+    }
+}
+/// 自测闭环：累计正文回复片段（text_chunk 的 text）。
+pub fn append_reply(text: &str) {
+    if let Ok(mut s) = trace_reply().lock() {
+        s.push_str(text);
+    }
+}
+
+/// 自测闭环：取出本 run 完整轨迹（事件列表 + 累计思考 + 累计正文 + 计数）。
+pub fn get_trace() -> serde_json::Value {
+    let events = trace_events()
+        .lock()
+        .map(|v| v.clone())
+        .unwrap_or_default();
+    let thinking = trace_thinking()
+        .lock()
+        .map(|s| s.clone())
+        .unwrap_or_default();
+    let reply = trace_reply()
+        .lock()
+        .map(|s| s.clone())
+        .unwrap_or_default();
+    serde_json::json!({
+        "events": events,
+        "thinking": thinking,
+        "reply": reply,
+        "counts": {
+            "events": events.len(),
+            "thinking_chars": thinking.chars().count(),
+            "reply_chars": reply.chars().count(),
+        },
+    })
+}
 
 use crate::agent::memory::MemoryItem;
 use crate::agent::memory::SquadMemoryItem;
@@ -83,6 +179,8 @@ pub struct StreamChunk {
 }
 
 fn emit(app: &AppHandle, event: &str, payload: &impl Serialize) {
+    // 自测闭环：把事件落轨迹缓冲（text/thinking_chunk 已在各自专用函数累加，此处跳过）。
+    push_event(event, payload);
     if let Err(e) = app.emit(event, payload) {
         tracing::warn!("[agent] emit `{event}` failed: {e}");
     } else {
@@ -126,6 +224,8 @@ pub fn emit_tool_finished(app: &AppHandle, step: &ToolStep) {
 
 /// 模型流式文本片段。
 pub fn emit_text_chunk(app: &AppHandle, text: &str, done: bool) {
+    // 自测闭环：累计正文回复片段（与前端流式推送解耦，独立落轨迹缓冲）。
+    append_reply(text);
     emit(
         app,
         EVT_AGENT_EVENT,
@@ -201,6 +301,8 @@ pub fn emit_intent_classified(app: &AppHandle, profile: &IntentProfile) {
 /// 分层思考片段（thinking_chunk）：规划/执行/自检三层的推理文本。
 /// 替代原先把规划推理误塞进 `status` 的做法，让轨迹视图能按 layer 着色区分。
 pub fn emit_thinking_chunk(app: &AppHandle, text: &str, done: bool, layer: &str) {
+    // 自测闭环：累计思考片段（与前端流式推送解耦，独立落轨迹缓冲）。
+    append_thinking(text);
     emit(
         app,
         EVT_AGENT_EVENT,

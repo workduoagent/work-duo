@@ -11,6 +11,7 @@ import { setTheme, setAccent } from '@/core/store/slices/themeSlice'
 import type { ThemeMode } from '@/core/store/slices/themeSlice'
 import { loadSettings } from '@/core/file/settings-file'
 import { initScrollbarAutoHide } from '@/utils/scrollbar-autohide'
+import { connectMcpBridge } from '@/core/mcpBridge'
 
 // 启动即把持久化的主题模式注入 Redux（旧值键名保持 work-duo-theme 不变）。
 try {
@@ -31,6 +32,9 @@ void loadSettings()
 
 // 全局滚动条：滚动/悬浮时出现，失焦隐藏
 initScrollbarAutoHide()
+
+// 自测闭环：注册 mcp:intent 监听（WorkDuo 内建 MCP Server 驱动时生效，常驻零副作用）
+void connectMcpBridge()
 
 // 全局禁用右键菜单（桌面客户端不允许出现浏览器默认右键）
 document.addEventListener('contextmenu', (e) => e.preventDefault())
