@@ -768,11 +768,15 @@ pub async fn run_pipeline(
                     } else {
                         "（暂定完成：无客观依据，建议人工确认）".to_string()
                     };
-                    // 实质内容段：模型终态汇报截断展示（产物行 + 汇报正文，两者都给）。
+                    // 实质内容段：模型终态汇报作为用户可见正文。2026-09-21 修订（轮 9 实锤）：
+                    // clip(500) 是日志截断（带「…(共N字符)」注记），把单步问答任务的完整
+                    // 回答砍成 530 字摘要并落库——问答/检索型任务的正文就是回答本身，
+                    // 放宽到 4000 且改用无注记截断（clip_plain）；多步任务的各步摘要
+                    // 通常远短于该值，聚合体积风险可控。
                     let body = if summary.is_empty() {
                         String::new()
                     } else {
-                        format!("\n{}", runtime::clip(&summary, 500))
+                        format!("\n{}", runtime::clip_plain(&summary, 4000))
                     };
                     if head.is_empty() {
                         body.trim_start().to_string()

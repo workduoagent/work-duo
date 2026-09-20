@@ -304,6 +304,76 @@ pub(crate) async fn persist_round_raw(app: &AppHandle, round_id: &str, raw_messa
     }
 }
 
+/// 终态正文兜底回填（2026-09-21 用户实锤）：经 MCP/无前端链路跑的任务轮次没有调用方
+/// 回填 `assistant_answer`，UI 把空正文渲染成「思考中…/未返回文本」，会话历史抽查不到
+/// 任何问答内容。引擎在终态持久化 raw 的同时把 final_text 兜底写入——仅当列为空时生效，
+/// 不覆盖前端任务结束后更完整的 updateRound 回填（两者值同源，幂等）。
+pub(crate) async fn persist_round_answer_if_empty(app: &AppHandle, round_id: &str, answer: &str) {
+    if answer.trim().is_empty() {
+        return;
+    }
+    let pool = match get_pool(app).await {
+        Ok(p) => p,
+        Err(e) => {
+            tracing::warn!("[agent] persist_round_answer: 取池失败：{e}");
+            return;
+        }
+    };
+    if let Err(e) = sqlx::query(
+        "UPDATE agent_conversation_round SET assistant_answer = ? WHERE id = ? AND (assistant_answer IS NULL OR assistant_answer = '')",
+    )
+    .bind(answer)
+    .bind(round_id)
+    .execute(&pool)
+    .await
+    {
+        tracing::warn!("[agent] persist_round_answer: 回填 assistant_answer 失败：{e}");
+    }
+}
+
+/// 终态过程兜底回填（2026-09-21 同策略扩展）：`thinking_content` / `tool_calls_summary`
+/// 此前同样只有前端链路上报，MCP 轮次为空导致 UI 思考折叠面板/工具过程缺失。
+/// 数据源 = 引擎轨迹缓冲（trace_thinking_snapshot / trace_tool_calls_summary_json），
+/// 与前端累计同源；仅当列空时写入，不覆盖前端更完整的 updateRound 回填。
+pub(crate) async fn persist_round_process_if_empty(
+    app: &AppHandle,
+    round_id: &str,
+    thinking: &str,
+    tool_calls_summary_json: &str,
+) {
+    let pool = match get_pool(app).await {
+        Ok(p) => p,
+        Err(e) => {
+            tracing::warn!("[agent] persist_round_process: 取池失败：{e}");
+            return;
+        }
+    };
+    if !thinking.trim().is_empty() {
+        if let Err(e) = sqlx::query(
+            "UPDATE agent_conversation_round SET thinking_content = ? WHERE id = ? AND (thinking_content IS NULL OR thinking_content = '')",
+        )
+        .bind(thinking)
+        .bind(round_id)
+        .execute(&pool)
+        .await
+        {
+            tracing::warn!("[agent] persist_round_process: 回填 thinking_content 失败：{e}");
+        }
+    }
+    if !tool_calls_summary_json.trim().is_empty() && tool_calls_summary_json != "[]" {
+        if let Err(e) = sqlx::query(
+            "UPDATE agent_conversation_round SET tool_calls_summary = ? WHERE id = ? AND (tool_calls_summary IS NULL OR tool_calls_summary = '')",
+        )
+        .bind(tool_calls_summary_json)
+        .bind(round_id)
+        .execute(&pool)
+        .await
+        {
+            tracing::warn!("[agent] persist_round_process: 回填 tool_calls_summary 失败：{e}");
+        }
+    }
+}
+
 /// 会话累计轮次 +1（用于后台压缩触发判定）。
 pub(crate) async fn bump_session_turns(app: &AppHandle, session_id: &str) {
     let pool = match get_pool(app).await {

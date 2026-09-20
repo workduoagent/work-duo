@@ -551,6 +551,10 @@ impl AgentRuntime {
                         raw_json.chars().count(),
                     );
                     crate::agent::round_compactor::persist_round_raw(app, round_id, &raw_json).await;
+                    crate::agent::round_compactor::persist_round_answer_if_empty(app, round_id, &result.final_text).await;
+                    let trace_thinking = crate::agent::events::trace_thinking_snapshot();
+                    let trace_tools = crate::agent::events::trace_tool_calls_summary_json();
+                    crate::agent::round_compactor::persist_round_process_if_empty(app, round_id, &trace_thinking, &trace_tools).await;
                 }
                 Err(e) => tracing::error!("[agent] run_task: 序列化精简 raw_messages_json 失败：{e}"),
             }
@@ -726,6 +730,9 @@ impl AgentRuntime {
             trimmed.len(),
             messages.len(),
         );
+        // 终态正文留存（match 内 move 前拷贝一份，供空 answer 兜底回填）。
+        // Err 臂直接 return，故 match 后该值必然已赋值（声明不初始化消 unused lint）。
+        let simple_final_text;
         match call_llm_stream(
             app,
             cfg,
@@ -758,6 +765,7 @@ impl AgentRuntime {
                     return;
                 }
                 let content = outcome.content;
+                simple_final_text = content.clone();
                 tracing::info!(
                     "[agent] run_simple_chat: 终态文本 {} 字符：{}",
                     content.chars().count(),
@@ -783,6 +791,10 @@ impl AgentRuntime {
             match serde_json::to_string(round_messages) {
                 Ok(raw_json) => {
                     crate::agent::round_compactor::persist_round_raw(app, round_id, &raw_json).await;
+                    crate::agent::round_compactor::persist_round_answer_if_empty(app, round_id, &simple_final_text).await;
+                    let trace_thinking = crate::agent::events::trace_thinking_snapshot();
+                    let trace_tools = crate::agent::events::trace_tool_calls_summary_json();
+                    crate::agent::round_compactor::persist_round_process_if_empty(app, round_id, &trace_thinking, &trace_tools).await;
                 }
                 Err(e) => tracing::error!("[agent] run_simple_chat: 序列化 raw_messages_json 失败：{e}"),
             }
@@ -2301,6 +2313,18 @@ pub(crate) fn clip(s: &str, max: usize) -> String {
         s.to_string()
     } else {
         format!("{}…(共{}字符)", s.chars().take(max).collect::<String>(), total)
+    }
+}
+
+/// 用户可见正文截断：与 `clip` 不同，不带「…(共N字符)」注记——注记混进回复正文
+/// 观感差且会随回填落库（2026-09-21 轮 9 实锤：assistant_answer 存的是 530 字
+/// 带注记截断版）。仅用于面向用户的正文；日志/调试仍用 `clip`。
+pub(crate) fn clip_plain(s: &str, max: usize) -> String {
+    let total = s.chars().count();
+    if total <= max {
+        s.to_string()
+    } else {
+        s.chars().take(max).collect::<String>()
     }
 }
 

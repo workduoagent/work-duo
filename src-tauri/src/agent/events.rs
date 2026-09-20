@@ -106,6 +106,51 @@ pub fn get_trace() -> serde_json::Value {
     })
 }
 
+/// 引擎终态回填用（2026-09-21）：当次 run 的思考累计快照（只读不清空，get_run_trace 仍可用）。
+/// 此前仅前端链路在任务结束后经 updateRound 上报 thinking_content——MCP/无前端链路的轮次
+/// 该列为空，UI 会话历史看不到思考过程（用户实锤「数据均要保存」）。
+pub fn trace_thinking_snapshot() -> String {
+    trace_thinking()
+        .lock()
+        .map(|s| s.clone())
+        .unwrap_or_default()
+}
+
+/// 引擎终态回填用：从事件流提取 tool_finished 的工具调用摘要，序列化为前端 updateRound
+/// 同款落库格式 `[{name,status,args,result,step?}]`（session-helpers 重建 ToolStep 卡片按此解析）。
+pub fn trace_tool_calls_summary_json() -> String {
+    let events = trace_events()
+        .lock()
+        .map(|v| v.clone())
+        .unwrap_or_default();
+    let mut out: Vec<serde_json::Value> = Vec::new();
+    for e in events.iter() {
+        let p = match e.get("payload") {
+            Some(p) => p,
+            None => continue,
+        };
+        if p.get("eventType").and_then(|x| x.as_str()) != Some("tool_finished") {
+            continue;
+        }
+        let step = match p.get("step") {
+            Some(s) => s,
+            None => continue,
+        };
+        let name = step.get("toolName").and_then(|x| x.as_str()).unwrap_or("");
+        if name.is_empty() {
+            continue;
+        }
+        out.push(serde_json::json!({
+            "name": name,
+            "status": step.get("status").and_then(|x| x.as_str()).unwrap_or("success"),
+            "args": step.get("args").cloned().unwrap_or(serde_json::Value::Null),
+            "result": step.get("result").cloned().unwrap_or(serde_json::Value::Null),
+            "step": step.get("step").cloned().unwrap_or(serde_json::Value::Null),
+        }));
+    }
+    serde_json::to_string(&out).unwrap_or_else(|_| "[]".into())
+}
+
 use crate::agent::memory::MemoryItem;
 use crate::agent::memory::SquadMemoryItem;
 use crate::agent::plan_approval::PlanApprovalRequest;

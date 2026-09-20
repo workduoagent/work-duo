@@ -2341,7 +2341,10 @@ export default function AgentChatPage() {
                     {m.role === 'agent' ? (
                       content ? (
                         <MarkdownRenderer content={content} />
-                      ) : isStreaming || isRunning ? (
+                      ) : isLastAgent && (isStreaming || isRunning) ? (
+                        // 「思考中…」只属于最后一条 agent 气泡（页面级 running 状态）：
+                        // 历史轮正文为空（如 MCP 轮次未回填）时套用 running 会全部误显
+                        // 「思考中…」，应如实显示未返回文本（2026-09-21 用户实锤）。
                         <span className="agent-chat__thinking">思考中…</span>
                       ) : (
                         <span className="agent-chat__thinking">（智能体未返回文本内容）</span>
