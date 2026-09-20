@@ -323,6 +323,14 @@ fn chunk_section(
     }
 }
 
+/// 噪声 chunk 判定（纯函数，可单测）：剔除字母/数字后不含任何实质字符的块。
+/// CJK 汉字属 Unicode Letter，`is_alphanumeric()` 已覆盖，无需单独区间。
+/// 覆盖：md 水平分隔线（`---`）、星号/下划线分隔线、纯符号行、表格分隔行漏判进
+/// text 等场景（K3-1 真机实证 `---` 独立成块占 top_k 名额 · #20260918010 问题 #3）。
+fn is_noise_chunk(content: &str) -> bool {
+    !content.chars().any(|c| c.is_alphanumeric())
+}
+
 /// 组装单 chunk（标题前缀进 raw_text；type 单块保留语义）。
 fn push_chunk(
     out: &mut Vec<KbChunkMeta>,
@@ -333,7 +341,7 @@ fn push_chunk(
     content: &str,
 ) {
     let content = content.trim().to_string();
-    if content.chars().count() < 2 {
+    if content.chars().count() < 2 || is_noise_chunk(&content) {
         return;
     }
     let raw_text = match breadcrumbs {
@@ -1008,6 +1016,39 @@ mod tests {
         let table = chunks.iter().find(|c| c.chunk_type == "table").unwrap();
         assert!(table.content.contains("| a | b |"));
         assert!(table.content.contains("| 1 | 2 |"));
+    }
+
+    #[test]
+    fn noise_chunks_filtered_md_and_txt() {
+        // 纯函数：分隔线/纯符号 = 噪声；有字母数字/CJK = 实质
+        assert!(is_noise_chunk("---"));
+        assert!(is_noise_chunk("***"));
+        assert!(is_noise_chunk("___"));
+        assert!(is_noise_chunk("| --- | --- |")); // 表格分隔行漏判进 text
+        assert!(is_noise_chunk("。！？"));
+        assert!(!is_noise_chunk("## 8. 决策记录"));
+        assert!(!is_noise_chunk("记忆系统 v2 选型 LanceDB"));
+
+        // md：标题间的水平分隔线不得独立成块（K3-1 真机实证 `---` 占 top_k 名额）
+        let md = "# 甲\n正文甲。\n---\n## 乙\n正文乙。\n---\n| a | b |\n|---|---|\n| 1 | 2 |";
+        let chunks = chunk_asset(md, true);
+        assert!(!chunks.is_empty(), "实质内容不得被误杀");
+        for c in &chunks {
+            assert!(!is_noise_chunk(&c.content), "噪声块入库: {:?}", c.content);
+        }
+        assert!(chunks.iter().any(|c| c.content.contains("正文甲")), "分隔线两侧实质内容保留");
+        assert!(chunks.iter().any(|c| c.chunk_type == "table"), "表格不受影响");
+
+        // txt 纯滑窗路径同样过滤（分隔线行混入）
+        let txt = "实质内容第一段。\n---\n实质内容第二段。";
+        let tchunks = chunk_asset(txt, false);
+        assert!(tchunks.iter().all(|c| !is_noise_chunk(&c.content)));
+
+        // 真机案例复现（chunk #33）：标题下仅分隔线 → 该节只产出 `---` 块，必须整体滤除
+        let md2 = "# 丙\n---\n# 丁\n实质内容。";
+        let c2 = chunk_asset(md2, true);
+        assert!(c2.iter().all(|c| !is_noise_chunk(&c.content)), "仅分隔线的节不得成块");
+        assert!(c2.iter().any(|c| c.content.contains("实质内容")), "相邻实质节保留");
     }
 
     #[test]

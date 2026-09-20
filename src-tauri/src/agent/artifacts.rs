@@ -72,6 +72,70 @@ fn merge_artifact_candidates(
     raw
 }
 
+/// 解析候选并按「物理文件」去重，返回 `(resolved_path, is_fallback)`。
+///
+/// 关键修复（#20260918010-#2 幽灵产物重复登记）：`merge_artifact_candidates` 按原始字符串去重、
+/// 旧 `register_artifacts` 按「朴素解析路径」去重，均无法识别「同一物理文件的不同写法」——
+/// 例如工具真实写出的相对路径 `decision.md` 与 summary 文本里的 `.\decision.md` / 绝对路径 /
+/// 大小写不同路径（Windows 路径大小写不敏感但字符串不等），会被当作两个候选各登记一次，
+/// 既重复登记产物、又误触发幽灵产物 WARN（Q1 实证 `登记 2 个产物：memory-v2-lancedb-decision.md, memory-v2-lancedb-decision.md`）。
+///
+/// 此处按 `physical_key`（折叠 `.`/`..`、统一分隔符、Windows 小写、去 `\\?\`）判定物理等价，
+/// 同一文件只保留一条；当真实来源（fallback=false）与 summary 推断（fallback=true）命中同一文件时，
+/// 以真实来源为准（升级为非兜底、丢弃 summary 推断重复项，不再误报幽灵产物）。仅 summary 推断、
+/// 无真实来源命中同一文件的候选保留 fallback 标记（该 WARN 仍合理：确有文件但无工具证据）。
+///
+/// 文件不存在的候选直接丢弃（L1 文件存在校验）。
+fn resolve_artifact_entries(raw_candidates: Vec<(String, bool)>, ws: &str) -> Vec<(String, bool)> {
+    let mut resolved: Vec<(String, String, bool)> = Vec::new(); // (key, path, is_fallback)
+    for (raw, is_fallback) in raw_candidates {
+        let path = match resolve_path(&raw, &ws) {
+            Some(p) => p,
+            None => continue,
+        };
+        // L1 文件存在校验：不存在的文件不登记（避免登记「声称但未产生」的产物）。
+        if std::fs::metadata(&path).is_err() {
+            continue;
+        }
+        let key = physical_key(&path);
+        if let Some(existing) = resolved.iter_mut().find(|(k, _, _)| *k == key) {
+            // 同物理文件重复候选：真实来源优先，升级为非兜底并丢弃 summary 推断重复项。
+            if !is_fallback && existing.2 {
+                existing.1 = path;
+                existing.2 = false;
+            }
+            continue;
+        }
+        resolved.push((key, path, is_fallback));
+    }
+    resolved.into_iter().map(|(_, p, fb)| (p, fb)).collect()
+}
+
+/// 物理文件去重键：折叠 `.`/`..` 与空段、统一路径分隔符、Windows 下小写、去 `\\?\` 前缀。
+/// 用于让「相对路径 / `.\` 前缀 / 绝对路径 / 大小写不同」等不同写法的候选判定为同一文件。
+fn physical_key(p: &str) -> String {
+    let (sep, norm) = if cfg!(windows) {
+        ('\\', p.replace('/', "\\").to_lowercase())
+    } else {
+        ('/', p.replace('\\', "/"))
+    };
+    let mut parts: Vec<&str> = Vec::new();
+    for seg in norm.split(sep) {
+        match seg {
+            "" | "." => continue,
+            ".." => {
+                parts.pop();
+            }
+            other => parts.push(other),
+        }
+    }
+    let mut s = parts.join(&sep.to_string());
+    if let Some(stripped) = s.strip_prefix("\\\\?\\") {
+        s = stripped.to_string();
+    }
+    s
+}
+
 /// 子任务成功闭环后登记其文件产物。
 ///
 /// 返回登记成功的产物清单（供调用方写回 `SubTaskOutput.artifacts`）。
@@ -79,6 +143,7 @@ fn merge_artifact_candidates(
 ///
 /// 产物来源由 `sources` 提供（图/工具驱动的结构化事实），仅在无结构化来源时
 /// 退化到 `summary` 文本推断（`candidate_paths`），命中即 `tracing::warn!`。
+/// 登记前按「物理文件」去重（见 `resolve_artifact_entries`），消除幽灵产物重复登记。
 pub async fn register_artifacts(
     app: &AppHandle,
     cfg: &AgentRuntimeConfig,
@@ -91,25 +156,16 @@ pub async fn register_artifacts(
     // 候选路径按优先级合并：P0 工具真实写盘 > P1 success_criteria.target > P3 summary 文本推断（降级）。
     // 仅 summary 推断命中者 `is_fallback = true`（用于末尾 warn 幽灵产物风险）。
     let raw_candidates = merge_artifact_candidates(sources.changed_files, &sources.success_targets, summary);
+    // 解析并按物理文件去重：真实来源优先，同文件只登记一次（消除幽灵产物重复登记，#2）。
+    let resolved = resolve_artifact_entries(raw_candidates, &ws);
 
     let now = now_ms();
     let mut out: Vec<ArtifactRef> = Vec::new();
     let mut idx: u32 = 0;
     let mut had_summary_fallback = false;
 
-    for (raw, is_fallback) in raw_candidates {
-        let path = match resolve_path(&raw, &ws) {
-            Some(p) => p,
-            None => continue,
-        };
-        // 步骤内去重（同一路径只登记一次）。
-        if out.iter().any(|a| a.path == path) {
-            continue;
-        }
-        let meta = match std::fs::metadata(&path) {
-            Ok(m) => m,
-            Err(_) => continue, // 文件不存在 → 不登记（L1 文件存在校验）
-        };
+    for (path, is_fallback) in resolved {
+        let meta = std::fs::metadata(&path).expect("resolve_artifact_entries 仅返回已存在文件");
         if is_fallback {
             had_summary_fallback = true;
         }
@@ -373,5 +429,84 @@ mod tests {
                 assert!(!*fb, "{} 来自结构化来源，不应标 fallback", p);
             }
         }
+    }
+
+    /// 不同写法的同一物理文件应映射到相同去重键（Windows 大小写不敏感、分隔符/`.`/`..` 折叠）。
+    #[test]
+    fn physical_key_unifies_same_file_spellings() {
+        // 相对 vs 绝对、分隔符混合、`.`/`..` 折叠、Windows 大小写差异 → 同一键。
+        assert_eq!(physical_key("src/A.md"), physical_key("src\\a.md"));
+        assert_eq!(physical_key("./src/A.md"), physical_key("src/a.md"));
+        assert_eq!(physical_key("src/./A.md"), physical_key("src/a.md"));
+        assert_eq!(physical_key("src/b/../A.md"), physical_key("src/a.md"));
+        assert_eq!(physical_key("src\\.\\A.md"), physical_key("src/a.md"));
+    }
+
+    /// 不同物理文件应映射到不同键（不应误合并）。
+    #[test]
+    fn physical_key_keeps_distinct_files() {
+        assert_ne!(physical_key("src/a.md"), physical_key("src/b.md"));
+        assert_ne!(physical_key("dir1/a.md"), physical_key("dir2/a.md"));
+    }
+
+    /// 复现 Q1 幽灵产物重复登记：工具真实写出的相对路径 + summary 里的绝对/前缀路径
+    /// 指向同一文件，应只登记一次且以真实来源为准（不误报幽灵产物）。
+    #[test]
+    fn resolve_entries_real_beats_summary_same_file() {
+        let (dir, file) = temp_workspace_with_file("decision.md");
+        let abs = file.to_string_lossy().to_string();
+        // summary 提到绝对路径写法；changed_files 为相对写法（与 ws 拼接后与 abs 物理等价）。
+        let summary = format!("已生成决策记录 {abs}");
+        let changed = vec!["decision.md".to_string()];
+        let raw = merge_artifact_candidates(&changed, &[], &summary);
+        let ws = dir.to_string_lossy().to_string();
+        let resolved = resolve_artifact_entries(raw, &ws);
+        assert_eq!(resolved.len(), 1, "同文件只应登记一次（消除幽灵重复登记）");
+        assert!(!resolved[0].1, "真实来源优先，不应标 fallback（不误报幽灵产物）");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 仅 summary 推断、确有其文件的候选：保留为 fallback（幽灵 WARN 仍合理）。
+    #[test]
+    fn resolve_entries_summary_only_keeps_fallback() {
+        let (dir, file) = temp_workspace_with_file("report.xlsx");
+        let abs = file.to_string_lossy().to_string();
+        let summary = format!("例如 {abs} 可以这样配置");
+        let raw = merge_artifact_candidates(&[], &[], &summary);
+        let ws = dir.to_string_lossy().to_string();
+        let resolved = resolve_artifact_entries(raw, &ws);
+        assert_eq!(resolved.len(), 1, "确有文件的推断候选应保留");
+        assert!(resolved[0].1, "纯 summary 推断应标 fallback（幽灵 WARN 合理）");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 不存在的文件（summary 臆测但未产生）应被丢弃，不登记。
+    #[test]
+    fn resolve_entries_missing_file_dropped() {
+        let dir = std::env::temp_dir().join(format!(
+            "wd_art_test_{}_missing",
+            std::process::id()
+        ));
+        let _ = std::fs::create_dir_all(&dir);
+        let summary = "我创建了 ghost.md 但没真写";
+        let raw = merge_artifact_candidates(&[], &[], summary);
+        let ws = dir.to_string_lossy().to_string();
+        let resolved = resolve_artifact_entries(raw, &ws);
+        assert!(resolved.is_empty(), "不存在的文件不应登记");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 并行安全：每个用例用唯一临时目录，避免 cargo 并行测试互相覆盖。
+    fn temp_workspace_with_file(name: &str) -> (std::path::PathBuf, std::path::PathBuf) {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static COUNTER: AtomicUsize = AtomicUsize::new(0);
+        let n = COUNTER.fetch_add(1, Ordering::SeqCst);
+        let dir = std::env::temp_dir()
+            .join(format!("wd_art_test_{}_{}_{}", std::process::id(), n, name));
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::create_dir_all(&dir);
+        let file = dir.join(name);
+        std::fs::write(&file, b"artifact-content").unwrap();
+        (dir, file)
     }
 }

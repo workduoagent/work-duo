@@ -36,6 +36,7 @@ import type {
   PlanStep,
   ToolStep,
 } from './types'
+import { ToolResultView } from './ToolResultView'
 
 interface RunDagCanvasProps {
   planSteps: PlanStep[]
@@ -755,7 +756,7 @@ function ToolDetail({
       {tool.result && (
         <div className="agent-dag__detail-row">
           <span className="agent-dag__detail-k">结果</span>
-          <span className="agent-dag__detail-result">{truncate(tool.result.replace(/\s+/g, ' '), 120)}</span>
+          <ToolResultView toolName={tool.toolName} result={tool.result} variant="compact" failed={tool.status === 'failed'} />
         </div>
       )}
       {tool.path && (

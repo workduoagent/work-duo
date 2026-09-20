@@ -13,6 +13,7 @@
 import { useState } from 'react'
 import { Check, ChevronRight, Loader2, X, ShieldAlert } from 'lucide-react'
 import type { ToolStep } from './types'
+import { ToolResultView } from './ToolResultView'
 import './ToolStepCard.scss'
 
 interface ToolStepCardProps {
@@ -83,9 +84,7 @@ export function ToolStepCard({ step }: ToolStepCardProps) {
               <div className="tool-step__block-title">
                 {status === 'failed' ? '错误信息' : '返回结果'}
               </div>
-              <pre className={`tool-step__code${status === 'failed' ? ' is-error' : ''}`}>
-                {tryPretty(result)}
-              </pre>
+              <ToolResultView toolName={step.toolName} result={result} variant="block" failed={status === 'failed'} />
             </div>
           )}
         </div>

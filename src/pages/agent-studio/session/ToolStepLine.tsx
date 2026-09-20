@@ -33,6 +33,7 @@ import {
 } from 'lucide-react'
 import type { ToolStep } from './types'
 import { baseName, opOf, opVerb } from './toolNarrate'
+import { ToolResultView } from './ToolResultView'
 import './ToolStepLine.scss'
 
 function OpIcon({ op }: { op: string }) {
@@ -166,7 +167,7 @@ export function ToolStepLine({
           {step.result && (
             <div className="tool-line__detail-block">
               <span className="tool-line__detail-label">结果</span>
-              <code className="tool-line__detail-value">{clip(step.result, 600)}</code>
+              <ToolResultView toolName={step.toolName} result={step.result} variant="inline" />
             </div>
           )}
         </div>

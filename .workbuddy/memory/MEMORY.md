@@ -1,61 +1,51 @@
-# work-duo 长期约定（单一事实源 · 校准 2026-09-18）
+# work-duo 长期约定（单一事实源 · 校准 2026-09-20）
 
-> 与每日日志冲突以本文件为准；逐日细节留 `2026-*.md`。需求单一事实源=仓库根 `需求与问题跟踪-第二期.md`（✅已收口）与 `需求与问题跟踪-第三期.md`（当前主战场）。前端规范见《前端开发规范.md》。**🔴 红线：`.wd_mem/**` 与 `.workbuddy/memory/**` 绝不进用户可见 UI / present_files。**
+> 与每日日志冲突以本文件为准；逐日细节留 `2026-*.md`。需求单一事实源=仓库根 `需求与问题跟踪-第三期.md` + `docs/memory-system-design.md`(v2) + `docs/knowledge-rag-design.md`(v1, 第四期 K系列)。前端规范见《前端开发规范.md》。**🔴 红线：`.wd_mem/**` 与 `.workbuddy/memory/**` 绝不进用户可见 UI / present_files。**
 
 ## 技术栈 / 构建铁律
-React19+TS+Vite+**Tauri2**；UI=antd v5（经 `@/components/ui` 封装，禁裸 antd）；Sass 只用 `var(--color-*)`；lucide-react 图标；路由=HashRouter；Squad/执行图=`@xyflow/react` v12。**只跑 `node node_modules/typescript/bin/tsc --noEmit`**（bash 缺 coreutils，npm 生命周期脚本报错），禁 `vite build`；调试 `npm run tauri`；勿改 `vite.config.ts`。
+React19+TS+Vite+**Tauri2**；UI=antd v5（经 `@/components/ui` 封装，禁裸 antd）；Sass 只用 `var(--color-*)`；lucide-react 图标；HashRouter；Squad/执行图=`@xyflow/react` v12。**只跑 `node node_modules/typescript/bin/tsc --noEmit`**（bash 缺 coreutils），禁 `vite build`；调试 `npm run tauri`；勿改 `vite.config.ts`。
 
 ## 依赖 / 沙箱 / DDL
-- AI 只写 `package.json` 不自己装；重型前端库动态 `import()`+`shims.d.ts` 兜底；`src/` 删除/改名 EPERM→新建+改 import，旧文件用户手动删。
-- SQLite `workduo.db`；TS 访问层 `src/core/mapper/*`（禁组件直写 SQL）；DDL 单一事实源 `src/assets/sql/init.sql`+`updater.sql`（当前版本 **v26**：v25=vector_path 种子，v26=agent_conversation_round.segments_json 交错时间线持久化）。**DDL 变更必查 mapper 三要素**（列/`?`/参数数对齐）。
+- AI 只写 `package.json` 不自己装；重型前端库动态 `import()`+`shims.d.ts`；`src/` 删除/改名 EPERM→新建+改 import，旧文件用户手动删。
+- SQLite `workduo.db`；TS 访问层 `src/core/mapper/*`（禁组件直写 SQL）；DDL 单一事实源 `src/assets/sql/init.sql`+`updater.sql`（当前 **v29**：v26=segments_json 交错时间线 / v27=agent_memory_candidates 蒸馏 / v28=knowledge_asset digest+kb_embed_dim / v29=agent_kb_ref）。**DDL 变更必查 mapper 三要素**（列/`?`/参数数对齐）。
 - Rust 读 SQLite：`app.state::<tauri_plugin_sql::DbInstances>`→sqlx(0.8)，key=`sqlite:workduo.db`。
-- **cargo 沙箱自验**：`source ~/.workbuddy/msvc-env.sh && CARGO_TARGET_DIR=target-sb cargo test/check`（target-sb 已 gitignore；与用户 dev 的 target/ 隔离防锁冲突）。
+- **cargo 沙箱自验**：`source ~/.workbuddy/msvc-env.sh && CARGO_TARGET_DIR=target-sb cargo test/check`（target-sb 已 gitignore；与 dev 的 target/ 隔离防锁冲突）。
 
 ## 架构分层铁律
-- L0 `src-tauri/src/agent/**`=ReAct 引擎（意图→规划→执行→校验），禁内置领域能力；L2 领域区分唯一通道=Skill+MCP+Plugin+Agent 人设；约束落 `register_native_tools`，仅写 prompt 必被绕过。
-- 命令 `run_agent_task`/`submit_approval_decision`/`cancel_agent_task`（invoke 包 `input`/`decision`）；流水线意图分流→SIMPLE_CHAT/COMPOSITE→DAG 规划→执行；`try_acquire_run_lock()` 唯一互斥闸门；消息序列配对 sanitize（否则网关 400）；**run_task 启动重置清单必须含 plan_approval.reset()+approval_grants.reset()**。
-- 边审批策略（15007）：`policy.rs` 5 类危险信号×操作；三闸防疲劳=计划批准一次授权 grants/执行期只拦计划外/「本任务内记住」；**策略评估无条件化**（Exec 边按 code 内容行扫描）；never=留痕不弹卡。沙箱内部操作策略不可见（v1 边界）。
-- 统一实体图（graph.rs，`.wd_mem/graph/`）：图=运行时模型=持久化；回复聚合只读 TaskNode `success_criteria.target` 禁读模型 summary。
+- L0 `src-tauri/src/agent/**`=ReAct 引擎；L2 领域区分唯一通道=Skill+MCP+Plugin+Agent 人设；约束落 `register_native_tools`。
+- 命令 `run_agent_task`/`submit_approval_decision`/`cancel_agent_task`；流水线意图分流→DAG 规划→执行；`try_acquire_run_lock()` 当前=**全局互斥**（多任务隔离待 20260919002）；消息配对 sanitize（否则网关 400）；run_task 启动重置清单含 plan_approval.reset()+approval_grants.reset()。
+- 边审批（15007）：5 类危险信号；三闸防疲劳；策略评估无条件化（Exec 边按 code 内容行扫描）；never=留痕不弹卡。
+- 统一实体图（graph.rs）：回复聚合只读 TaskNode `success_criteria.target` 禁读模型 summary。
+- **第四期 K 系列**：统一 LanceDB（kb_chunks 表 M1 已建，v2 schema 16列）；KB 文件前端 kbFs.ts fs 直写 → 钩子挂 mapper 三变更点（fire-and-forget）；维度表级（`kb_embed_dim`）。
 
 ## 前端铁律
-UI 令牌只 `var(--color-*)`；hover 禁位移/缩放；表单 `autoComplete="off"`；`useNotify()`（@/components/ui/notify）禁静态 message；**新建组件带 scss 时 import 必须同轮落**（AppearanceModal 坑）；表单自动行为宁静默，状态用字段级 icon+Tooltip；HITL 四类决策在右栏「处置」DecisionCenter（Notification 已退役）；fixed 弹层 createPortal 到 body（transform 祖先致漂移）；**多行代码注入一律 Edit 工具逐点做，禁 node 脚本批量替换**（续行符失效/声明挤进 // 注释两次事故，setSegments 从未执行致渲染吞工具行）；**关键词子串做风险分级必须配误伤回归测试**（RISK_HINTS 坑）。
+UI 令牌只 `var(--color-*)`；hover 禁位移/缩放；表单 `autoComplete="off"`；`useNotify()` 禁静态 message；HITL 四类决策在 DecisionCenter；fixed 弹层 createPortal 到 body。
 
-## 进度快照（2026-09-18）
-- **第二期 ✅ 全部收口**（15001-15015+20260917001/002，含 15007 边审批、15005 拆分核验、HITL 处置中心），细节见跟踪文件。
-- **#20260916001 插件 ✅ 完结入库**（custom__ 工具/exit42 自愈/@提及/工具条胶囊）。
-- **Pixel Agent ✅ 完结入库（commit c2faa66）**：32×32 游戏级形象设计器（性别级联外观模型 v2/表情状态驱动/opacity 两帧动效/快照写 logo/外观弹窗 v3 三栏）；DDL `agent_info.appearance`（updater v24）；parse 层做 schema 迁移。
-- **意图分类 reasoning 返空已根治**（content 空→reasoning 字段回填，M0 顺带）。
+## 反复踩坑铁律（必背）
+- **Rust 字符串截断一律 `chars()`**，`&s[..n]` 仅纯 ASCII（中文多字节字节切片 panic 卡死）。
+- **多行代码注入一律 Edit 工具逐点做**，禁 node 脚本批量替换（续行符失效/声明挤进 // 注释两次事故）。
+- **关键词子串做风险分级必须配误伤回归测试**（RISK_HINTS 误伤「覆盖」→弹卡13次）。
+- **消费端必须追到 JSX props 实参**（`thinking={[]}` 死数组骗过两轮调研）。
+- **打字机必须常速**（追赶式=数据突发视觉突发）；终态文本一次性下发绕过所有打字机（用 stream_final_text chars 切片）。
+- **定时器/订阅 cleanup=清除+复位两步**（只清不复位 StrictMode 死锁）。
+- **Lance 原语（query/delete/upsert）全部幂等处理「表不存在」**（不只查询路径）。
+- **防闪空用占位态不用保留旧数据**；延迟换幕必须评估窗口期时长（上一轮残留体感）。
+- **熔断判定必须过客观校验**；criteria 为空严禁直接判失败重试（检索死循环）；沙箱双路径（code/script_path）行为必须一致。
+- **机制正确≠结果正确**，验收必须核对业务产物（外部评审假绿教训）。
 
-## 当前主战场：第三期 记忆与知识统一检索
-单一事实源=`需求与问题跟踪-第三期.md`；设计稿=`docs/memory-system-design.md` v2.0（已拍板）。
-- **已拍板架构**：向量库=**统一 LanceDB**（否决 SQLite BLOB；SQLite 只存业务元数据/ref_count）；数据目录 `vector_path` 默认 `$APPDATA/.vectors` 可迁移；嵌入/重排外接 LLM 模块（models 表 embedding/rerank 分类，协议探测见 modelTest.ts）；降级链=**向量→关键词(2-gram)→ref_count**；向量域表 memories/artifacts/kb_chunks/session_summaries。
-- **M0 护栏 ✅（#20260918001 真机验收 via MiniMax M3）**：`validate_forced_entry`（key≥2/content≥10/模板黑名单/category 强校验）+`anchor_memory.auto_merge`（find_similar_memory 去噪）+`recall_top_memories` 加 prompt+char_bigrams/overlap_score 重排；9 单测（42 全绿）。gemma4:e4b 提炼能力不足=已知限制。
-- **M1 #20260918002 嵌入+LanceDB 基建 ✅（2026-09-18，49 单测全绿）**：`agent/embedding.rs`（双协议+探测+埋点+rerank 骨架）+ `agent/vector_store.rs`（LanceDB 四表/upsert merge/search only_if 过滤/全局懒连接降级）+ `vector_path` 设置行（专用迁移重连命令）。**上游坑：lancedb 0.38/0.39 默认 features 编不过（Error::Http 在 remote 门内），必须 features=["remote"]**。
-- **M1 #20260918003 召回管道化 ✅（2026-09-18，51 单测全绿，真机闭环验证）**：写路径收口 `memory::anchor_memory`（spawn 异步嵌入 upsert，三出口零改动）；召回三级链=向量（scope+agent 谓词）→关键词 2-gram 兜底补齐→ref_count；`load_config` 加 `prompt: Option<String>`；delete 双删。向量文本=key\n+content，scope="agent"。
-- **M1 #20260918004 语义召回状态/统计/回填 ✅（2026-09-18，51 单测全绿，真机验收通过）**：MemoryPalace 顶部状态条（能力/连接/统计/回填按钮+进度）；`vector_status` 扩展 stats；`backfill_memory_vectors` 命令（批量 16 条嵌入+逐批 upsert 幂等=存量补齐+换模型重算双场景，agent-memory-backfill 进度事件，重入保护）。
-- **🔴 #20260918002B 三轮真机五连热修 ✅（2026-09-18，51 单测全绿）**：①超轮兜底 summary 术语外泄→友好化（有文件拼「已生成/更新 X」）；②轨迹面板挤压→agent-chat__right 悬浮化（absolute + --right-w 变量 + rightWidth 自适应 clamp）；③TokenRing 1101% 误报→双口径（环=最近一轮输入/窗口，累计单列；压缩正常=阈值 5 轮未达）；④图闪失→换幕延迟 plan_generated（run 不清轨迹数据）；⑤锚定缺条（模型只写 .wd_mem 文件 0 次 anchor 调用）→planner 记忆沉淀约定 + 提炼器补料（PipelineResult.wd_mem_notes）。教训：内部机制术语绝不进用户文案；换幕/清空时机必须对齐用户心理模型；记忆双轨（wd_mem 文件 + anchor 结构化）需显式引导。
-- **🔴 P0 panic 热修 ✅（2026-09-18 17:22）**：`tool_command()`（runtime.rs:813）对超 800 **字节**的 args JSON 做 `&full[..800]` 字节切片，中文多字节字符边界 panic → tokio worker 死亡 → 任务静默卡死（anchor_memory 超长中文 content 首次触发阈值）。修复=chars() 字符安全截断 + 全模块扫描零残留。**铁律：Rust 字符串截断一律 chars()，&s[..n] 仅纯 ASCII 可用**。教训：机制正确≠结果正确，验收必须核对业务产物。
-- **M2 #20260918005 rerank 精排 ✅（2026-09-18，51 单测全绿）**：`recall_top_memories` 管道=向量粗排 k×4→关键词补齐→rerank 精排取 k（可选级未配置/失败跳过）→bump；`bump_stats` 泛化键（embedding_*/rerank_*）；精排生效打 info 顺序对比（key 明文）。**#20260918011 reasoning 流式打字机展示已登记待办**（emit_thinking_chunk 链路已齐，缺 SSE 增量推送+节流）。→ 下一步 M2 #20260918006 artifacts 入 Lance。
-- **M2 #20260918006 artifacts 入 Lance ✅（2026-09-18/19，59 单测全绿，真机验收闭环）**：新模块 `agent/artifact_index.rs`（md 标题分节切块 6 单测/DefaultHasher 文件级 digest 增量/同步管道）+ vector_store 泛化三能力（upsert_artifacts/search_artifacts 带内容列/query_artifact_file_digest 无向量条件查询）+ **三写钩子全覆盖**（archive_artifact/write_file/edit_file 均改持 AppHandle + is_artifacts_md_rel 前缀判断）+ load_config top-3 片段注入（filter=workspace，与记忆宫殿解耦 off 仍注入）。真机闭环：edit 追加 → artifacts 表 dim=512 建表 → 13 分节索引 → 新会话问设计决策 → `已注入 .wd_mem/artifacts 相关知识片段`（rerank 005 同场验证）。真机揪出两 bug：①query_artifact_file_digest 表不存在返回 Err（实现与「Ok(None) 走全量写入」设计不符，新库首归档必断）→ 先 table_names 查存在性；②edit_file 漏钩子 → 补齐。**教训：lazy 建表基建「先查后写」前置查询必须把表不存在当空结果；写入类工具全覆盖 write/edit/archive 三兄弟都要钩**。隔离键=workspace 路径；删除钩子不适用（.wd_mem 受保护）。
-- **M3 #20260918007 会话压缩蒸馏 ✅（2026-09-19 凌晨，cargo 63 passed + tsc 0E，待真机验收）**：DDL **v27** `agent_memory_candidates`（pending/confirmed/rejected）+ 压缩 prompt 追加「### Memory Candidates」第二产出段 + `parse_compaction_output` 纯函数（摘要剥离候选段，4 单测）+ 落库分流（off 不产 / forced 直接 anchor auto_merge 转入 / active 落 pending 防 key 重复堆积）+ 命令三件套 list/confirm/reject（confirm 走 auto_merge）+ MemoryPalace「待确认」区（agent-context-compacted 事件顺带刷新）。settle 管任务级、蒸馏管会话级互补。下一步 K1 #20260918008 知识库 RAG。
-- **🔴 #20260918001B 真机热修 + 烧钱审计 ✅（2026-09-18，二轮回归 ¥0.5/-77% 验证通过）**：超轮(8)熔断误判→never 重试风暴烧 210 万 token。修复=pipeline 熔断先跑 verifier 客观校验通过即闭环；run_python_sandbox script_path 路径同款注入 WORKSPACE；RunDagCanvas fitView 信号改 planSteps.length。二次审计五连修：LLM 重试 4xx 不重试（仅 408/429/5xx/网络）、prior_summary 尾部裁 6000、同因失败 failSig 止损、诊断回灌 clip 800、forced_settle 输入裁剪。二轮回归新增：planner 规则「单步 ≤5 文件」粒度约束（大步骤撞轮预算根因）、Node 沙箱 script_path 同款注入（缺口已闭合）。**M1 003 真机全链路闭环确认**（向量检索→召回注入→锚定去重→向量回写）。教训：熔断判定必须过客观校验；沙箱双路径行为必须一致；reasoning 模型跑工具任务 output 大头是思考 tokens（用户可关）。
-- **🔴 #20260918003B 外部评审批次 ✅（2026-09-18，53 单测）**：外部评审（缺陷 D01-D13）核心差距=只验证机制链路未验证交付质量（pytest 实败=弱 criteria 假绿）。落地：verifier evidence 可回放（passed_notes 明细）；熔断验收分级（存在性→verified=false 暂定+人工复核提示，行为级才 true）；future-safe 注入 helper `inject_workspace_line`（四通道全切，治 __future__ SyntaxError=此前 WORKSPACE 修复引入的缺陷）；planner 行为级验收必选+recon 契约+禁重复侦察+单步≤5 文件粒度约束；沙箱语法错误附落盘脚本头预览。挂起：D06 真因（unmatched-)）、D08 skill 全文注入膨胀（24-45K/轮）结构优化排期。教训：机制正确≠结果正确，验收必须核对业务产物。
-- **🔴 #20260918004B 审批风暴根因修复 ✅（2026-09-18）**：merge_json 用例弹卡 13 次，根因=**intent.rs RISK_HINTS 子串误伤**（「override 整体覆盖」命中「覆盖」→risk=high→强制人工审批压过 auto_exec；用户是对的，UI 全开，我错误归因到用户开关）。修复=词表收窄为低误伤高置信破坏词（删除文件/rm -rf/drop table/清空数据库/付款转账等）+新增误伤/命中双回归测试（53 单测）。教训：关键词子串做风险分级必须配误伤回归测试；归因错误前必须先核对代码链路（effective_auto_exec 覆盖逻辑）。
-- **消息流时间线重构 ✅（2026-09-18，DDL v26）**：交错时间线 `ChatSegment[]`（text|tool|thought 按**到达顺序**，tool_started 占位段经 callId 回查 toolSteps，旁白+工具段同批相邻入列）；运行中全展开，任务结束收进「思考与执行过程」ProcessCollapse（live 区去独立 ThoughtPanel）；MessageActions 加复制完整记录（单条 Markdown 导出 thought/tool 穿插）；终态聚合改「产物行+summary clip500」双段+skipped 带标题建议；**TokenRing 二次修正=新事件 `agent-llm-usage`**（单次请求 prompt/completion，流式发非流式不发）作真实窗口口径（上轮任务级累计口径仍错，用户抓包抓出 713%）；旧消息无 segments 走旧渲染兼容。教训：ChatSegment kind 枚举扩展同步渲染/导出两处 switch；AgentSessionState 显式接口加字段必须同步（三次踩）。
-- 收口标准：cargo test + tsc + 真机验收路径写回跟踪文件。
-- **011 reasoning 思考流式展示 ✅（2026-09-19 凌晨，cargo 63+tsc 0E，待真机验收）**：call_llm_stream/once 加 on_reasoning 回调，SSE 节流（≥80字或≥150ms）在 runtime 层统一；pipeline 子任务 exec 层逐批+done 收尾（原一次性推全文废弃）、SIMPLE_CHAT 新增 chat 层；前端 TracePanel 同层连续 chunk 分组拼接（打字机不碎片）。思考模式保留。
-- **011 打字机真机热修 ✅（2026-09-19 午，cargo 63+tsc 0E）**：网关把 reasoning 增量攒坨末尾突发下发（5.7s 流 9 chunk），后端节流正确也无效→前端 TracePanel revealed 状态+32ms interval 逐字揭示（自适应追赶），挂载存量全显、新增块打字+光标闪烁。教训：打字机效果必须前端与数据到达节奏解耦，别赌上游按 token 推。
-- **011 打字机二轮热修 ✅（2026-09-19 午后，tsc 0E）**：真根因=右栏 TracePanel 拿死数组 thinking={[]}（接线断裂，traceThinking 从未渲染），用户看到的思考是 ThoughtPanel 旁白行。修复=chat.tsx 接线真数据 + thinking_chunk 增量并轨 thoughts/segments（reasoningOpenRef 快照防重拼）复用 useTypewriter + TracePanel v2 常速 60 字/秒（仅最后块动画，世代计数防清空残留）。**铁律：调研消费端必须追到 JSX props 实参；打字机速度必须常速，追赶式在数据突发下等于没做**。
-- **011 工作空间模式打字机 ✅（2026-09-19 13:55，cargo 63+tsc 0E）**：chat.tsx 增 ThoughtSegmentLine（复用 useTypewriter）让运行中时间线 thought 段逐字流出；runtime.rs 增 stream_final_text（chars() 切片 ~120片×16ms、支持 cancel）替换终态正文一次性 emit。**铁律：自由会话/复合任务两条渲染分支必须逐条对齐；终态文本一次性下发会绕过前端所有打字机**。
-- **011 四轮：useTypewriter StrictMode 死锁 ✅（2026-09-19 14:20，tsc 0E）**：清理只 clearTimeout 未复位 null → 挂载即激活的组件 StrictMode 双挂载后启动 guard 死锁、shown 永空（思考段空行）；挂载时非激活的气泡实例不受影响。**铁律：定时器/订阅 cleanup=清除+复位两步；判断「打字机」要区分 delta 增长与钩子动画**。
-- **第三期收官范围（2026-09-19 拍板）**：K1-K3 知识库 RAG 移入第四期待重新设计（LanceDB 保留；K1 旧假设失效=KB 文件前端 kbFs.ts fs 插件直写、kb_chunks 表已建、嵌入管线成熟）；当前主线=20260919002 单Agent后台运行/多任务隔离（run lock 全局→per-agent+并发上限+TaskManager+事件路由+前端任务中心，try_acquire_run_lock 现为全局互斥）→ 20260919001 小分队整体打磨（依赖底座，先盘点出清单）。
-- **第四期 K 系列设计稿 ✅（2026-09-19，docs/knowledge-rag-design.md v1.0）**：放弃 MinerU、TXT/MD 系先行、kb_chunks v2 通用表（page_idx/bbox 占位留缝、维度表级 kb_embed_dim）、SQLite v28（knowledge_asset.digest/indexed_at/meta_data）、agent/knowledge.rs（FileTextExtractor 接缝）、命令 kb_sync_asset/kb_remove_asset/kb_rebuild_index + agent-kb-index-progress；排期 K1a→K1b→K2→K3。第三期当前主线仍是 012 后台运行/多任务隔离 → 011 小分队打磨。
-- **第四期 K1a 引擎层 ✅（2026-09-19 晚，cargo 72 passed）**：DDL v28（knowledge_asset.digest/indexed_at/meta_data + kb_embed_dim）+ mapper syncAssets 改保 id upsert（防 asset id 漂移孤儿化 Lance 段）+ vector_store kb_chunks v2（16 列 schema/upsert/search/query_kb_asset_digest/drop_table）+ agent/knowledge.rs（FileTextExtractor 接缝、层级链分节、语义块即 chunk、digest+path 双判定增量、维度表级迁移、rebuild 重入保护）+ 命令三件套已注册。下一步 K1b 前端（kbFs 钩子/详情页重建 UI/状态徽标）。
-- **第四期 K1b 前端 ✅（2026-09-19 晚，cargo 72+zero warnings+tsc CLEAN）**：kb-index-hooks.ts（fire-and-forget）挂 mapper 三数据变更点（syncAssets 变更/消失、deleteAssetsUnderPath、deleteKnowledgeBase）全覆盖 fs 写路径（MultiFileViewer 纯查看器）；详情页索引行（kb_rebuild_index 按钮+agent-kb-index-progress 进度按 kbId 过滤+已索引 X/Y 摘要 listAssets 聚合）。K1 全线待真机验收。下一步 K2（native__kb_search+agent_kb_ref 绑定）。
-- **K1 真机热修 ✅（2026-09-19）**：delete_by_filter 表不存在时崩 → 加存在性检查幂等 Ok。**铁律升级：Lance 原语（query/delete/upsert）全部幂等处理「表不存在」，不只查询路径**。
-- **第四期 K1 真机验收通过 ✅（2026-09-19 22:58）**：90 chunks / dim=512 / embedded=true / kb_chunks.lance 落盘确认，K1 收官。下一步 K2=native__kb_search 工具（tag 圈定→向量→关键词降级）+ agent_kb_ref 绑定（对齐 agent_skill_ref 范式）+ planner 大纲。
-- **第四期 K2 完成 ✅（2026-09-19 深夜，cargo 72+tsc CLEAN，待真机验收）**：agent_kb_ref（DDL v29）→ load_config 装配 kb_ids → native__kb_search（ReadSafe，未绑定不注册，kb_search 管道=向量→LIKE 关键词降级）→ planner 大纲条件条目（优先检索而非臆测）→ 向导步骤 6 StepKnowledge + draft.kbIds 全链路。验收=绑定智能体问知识库内容看工具调用日志。
-- **K2 死循环热修 ✅（2026-09-19 深夜）**：案例 2 模型 9 轮纯检索不收敛→熔断→criteria=[] 无法校验→自动重跑→再循环。修复=①kb_search 工具内计数超 6 次注入收敛 notice；②熔断+criteria 为空时强制总结轮（无工具 LLM 调用）按暂定完成收尾。**教训：检索类工具必须有任务内软上限引导收敛；criteria 为空的熔断严禁直接判失败重试（会重蹈覆辙），先强制模型输出结论**。
-- **第四期 K2 真机验收通过 ✅（2026-09-19 23:43）**：案例 1/2 全绿，收敛护栏生效（notice 第 7 次检索注入→第 6 轮写文件→8 轮闭环 vs 上轮死循环）。K2 收官。观察项：kb_search 大结果上下文累积致 prompt 107K，K3 时优化。剩 K3（引用展示+标签云）收官。
-- **第四期 K2 四案例全绿正式收官 ✅（2026-09-19 深夜翻牌）**：案例1 事实核对（score=0.774 命中§3.3，模型自发双语双路检索）/案例2 收敛护栏（notice 第7次注入→8轮闭环 vs 死循环修复前）/案例3 忠实性100%（逐项对照§6 原文无幻觉）/案例4 否定测试（语义最近邻≠主题命中，明确答「没有」零编造）。criteria=[] 纯问答闭环标「暂定完成+人工复核」=003B 验收分级设计行为。剩 K3 收官（引用展示+标签云+kb_search 上下文成本优化 top_k/裁剪）。
-- **#20260919003 启动窗口残留上一轮轨迹 ✅（2026-09-19 深夜，纯前端 tsc CLEAN）**：002B 热修④延迟换幕的副作用——规划期 5~15s 右栏挂上一轮终态；SIMPLE_CHAT 轮永久残留旧 DAG。修复=run() 启动即清全部轨迹 + planning 窗口标志（TracePanel/RunDagCanvas 占位「正在启动任务」）。**铁律：防闪空用占位态不用保留旧数据；延迟换幕必须评估窗口期时长**。
+## 进度快照
+### 第三期（记忆与知识统一检索）✅ 收官
+M0 护栏 / M1 嵌入+LanceDB / M1 记忆召回管道 / M2 rerank / M2 artifacts 入 Lance / M3 会话压缩蒸馏 / 011 reasoning 打字机 —— 全完成+真机验收（cargo 72 passed / tsc CLEAN）。
+### 第四期 K 系列（知识库 RAG 重设计）v1.0
+- **K1a 引擎层 ✅**（DDL v28 + knowledge.rs + vector_store kb_chunks v2 + 命令三件套）
+- **K1b 前端 ✅**（kbFs 三钩子 + 详情页重建/进度/状态徽标）
+- **K2 检索工具+绑定 ✅**（native__kb_search + agent_kb_ref DDL v29 + planner 大纲；收敛护栏+四案例全绿真机验收）
+- **K3 引用展示+标签云+上下文优化 🚧 逐子任务实现中**（#20260918010）
+  - **K3-1 命中片段卡片 ✅ 收口**（`KbSearchCitations` + 统一分发 `ToolResultView`：对话/规划/执行图三渲染位，解耦——kb_search 渲染仅一处；Q1 双轮真机验收通过，源文件可打开）
+  - **Q1 顺带 4 问题**：**#3 切块噪声 ✅**（`is_noise_chunk` 纯函数收口 `push_chunk`，cargo 73 passed；生效需对 KB **重建索引**）；**#2 幽灵产物去重 ✅**（`resolve_artifact_entries`+`physical_key` 按物理文件去重、真实来源优先，cargo 78 passed）→ 🔲 **#1 intent 空响应**（`intent.rs:97` 已两次复现，空 content 降级 COMPOSITE_TASK 误走规划+写文件）→ 🔲 **#4 = K3-4**
+  - **K3-2 任务级引用汇总 ⬜** / **K3-3 标签云+标签筛选 ⬜** / **K3-4 上下文成本优化 ⬜**（Q1 实证：事实问答 5 轮 prompt 50096 tokens，历史 hits 全量回带）
+
+## 待办主线（非 K 系列）
+- 20260919002 单 Agent 后台运行/多任务隔离（run lock 全局→per-agent+并发上限+TaskManager）🔲
+- 20260919001 小分队整体打磨（依赖 002 底座）🔲
+- 第三期收尾挂起：D06 沙箱 unmatched ')' 真因 / D08 skill 全文注入 24-45K/轮结构优化
