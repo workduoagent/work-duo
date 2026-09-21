@@ -69,6 +69,31 @@ import {
 } from '@/core/file/kbFs'
 import { fe } from '@/core/logBridge'
 
+// —— 技能模块（设置 → 技能中心 / skill-hub）：与 SkillFormModal / detail / import 同款真实 handler ——
+import {
+  getSkill,
+  upsertSkill,
+  deleteSkill,
+  setSkillStatus,
+  resolveSkillBasePath,
+  listSkills,
+} from '@/core/mapper/skill-mapper'
+import {
+  persistSkillFiles,
+  removeSkillDir,
+  readSkillFileTree,
+  readSkillFileContent,
+  writeSkillFileContent,
+  zipSkillDir,
+  uint8ToBase64,
+} from '@/core/file/skillFs'
+import {
+  createEmptySkill,
+  type SkillInfo,
+  type ScriptFile,
+  type ResourceFile,
+} from '@/core/file/skill-file'
+
 let started = false
 let unlisten: UnlistenFn | null = null
 
@@ -117,6 +142,24 @@ function slim(a: AgentInfo) {
     scenario: a.scenario,
     isActive: a.isActive,
   }
+}
+
+/** base64 -> Uint8Array（用于上送资源 / 导入文件）。 */
+function b64ToBytes(b64: string): Uint8Array {
+  return Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))
+}
+
+/**
+ * 按 id 或 identifier 解析技能（identifier 是唯一稳定键，作为 id 缺失时的回退）。
+ * skill_info.id 是文本 UUID 主键（调用方自带），而 identifier 由 UNIQUE 约束保证唯一，
+ * 因此两键都能稳定定位一行。
+ */
+async function resolveSkill(key?: string): Promise<SkillInfo | undefined> {
+  if (!key) return undefined
+  const byId = await getSkill(key)
+  if (byId) return byId
+  const list = await listSkills()
+  return list.find((s) => s.identifier === key)
 }
 
 /**
@@ -445,6 +488,172 @@ async function dispatch(intent: string, payload: unknown): Promise<unknown> {
       if (!id) throw new Error('memory:reject_candidate 缺少 id')
       await invoke('reject_memory_candidate', { id })
       return { id, rejected: true }
+    }
+    // —— 技能模块（设置 → 技能中心 / skill-hub）：与 SkillFormModal / detail / import 同款真实 handler ——
+    // 落盘先行（persistSkillFiles）→ 入库（upsertSkill），与 skill-hub 页面 handleSave/handleImport 完全一致。
+    case 'skill:get': {
+      const key = (payload as { id?: string; identifier?: string })?.id
+        ?? (payload as { id?: string; identifier?: string })?.identifier
+      const sk = await resolveSkill(key)
+      if (!sk) throw new Error(`skill:get 未找到技能 ${key ?? '(空)'}`)
+      return sk
+    }
+    case 'skill:upsert': {
+      const p = payload as {
+        skill?: SkillInfo
+        scripts?: Array<{ id?: string; name: string; language: string; content: string }>
+        resources?: Array<{ name: string; dir?: string; base64: string }>
+      }
+      const sk = p?.skill
+      if (!sk?.identifier?.trim() || !sk?.name?.trim())
+        throw new Error('skill:upsert 缺少 skill.identifier / skill.name')
+      // 新建技能时 id 由调用方（此处）自带 UUID——skill_info.id 是文本主键、非自增（见 DDL）。
+      // 对齐真人 UI：SkillFormModal 创建时生成 id，避免 INSERT 把 id 列写成 NULL。
+      if (!sk.id) sk.id = crypto.randomUUID()
+      const scripts: ScriptFile[] = (p.scripts ?? []).map((s) => ({
+        id: s.id ?? crypto.randomUUID(),
+        name: s.name,
+        language: s.language,
+        content: s.content ?? '',
+      }))
+      const resources: ResourceFile[] = (p.resources ?? []).map((r) => ({
+        id: crypto.randomUUID(),
+        name: r.name,
+        dir: r.dir ?? '',
+        data: b64ToBytes(r.base64),
+      }))
+      const rawBase = await resolveSkillBasePath()
+      fe.info('mcpBridge.skill', `skill:upsert identifier=${sk.identifier} name=${sk.name} scripts=${scripts.length} resources=${resources.length}`)
+      // 落盘先行：磁盘写入成功后再入库，避免「IO 失败但 DB 已写入」的脏数据
+      await persistSkillFiles(rawBase, sk, scripts, resources)
+      const list = await upsertSkill(sk)
+      const rec = list.find((x) => x.identifier === sk.identifier) ?? list[list.length - 1]
+      fe.info('mcpBridge.skill', `skill:upsert done identifier=${sk.identifier}`)
+      return rec
+    }
+    case 'skill:delete': {
+      const key = (payload as { id?: string; identifier?: string })?.id
+        ?? (payload as { id?: string; identifier?: string })?.identifier
+      if (!key) throw new Error('skill:delete 缺少 id 或 identifier')
+      const sk = await resolveSkill(key)
+      if (!sk) throw new Error(`skill:delete 未找到技能 ${key}`)
+      const id = sk.id
+      const identifier = sk.identifier
+      fe.info('mcpBridge.skill', `skill:delete identifier=${identifier} id=${id}`)
+      await deleteSkill(id)
+      const rawBase = await resolveSkillBasePath()
+      // 与 skill-hub handleDelete 一致：磁盘清理失败（如目录已不存在）不阻断「库行已删」的结果
+      await removeSkillDir(rawBase, identifier).catch(() => {})
+      return { id, identifier, deleted: true }
+    }
+    case 'skill:set_status': {
+      const p = payload as { id?: string; identifier?: string; status?: number }
+      const key = p?.id ?? p?.identifier
+      if (!key) throw new Error('skill:set_status 缺少 id 或 identifier')
+      const sk = await resolveSkill(key)
+      if (!sk) throw new Error(`skill:set_status 未找到技能 ${key}`)
+      await setSkillStatus(sk.id, p.status ?? 1)
+      return { id: sk.id, identifier: sk.identifier, status: p.status ?? 1, ok: true }
+    }
+    case 'skill:list_files': {
+      const p = payload as { identifier?: string; skillPath?: string }
+      if (!p?.identifier) throw new Error('skill:list_files 缺少 identifier')
+      const tree = await readSkillFileTree(p.identifier, p.skillPath)
+      return { identifier: p.identifier, tree }
+    }
+    case 'skill:read_file': {
+      const p = payload as { identifier?: string; relPath?: string; skillPath?: string }
+      if (!p?.identifier || !p?.relPath) throw new Error('skill:read_file 缺少 identifier/relPath')
+      const f = await readSkillFileContent(p.identifier, p.relPath, p.skillPath)
+      if (!f) throw new Error(`skill:read_file 未找到文件 ${p.relPath}`)
+      return { relPath: f.relPath, name: f.name, base64: uint8ToBase64(f.data) }
+    }
+    case 'skill:write_file': {
+      const p = payload as { identifier?: string; relPath?: string; content?: string; skillPath?: string }
+      if (!p?.identifier || !p?.relPath || p?.content == null)
+        throw new Error('skill:write_file 缺少 identifier/relPath/content')
+      const ok = await writeSkillFileContent(p.identifier, p.relPath, p.content, p.skillPath)
+      if (!ok) throw new Error('skill:write_file 写入失败')
+      return { ok: true, relPath: p.relPath }
+    }
+    case 'skill:export': {
+      const p = payload as { identifier?: string; skillPath?: string }
+      if (!p?.identifier) throw new Error('skill:export 缺少 identifier')
+      const bytes = await zipSkillDir(p.identifier, p.skillPath)
+      if (!bytes) throw new Error(`skill:export 打包失败 identifier=${p.identifier}`)
+      return { identifier: p.identifier, base64: uint8ToBase64(bytes), ok: true }
+    }
+    case 'skill:import': {
+      // 与 SkillImportModal.handleOk 同款：zipBase64 解压 / files 扁平数组 -> 资源；
+      // SKILL.md 内容作为 skillMarkdown；落盘 + 入库。
+      const p = payload as {
+        identifier?: string
+        name?: string
+        description?: string
+        scenario?: string
+        tags?: string[]
+        skillMarkdown?: string
+        zipBase64?: string
+        files?: Array<{ relPath: string; base64: string }>
+      }
+      if (!p?.identifier?.trim() || !p?.name?.trim())
+        throw new Error('skill:import 缺少 identifier / name')
+      // 新建技能时 id 由调用方生成 UUID（skill_info.id 文本主键非自增，与 upsert 一致）
+
+      const resources: ResourceFile[] = []
+      if (p.zipBase64) {
+        const JSZip = (await import('jszip')).default
+        const zip = await JSZip.loadAsync(b64ToBytes(p.zipBase64))
+        for (const f of Object.values(zip.files)) {
+          if (f.dir) continue
+          const full = f.name.replace(/\\/g, '/')
+          const idx = full.lastIndexOf('/')
+          const name = idx >= 0 ? full.slice(idx + 1) : full
+          // 头像归一化（与导入弹窗一致：无论原在何处，强制落到根目录 logo.<ext>）
+          const logoMatch = name.match(/^logo\.(png|jpe?g|gif|webp|svg)$/i)
+          if (logoMatch) {
+            resources.push({
+              id: crypto.randomUUID(),
+              name: `logo.${logoMatch[1].toLowerCase()}`,
+              dir: '',
+              data: new Uint8Array(await f.async('arraybuffer')),
+            })
+            continue
+          }
+          const rel = idx >= 0 ? full.slice(0, idx) : ''
+          resources.push({
+            id: crypto.randomUUID(),
+            name,
+            dir: rel,
+            data: new Uint8Array(await f.async('arraybuffer')),
+          })
+        }
+      } else if (p.files?.length) {
+        for (const f of p.files) {
+          const idx = f.relPath.lastIndexOf('/')
+          const name = idx >= 0 ? f.relPath.slice(idx + 1) : f.relPath
+          const dir = idx >= 0 ? f.relPath.slice(0, idx) : ''
+          resources.push({ id: crypto.randomUUID(), name, dir, data: b64ToBytes(f.base64) })
+        }
+      }
+      const skill: SkillInfo = {
+        ...createEmptySkill(),
+        identifier: p.identifier.trim(),
+        name: p.name.trim(),
+        description: p.description?.trim() || undefined,
+        scenario: p.scenario || undefined,
+        tags: p.tags?.length ? p.tags : undefined,
+        // 导入只填 skillMarkdown；instruction 与 SKILL.md 是不同字段，保持为空（与导入弹窗一致）
+        instruction: undefined,
+        skillMarkdown: p.skillMarkdown || undefined,
+      }
+      if (!skill.id) skill.id = crypto.randomUUID()
+      const rawBase = await resolveSkillBasePath()
+      fe.info('mcpBridge.skill', `skill:import identifier=${skill.identifier} name=${skill.name} files=${resources.length}`)
+      await persistSkillFiles(rawBase, skill, [], resources)
+      const list = await upsertSkill(skill)
+      const rec = list.find((x) => x.identifier === skill.identifier) ?? list[list.length - 1]
+      return rec
     }
     default:
       throw new Error(`未知意图: ${intent}`)

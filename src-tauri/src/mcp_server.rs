@@ -586,6 +586,16 @@ async fn call_tool(app: &AppHandle, name: &str, args: &Value) -> Value {
         "memory_list_candidates" => dispatch_ui(app, "memory:list_candidates", args.clone()).await,
         "memory_confirm_candidate" => dispatch_ui(app, "memory:confirm_candidate", args.clone()).await,
         "memory_reject_candidate" => dispatch_ui(app, "memory:reject_candidate", args.clone()).await,
+        // —— 技能模块（设置 → 技能中心 / skill-hub）：UI 级真实 handler（增删改/启停/文件/导入导出）——
+        "skill_get" => dispatch_ui(app, "skill:get", args.clone()).await,
+        "skill_upsert" => dispatch_ui(app, "skill:upsert", args.clone()).await,
+        "skill_delete" => dispatch_ui(app, "skill:delete", args.clone()).await,
+        "skill_set_status" => dispatch_ui(app, "skill:set_status", args.clone()).await,
+        "skill_list_files" => dispatch_ui(app, "skill:list_files", args.clone()).await,
+        "skill_read_file" => dispatch_ui(app, "skill:read_file", args.clone()).await,
+        "skill_write_file" => dispatch_ui(app, "skill:write_file", args.clone()).await,
+        "skill_export" => dispatch_ui(app, "skill:export", args.clone()).await,
+        "skill_import" => dispatch_ui(app, "skill:import", args.clone()).await,
         _ => json!({ "error": format!("unknown tool: {name}") }),
     }
 }
@@ -1054,6 +1064,83 @@ run_task_ex / run_agent_task 启动时会 reset 该缓冲，故只反映最近�
             "memory_reject_candidate",
             "【记忆·忽略候选】忽略一条蒸馏候选（候选置 rejected）。",
             json!({ "type": "object", "properties": { "id": { "type": "string" } }, "required": ["id"] }),
+        ),
+        // —— 技能模块（设置 → 技能中心 / skill-hub）——
+        tool(
+            "skill_get",
+            "【技能·查】按 id 查单个技能（含 skillMarkdown 正文与 path）。",
+            json!({ "type": "object", "properties": { "id": { "type": "string" } }, "required": ["id"] }),
+        ),
+        tool(
+            "skill_upsert",
+            "【技能·增/改】创建或更新技能并落盘（SKILL.md + 脚本 + 资源）。payload.skill 必填 identifier/name；可选 scripts:[{name,language,content}]、resources:[{name,dir,base64}]（dir 为空=根目录）。落盘先行再入库，与 skill-hub 页面完全一致；也可用于从文件数组导入（resources 传全部文件）。",
+            json!({ "type": "object", "properties": {
+                "skill": { "type": "object", "description": "SkillInfo：id?/identifier/name/description?/instruction?/skillMarkdown?/tags?/scenario?/status?" },
+                "scripts": { "type": "array", "description": "可选脚本文件 [{name,language,content}]" },
+                "resources": { "type": "array", "description": "可选资源文件 [{name,dir,base64}]" }
+            }, "required": ["skill"] }),
+        ),
+        tool(
+            "skill_delete",
+            "【技能·删】按 id 真实删除技能（删库行 + 删磁盘目录），不可逆。",
+            json!({ "type": "object", "properties": { "id": { "type": "string" } }, "required": ["id"] }),
+        ),
+        tool(
+            "skill_set_status",
+            "【技能·启停】切换启用状态（status: 1 启用 / 0 禁用）。",
+            json!({ "type": "object", "properties": {
+                "id": { "type": "string" },
+                "status": { "type": "number", "description": "1 启用 / 0 禁用" }
+            }, "required": ["id"] }),
+        ),
+        tool(
+            "skill_list_files",
+            "【技能·文件树】列出技能目录下全部文件树（目录优先、同名排序）。返回 {identifier, tree}。",
+            json!({ "type": "object", "properties": {
+                "identifier": { "type": "string" },
+                "skillPath": { "type": "string", "description": "可选，技能物理路径（缺省用 skill_info.path）" }
+            }, "required": ["identifier"] }),
+        ),
+        tool(
+            "skill_read_file",
+            "【技能·读文件】读取技能目录下某文件内容，返回 base64（relPath 相对技能根目录，如 scripts/main.py）。",
+            json!({ "type": "object", "properties": {
+                "identifier": { "type": "string" },
+                "relPath": { "type": "string" },
+                "skillPath": { "type": "string" }
+            }, "required": ["identifier", "relPath"] }),
+        ),
+        tool(
+            "skill_write_file",
+            "【技能·写文件】覆盖写入技能目录下某文本文件（relPath 相对技能根目录）。",
+            json!({ "type": "object", "properties": {
+                "identifier": { "type": "string" },
+                "relPath": { "type": "string" },
+                "content": { "type": "string", "description": "文本文件内容" },
+                "skillPath": { "type": "string" }
+            }, "required": ["identifier", "relPath", "content"] }),
+        ),
+        tool(
+            "skill_export",
+            "【技能·导出】把技能目录打包为 ZIP，返回 base64（供导出/备份）。",
+            json!({ "type": "object", "properties": {
+                "identifier": { "type": "string" },
+                "skillPath": { "type": "string" }
+            }, "required": ["identifier"] }),
+        ),
+        tool(
+            "skill_import",
+            "【技能·导入】从 ZIP(base64) 或扁平文件数组导入技能并落盘+入库。payload: identifier/name 必填；可选 description/scenario/tags/skillMarkdown/zipBase64/files:[{relPath,base64}]（与 skill-hub 导入弹窗同款：SKILL.md→skillMarkdown，logo.*→根目录）。",
+            json!({ "type": "object", "properties": {
+                "identifier": { "type": "string" },
+                "name": { "type": "string" },
+                "description": { "type": "string" },
+                "scenario": { "type": "string" },
+                "tags": { "type": "array", "items": { "type": "string" } },
+                "skillMarkdown": { "type": "string" },
+                "zipBase64": { "type": "string", "description": "ZIP 压缩包 base64（与 files 二选一）" },
+                "files": { "type": "array", "description": "扁平文件数组 [{relPath, base64}]" }
+            }, "required": ["identifier", "name"] }),
         ),
     ])
 }
