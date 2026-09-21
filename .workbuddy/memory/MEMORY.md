@@ -13,7 +13,7 @@ React19+TS+Vite+**Tauri2**；UI=antd v5（经 `@/components/ui` 封装，禁裸 
 
 ## 架构 / MCP 自测闭环
 - L0 `src-tauri/src/agent/**`=ReAct 引擎；L2 领域区分唯一通道=Skill+MCP+Plugin+Agent 人设。
-- 命令 `run_agent_task`/`submit_approval_decision`/`cancel_agent_task`；`try_acquire_run_lock()` 当前=**全局互斥**（多任务隔离待 20260919002）。
+- 命令 `run_agent_task`/`submit_approval_decision`/`cancel_agent_task`；`try_acquire_run_lock()` 多任务隔离已落地（20260919002 ✅，commit 3919c0a，旧「全局互斥」记载作废，锁形态以代码为准）。
 - **内建 MCP Server** `src-tauri/src/mcp_server.rs` 监听 `127.0.0.1:18755/mcp`（Streamable HTTP，56 工具）。前端零侵入桥 `src/core/mcpBridge.ts`：`listen('mcp:intent')`→真实 handler→`invoke('mcp_resolve_result')`；**UI 级工具回包统一 `{ok,data}` 信封**（驱动需拆 `data`）。连接器 `~/.workbuddy/mcp.json`→`workduo-mcp`(`"type":"http"`)。
 - **前端日志透传（2026-09-21 新增）**：Rust 命令 `logging::log_frontend(level,module,message)` 把前端日志以与 tracing 同格式 `[时间][模块][fe][web:0]-LEVEL-内容` 落同一份 `workduo.log.YYYY-MM-DD`（复用 `choose_logs_dir`）。前端 `src/core/logBridge.ts` 暴露 `fe.info/warn/error/debug(module,msg)`，fire-and-forget（失败静默）。已埋点：kbFs / kb-index-hooks / knowledge-mapper / mcpBridge(kb:*)，经 `agent_get_run_logs` 可一并回看前端链路。
 
@@ -30,6 +30,7 @@ UI 令牌只 `var(--color-*)`；hover 禁位移/缩放；表单 `autoComplete="o
 - Lance 原语全部幂等处理「表不存在」。
 - 熔断判定必须过客观校验；criteria 空严禁直接判失败重试。
 - **机制正确≠结果正确**，验收必须核对业务产物。
+- **跨链路数据落库引擎终态统一兜底**（persist_round_answer/process_if_empty，仅空时写不覆盖前端），不依赖调用方自觉；日志 clip（带注记）禁入用户可见正文（#20260921001）。
 
 ## 进度快照
 - 第三期（记忆与知识统一检索）✅ 收官（cargo 72 passed / tsc CLEAN）。
@@ -38,8 +39,9 @@ UI 令牌只 `var(--color-*)`；hover 禁位移/缩放；表单 `autoComplete="o
 - 内建 MCP 自测闭环 ✅ MVP1；三大模块（插件/KB/记忆）UI 级工具已全接入（55 工具，含 KB 标签 add/remove/rename）；前端日志透传 ✅。
 
 ## 待办 / 长期约定
-- 20260919002 单 Agent 多任务隔离（run lock 全局→per-agent）🔲；20260919001 小分队打磨 🔲。
-- **🔴 Skill 同步铁律**：仓库 `docs/skills/<name>/SKILL.md` 为单一事实源；客户端 `~/.workbuddy/skills/<name>/SKILL.md` 必须同步一致。
+- 20260919002 单 Agent 多任务隔离 ✅（2026-09-21，3919c0a）；20260919001 小分队打磨 🔲。
+- KB 删除级联清理向量段已修（f78701b，防 Lance 孤儿残留）；`agent_run_task` 的 workspace 字段已标注「=绑定工作空间绝对路径，不传则自由对话」（e98df0f）。
+- **🔴 Skill 同步铁律**：仓库 `docs/skills/<name>/SKILL.md` 为单一事实源；客户端 `~/.workbuddy/skills/<name>/SKILL.md` 必须同步一致。**workduo-mcp 已安装客户端 ✅（2026-09-21，SKILL.md+scripts/ 共 7 文件与仓库逐字节一致，客户端无旧版残留）**。
 - **🔴 Skill 内容红线（2026-09-21 确立）**：SKILL.md **不得出现任何第三方产品目录路径**（如 `~/.workbuddy/...`、特定 IDE/客户端路径、安装步骤指向某产品配置目录）；需引用资源只指向 **skill 内部相对路径**（如 `scripts/`）。该 skill 定位 = **给外部编程工具（任意支持 MCP 的客户端）对接 WorkDuo 内建 MCP Server 的集成指南**，不叫「自测/selftest/测试」，命名即 `workduo-mcp`（无 selftest 字眼）。
 - **用户长期约定**：SKILL+MCP 拿不到有效信息时第一时间报告做更新/补丁。
 - **`get_run_logs` since_ts 坑**：行首 `[YYYY-MM-DD HH:MM:SS.mmm]` 子串字典序比较；传 ISO(`T`/`Z`) 会被全剔返回 0 行，须传**本地空格分隔**同形串或仅用 `limit`。
