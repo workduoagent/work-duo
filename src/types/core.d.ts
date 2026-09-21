@@ -416,8 +416,9 @@ export interface AgentConversationRound {
   /** 规划步骤结构（标题/状态/产物摘要），与 toolCallsSummary 对称落库；历史回看时重建「步骤 → 工具」嵌套视图。 */
   planStepsSummary?: Record<string, unknown>[]
   /** 交错时间线（2026-09-18）：思考旁白/工具调用/正文按真实时序的 JSON（ChatSegment[]）；
-   * 历史加载时据此重建穿插渲染。旧 round 无此列 = undefined，回退旧渲染。 */
-  segments?: Array<{ kind: string; text?: string; callId?: string }>
+   * 历史加载时据此重建穿插渲染。旧 round 无此列 = undefined，回退旧渲染。
+   * K3-2：kb-sources 段带 hits（本次引用来源命中列表），JSON 往返原样保留。 */
+  segments?: Array<{ kind: string; text?: string; callId?: string; hits?: unknown[] }>
   inputTokens?: number
   outputTokens?: number
   startTime?: number

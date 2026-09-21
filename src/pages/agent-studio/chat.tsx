@@ -107,6 +107,9 @@ import { useAgentSession } from './session/useAgentSession'
 import { TracePanel } from './session/TracePanel'
 import { RunDagCanvas } from './session/RunDagCanvas'
 import { ToolStepLine } from './session/ToolStepLine'
+import { KbSourceList, KbCiteMark, type KbHit } from './session/KbSearchCitations'
+import { makeRemarkKbCites } from './session/remarkKbCites'
+import { fe } from '@/core/logBridge'
 import { DecisionCenter } from './session/DecisionCenter'
 import { TakeoverPanel } from './session/TakeoverPanel'
 import type { ReadArtifactResult, BranchFromStepInput, BranchStep, PlanDAG, ContextCompactedPayload, ToolStep } from './session/types'
@@ -172,6 +175,46 @@ async function resolveWorkspaceDir(agent: AgentInfo): Promise<string | null> {
   if (base.includes('$APPDATA')) base = base.replace('$APPDATA', await appDataDir())
   if (base.includes('$RESOURCE')) base = base.replace('$RESOURCE', await resourceDir())
   return `${base}/${agent.identifier}`
+}
+
+/** K3-2 引用感知正文渲染：消息带 kbSources 时启用内联引标 remark 插件——正文中的 `[N]`
+ *  渲染为可悬浮溯源的引标（hover 展示召回片段内容）；无引用数据时与普通 MarkdownRenderer 等价。 */
+function CiteAwareMarkdown({ text, kbSources }: { text?: string; kbSources?: KbHit[] }) {
+  const remarkExt = useMemo(() => (kbSources?.length ? [makeRemarkKbCites(kbSources)] : undefined), [kbSources])
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const compsExt = useMemo(
+    () =>
+      kbSources?.length
+        ? {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            'kb-cite': (p: any) => <KbCiteMark cite={p?.cite} hits={kbSources} />,
+          }
+        : undefined,
+    [kbSources],
+  )
+  return <MarkdownRenderer content={text ?? ''} remarkPluginsExt={remarkExt} componentsExt={compsExt} />
+}
+
+/** 运行中正文段打字机（用户反馈：流式 chunk 整段刷出=「一句句往外刷」）：
+ *  复用 useTypewriter 常速逐字（30ms/字≈33 字/秒，肉眼单字节奏；积压 >200 字按比例
+ *  加速追赶防永久滞后）。仅最后一段 active 参与打字；非激活段直接全文渲染
+ *  （绕过 hook 首帧空闪）。任务结束切非激活 → 终态一次性全文（既有约定）。 */
+function TypewriterMarkdownInner({ text, kbSources }: { text?: string; kbSources?: KbHit[] }) {
+  const shown = useTypewriter(text ?? '', true, 30)
+  return <CiteAwareMarkdown text={shown} kbSources={kbSources} />
+}
+
+function TypewriterMarkdown({
+  text,
+  active,
+  kbSources,
+}: {
+  text?: string
+  active?: boolean
+  kbSources?: KbHit[]
+}) {
+  if (!active) return <CiteAwareMarkdown text={text} kbSources={kbSources} />
+  return <TypewriterMarkdownInner text={text} kbSources={kbSources} />
 }
 
 /* ------------------------------------------------------------------ *
@@ -258,7 +301,7 @@ export default function AgentChatPage() {
 
   // 会话状态机（必须早于任何引用 session.* 的回调/依赖数组，否则 TDZ）。
   const session = useAgentSession()
-  const { toolSteps, segments, lastLlmUsage, streamingText, isStreaming, statusText, thoughts, planSteps, isRunning, pendingApproval, run, submitDecision, reset, cancel, lastTaskUsage, liveTokenUsage, taskError, artifacts, recovery, resolveRecovery, pendingChoice, submitChoice, planApproval, resolvePlanApproval } =
+  const { toolSteps, segments, lastLlmUsage, streamingText, isStreaming, statusText, thoughts, planSteps, isRunning, pendingApproval, run, submitDecision, reset, cancel, lastTaskUsage, liveTokenUsage, taskError, artifacts, recovery, resolveRecovery, pendingChoice, submitChoice, planApproval, resolvePlanApproval, kbSources } =
     session
 
   const [agent, setAgent] = useState<AgentInfo | undefined>()
@@ -527,6 +570,42 @@ export default function AgentChatPage() {
   const recognitionRef = useRef<unknown>(null)
 
   const scrollRef = useRef<HTMLDivElement>(null)
+  // 流式跟随滚动（用户反馈热修）：
+  // - followBottom=true（跟随模式）时内容增长自动贴底；用户向上滚（滚轮上/拖动滚动条离开
+  //   底部）即解除跟随、回看历史不被打扰；手动滚回底部附近自动恢复；发新提问强制恢复。
+  // - 跟随贴底一律瞬时赋值 scrollTop（禁用 smooth）：流式 chunk 每 16ms 一批，上一次 smooth
+  //   动画未完成即被下一次打断，多次平滑动画互相拉扯正是「抖动」根因；瞬时赋值恒显示最新内容。
+  // - 正文为打字机逐字渲染（比数据流滞后）：仅靠数据变化触发贴底会永远追着实际渲染高度跑
+  //   （「显示的不是最新内容」的另一层根因），故流式期间用 RAF 循环按**实际渲染高度**贴底。
+  const [followBottom, setFollowBottom] = useState(true)
+  const followRafRef = useRef<number | null>(null)
+  // 上次 scrollTop：onScroll 判定「用户向上拖动」的基准（程序贴底 scrollTop 只增不减）。
+  const lastScrollTopRef = useRef(0)
+
+  /** 跟随贴底（rAF 合并 + 瞬时赋值）：同一帧多次触发只滚一次。 */
+  const scheduleFollowScroll = useCallback(() => {
+    if (followRafRef.current != null) return
+    followRafRef.current = requestAnimationFrame(() => {
+      followRafRef.current = null
+      const el = scrollRef.current
+      if (el) el.scrollTop = el.scrollHeight
+    })
+  }, [])
+
+  // 流式期间持续贴底循环：每帧无条件贴底（赋相同值浏览器 no-op，成本可忽略）——
+  // 以实际渲染高度为准，任何间隙/高度暴涨下一帧立即补齐，输出中途绝不掉队。
+  // 解除跟随（followBottom=false）→ 循环即停；恢复/新提问 → 随依赖重启。
+  useEffect(() => {
+    if (!(isStreaming || isRunning) || !followBottom) return
+    let raf = 0
+    const tick = () => {
+      const el = scrollRef.current
+      if (el) el.scrollTop = el.scrollHeight
+      raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
+  }, [isStreaming, isRunning, followBottom])
   const replyStartRef = useRef<number | null>(null)
   const prevIsRunningRef = useRef(false)
   const roundIdRef = useRef<string | null>(null)
@@ -559,7 +638,9 @@ export default function AgentChatPage() {
     messages.length > 0 && messages[messages.length - 1].role === 'agent'
       ? messages[messages.length - 1].content
       : ''
-  const displayedContent = useTypewriter(lastAgentContent, isStreaming)
+  // 气泡正文打字机（非 segments 旧分支/FilePathCards 消费）：30ms/字（≈33 字/秒，肉眼单字节奏），
+  // 积压按比例追赶——原默认 10ms/字（100 字/秒）对长回复过快，用户反馈「一句句往外刷」。
+  const displayedContent = useTypewriter(lastAgentContent, isStreaming, 30)
 
   // 加载智能体 + 工具/技能计数 + 能力判定 + 工作空间 + 会话列表
   useEffect(() => {
@@ -700,18 +781,21 @@ export default function AgentChatPage() {
     }
   }, [])
 
-  // 新消息 / 工具步骤 / 流式文本变化时滚动到底
+  // 新消息 / 工具步骤 / 流式文本变化时：仅「跟随模式」下贴底（瞬时、rAF 合并）；
+  // 用户已向上滚动回看历史时不打扰（解除跟随），滚回底部附近自动恢复。
+  // 流式期间的打字机逐字增长由上方 RAF 循环覆盖（以实际渲染高度为准）。
   useEffect(() => {
     const el = scrollRef.current
     if (!el) return
     if (restoringRef.current) {
       // 历史会话回显：瞬时定位到底部，避免整列平滑滑动的视觉抖动
       restoringRef.current = false
+      setFollowBottom(true)
       el.scrollTop = el.scrollHeight
-    } else {
-      el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
+      return
     }
-  }, [messages, toolSteps, streamingText])
+    if (followBottom) scheduleFollowScroll()
+  }, [messages, toolSteps, streamingText, followBottom, scheduleFollowScroll])
 
   /** 持久化一轮：确保有会话 → 追加 round → 记录 roundId / 序号。 */
   const ensureRound = useCallback(
@@ -862,6 +946,8 @@ export default function AgentChatPage() {
     lastPromptRef.current = text
 
     replyStartRef.current = Date.now()
+    // 新提问 = 用户明确要看最新内容：恢复跟随模式（此前可能因回看历史已解除）
+    setFollowBottom(true)
     // 方案 C：发消息即自动展开右栏并切到「图」（本轮 DAG 主视图），符合 Graph-first 作用域。
     setRightOpen(true)
     setRightTab('graph')
@@ -911,9 +997,9 @@ export default function AgentChatPage() {
       // 欢迎语是静态提示，不参与流式回填：避免 reset() 清空 streamingText 后
       // 把欢迎语覆盖成空内容，导致界面误显示「思考中…」
       if (!last || last.role !== 'agent' || last.id === 'welcome') return prev
-      return [...prev.slice(0, -1), { ...last, content: streamingText, thought: thoughts, toolSteps, segments }]
+      return [...prev.slice(0, -1), { ...last, content: streamingText, thought: thoughts, toolSteps, segments, kbSources }]
     })
-  }, [streamingText, thoughts, toolSteps, segments])
+  }, [streamingText, thoughts, toolSteps, segments, kbSources])
 
   // 任务结束（完成/异常/取消）时，补全耗时、token 与历史持久化
   useEffect(() => {
@@ -951,8 +1037,10 @@ export default function AgentChatPage() {
             status: s.status,
             summary: s.summary,
           })),
-          // 交错时间线持久化（v26）：刷新/历史加载后按原时序重建穿插渲染
-          segments,
+          // 交错时间线持久化（v26）：刷新/历史加载后按原时序重建穿插渲染。
+          // K3-2：任务级引用来源追加为 kb-sources 段（仅作持久化载体——历史加载时
+          // session-helpers 提取回消息字段 kbSources，不进时间线渲染）。
+          segments: kbSources.length > 0 ? [...segments, { kind: 'kb-sources' as const, hits: kbSources }] : segments,
           inputTokens,
           outputTokens,
           endTime: completedAt,
@@ -1018,6 +1106,12 @@ export default function AgentChatPage() {
       setMessages((prev) => {
         const last = prev[prev.length - 1]
         if (last && last.role === 'agent') {
+          // K3-2 热修诊断：终态正文空屏定位（经 agent_get_run_logs 可回看）。
+          const segTexts = (last.segments ?? []).filter((s) => s.kind === 'text')
+          void fe.info(
+            'chat',
+            `终态诊断: content=${(last.content ?? '').length}字 segs=${(last.segments ?? []).length} text段=${segTexts.length} 最后text=${segTexts.length ? (segTexts[segTexts.length - 1].text ?? '').length : 0}字 kbSources=${last.kbSources?.length ?? 0} streamingText=${streamingText.length}`,
+          )
           return [
             ...prev.slice(0, -1),
             {
@@ -1026,6 +1120,7 @@ export default function AgentChatPage() {
               thought: thoughts,
               toolSteps,
               segments,
+              kbSources,
               completedAt,
               durationMs,
               tokenCount: inputTokens + outputTokens,
@@ -1036,7 +1131,7 @@ export default function AgentChatPage() {
       })
     }
     prevIsRunningRef.current = isRunning
-  }, [isRunning, streamingText, thoughts, toolSteps, planSteps, segments, lastAgentContent, statusText, activeSessionId, removedSkillIds, removedMcpIds, disabledMcpToolIds, boundMcps, toolCount, skillCount, isTauri, lastTaskUsage])
+  }, [isRunning, streamingText, thoughts, toolSteps, planSteps, segments, kbSources, lastAgentContent, statusText, activeSessionId, removedSkillIds, removedMcpIds, disabledMcpToolIds, boundMcps, toolCount, skillCount, isTauri, lastTaskUsage])
 
   // 输入框顶部拖拽手柄：向上拖动增大高度（底部锚定，自然向上扩展），而非原生 resize 只能向下拉。
   const startInputResize = useCallback((e: React.MouseEvent) => {
@@ -2152,7 +2247,36 @@ export default function AgentChatPage() {
 
       {/* 中间会话区 */}
       <section className="agent-chat__main">
-        <div className="agent-chat__scroll" ref={scrollRef}>
+        <div
+          className="agent-chat__scroll"
+          ref={scrollRef}
+          onWheel={(e) => {
+            // 用户滚轮意图：向上滚 = 立即解除跟随（回看历史不被拉回）；向下滚回底部附近 = 恢复跟随。
+            if (e.deltaY < 0) {
+              setFollowBottom(false)
+            } else {
+              const el = scrollRef.current
+              if (el && el.scrollHeight - el.scrollTop - el.clientHeight < 80) {
+                setFollowBottom(true)
+                scheduleFollowScroll()
+              }
+            }
+          }}
+          onScroll={() => {
+            // 解除跟随只认「真实的用户向上滚动」：
+            //  - scrollTop 减小（程序贴底只会单调增到最大值）且明显远离底部（>120px）
+    //    = 用户拖动滚动条/触摸板向上 → 解除；
+            //  - 内容收缩导致的 scrollTop 钳制 distance=0，不会误判。
+            // 手动滚回底部附近恢复跟随；数据增长不触发 scroll 事件，不会误解除。
+            const el = scrollRef.current
+            if (!el) return
+            const st = el.scrollTop
+            const distance = el.scrollHeight - st - el.clientHeight
+            if (st < lastScrollTopRef.current - 2 && distance > 120) setFollowBottom(false)
+            if (distance <= 8) setFollowBottom(true)
+            lastScrollTopRef.current = st
+          }}
+        >
           {messages.map((m, idx) => {
             const isLastAgent = idx === messages.length - 1 && m.role === 'agent'
             const content = isLastAgent ? displayedContent : m.content
@@ -2261,7 +2385,11 @@ export default function AgentChatPage() {
                       }
                       const renderText = (text: string | undefined, i: number) => (
                         <div key={i} className="agent-chat__seg-text">
-                          <MarkdownRenderer content={text ?? ''} />
+                          <TypewriterMarkdown
+                            text={text}
+                            active={isLastAgent && (isStreaming || isRunning) && i === segs.length - 1}
+                            kbSources={m.kbSources}
+                          />
                         </div>
                       )
                       // 运行中（最后一条且流式/运行态）：交错时间线全展开（旁白行+工具块穿插）。
@@ -2284,7 +2412,9 @@ export default function AgentChatPage() {
                           </div>
                         )
                       }
-                      // 已结束：最后一个 text 段作为正文气泡（最终交付），其余段收进折叠块
+                      // 已结束：最后一个 text 段作为正文气泡（最终交付），其余段收进折叠块。
+                      // K3-2 热修：text 段意外为空时回退 m.content（终态固化已写入全文），
+                      // 双路皆空才显示占位——任何情况下正文气泡不得为空。
                       let lastTextIdx = -1
                       for (let i = segs.length - 1; i >= 0; i--) {
                         if (segs[i].kind === 'text') {
@@ -2293,7 +2423,8 @@ export default function AgentChatPage() {
                         }
                       }
                       const collapsed = segs.filter((_, i) => i !== lastTextIdx)
-                      const finalText = lastTextIdx >= 0 ? (segs[lastTextIdx].text ?? '') : m.content
+                      const finalText =
+                        (lastTextIdx >= 0 ? (segs[lastTextIdx].text ?? '') : '') || m.content
                       return (
                         <>
                           {collapsed.length > 0 && (
@@ -2305,11 +2436,13 @@ export default function AgentChatPage() {
                           )}
                           <div className="agent-chat__bubble">
                             {finalText ? (
-                              <MarkdownRenderer content={finalText} />
+                              <CiteAwareMarkdown text={finalText} kbSources={m.kbSources} />
                             ) : (
                               <span className="agent-chat__thinking">（智能体未返回文本内容）</span>
                             )}
                           </div>
+                          {/* K3-2 任务级引用来源：本轮知识检索命中的去重溯源列表（气泡底部，不进折叠块）。 */}
+                          <KbSourceList hits={m.kbSources} />
                         </>
                       )
                     })()

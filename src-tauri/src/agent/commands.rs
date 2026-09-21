@@ -131,11 +131,12 @@ pub async fn run_agent_task(
     // 并发互斥（spawn 前主闸门，且必须早于 load_config）：连点「运行」时第二次请求
     // 立刻拿到 Err，零 DB 开销；若 load_config 失败，guard 随 `?` 提前 return 自动 Drop，
     // 锁正确释放，无需额外处理。
-    let running_guard = match runtime.try_acquire_run_lock() {
-        Some(g) => g,
+    // 20260919002：锁粒度 per-agent——同一 Agent 互斥，不同 Agent 可并行。
+    let (task_state, running_guard) = match runtime.try_acquire_run_lock(&input.agent_id) {
+        Some(pair) => pair,
         None => {
-            tracing::warn!("[agent] run_agent_task: 已有任务在运行，拒绝重复启动");
-            return Err("已有任务正在运行，请先等待其完成或点击停止。".into());
+            tracing::warn!("[agent] run_agent_task: agent {} 已有任务在运行，拒绝重复启动", input.agent_id);
+            return Err("该智能体已有任务正在运行，请先等待其完成或点击停止。".into());
         }
     };
 
@@ -175,12 +176,12 @@ pub async fn run_agent_task(
     let initial_context = input.initial_context.clone().unwrap_or_default();
 
     // 锁已在上方入口处抢占（running_guard）：跨 spawn 持有，run_task 任意出口
-    // （正常 / 取消 / panic）自动复位 running；本处不再抢锁。
+    // （正常 / 取消 / panic）自动复位 running 并回收状态束；本处不再抢锁。
     events::reset_trace(); // 自测闭环：清空轨迹缓冲，保证只反映本次 run
     tauri::async_runtime::spawn(async move {
         let _running_guard = running_guard;
         tracing::info!("[agent] run_agent_task 后台任务已 spawn，开始 run_task");
-        rt.run_task(&app_clone, cfg, prompt, plan_override, pre_completed, initial_context)
+        rt.run_task(&app_clone, cfg, prompt, plan_override, pre_completed, initial_context, &task_state)
             .await;
         tracing::info!("[agent] run_agent_task 后台任务 run_task 结束");
     });
@@ -200,10 +201,14 @@ pub async fn run_task_ex(
 ) -> Result<String, String> {
     let run_id = next_run_id();
 
-    let running_guard = match runtime.try_acquire_run_lock() {
-        Some(g) => g,
+    // 20260919002：锁粒度 per-agent——同一 Agent 互斥，不同 Agent 可并行。
+    let (task_state, running_guard) = match runtime.try_acquire_run_lock(&input.agent_id) {
+        Some(pair) => pair,
         None => {
-            return Err("已有任务正在运行，请先等待其完成或点击停止。".into());
+            return Err(format!(
+                "智能体 {} 已有任务正在运行，请先等待其完成。",
+                input.agent_id
+            ));
         }
     };
 
@@ -262,6 +267,7 @@ pub async fn run_task_ex(
             plan_override,
             pre_completed,
             initial_context,
+            &task_state,
         )
         .await;
         let mut reg = reg.lock().await;
@@ -314,20 +320,22 @@ pub async fn wait_task(
     }
 }
 
-/// 回传审批决策。
+/// 回传审批决策。20260919002：agent_id 缺省时路由到唯一在跑任务（多任务并行须显式传）。
 #[tauri::command]
 pub async fn submit_approval_decision(
     runtime: State<'_, AgentRuntime>,
+    agent_id: Option<String>,
     decision: ApprovalDecisionInput,
 ) -> Result<bool, String> {
+    let task = runtime.resolve_task_state(agent_id.as_deref())?;
     // 15007：「本任务内记住」勾选 → 把策略授权 key 写入 grants（同信号后续操作放行）。
     // 仅 approve/takeover 生效；skip 意味着拒绝，不该记住。
     if decision.remember && decision.decision != "skip" {
         if let Some(key) = &decision.grant_key {
-            runtime.approval_grants.grant(key);
+            task.approval_grants.grant(key);
         }
     }
-    Ok(runtime.approval.resolve(decision).await)
+    Ok(task.approval.resolve(decision).await)
 }
 
 /// 回传方案推荐选择（Agent 调 `native__ask_user_choice` 挂起后，用户点选唤醒）。
@@ -344,30 +352,39 @@ pub struct SubmitChoiceInput {
 #[tauri::command]
 pub async fn submit_choice_decision(
     runtime: State<'_, AgentRuntime>,
+    agent_id: Option<String>,
     input: SubmitChoiceInput,
 ) -> Result<bool, String> {
-    Ok(runtime
+    let task = runtime.resolve_task_state(agent_id.as_deref())?;
+    Ok(task
         .choice
         .resolve(&input.choice_id, &input.option_id, input.custom_text)
         .await)
 }
 
-/// 取消当前任务（最佳努力）：置位共享取消标志，后台 run_task 流水线与流式拉取循环
+/// 取消当前任务（最佳努力）：置位该 Agent 的取消标志，后台 run_task 流水线与流式拉取循环
 /// 会在下一轮边界 / 下一个 SSE chunk 处感知并立即终止，无需额外的任务句柄。
+/// 20260919002：按 agent_id 路由（并行任务只停目标 Agent）；agent_id 缺省时取唯一在跑任务。
 #[tauri::command]
-pub async fn cancel_agent_task(runtime: State<'_, AgentRuntime>) -> Result<(), String> {
-    runtime
-        .cancel_flag
+pub async fn cancel_agent_task(
+    runtime: State<'_, AgentRuntime>,
+    agent_id: Option<String>,
+) -> Result<(), String> {
+    let task = runtime.resolve_task_state(agent_id.as_deref())?;
+    task.cancel_flag
         .store(true, std::sync::atomic::Ordering::SeqCst);
     // 若后台流水线正挂在恢复等待上，同步唤醒（否则取消信号无法跳出 wait 挂起）。
-    runtime.recovery.cancel();
+    task.recovery.cancel();
     // 若后台流水线正挂在敏感工具审批上，清空所有 pending 审批（drop Sender →
     // `rx.await` 走拒绝分支），否则「停止」无法跳出审批挂起、任务永久卡住。
-    runtime.approval.cancel_all().await;
-    runtime.choice.cancel_all().await;
+    task.approval.cancel_all().await;
+    task.choice.cancel_all().await;
     // 若后台流水线正挂在计划审批门禁上，唤醒（否则「停止」无法跳出等待、任务永久卡住）。
-    runtime.plan_approval.cancel();
-    tracing::info!("[agent] cancel_agent_task: 已置位取消标志，后台任务将尽快终止");
+    task.plan_approval.cancel();
+    tracing::info!(
+        "[agent] cancel_agent_task: agent {} 已置位取消标志，后台任务将尽快终止",
+        task.agent_id
+    );
     Ok(())
 }
 
@@ -382,23 +399,31 @@ pub struct ResolveSubtaskInput {
     pub guidance: Option<String>,
 }
 
-/// 重试当前受阻子任务（步骤级恢复按钮之一）。
+/// 重试当前受阻子任务（步骤级恢复按钮之一）。20260919002：按 agent_id 路由。
 #[tauri::command]
-pub async fn retry_subtask(runtime: State<'_, AgentRuntime>) -> Result<bool, String> {
-    if !runtime.recovery.is_blocked() {
+pub async fn retry_subtask(
+    runtime: State<'_, AgentRuntime>,
+    agent_id: Option<String>,
+) -> Result<bool, String> {
+    let task = runtime.resolve_task_state(agent_id.as_deref())?;
+    if !task.recovery.is_blocked() {
         return Ok(false); // 当前没有子任务在等待恢复
     }
-    runtime.recovery.resolve(RecoveryDecision::Retry);
+    task.recovery.resolve(RecoveryDecision::Retry);
     Ok(true)
 }
 
 /// 跳过当前受阻子任务，标记为已跳过并继续后续步骤（步骤级恢复按钮之一）。
 #[tauri::command]
-pub async fn skip_subtask(runtime: State<'_, AgentRuntime>) -> Result<bool, String> {
-    if !runtime.recovery.is_blocked() {
+pub async fn skip_subtask(
+    runtime: State<'_, AgentRuntime>,
+    agent_id: Option<String>,
+) -> Result<bool, String> {
+    let task = runtime.resolve_task_state(agent_id.as_deref())?;
+    if !task.recovery.is_blocked() {
         return Ok(false);
     }
-    runtime.recovery.resolve(RecoveryDecision::Skip);
+    task.recovery.resolve(RecoveryDecision::Skip);
     Ok(true)
 }
 
@@ -407,9 +432,11 @@ pub async fn skip_subtask(runtime: State<'_, AgentRuntime>) -> Result<bool, Stri
 #[tauri::command]
 pub async fn resolve_subtask(
     runtime: State<'_, AgentRuntime>,
+    agent_id: Option<String>,
     input: ResolveSubtaskInput,
 ) -> Result<bool, String> {
-    if !runtime.recovery.is_blocked() {
+    let task = runtime.resolve_task_state(agent_id.as_deref())?;
+    if !task.recovery.is_blocked() {
         return Ok(false);
     }
     let decision = match input.decision.to_lowercase().as_str() {
@@ -423,7 +450,7 @@ pub async fn resolve_subtask(
             ))
         }
     };
-    runtime.recovery.resolve(decision);
+    task.recovery.resolve(decision);
     Ok(true)
 }
 
@@ -443,9 +470,11 @@ pub struct SubmitPlanApprovalInput {
 #[tauri::command]
 pub async fn submit_plan_decision(
     runtime: State<'_, AgentRuntime>,
+    agent_id: Option<String>,
     input: SubmitPlanApprovalInput,
 ) -> Result<bool, String> {
-    if !runtime.plan_approval.is_blocked() {
+    let task = runtime.resolve_task_state(agent_id.as_deref())?;
+    if !task.plan_approval.is_blocked() {
         return Ok(false);
     }
     let decision = match input.decision.to_lowercase().as_str() {
@@ -458,7 +487,7 @@ pub async fn submit_plan_decision(
             ))
         }
     };
-    runtime.plan_approval.resolve(decision);
+    task.plan_approval.resolve(decision);
     Ok(true)
 }
 

@@ -13,6 +13,7 @@
  *  - 非 Tauri 环境（浏览器 dev）回退 localStorage，保证可调试（资产扫描返回空）。
  */
 import { isTauri } from '@/core/config'
+import { fe } from '@/core/logBridge'
 import { safeIso } from './safeTime'
 import type { KnowledgeBase, KnowledgeAsset, KnowledgeAssetType } from '@/types/core'
 import type { KnowledgeBaseRow, KnowledgeAssetRow } from '@/types/database'
@@ -180,6 +181,7 @@ export async function createKnowledgeBase(input: {
     ],
   )
   await syncAssets(id, folder)
+  fe.info('kb', `createKnowledgeBase ok identifier=${input.identifier} id=${id}`)
   return listKnowledgeBases()
 }
 
@@ -257,6 +259,7 @@ export async function deleteKnowledgeBase(kb: KnowledgeBase): Promise<KnowledgeB
   await db.execute('DELETE FROM knowledge_asset WHERE kb_id = ?', [kb.id])
   await db.execute('DELETE FROM knowledge_base WHERE id = ?', [kb.id])
   if (kb.path) await removeKbDir(kb.path)
+  fe.info('kb', `deleteKnowledgeBase ok identifier=${kb.identifier} id=${kb.id}`)
   return listKnowledgeBases()
 }
 // 整库删除：级联清理该库全部资产的向量段（fire-and-forget，幂等）
@@ -279,6 +282,46 @@ export async function listAssets(kbId: string): Promise<KnowledgeAsset[]> {
     [kbId],
   )
   return rows.map(rowToAsset)
+}
+
+/** 读取资产 meta_data JSON 里的标签数组（K3-3 标签云）。
+ *  容忍脏数据：缺失 / 非 JSON / tags 非数组 → 空数组。 */
+export function parseAssetTags(metaData: string | null | undefined): string[] {
+  if (!metaData) return []
+  try {
+    const v = JSON.parse(metaData) as { tags?: unknown }
+    return Array.isArray(v.tags) ? v.tags.filter((t): t is string => typeof t === 'string') : []
+  } catch {
+    return []
+  }
+}
+
+/** 更新资产标签（K3-3）：合并保留 meta_data 既有字段，仅覆写 tags 键。
+ *  空数组 = 清空标签（meta_data 若因此为空对象则置 NULL，保持列整洁）。 */
+export async function updateAssetTags(assetId: string, tags: string[]): Promise<void> {
+  if (!isTauri) return
+  const db = await getDb()
+  const rows = await db.select<{ meta_data: string | null }[]>(
+    'SELECT meta_data FROM knowledge_asset WHERE id = ?',
+    [assetId],
+  )
+  let meta: Record<string, unknown> = {}
+  if (rows[0]?.meta_data) {
+    try {
+      const parsed = JSON.parse(rows[0].meta_data) as Record<string, unknown>
+      if (parsed && typeof parsed === 'object') meta = parsed
+    } catch {
+      /* 脏 meta_data：从空对象重建 */
+    }
+  }
+  meta.tags = tags
+  const next = JSON.stringify(meta)
+  await db.execute('UPDATE knowledge_asset SET meta_data = ?, updated_at = ? WHERE id = ?', [
+    next === '{}' ? null : next,
+    Date.now(),
+    assetId,
+  ])
+  fe.info('kb', `updateAssetTags asset=${assetId.slice(0, 8)} tags=[${tags.join(',')}]`)
 }
 
 /** 删除某知识库下指定目录（含其全部子目录）对应的资产记录。
@@ -367,6 +410,10 @@ async function syncAssets(id: string, folder: string): Promise<{ fileCount: numb
   await db.execute(
     'UPDATE knowledge_base SET file_count = ?, file_size = ?, updated_at = ? WHERE id = ?',
     [fileCount, fileSize, now, id],
+  )
+  fe.info(
+    'kb',
+    `syncAssets done kbId=${id} count=${fileCount} size=${fileSize} toSync=${toSync.length} removed=${removed.length}`,
   )
   return { fileCount, fileSize }
 }

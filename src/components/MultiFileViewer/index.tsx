@@ -18,10 +18,12 @@
  */
 import { Component, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Spin } from 'antd'
+import { Save, X, Pencil } from 'lucide-react'
 import type { KnowledgeBase } from '@/types/core'
-import { readKbFileContent, type KbFileContent } from '@/core/file/kbFs'
+import { readKbFileContent, writeKbFileContent, type KbFileContent } from '@/core/file/kbFs'
 import { MarkdownRenderer } from '@/components/markdown/MarkdownRenderer'
 import { MonacoJsonEditor } from '@/components/code-editor'
+import { useNotify } from '@/components/ui/notify'
 import { useResolvedTheme } from '@/hooks/useResolvedTheme'
 import { pdfZhCn } from './pdfZhCn'
 
@@ -130,17 +132,34 @@ export interface MultiFileViewerProps {
   kb: KnowledgeBase
   /** 相对知识库根目录的路径；为空表示未选中 */
   relPath: string | null
+  /** 文件内容被编辑保存后回调（如触发知识库增量索引），可选。 */
+  onFileChanged?: () => void
 }
 
-export function MultiFileViewer({ kb, relPath }: MultiFileViewerProps) {
+/** 可编辑扩展名集合：纯文本/标记/代码类（二进制与富格式仅预览）。 */
+const EDITABLE_EXTS = new Set([
+  'md', 'markdown', 'txt', 'log', 'json', 'jsonc', 'yml', 'yaml', 'sh', 'bash', 'zsh',
+  'ps1', 'py', 'js', 'mjs', 'cjs', 'jsx', 'ts', 'tsx', 'html', 'css', 'scss', 'less',
+  'go', 'rs', 'java', 'kt', 'rb', 'php', 'c', 'h', 'cpp', 'cs', 'swift', 'lua', 'sql',
+  'xml', 'toml', 'ini', 'env',
+])
+
+export function MultiFileViewer({ kb, relPath, onFileChanged }: MultiFileViewerProps) {
+  const { message } = useNotify()
   const [content, setContent] = useState<KbFileContent | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // 编辑态（K 系列补充：详情页此前只能创建不能编辑，属功能缺口）
+  const [reloadNonce, setReloadNonce] = useState(0)
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState('')
+  const [saving, setSaving] = useState(false)
 
   useEffect(() => {
     let active = true
     setContent(null)
     setError(null)
+    setEditing(false)
     if (!relPath || !kb.path) return
     setLoading(true)
     void (async () => {
@@ -153,7 +172,7 @@ export function MultiFileViewer({ kb, relPath }: MultiFileViewerProps) {
     return () => {
       active = false
     }
-  }, [kb.path, relPath])
+  }, [kb.path, relPath, reloadNonce])
 
   if (!relPath) return <div className="kb-viewer__muted">请从左侧选择一个文件</div>
   if (loading) return <div className="kb-viewer__loading"><Spin tip="正在读取文件..." /></div>
@@ -161,35 +180,100 @@ export function MultiFileViewer({ kb, relPath }: MultiFileViewerProps) {
   if (!content) return <div className="kb-viewer__muted">请选择一个文件</div>
 
   const ext = extOf(content.name)
+  const canEdit = EDITABLE_EXTS.has(ext)
 
-  if (ext === 'md' || ext === 'markdown') {
-    return <MarkdownViewer bytes={content.data} kbPath={kb.path as string} mdRelPath={relPath} />
+  if (editing) {
+    return (
+      <div className="kb-viewer__editwrap">
+        <div className="kb-viewer__editbar">
+          <span className="kb-viewer__editbar-hint">{relPath}</span>
+          <button
+            type="button"
+            className="kb-viewer__editbar-btn"
+            disabled={saving}
+            onClick={() => {
+              void (async () => {
+                setSaving(true)
+                const r = await writeKbFileContent(kb.path as string, relPath, draft)
+                setSaving(false)
+                if (r.ok) {
+                  message.success('已保存')
+                  onFileChanged?.()
+                  setEditing(false)
+                  setReloadNonce((n) => n + 1)
+                } else {
+                  message.error(`保存失败：${r.error ?? '未知错误'}`)
+                }
+              })()
+            }}
+          >
+            <Save size={13} /> {saving ? '保存中…' : '保存'}
+          </button>
+          <button
+            type="button"
+            className="kb-viewer__editbar-btn"
+            disabled={saving}
+            onClick={() => setEditing(false)}
+          >
+            <X size={13} /> 取消
+          </button>
+        </div>
+        <div className="kb-viewer__editarea">
+          <MonacoJsonEditor
+            mode="code"
+            value={draft}
+            onChange={(v) => setDraft(typeof v === 'string' ? v : draft)}
+            language={langOf(content.name)}
+            height="100%"
+          />
+        </div>
+      </div>
+    )
   }
-  if (ext === 'pdf') {
-    return <PdfViewer bytes={content.data} name={content.name} />
-  }
-  if (ext === 'doc' || ext === 'docx') {
-    return <DocxViewer bytes={content.data} name={content.name} />
-  }
-  if (ext === 'xls' || ext === 'xlsx' || ext === 'csv') {
-    return <XlsxViewer bytes={content.data} name={content.name} />
-  }
-  if (ext === 'pptx') {
-    return <PptxViewer bytes={content.data} name={content.name} />
-  }
-  if (isImageFile(content.name)) {
-    return <ImageViewer bytes={content.data} name={content.name} ext={ext} />
-  }
-  if (isVideoFile(content.name)) {
-    return <VideoViewer bytes={content.data} name={content.name} ext={ext} />
-  }
-  if (isAudioFile(content.name)) {
-    return <AudioViewer bytes={content.data} name={content.name} ext={ext} />
-  }
-  if (ext === 'epub') {
-    return <EpubViewer bytes={content.data} name={content.name} />
-  }
-  return <TextViewer bytes={content.data} name={content.name} />
+
+  const body =
+    ext === 'md' || ext === 'markdown' ? (
+      <MarkdownViewer bytes={content.data} kbPath={kb.path as string} mdRelPath={relPath} />
+    ) : ext === 'pdf' ? (
+      <PdfViewer bytes={content.data} name={content.name} />
+    ) : ext === 'doc' || ext === 'docx' ? (
+      <DocxViewer bytes={content.data} name={content.name} />
+    ) : ext === 'xls' || ext === 'xlsx' || ext === 'csv' ? (
+      <XlsxViewer bytes={content.data} name={content.name} />
+    ) : ext === 'pptx' ? (
+      <PptxViewer bytes={content.data} name={content.name} />
+    ) : isImageFile(content.name) ? (
+      <ImageViewer bytes={content.data} name={content.name} ext={ext} />
+    ) : isVideoFile(content.name) ? (
+      <VideoViewer bytes={content.data} name={content.name} ext={ext} />
+    ) : isAudioFile(content.name) ? (
+      <AudioViewer bytes={content.data} name={content.name} ext={ext} />
+    ) : ext === 'epub' ? (
+      <EpubViewer bytes={content.data} name={content.name} />
+    ) : (
+      <TextViewer bytes={content.data} name={content.name} />
+    )
+
+  return canEdit ? (
+    <div className="kb-viewer__editwrap">
+      <div className="kb-viewer__editbar">
+        <span className="kb-viewer__editbar-hint" />
+        <button
+          type="button"
+          className="kb-viewer__editbar-btn"
+          onClick={() => {
+            setDraft(new TextDecoder('utf-8').decode(content.data))
+            setEditing(true)
+          }}
+        >
+          <Pencil size={13} /> 编辑
+        </button>
+      </div>
+      {body}
+    </div>
+  ) : (
+    body
+  )
 }
 
 /* ----------------------------- 各类型渲染子组件 ----------------------------- */

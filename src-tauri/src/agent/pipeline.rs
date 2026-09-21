@@ -98,7 +98,9 @@ const GLOBAL_AGENT_RULES: &str = "【交互准则 · 全局】\n\
 - 当用户的核心任务目标已经完成后，不要调用 `native__ask_user_choice` 来征求后续方向或建议；\
 把可选的后续方向作为简短要点写在你的【最终回复】文本里即可（用户看完自行决定是否开启新任务）。\n\
 - `native__ask_user_choice` 仅用于「任务进行中、意图确实不明确、且必须用户拍板才能继续推进」的情形（如多分支取舍）。\n\
-- 不要把「推荐方案 / 后续建议」包装成需要用户即时选择的弹窗。";
+- 不要把「推荐方案 / 后续建议」包装成需要用户即时选择的弹窗。\n\
+- 思考过程（reasoning/思考链）一律用**简体中文**书写（用户会在界面直接阅读思考流，英文思考不可接受）；\
+最终回复同样使用简体中文。";
 
 fn build_skill_guidance(skills: &[crate::agent::skill_adapter::SkillToolWrapper]) -> String {
     if skills.is_empty() {

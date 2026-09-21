@@ -1,8 +1,8 @@
 /* 知识库详情页 + 目录树 + 多格式查看器 */
 .kb-detail {
-  padding: 20px 28px 32px;
-  max-width: 1280px;
-  margin: 0 auto;
+  /* 全屏铺满：不设 max-width（1280 会在宽屏两侧留大段空白），仅以边距控制呼吸感；
+     explorer 为 300px 树 + 1fr 查看器的网格，宽屏下查看器自然吃满剩余宽度。 */
+  padding: 20px 32px 32px;
   /* 参考 skill 模块详情页：钉死为窗口可用高度，页面本身不滚动；
      头部 / 信息块为固定块，文件块 flex:1 占剩余高度，目录与内容各自内部细滚动；
      窄屏（堆叠布局）才允许整体滚动。 */
@@ -145,7 +145,8 @@
 
   &__explorer {
     display: grid;
-    grid-template-columns: 280px 1fr;
+    /* 宽屏铺满：树列加宽到 320px（窄屏堆叠布局由下方 media query 处理），查看器吃满剩余 */
+    grid-template-columns: 320px 1fr;
     gap: 16px;
     flex: 1;
     min-height: 0;
@@ -675,4 +676,240 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+/* K3-3 标签悬浮栈：右缘 icon + 牙齿式标签条竖排（hover 向左抽出、点击定位）。 */
+.kb-detail { position: relative; }
+
+.kb-detail__tagstack {
+  position: absolute;
+  right: 0;
+  top: 7%;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+.kb-detail__float-tag {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  margin-right: 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-surface, #fff);
+  color: var(--color-foreground-muted);
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  transition: background 0.12s ease, color 0.12s ease;
+
+  &:hover:not(:disabled) {
+    background: var(--color-surface-hover, rgba(0, 0, 0, 0.05));
+    color: var(--color-foreground);
+  }
+
+  &:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+
+  &--open {
+    outline: 2px solid rgba(59, 130, 246, 0.45);
+  }
+}
+
+/* 牙齿式标签条：默认只露出 30px 色块，hover 向左抽出显示完整名称+计数。
+   右端平齐贴边、左端圆角，像从右缘抽屉里拉出来的一截。 */
+.kb-detail__tagdrawer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 5px;
+  height: 26px;
+  max-width: 30px;
+  padding: 0 10px 0 8px;
+  border: none;
+  border-radius: 13px 0 0 13px;
+  cursor: pointer;
+  overflow: hidden;
+  white-space: nowrap;
+  font-size: 11.5px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+  transition: max-width 0.2s ease;
+
+  &:hover {
+    max-width: 240px;
+  }
+}
+
+.kb-detail__tagdrawer-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 0;
+  opacity: 0;
+  transition: max-width 0.2s ease, opacity 0.18s ease;
+
+  .kb-detail__tagdrawer:hover & {
+    max-width: 170px;
+    opacity: 1;
+  }
+}
+
+.kb-detail__tagdrawer-n {
+  flex: none;
+  font-size: 10px;
+  font-weight: 700;
+  opacity: 0;
+  transition: opacity 0.18s ease;
+}
+
+.kb-detail__tagdrawer:hover .kb-detail__tagdrawer-n {
+  opacity: 0.8;
+}
+
+.kb-detail__tagpanel {
+  position: absolute;
+  right: 46px;
+  top: 7%;
+  z-index: 41;
+  width: 264px;
+  padding: 9px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-bg, #fff);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.14);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.kb-detail__tagpanel-chips {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.kb-detail__tagpanel-empty {
+  font-size: 11px;
+  color: var(--color-foreground-subtle, var(--color-foreground-muted));
+}
+
+.kb-detail__tagchip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: 22px;
+  padding: 0 4px 0 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  cursor: pointer;
+  font-size: 11.5px;
+  user-select: none;
+}
+
+.kb-detail__tagchip-name {
+  border: none;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+  font-size: 11.5px;
+  color: inherit;
+  max-width: 5ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kb-detail__tagchip-x {
+  border: none;
+  background: transparent;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  color: inherit;
+  opacity: 0.6;
+  transition: opacity 0.12s ease, background 0.12s ease;
+
+  &:hover {
+    opacity: 1;
+    background: rgba(0, 0, 0, 0.08);
+  }
+}
+
+/* 文件编辑（K 系列补充：详情页文件可编辑保存）。 */
+.kb-viewer__editwrap {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  height: 100%;
+  min-height: 0;
+}
+
+.kb-viewer__editbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+
+.kb-viewer__editbar-hint {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 11px;
+  color: var(--color-foreground-muted);
+}
+
+.kb-viewer__editbar-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-surface, rgba(0, 0, 0, 0.02));
+  cursor: pointer;
+  font-size: 11.5px;
+  color: var(--color-foreground);
+  transition: background 0.12s ease;
+
+  &:hover:not(:disabled) {
+    background: var(--color-surface-hover, rgba(0, 0, 0, 0.05));
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+}
+
+.kb-viewer__editarea {
+  flex: 1 1 auto;
+  min-height: 0;
+  /* Monaco 高度传导链：editarea(flex) → .mcphub-monaco(flex) → __body(flex) → Editor 100% */
+  display: flex;
+}
+
+.kb-viewer__editarea .mcphub-monaco {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.kb-viewer__editarea .mcphub-monaco__body {
+  flex: 1 1 auto;
+  min-height: 0;
 }

@@ -10,8 +10,11 @@
 //! - 模块发现层（Rust 直读 workduo.db，零业务副作用，供自测驱动方「看到可选集」后智能选值）：
 //!   `agent_list_models` / `agent_list_skills` / `agent_list_mcps` / `agent_list_mcp_tools` /
 //!   `agent_list_plugins` / `agent_list_kbs` / `agent_list_scenarios`
-//! - UI 意图层（派发到前端真实 handler，走完整 Tauri2 全流程）：
+//! - UI 意图层（派发到前端真实 handler，走完整 Tauri2 全流程，所有操作留痕、可经 UI 抽查）：
 //!   `agent_ui_create` / `agent_ui_update` / `agent_ui_delete` / `agent_ui_get` / `agent_ui_list`
+//!   + 插件模块 `plugin_*`（百宝箱→插件：增删改查/启用/试跑/提取头注/执行日志）
+//!   + 知识库模块 `kb_*`（创建/编辑/删除/列资产/新增文件/导入/建文件夹/移除/重建索引）
+//!   + 记忆宫殿模块 `memory_*`（设置→记忆宫殿：锚定/更新/删除/召回/蒸馏候选/热力图）
 //!
 //! UI 意图工具经 Tauri 事件 `mcp:intent` 派发到前端 `mcpBridge`，
 //! 前端用 `invoke('mcp_resolve_result', {id, ok, data})` 回传结果。
@@ -548,6 +551,41 @@ async fn call_tool(app: &AppHandle, name: &str, args: &Value) -> Value {
             let sid = args.get("sessionId").and_then(|v| v.as_str()).unwrap_or("").to_string();
             dispatch_ui(app, "agent:round_list", json!({ "sessionId": sid })).await
         }
+        // —— 插件模块（百宝箱 → 插件）：UI 级真实 handler（增删改查/启用/试跑/提取头注/执行日志）——
+        "plugin_list" => dispatch_ui(app, "plugin:list", args.clone()).await,
+        "plugin_get" => dispatch_ui(app, "plugin:get", args.clone()).await,
+        "plugin_upsert" => dispatch_ui(app, "plugin:upsert", args.clone()).await,
+        "plugin_delete" => dispatch_ui(app, "plugin:delete", args.clone()).await,
+        "plugin_set_enabled" => dispatch_ui(app, "plugin:set_enabled", args.clone()).await,
+        "plugin_test" => dispatch_ui(app, "plugin:test", args.clone()).await,
+        "plugin_extract_meta" => dispatch_ui(app, "plugin:extract_meta", args.clone()).await,
+        "plugin_list_run_logs" => dispatch_ui(app, "plugin:list_run_logs", args.clone()).await,
+        // —— 知识库模块：UI 级真实 handler（创建/编辑/删除/列资产/新增文件/导入/建文件夹/移除/重建索引）——
+        "kb_list" => dispatch_ui(app, "kb:list", args.clone()).await,
+        "kb_get" => dispatch_ui(app, "kb:get", args.clone()).await,
+        "kb_create" => dispatch_ui(app, "kb:create", args.clone()).await,
+        "kb_update" => dispatch_ui(app, "kb:update", args.clone()).await,
+        "kb_delete" => dispatch_ui(app, "kb:delete", args.clone()).await,
+        "kb_list_assets" => dispatch_ui(app, "kb:list_assets", args.clone()).await,
+        "kb_add_file" => dispatch_ui(app, "kb:add_file", args.clone()).await,
+        "kb_import_file" => dispatch_ui(app, "kb:import_file", args.clone()).await,
+        "kb_create_folder" => dispatch_ui(app, "kb:create_folder", args.clone()).await,
+        "kb_remove_file" => dispatch_ui(app, "kb:remove_file", args.clone()).await,
+        "kb_rebuild_index" => dispatch_ui(app, "kb:rebuild_index", args.clone()).await,
+        "kb_add_tag" => dispatch_ui(app, "kb:add_tag", args.clone()).await,
+        "kb_remove_tag" => dispatch_ui(app, "kb:remove_tag", args.clone()).await,
+        "kb_rename_tag" => dispatch_ui(app, "kb:rename_tag", args.clone()).await,
+        "kb_get_tags" => dispatch_ui(app, "kb:get_tags", args.clone()).await,
+        // —— 记忆宫殿模块（设置 → 记忆宫殿）：UI 级 invoke 调用（与 MemoryPalace.tsx 同款）——
+        "memory_list" => dispatch_ui(app, "memory:list", args.clone()).await,
+        "memory_heatmap" => dispatch_ui(app, "memory:heatmap", args.clone()).await,
+        "memory_anchor" => dispatch_ui(app, "memory:anchor", args.clone()).await,
+        "memory_update" => dispatch_ui(app, "memory:update", args.clone()).await,
+        "memory_delete" => dispatch_ui(app, "memory:delete", args.clone()).await,
+        "memory_recall" => dispatch_ui(app, "memory:recall", args.clone()).await,
+        "memory_list_candidates" => dispatch_ui(app, "memory:list_candidates", args.clone()).await,
+        "memory_confirm_candidate" => dispatch_ui(app, "memory:confirm_candidate", args.clone()).await,
+        "memory_reject_candidate" => dispatch_ui(app, "memory:reject_candidate", args.clone()).await,
         _ => json!({ "error": format!("unknown tool: {name}") }),
     }
 }
@@ -787,6 +825,235 @@ run_task_ex / run_agent_task 启动时会 reset 该缓冲，故只反映最近�
             "agent_list_scenarios",
             "【模块发现】读取 scenario_category（默认 scope='AGENT'），列出智能体场景分类 {id,scope,value,label}。\n用途：为 agent_ui_create 的 scenario 字段选 value（如 office-efficiency / data-analysis / dev-programming）。",
             json!({ "type": "object", "properties": { "scope": { "type": "string", "description": "场景域，默认 AGENT；可选 MCP/SKILL/KB" } } }),
+        ),
+        // —— 插件模块（百宝箱 → 插件）——
+        tool(
+            "plugin_list",
+            "【插件·发现】列出全部本地插件（FaaS）。返回每行含 id/name/identifier/description/runtime/enabled/scenario。\n用途：为 agent_ui_create 的 pluginIds 选值（数组，≤10）；或定位 identifier 做编辑/删除。",
+            json!({ "type": "object", "properties": { "scenario": { "type": "string", "description": "场景 key（可选，按场景过滤）" } } }),
+        ),
+        tool(
+            "plugin_get",
+            "【插件·查】按 id 查询单个插件（含 scriptContent 完整脚本）。",
+            json!({ "type": "object", "properties": { "id": { "type": "string" } }, "required": ["id"] }),
+        ),
+        tool(
+            "plugin_upsert",
+            "【插件·自编写/增/改】创建或更新插件（id 空=新建）。\n这是「插件自编写」核心入口：把一段 run(params) 函数 + 头注释元数据写入 platform（落 user_plugin_tool 表，script_content 字段），平台以 custom__<identifier> 注册为智能体工具。\n【字段】id(可选,空则新建) / name(必填) / identifier(必填,slug,^[a-z0-9][a-z0-9_-]{1,47}$,不得含 native__/mcp__/skill__/custom__ 前缀) / description(必填) / runtime(必填,'python'|'bun'，注意：本系统无 node，TypeScript 用 'bun') / scriptContent(必填,用户核心代码，仅 run+头注释) / parametersSchema(必填,JSON Schema 对象) / dependencies(可选,依赖数组如['requests']) / sampleParams(可选,试跑示例参数) / enabled(可选,默认true) / timeoutSec(可选,秒,默认60,硬上限300) / scenario(可选)。\n【脚本范式】Python 头注释用 \"\"\"name/description/dependencies/parameters\"\"\"；Bun/TS 用 JSDoc /** ... */。函数签名固定 def run(params): / export async function run(params)。详见 Skill 内 scripts/ 目录的标准范式模板。",
+            json!({ "type": "object", "properties": {
+                "id": { "type": "string", "description": "空=新建，否则按 id 更新" },
+                "name": { "type": "string" },
+                "identifier": { "type": "string", "description": "slug，不含 custom__ 前缀" },
+                "description": { "type": "string" },
+                "runtime": { "type": "string", "enum": ["python", "bun"], "description": "脚本运行期（无 node）" },
+                "scriptContent": { "type": "string", "description": "用户核心代码（run + 头注释）" },
+                "parametersSchema": { "type": "object", "description": "JSON Schema 对象" },
+                "dependencies": { "type": "array", "items": { "type": "string" } },
+                "sampleParams": { "type": "object" },
+                "enabled": { "type": "boolean" },
+                "timeoutSec": { "type": "number" },
+                "scenario": { "type": "string" }
+            }, "required": ["name", "identifier", "description", "runtime", "scriptContent", "parametersSchema"] }),
+        ),
+        tool(
+            "plugin_delete",
+            "【插件·删】真实删除插件（级联清理 agent_plugin_ref；run_log 由 Rust 侧按需清理）。\n⚠️ 为真实不可逆删除，请显式传入 id，谨慎使用；测试数据清理请故意、显式进行，以便人工抽查留痕。",
+            json!({ "type": "object", "properties": { "id": { "type": "string" } }, "required": ["id"] }),
+        ),
+        tool(
+            "plugin_set_enabled",
+            "【插件·启停】切换插件启用/禁用（enabled=0/1）。",
+            json!({ "type": "object", "properties": { "id": { "type": "string" }, "enabled": { "type": "boolean" } }, "required": ["id", "enabled"] }),
+        ),
+        tool(
+            "plugin_test",
+            "【插件·试跑】端到端试跑插件：读 DB → 拼 Runner → 沙箱执行（python 走 micromamba，bun 走 bun）→ exit 42 依赖自愈 → 写 plugin_run_log。\n返回 PluginTestResult{ok,callId,durationMs,exitCode,result,stdout,stderr,depsInstalled,errorType,missingPackage,errorMessage,traceback}。params 缺省回退 sampleParams→{}。",
+            json!({ "type": "object", "properties": { "pluginId": { "type": "string" }, "params": { "type": "object", "description": "试跑入参（覆盖 sampleParams）" } }, "required": ["pluginId"] }),
+        ),
+        tool(
+            "plugin_extract_meta",
+            "【插件·解析】从脚本头注释解析元数据（name/description/dependencies/parameters→JSON Schema），不落库。用于自编写时先校验/预览元数据。",
+            json!({ "type": "object", "properties": { "runtime": { "type": "string", "enum": ["python", "bun"] }, "script": { "type": "string" } }, "required": ["runtime", "script"] }),
+        ),
+        tool(
+            "plugin_list_run_logs",
+            "【插件·日志】列出某插件最近执行日志（plugin_run_log，按时间倒序，limit 默认 50）。",
+            json!({ "type": "object", "properties": { "pluginId": { "type": "string" }, "limit": { "type": "number" } }, "required": ["pluginId"] }),
+        ),
+        // —— 知识库模块 ——
+        tool(
+            "kb_list",
+            "【KB·发现】列出全部知识库（knowledge_base）。返回 id/identifier/name/description/scenario/file_count。\n用途：为 agent_ui_create 的 kbIds 选值（数组，无上限）；绑定后智能体获得 native__kb_search 检索能力。",
+            json!({ "type": "object", "properties": { "scenarioFilter": { "type": "string", "description": "场景 key（可选）" } } }),
+        ),
+        tool(
+            "kb_get",
+            "【KB·查】按 id 查询单个知识库（含派生 path）。",
+            json!({ "type": "object", "properties": { "id": { "type": "string" } }, "required": ["id"] }),
+        ),
+        tool(
+            "kb_create",
+            "【KB·创建】新建知识库：建物理目录 + 写 knowledge_base 行 + 扫描初始资产。\n【字段】identifier(必填,唯一 slug,同时是磁盘目录名) / name(必填) / description(可选) / logo(可选) / scenario(可选场景 value)。",
+            json!({ "type": "object", "properties": {
+                "identifier": { "type": "string" },
+                "name": { "type": "string" },
+                "description": { "type": "string" },
+                "logo": { "type": "string" },
+                "scenario": { "type": "string" }
+            }, "required": ["identifier", "name"] }),
+        ),
+        tool(
+            "kb_update",
+            "【KB·编辑】更新知识库元数据（名称/简介/Logo/场景/唯一标识）；identifier 变化会同步重命名物理目录。",
+            json!({ "type": "object", "properties": {
+                "id": { "type": "string" },
+                "identifier": { "type": "string" },
+                "name": { "type": "string" },
+                "description": { "type": "string" },
+                "logo": { "type": "string" },
+                "scenario": { "type": "string" }
+            }, "required": ["id", "name"] }),
+        ),
+        tool(
+            "kb_delete",
+            "【KB·删除】删除知识库：级联清理 LanceDB 向量段 + 删 knowledge_asset 行 + 删 knowledge_base 行 + 删物理目录。\n⚠️ 真实不可逆删除，请显式传入 id，谨慎使用；测试数据清理请故意、显式进行，以便人工抽查留痕。",
+            json!({ "type": "object", "properties": { "id": { "type": "string" } }, "required": ["id"] }),
+        ),
+        tool(
+            "kb_list_assets",
+            "【KB·资产】列出某知识库全部资产（knowledge_asset）：id/name/type/fileExt/fileSize/filePath/digest/indexedAt。",
+            json!({ "type": "object", "properties": { "kbId": { "type": "string" } }, "required": ["kbId"] }),
+        ),
+        tool(
+            "kb_add_file",
+            "【KB·新增文件】在知识库内写一段文本内容（如新建 Markdown），并自动 refreshAssets 触发增量索引同步（新增/变化资产 fire-and-forget 调 kb_sync_asset）。\n入参：kbId(必填) / relPath(必填,相对根目录路径如 docs/a.md) / content(必填,文本)。返回刷新后的 {ok,fileCount,fileSize}。",
+            json!({ "type": "object", "properties": {
+                "kbId": { "type": "string" },
+                "relPath": { "type": "string", "description": "相对知识库根目录路径，如 docs/a.md" },
+                "content": { "type": "string" }
+            }, "required": ["kbId", "relPath", "content"] }),
+        ),
+        tool(
+            "kb_import_file",
+            "【KB·导入文件】向知识库导入二进制文件（落盘 + 触发索引）。content 以 base64 编码传入。\n入参：kbId(必填) / relPath(必填) / base64(必填)。返回刷新后的 {ok,fileCount,fileSize}。",
+            json!({ "type": "object", "properties": {
+                "kbId": { "type": "string" },
+                "relPath": { "type": "string" },
+                "base64": { "type": "string", "description": "文件字节的 base64" }
+            }, "required": ["kbId", "relPath", "base64"] }),
+        ),
+        tool(
+            "kb_create_folder",
+            "【KB·建文件夹】在知识库内新建文件夹（仅落盘，不写库、不触发索引）。",
+            json!({ "type": "object", "properties": { "kbId": { "type": "string" }, "relPath": { "type": "string" } }, "required": ["kbId", "relPath"] }),
+        ),
+        tool(
+            "kb_remove_file",
+            "【KB·移除文件】删除知识库内文件/目录：删磁盘条目 + deleteAssetsUnderPath 清库 + 对每个资产 fireKbRemoveAsset 同步删除 LanceDB 向量段（按 kb_id='..' AND asset_id='..' 谓词）。\n⚠️ 会同步删除已索引向量，请确认后操作。",
+            json!({ "type": "object", "properties": { "kbId": { "type": "string" }, "relPath": { "type": "string" } }, "required": ["kbId", "relPath"] }),
+        ),
+        tool(
+            "kb_rebuild_index",
+            "【KB·重建索引】全量重建知识库向量索引（异步 spawn，含重入单飞保护；逐资产 force 重切重嵌）。返回 spawn 受理结果 {started,reason?}。进度经 Tauri 事件 agent-kb-index-progress 推送。",
+            json!({ "type": "object", "properties": { "kbId": { "type": "string" } }, "required": ["kbId"] }),
+        ),
+        tool(
+            "kb_add_tag",
+            "【KB·打标签·增】给指定资产（文件）追加一个标签（写入 knowledge_asset.meta_data.tags 数组；已存在则幂等忽略）。\n入参：kbId(必填) / assetId(必填,目标文件资产 id) / tag(必填,标签文本,自动 trim)。返回 {ok,existed,tags}（tags=操作后完整标签数组）。标签读取可经 kb_list_assets 的 metaData.tags。",
+            json!({ "type": "object", "properties": {
+                "kbId": { "type": "string", "description": "知识库 id" },
+                "assetId": { "type": "string", "description": "目标文件资产 id（kb_list_assets 取）" },
+                "tag": { "type": "string", "description": "标签文本" }
+            }, "required": ["kbId", "assetId", "tag"] }),
+        ),
+        tool(
+            "kb_remove_tag",
+            "【KB·打标签·删】从指定资产移除一个标签（从 meta_data.tags 过滤掉）。\n入参：kbId(必填) / assetId(必填) / tag(必填)。返回 {ok,removed,tags}。",
+            json!({ "type": "object", "properties": {
+                "kbId": { "type": "string" },
+                "assetId": { "type": "string" },
+                "tag": { "type": "string" }
+            }, "required": ["kbId", "assetId", "tag"] }),
+        ),
+        tool(
+            "kb_rename_tag",
+            "【KB·打标签·改】在指定资产内把某标签改名（保持原顺序）。\n入参：kbId(必填) / assetId(必填) / from(必填,原标签) / to(必填,新标签)。返回 {ok,renamed,tags}。",
+            json!({ "type": "object", "properties": {
+                "kbId": { "type": "string" },
+                "assetId": { "type": "string" },
+                "from": { "type": "string", "description": "原标签文本" },
+                "to": { "type": "string", "description": "新标签文本" }
+            }, "required": ["kbId", "assetId", "from", "to"] }),
+        ),
+        tool(
+            "kb_get_tags",
+            "【KB·打标签·查】读取指定资产（文件）当前的全部标签（解析 knowledge_asset.meta_data.tags 数组）。\n入参：kbId(必填) / assetId(必填,目标文件资产 id)。返回 {assetId,tags}（tags=该文件标签字符串数组）。Agent 判读/检索某文件主题时用。",
+            json!({ "type": "object", "properties": {
+                "kbId": { "type": "string", "description": "知识库 id" },
+                "assetId": { "type": "string", "description": "目标文件资产 id（kb_list_assets 取）" }
+            }, "required": ["kbId", "assetId"] }),
+        ),
+        // —— 记忆宫殿模块（设置 → 记忆宫殿）——
+        tool(
+            "memory_list",
+            "【记忆·列】列出记忆宫殿全部记忆（agent_memories，全局视图；分类/关键词过滤在 UI 端做，这里透传 agentId/category/query 给后端）。返回 MemoryItem[]{id,agentId,sessionId,key,content,category,refCount,anchored,lastRecalledAt,createdAt,updatedAt}。",
+            json!({ "type": "object", "properties": {
+                "agentId": { "type": "string", "description": "归属智能体 id（可选，NULL=全局）" },
+                "category": { "type": "string", "description": "分类枚举 decision/code_pattern/user_pref/architecture/fix/other" },
+                "query": { "type": "string" }
+            } }),
+        ),
+        tool(
+            "memory_heatmap",
+            "【记忆·热力图】按日聚合召回次数（agent_memory_events），返回 HeatmapPoint[]{date,count}。",
+            json!({ "type": "object", "properties": { "agentId": { "type": "string" } } }),
+        ),
+        tool(
+            "memory_anchor",
+            "【记忆·锚定/自编写】新增或更新一条记忆（UPSERT，同 agentId+key 存在则更新 content/category 保留 refCount）。\n入参（即 AnchorMemoryInput）：agentId(可选) / sessionId(可选) / key(必填,短标题) / content(必填,记忆正文) / category(可选,默认 'other'，切勿留空依赖 SQL 默认 'general') / anchored(可选,默认 true)。",
+            json!({ "type": "object", "properties": {
+                "agentId": { "type": "string" },
+                "sessionId": { "type": "string" },
+                "key": { "type": "string" },
+                "content": { "type": "string" },
+                "category": { "type": "string", "description": "decision/code_pattern/user_pref/architecture/fix/other，默认 other" },
+                "anchored": { "type": "boolean" }
+            }, "required": ["key", "content"] }),
+        ),
+        tool(
+            "memory_update",
+            "【记忆·编辑】更新某条记忆（仅更新非空字段，key/content 变更后重算向量）。",
+            json!({ "type": "object", "properties": {
+                "id": { "type": "string" },
+                "key": { "type": "string" },
+                "content": { "type": "string" },
+                "category": { "type": "string" }
+            }, "required": ["id"] }),
+        ),
+        tool(
+            "memory_delete",
+            "【记忆·删除】删除一条记忆（DELETE agent_memories 级联清事件 + 删 LanceDB 向量）。\n⚠️ 真实不可逆删除，请显式传入 id，谨慎使用；测试数据清理请故意、显式进行，以便人工抽查留痕。",
+            json!({ "type": "object", "properties": { "id": { "type": "string" } }, "required": ["id"] }),
+        ),
+        tool(
+            "memory_recall",
+            "【记忆·召回】手动召回一次（refCount+1、写 recall 事件、emit agent-memory-recalled）。返回更新后的 MemoryItem。",
+            json!({ "type": "object", "properties": { "id": { "type": "string" } }, "required": ["id"] }),
+        ),
+        tool(
+            "memory_list_candidates",
+            "【记忆·蒸馏候选】列出待确认蒸馏候选（agent_memory_candidates status='pending'）。",
+            json!({ "type": "object", "properties": {} }),
+        ),
+        tool(
+            "memory_confirm_candidate",
+            "【记忆·采纳候选】采纳一条蒸馏候选（过 M0 护栏+去噪后转入 agent_memories，候选置 confirmed）。",
+            json!({ "type": "object", "properties": { "id": { "type": "string" } }, "required": ["id"] }),
+        ),
+        tool(
+            "memory_reject_candidate",
+            "【记忆·忽略候选】忽略一条蒸馏候选（候选置 rejected）。",
+            json!({ "type": "object", "properties": { "id": { "type": "string" } }, "required": ["id"] }),
         ),
     ])
 }

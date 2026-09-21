@@ -6,6 +6,7 @@
  */
 import type * as React from 'react'
 import type { ChatAttachmentInput, PlanStep, ToolStep } from '../session/types'
+import type { KbHit } from '../session/KbSearchCitations'
 
 /** 输入框底部工具条里展示的「单个 MCP 服务」及其绑定工具（用于临时移除 / 工具开关）。 */
 export interface BoundMcpTool {
@@ -53,11 +54,16 @@ export interface SuggestState {
 
 /** 交错时间线段（2026-09-18 用户体验重构）：模型说话（text）、工具调用（tool）、
  * 思考旁白（thought，如「正在记录记忆」）按真实到达顺序排列，界面渲染与复制导出
- * 均按此时序穿插（旁白行紧跟其触发的工具块）。tool 段按 callId 实时回查 toolSteps。 */
+ * 均按此时序穿插（旁白行紧跟其触发的工具块）。tool 段按 callId 实时回查 toolSteps。
+ * kb-sources（K3-2）：task_done 时固化进 segments_json 的「本次引用来源」段——
+ * 仅作持久化载体，历史加载时被 session-helpers 提取回 ChatMessage.kbSources，
+ * 不进时间线渲染（时间线上该段无视觉形态）。 */
 export interface ChatSegment {
-  kind: 'text' | 'tool' | 'thought'
+  kind: 'text' | 'tool' | 'thought' | 'kb-sources'
   text?: string
   callId?: string
+  /** kb-sources 段专用：本轮全部 kb_search 命中去重后的精简列表。 */
+  hits?: KbHit[]
 }
 
 export interface ChatMessage {
@@ -85,6 +91,10 @@ export interface ChatMessage {
   attachments?: ChatAttachmentInput[]
   /** 该轮任务异常信息（由 `agent-task-error` 写入），用于渲染「错误诊断面板」。 */
   error?: { message: string; at: number }
+  /** K3-2 任务级引用来源：本轮全部 kb_search 命中去重后的精简列表，渲染在气泡底部
+   *  「📚 本次引用来源」区。live 轮由 useAgentSession 在 task_done 时定稿；历史轮从
+   *  segments_json 的 kb-sources 段提取回填（session-helpers）。 */
+  kbSources?: KbHit[]
 }
 
 /** 输入框暂存附件：在 ChatAttachmentInput 基础上加前端 id，用于列表 key 与移除。 */

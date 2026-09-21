@@ -19,6 +19,7 @@
 //! 的泛型推断。`FormatEvent` 以具名 struct + `Writer<'_>` 实现（避免闭包参数推断失败：
 //! trait 实参类型是带生命周期的 `Writer<'_>` 而非裸 `&mut dyn Write`，闭包推断对不上）。
 
+use std::fs::OpenOptions;
 use std::io::Write as IoWrite;
 use tauri::Manager;
 use tracing::field::{Field, Visit};
@@ -238,4 +239,36 @@ pub fn get_run_logs(
         }
     }
     Ok(lines)
+}
+
+/// 前端日志转发：把前端（TS/Webview）的关键操作日志也落到同一份每日滚动文件
+///（`workduo.log.YYYY-MM-DD`），使后端 `get_run_logs` 能一并回看「前端 KB 操作 / 索引钩子」
+/// 等链路，便于跨端排错。
+///
+/// 写入格式与 Rust `tracing` 完全一致（`[时间][模块][fe][web:0]-LEVEL-内容`），
+/// 因此 `get_run_logs` 的 `since_ts` / `level` 过滤对前端日志同样生效；
+/// 同时镜像一行到 stdout（开发期观察）。fire-and-forget 语义由前端调用方保证，本命令只管落盘。
+#[tauri::command]
+pub fn log_frontend(
+    app: tauri::AppHandle,
+    level: String,
+    module: String,
+    message: String,
+) {
+    let lvl = match level.to_uppercase().as_str() {
+        "ERROR" | "ERR" => "ERROR",
+        "WARN" | "WARNING" => "WARN",
+        "DEBUG" => "DEBUG",
+        _ => "INFO",
+    };
+    let ts = chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f").to_string();
+    let line = format!("[{}][{}][fe][web:0]-{}-{}", ts, module, lvl, message);
+    // 复用 choose_logs_dir 的优先级策略，确保与 tracing_appender 写同一文件。
+    let dir = choose_logs_dir(&app);
+    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+    let path = dir.join(format!("workduo.log.{today}"));
+    if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(&path) {
+        let _ = writeln!(f, "{}", line);
+    }
+    println!("{}", line);
 }

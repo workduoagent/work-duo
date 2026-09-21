@@ -906,17 +906,38 @@ fn is_relevant_score(score: f32) -> bool {
     score < 0.0 || score <= KB_SCORE_RELEVANCE_MAX
 }
 
+/// K3-3 标签匹配（纯函数）：资产 `meta_data` JSON 的 `tags` 数组与给定标签是否有交集。
+/// 容忍脏数据：meta_data 缺失 / 非 JSON / tags 非数组 → 一律不命中（不 panic）。
+fn asset_matches_tags(meta_data: Option<&str>, tags: &[String]) -> bool {
+    let Some(raw) = meta_data else {
+        return false;
+    };
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(raw) else {
+        return false;
+    };
+    let Some(arr) = v.get("tags").and_then(|t| t.as_array()) else {
+        return false;
+    };
+    arr.iter().any(|t| {
+        t.as_str()
+            .is_some_and(|s| tags.iter().any(|q| q == s))
+    })
+}
+
 /// 知识库检索管道（K2 设计稿 §5.3）：向量近邻 → 关键词 LIKE 降级 → 空清单。
 /// `kb_ids` 为空 = 未绑定，返回空（工具层不应注册，此处兜底防呆）。
 /// `full` = 返回未裁剪正文（上限 4000 字防极端）：用于「重检命中已全部见过」时
 /// 恢复完整原文——裁剪分级 + 去重叠加曾导致超长 chunk（如调色板 ~700 字）永远拿不回
 /// 完整版（2026-09-20 轮 4 实锤）。
+/// `tags`（K3-3）= 资产标签圈定：非空时先查 SQLite `knowledge_asset.meta_data.tags`
+/// 命中的 asset_id 集（设计稿 §2.4：SQLite 管标签过滤、Lance 管语义），无命中直接返回空。
 pub(crate) async fn kb_search(
     app: &AppHandle,
     kb_ids: &[String],
     query: &str,
     top_k: usize,
     full: bool,
+    tags: Option<&[String]>,
 ) -> Result<Vec<KbSearchHit>, String> {
     let query = query.trim();
     if kb_ids.is_empty() || query.is_empty() {
@@ -930,6 +951,41 @@ pub(crate) async fn kb_search(
         "kb_id IN ({})",
         kb_ids.iter().map(|id| format!("'{}'", esc(id))).collect::<Vec<_>>().join(", ")
     );
+    // K3-3 标签圈定：资产量级小（每 KB 几十~几百），拉到 Rust 内存按 JSON tags 交集匹配，
+    // 不依赖 SQLite JSON1 扩展、容忍脏 meta_data（通用性）。无命中资产 → 直接空结果。
+    let asset_filter = if let Some(tags) = tags.filter(|t| !t.is_empty()) {
+        let kb_in = kb_ids.iter().map(|id| format!("'{}'", esc(id))).collect::<Vec<_>>().join(", ");
+        let rows = sqlx::query(&format!(
+            "SELECT id, meta_data FROM knowledge_asset WHERE kb_id IN ({kb_in})"
+        ))
+        .fetch_all(&pool)
+        .await
+        .map_err(|e| format!("查询资产标签失败：{e}"))?;
+        let matched: Vec<String> = rows
+            .into_iter()
+            .filter_map(|r| {
+                let id: String = r.try_get("id").ok()?;
+                let meta: Option<String> = r.try_get("meta_data").ok()?;
+                asset_matches_tags(meta.as_deref(), tags).then_some(id)
+            })
+            .collect();
+        if matched.is_empty() {
+            tracing::info!("[agent] kb_search: 标签圈定无命中资产 tags={:?} → 返回空", tags);
+            return Ok(Vec::new());
+        }
+        tracing::info!(
+            "[agent] kb_search: 标签圈定 tags={:?} 命中 {} 个资产",
+            tags,
+            matched.len()
+        );
+        format!(
+            " AND asset_id IN ({})",
+            matched.iter().map(|id| format!("'{}'", esc(id))).collect::<Vec<_>>().join(", ")
+        )
+    } else {
+        String::new()
+    };
+    let vector_filter = format!("{kb_filter}{asset_filter}");
     let top_k = top_k.clamp(1, 8);
 
     // 通道一：向量检索
@@ -939,7 +995,7 @@ pub(crate) async fn kb_search(
             .into_iter()
             .next()
             .ok_or("嵌入返回空向量")?;
-        let hits = vs.search_kb_chunks(&qvec, Some(&kb_filter), top_k).await?;
+        let hits = vs.search_kb_chunks(&qvec, Some(&vector_filter), top_k).await?;
         // K3-4：score 阈值过滤——无关查询的最近邻（distance>1.0）直接丢弃；
         // 全部被滤掉时落到关键词通道做最后一次字面匹配，仍空则由上层返回「未找到」。
         let hits: Vec<_> = hits.into_iter().filter(|h| is_relevant_score(h.score)).collect();
@@ -981,7 +1037,7 @@ pub(crate) async fn kb_search(
         .map(|t| format!("(content LIKE '%{}%' OR raw_text LIKE '%{}%')", esc(t), esc(t)))
         .collect::<Vec<_>>()
         .join(" OR ");
-    let kw_filter = format!("{kb_filter} AND ({like_clause})");
+    let kw_filter = format!("{kb_filter}{asset_filter} AND ({like_clause})");
     let rows = vs.query_kb_chunks_by_keyword(&kw_filter, top_k).await?;
     Ok(rows
         .into_iter()
@@ -1019,6 +1075,28 @@ fn clip_chars(s: &str, max: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// K3-3 标签匹配：meta_data JSON tags 交集判定 + 脏数据容忍。
+    #[test]
+    fn asset_tags_matching_tolerates_dirty_meta() {
+        let tags = ["设计".to_string(), "架构".to_string()];
+        // 正常命中（顺序/子集无关）
+        assert!(asset_matches_tags(Some(r#"{"tags":["设计","RAG"]}"#), &tags));
+        assert!(asset_matches_tags(Some(r#"{"tags":["架构"]}"#), &tags));
+        // 保留其它字段不受影响
+        assert!(asset_matches_tags(
+            Some(r#"{"digest":"abc","tags":["设计"]}"#),
+            &tags
+        ));
+        // 不命中
+        assert!(!asset_matches_tags(Some(r#"{"tags":["RAG"]}"#), &tags));
+        // 脏数据：缺失 meta_data / 非 JSON / tags 非数组 / 空查询
+        assert!(!asset_matches_tags(None, &tags));
+        assert!(!asset_matches_tags(Some("not-json"), &tags));
+        assert!(!asset_matches_tags(Some(r#"{"tags":"设计"}"#), &tags));
+        assert!(!asset_matches_tags(Some(r#"{}"#), &tags));
+        assert!(!asset_matches_tags(Some(r#"{"tags":["设计"]}"#), &[]));
+    }
 
     #[test]
     fn extractor_supports_md_txt_only() {

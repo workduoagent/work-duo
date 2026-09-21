@@ -8,6 +8,7 @@ import type { ChatAttachmentInput, PlanStep, ToolStep } from '../session/types'
 import type { AgentConversationRound, AgentConversationSession, AgentProject } from '@/types/core'
 import type { SessionTreeGroup } from '@/core/mapper/agent-session-mapper'
 import type { ChatMessage, ChatSegment } from './types'
+import type { KbHit } from '../session/KbSearchCitations'
 import { estimateTokens } from './file-helpers'
 
 /** 把历史轮次转为消息流（用于点击左侧会话加载）。 */
@@ -111,6 +112,11 @@ export function roundsToMessages(rounds: AgentConversationRound[]): ChatMessage[
               // callId 暂空，下方循环统一重映射为 hist-{roundId}-{序号}（与重建 toolSteps 对齐）
               return { kind: 'tool', callId: '' }
             }
+            // K3-2：kb-sources 段 = 「本次引用来源」持久化载体，命中列表原样保留，
+            // 由下方从时间线拆出回填消息字段（不进时间线渲染）。
+            if (s.kind === 'kb-sources' && Array.isArray(s.hits)) {
+              return { kind: 'kb-sources', hits: s.hits.filter((h): h is KbHit => !!h && typeof h === 'object') }
+            }
             return null
           })
           .filter((x): x is ChatSegment => x !== null)
@@ -128,6 +134,11 @@ export function roundsToMessages(rounds: AgentConversationRound[]): ChatMessage[
         }
       }
     }
+    // K3-2 任务级引用来源：kb-sources 段从时间线拆出 → 消息字段 kbSources（气泡底部渲染
+    // 「📚 本次引用来源」）；时间线剔除该段（其在时间线上无视觉形态）。
+    const kbSourceHits =
+      segments?.filter((s) => s.kind === 'kb-sources').flatMap((s) => s.hits ?? []) ?? []
+    const timeline = segments?.filter((s) => s.kind !== 'kb-sources')
     msgs.push({
       id: `a-${r.id}`,
       role: 'agent',
@@ -136,7 +147,8 @@ export function roundsToMessages(rounds: AgentConversationRound[]): ChatMessage[
       thought: r.thinkingContent ? r.thinkingContent.split('\n') : undefined,
       toolSteps: toolSteps?.length ? toolSteps : undefined,
       planSteps: planSteps?.length ? planSteps : undefined,
-      segments: segments?.length ? segments : undefined,
+      segments: timeline?.length ? timeline : undefined,
+      kbSources: kbSourceHits.length ? kbSourceHits : undefined,
       completedAt: r.endTime,
       durationMs: r.startTime && r.endTime ? r.endTime - r.startTime : undefined,
       tokenCount: (r.inputTokens ?? 0) + (r.outputTokens ?? 0) || estimateTokens(r.assistantAnswer ?? ''),

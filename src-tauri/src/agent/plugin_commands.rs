@@ -84,6 +84,7 @@ pub async fn test_user_plugin(
 
     let spec = PluginExecSpec {
         plugin_id: plugin_id.clone(),
+        identifier: get_str(&row, "identifier"),
         runtime,
         script_content,
         timeout_sec: if timeout_sec == 0 { 60 } else { timeout_sec },

@@ -30,6 +30,8 @@ use crate::mamba_manager::MambaManager;
 #[derive(Debug, Clone)]
 pub struct PluginExecSpec {
     pub plugin_id: String,
+    /// 插件 identifier（如 text_analyzer），仅用于运行期日志展示，便于 Agent 关联具体插件。
+    pub identifier: String,
     /// 运行时：`python` | `bun`。
     pub runtime: String,
     /// 用户核心代码（仅 `run` + 头注释，不含 Runner 壳）。
@@ -598,6 +600,45 @@ async fn finalize(
     start: std::time::Instant,
 ) {
     result.duration_ms = start.elapsed().as_millis() as u64;
+    // 运行结束汇总日志：一条 outcome + 成功时附截断后的返回值预览（便于 Agent 抽查结果）。
+    let outcome = if result.ok {
+        "SUCCESS"
+    } else {
+        result.error_type.as_deref().unwrap_or("FAILURE")
+    };
+    let err_preview = truncate(result.error_message.as_deref().unwrap_or("-"), 256);
+    tracing::info!(
+        "[plugin] ◀ 执行结束 plugin={} id={} source={} result={} duration_ms={} exit_code={:?} error={} deps_installed={:?}",
+        spec.identifier,
+        spec.plugin_id,
+        source,
+        outcome,
+        result.duration_ms,
+        result.exit_code,
+        err_preview,
+        result.deps_installed
+    );
+    if result.ok {
+        match &result.result {
+            Some(v) => {
+                let rp = truncate(
+                    &serde_json::to_string(v).unwrap_or_else(|_| "null".to_string()),
+                    512,
+                );
+                tracing::info!(
+                    "[plugin]   ↳ 返回值(截断512B) plugin={} result={}",
+                    spec.identifier,
+                    rp
+                );
+            }
+            None => {
+                tracing::info!(
+                    "[plugin]   ↳ 返回值 plugin={} (stdout 非合法 JSON，已置 error_type=InvalidJson)",
+                    spec.identifier
+                );
+            }
+        }
+    }
     write_plugin_run_log(app, spec, result, params, agent_id, session_id, source).await;
     update_last_run(app, spec, result.ok).await;
 }
@@ -633,6 +674,23 @@ pub async fn run_plugin(
         error_message: None,
         traceback: None,
     };
+
+    // 运行生命周期日志：供 Agent 运行插件时观察状态；入参与返回值过长均截断，避免日志膨胀。
+    let params_preview = truncate(
+        &serde_json::to_string(params).unwrap_or_else(|_| "{}".to_string()),
+        256,
+    );
+    tracing::info!(
+        "[plugin] ▶ 启动执行 plugin={} id={} runtime={} source={} agent={} session={} call_id={} params={}",
+        spec.identifier,
+        spec.plugin_id,
+        spec.runtime,
+        source,
+        agent_id.unwrap_or("-"),
+        session_id.unwrap_or("-"),
+        call_id,
+        params_preview
+    );
 
     // 1. 临时目录 + 写 Runner 壳，决定 sidecar / args / envs。
     let runs_dir = plugin_runs_dir(app);
@@ -808,8 +866,21 @@ pub async fn run_plugin(
     }
 
     // 6. 依赖自愈：安装 + 重试一次（仅一次，与现 sandbox 一致）。
+    tracing::info!(
+        "[plugin] 检测到缺失依赖，准备自愈 plugin={} runtime={} missing={:?}",
+        spec.identifier,
+        spec.runtime,
+        missing
+    );
     match install_deps(app, mamba, bun, &call_dir, &spec.runtime, &missing).await {
-        Ok(specs) => result.deps_installed = specs,
+        Ok(specs) => {
+            result.deps_installed = specs.clone();
+            tracing::info!(
+                "[plugin] 依赖自愈安装完成 plugin={} 已安装={:?}",
+                spec.identifier,
+                specs
+            );
+        }
         Err(e) => tracing::warn!("[plugin] 依赖安装失败（将直接重试并透传错误）：{e}"),
     }
     let retry = match run_sidecar_with_stdin(

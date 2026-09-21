@@ -15,6 +15,7 @@
  *    供 knowledge-mapper 写入 knowledge_asset。
  */
 import { isTauri } from '@/core/config'
+import { fe } from '@/core/logBridge'
 import { appDataDir, resourceDir, join } from '@tauri-apps/api/path'
 import {
   mkdir,
@@ -204,9 +205,12 @@ export async function writeKbFileContent(
     const target = await join(base, relPath)
     await mkdir(await dirname(target), { recursive: true })
     await writeTextFile(target, content)
+    fe.info('kbFs', `writeKbFileContent ok relPath=${relPath} bytes=${content.length}`)
     return { ok: true }
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+    const msg = e instanceof Error ? e.message : String(e)
+    fe.warn('kbFs', `writeKbFileContent fail relPath=${relPath} err=${msg}`)
+    return { ok: false, error: msg }
   }
 }
 
@@ -225,9 +229,12 @@ export async function writeKbFileBinary(
     const target = await join(base, relPath)
     await mkdir(await dirname(target), { recursive: true })
     await writeFile(target, bytes)
+    fe.info('kbFs', `writeKbFileBinary ok relPath=${relPath} bytes=${bytes.byteLength}`)
     return { ok: true }
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+    const msg = e instanceof Error ? e.message : String(e)
+    fe.warn('kbFs', `writeKbFileBinary fail relPath=${relPath} err=${msg}`)
+    return { ok: false, error: msg }
   }
 }
 
@@ -241,9 +248,12 @@ export async function createKbFolder(folder: string, relPath: string): Promise<K
     const base = await resolveRealKnowledgeBasePath(folder)
     const target = await join(base, relPath)
     await mkdir(target, { recursive: true })
+    fe.info('kbFs', `createKbFolder ok relPath=${relPath}`)
     return { ok: true }
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+    const msg = e instanceof Error ? e.message : String(e)
+    fe.warn('kbFs', `createKbFolder fail relPath=${relPath} err=${msg}`)
+    return { ok: false, error: msg }
   }
 }
 
@@ -252,6 +262,7 @@ export async function removeKbDir(folder: string): Promise<void> {
   if (!isTauri) return
   const dir = await resolveRealKnowledgeBasePath(folder)
   await remove(dir, { recursive: true })
+  fe.info('kbFs', `removeKbDir ok folder=${folder}`)
 }
 
 /**
@@ -264,9 +275,12 @@ export async function deleteKbEntry(folder: string, relPath: string): Promise<Kb
     const base = await resolveRealKnowledgeBasePath(folder)
     const target = await join(base, relPath)
     await remove(target, { recursive: true })
+    fe.info('kbFs', `deleteKbEntry ok relPath=${relPath}`)
     return { ok: true }
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+    const msg = e instanceof Error ? e.message : String(e)
+    fe.warn('kbFs', `deleteKbEntry fail relPath=${relPath} err=${msg}`)
+    return { ok: false, error: msg }
   }
 }
 
@@ -288,9 +302,12 @@ export async function moveKbEntry(
     const from = await join(base, fromRel)
     const to = await join(base, destRel)
     await rename(from, to)
+    fe.info('kbFs', `moveKbEntry ok fromRel=${fromRel} toRel=${destRel}`)
     return { ok: true }
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+    const msg = e instanceof Error ? e.message : String(e)
+    fe.warn('kbFs', `moveKbEntry fail fromRel=${fromRel} err=${msg}`)
+    return { ok: false, error: msg }
   }
 }
 
@@ -352,6 +369,7 @@ export async function walkKbAssets(folder: string): Promise<KbAssetScan[]> {
   } catch {
     /* 目录不存在等，返回已收集的部分 */
   }
+  fe.info('kbFs', `walkKbAssets done folder=${folder} count=${out.length}`)
   return out
 }
 

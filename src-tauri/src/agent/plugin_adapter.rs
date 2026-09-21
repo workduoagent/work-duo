@@ -109,6 +109,7 @@ pub fn register_plugins_into(registry: &mut ToolRegistry, app: &AppHandle, plugi
         }
         let spec = PluginExecSpec {
             plugin_id: p.plugin_id.clone(),
+            identifier: p.identifier.clone(),
             runtime: p.runtime.clone(),
             script_content: p.script_content.clone(),
             timeout_sec: p.timeout_sec,

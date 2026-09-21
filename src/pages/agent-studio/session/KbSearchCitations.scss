@@ -154,3 +154,155 @@
     color: var(--color-foreground);
   }
 }
+
+/* 任务级引用来源区（K3-2）：气泡底部「📚 引用来源」按源文件分组（[1][2] 文件名）。只用 var(--color-*) 令牌，hover 仅改背景。 */
+.kb-src {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  width: 100%;
+
+  &__head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--color-foreground-muted);
+  }
+
+  &__n {
+    display: inline-flex;
+    align-items: center;
+    height: 16px;
+    padding: 0 7px;
+    border-radius: 999px;
+    font-size: 10px;
+    font-weight: 600;
+    background: var(--color-surface-hover, rgba(0, 0, 0, 0.06));
+    color: var(--color-foreground-muted);
+  }
+
+  &__list {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  &__row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    min-width: 0;
+  }
+
+  &__marks {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    flex: none;
+  }
+
+  &__file {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    min-width: 0;
+    padding: 2px 8px;
+    border: 1px solid var(--color-border);
+    border-radius: 6px;
+    background: var(--color-surface, rgba(0, 0, 0, 0.02));
+    cursor: pointer;
+    font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+    font-size: 12px;
+    color: var(--color-brand-600, var(--color-primary));
+    text-align: left;
+    transition: background 0.12s ease;
+
+    &:hover {
+      background: var(--color-surface-hover, rgba(0, 0, 0, 0.05));
+    }
+  }
+
+  &__go {
+    flex: none;
+    color: var(--color-foreground-subtle, var(--color-foreground-muted));
+  }
+}
+
+/* 正文内联引用引标（K3-2）：[N] 小上标 + hover 悬浮召回片段卡（纯 CSS，absolute 定位）。 */
+.kb-cite-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: baseline;
+}
+
+.kb-cite-mark {
+  display: inline-flex;
+  align-items: center;
+  height: 15px;
+  padding: 0 4px;
+  margin: 0 1px;
+  border-radius: 4px;
+  background: rgba(59, 130, 246, 0.12);
+  color: #3b82f6;
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: default;
+  user-select: none;
+  transition: background 0.12s ease;
+
+  .kb-cite-wrap:hover &,
+  .kb-cite-wrap:focus-within & {
+    background: rgba(59, 130, 246, 0.22);
+  }
+}
+
+.kb-cite-pop {
+  display: none;
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  z-index: 60;
+  width: 380px;
+  max-width: min(380px, 72vw);
+  max-height: 280px;
+  overflow: auto;
+  padding: 8px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-bg, #fff);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.14);
+  text-align: left;
+
+  .kb-cite-wrap:hover &,
+  .kb-cite-wrap:focus-within & {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+}
+
+.kb-cite-pop__src {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 11px;
+  color: var(--color-brand-600, var(--color-primary));
+  word-break: break-all;
+}
+
+.kb-cite-pop__crumbs {
+  font-size: 10.5px;
+  color: var(--color-foreground-subtle, var(--color-foreground-muted));
+}
+
+.kb-cite-pop__content {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--color-foreground);
+}

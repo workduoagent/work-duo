@@ -3033,30 +3033,23 @@ impl AgentTool for AskUserChoiceTool {
             }
         }
         events::emit_choice_needed(&self.app, &req);
-        let rx = self
+        // 20260919002 per-agent：经工具上下文的 agent_id 路由到本任务的状态束（choice 中枢随 agent 走）。
+        let task_state = self
             .app
             .state::<crate::agent::runtime::AgentRuntime>()
-            .choice
-            .suspend(req)
-            .await;
+            .task_state(&ctx.agent_id)
+            .ok_or_else(|| ToolError::ExecutionFailed("任务状态已失效（任务可能已被回收）".into()))?;
+        let rx = task_state.choice.suspend(req).await;
         let outcome = match timeout(Duration::from_secs(CHOICE_TIMEOUT_SECS), rx).await {
             Ok(Ok(o)) => o,
             Ok(Err(_)) => {
                 // 通道关闭（停止触发 drop Sender）：回灌「已取消」，避免循环挂死。
-                self.app
-                    .state::<crate::agent::runtime::AgentRuntime>()
-                    .choice
-                    .cancel(&choice_id)
-                    .await;
+                task_state.choice.cancel(&choice_id).await;
                 return Ok("（用户已取消选择）".into());
             }
             Err(_) => {
                 // 超时：清理挂起项后回灌「未收到选择」。
-                self.app
-                    .state::<crate::agent::runtime::AgentRuntime>()
-                    .choice
-                    .cancel(&choice_id)
-                    .await;
+                task_state.choice.cancel(&choice_id).await;
                 return Ok("（用户选择超时，未收到选择）".into());
             }
         };
@@ -3166,6 +3159,8 @@ pub fn register_kb_search_tool(registry: &mut ToolRegistry, app: &AppHandle, kb_
         kb_ids,
         call_count: std::sync::atomic::AtomicUsize::new(0),
         seen_chunks: std::sync::Mutex::new(std::collections::HashSet::new()),
+        cite_by_id: std::sync::Mutex::new(std::collections::HashMap::new()),
+        cite_counter: std::sync::atomic::AtomicUsize::new(0),
     }));
 }
 
@@ -3181,6 +3176,8 @@ const KB_SEARCH_HARD_LIMIT: usize = 10;
 
 /// 知识库检索工具（K2）：语义优先、关键词降级，返回可溯源片段（源文件 + 层级路径）。
 /// 只读（ReadSafe），无需审批。
+/// K3-2 引用编号：每个命中带 `cite` 字段（任务内全局递增、同一 chunk 跨调用编号不变），
+/// 模型被引导在回复句末标注 `[编号]`，前端据此渲染可悬浮溯源的正文内联引标。
 pub struct KbSearchTool {
     app: AppHandle,
     /// 该智能体绑定的知识库 id（检索范围）。
@@ -3189,6 +3186,10 @@ pub struct KbSearchTool {
     call_count: std::sync::atomic::AtomicUsize,
     /// K3-4 任务内去重：已返回过的 chunk id（防止多轮检索重复付同一段内容的 token）。
     seen_chunks: std::sync::Mutex<std::collections::HashSet<String>>,
+    /// K3-2 引用编号映射：chunk id → cite（首见分配，跨调用稳定）。
+    cite_by_id: std::sync::Mutex<std::collections::HashMap<String, u32>>,
+    /// K3-2 引用编号计数器（配合 cite_by_id 分配下一个编号）。
+    cite_counter: std::sync::atomic::AtomicUsize,
 }
 
 #[async_trait]
@@ -3199,10 +3200,11 @@ impl AgentTool for KbSearchTool {
     fn tool_definition(&self) -> Value {
         def(
             "native__kb_search",
-            "检索已绑定的知识库（Markdown/TXT 文档），返回与查询最相关的资料片段（含源文件路径与层级位置，可溯源）。回答事实性、配置类、领域知识问题时应优先调用本工具核对资料，而非凭记忆臆测。只读，无需审批。",
+            "检索已绑定的知识库（Markdown/TXT 文档），返回与查询最相关的资料片段（含源文件路径与层级位置，可溯源）。回答事实性、配置类、领域知识问题时应优先调用本工具核对资料，而非凭记忆臆测。只读，无需审批。每个片段带 cite 字段 = 任务内全局引用编号（同一片段跨调用编号不变）；**在最终回答中引用某片段内容时，请在对应句子末尾标注其引用编号**（如 [1]、[2]，紧跟句末标点前），便于用户悬浮溯源；未引用到的片段不必标注。",
             json!({
                 "query": { "type": "string", "description": "检索查询（自然语言，可含关键词）" },
-                "top_k": { "type": "integer", "description": "返回片段数上限，默认 5，最大 8；除非确需多角度覆盖，保持默认即可" }
+                "top_k": { "type": "integer", "description": "返回片段数上限，默认 5，最大 8；除非确需多角度覆盖，保持默认即可" },
+                "tags": { "type": "array", "items": { "type": "string" }, "description": "可选：资产标签过滤（仅检索打了这些标签的文件；标签清单见知识库详情页标签云）。用户明确要求按标签限定范围时才传，否则省略" }
             }),
             &["query"],
         )
@@ -3210,8 +3212,7 @@ impl AgentTool for KbSearchTool {
     fn check_permission(&self, _args: &Value) -> PermissionLevel {
         PermissionLevel::ReadSafe
     }
-    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<String, ToolError> {
-        let query = args
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<String, ToolError> {        let query = args
             .get("query")
             .and_then(|v| v.as_str())
             .unwrap_or("")
@@ -3236,9 +3237,22 @@ impl AgentTool for KbSearchTool {
             .map_err(|e| ToolError::ExecutionFailed(format!("序列化检索结果失败：{e}")))?);
         }
         let top_k = args.get("top_k").and_then(|v| v.as_u64()).unwrap_or(5) as usize;
-        let hits = crate::agent::knowledge::kb_search(&self.app, &self.kb_ids, &query, top_k, false)
-            .await
-            .map_err(ToolError::ExecutionFailed)?;
+        // K3-3 标签圈定（可选）：传入资产标签 → 仅在命中标签的资产范围内检索。
+        let tags: Option<Vec<String>> = args.get("tags").and_then(|v| v.as_array()).map(|a| {
+            a.iter()
+                .filter_map(|x| x.as_str().map(String::from))
+                .collect::<Vec<_>>()
+        });
+        let hits = crate::agent::knowledge::kb_search(
+            &self.app,
+            &self.kb_ids,
+            &query,
+            top_k,
+            false,
+            tags.as_deref(),
+        )
+        .await
+        .map_err(ToolError::ExecutionFailed)?;
         if hits.is_empty() {
             return Ok("知识库中未找到与查询相关的片段。".into());
         }
@@ -3273,10 +3287,17 @@ impl AgentTool for KbSearchTool {
         if fresh_hits.is_empty() {
             // K3-4 修订（2026-09-20 轮 4 实锤）：全重复时重取完整原文——裁剪分级+去重叠加
             // 曾导致超长 chunk（调色板 ~700 字）被 600 上限腰斩且永远拿不回完整版。
-            let full_hits =
-                crate::agent::knowledge::kb_search(&self.app, &self.kb_ids, &query, top_k, true)
-                    .await
-                    .map_err(ToolError::ExecutionFailed)?;
+            let full_hits = crate::agent::knowledge::kb_search(
+                &self.app,
+                &self.kb_ids,
+                &query,
+                top_k,
+                true,
+                tags.as_deref(),
+            )
+            .await
+            .map_err(ToolError::ExecutionFailed)?;
+            let full_hits = self.with_cite(full_hits)?;
             return Ok(serde_json::to_string(&serde_json::json!({
                 "notice": format!(
                     "该查询命中的 {} 个片段此前已返回过（截断版）；以下为未截断的完整原文，请以此为准整理最终答案，无需再次检索。",
@@ -3292,10 +3313,16 @@ impl AgentTool for KbSearchTool {
         let mut out_hits = fresh_hits;
         let mut extra_notice = String::new();
         if !better_dup_ids.is_empty() {
-            let full_hits =
-                crate::agent::knowledge::kb_search(&self.app, &self.kb_ids, &query, top_k, true)
-                    .await
-                    .map_err(ToolError::ExecutionFailed)?;
+            let full_hits = crate::agent::knowledge::kb_search(
+                &self.app,
+                &self.kb_ids,
+                &query,
+                top_k,
+                true,
+                tags.as_deref(),
+            )
+            .await
+            .map_err(ToolError::ExecutionFailed)?;
             let extras: Vec<_> = full_hits
                 .into_iter()
                 .filter(|h| better_dup_ids.contains(&h.id))
@@ -3309,7 +3336,7 @@ impl AgentTool for KbSearchTool {
                 );
             }
         }
-        let hits_json = serde_json::to_value(&out_hits)
+        let hits_json = serde_json::to_value(self.with_cite(out_hits)?)
             .map_err(|e| ToolError::ExecutionFailed(format!("序列化检索结果失败：{e}")))?;
         // 收敛引导（软上限）：超限后包装返回，注入「立即整理答案」的强提示，
         // 把模型从「无限换词再检索」循环里拽出来（硬上限在 execute 入口短路）。
@@ -3334,6 +3361,38 @@ impl AgentTool for KbSearchTool {
         }
         serde_json::to_string(&hits_json)
             .map_err(|e| ToolError::ExecutionFailed(format!("序列化检索结果失败：{e}")))
+    }
+}
+
+impl KbSearchTool {
+    /// K3-2：为命中注入 `cite` 引用编号（首见分配任务内递增号，重复命中/完整版重取沿用原号），
+    /// 序列化为 JSON Value 后逐条插入 cite 字段（编号属工具层会话态，不污染 KbSearchHit 结构）。
+    fn with_cite(
+        &self,
+        hits: Vec<crate::agent::knowledge::KbSearchHit>,
+    ) -> Result<Vec<Value>, ToolError> {
+        let mut map = self
+            .cite_by_id
+            .lock()
+            .map_err(|_| ToolError::ExecutionFailed("kb_search 引用编号锁中毒".into()))?;
+        let mut out = Vec::with_capacity(hits.len());
+        for h in hits {
+            let cite = match map.get(&h.id) {
+                Some(c) => *c,
+                None => {
+                    let c = (self.cite_counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1) as u32;
+                    map.insert(h.id.clone(), c);
+                    c
+                }
+            };
+            let mut v = serde_json::to_value(&h)
+                .map_err(|e| ToolError::ExecutionFailed(format!("序列化检索结果失败：{e}")))?;
+            if let Some(obj) = v.as_object_mut() {
+                obj.insert("cite".into(), serde_json::json!(cite));
+            }
+            out.push(v);
+        }
+        Ok(out)
     }
 }
 

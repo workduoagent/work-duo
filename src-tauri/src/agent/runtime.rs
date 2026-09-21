@@ -48,29 +48,53 @@ const MAX_TOOL_OUTPUT_LENGTH: usize = 15000;
 /// 超时与「停止」(`cancel_all` drop Sender) 都收敛到拒绝分支，不新增状态通路。
 const APPROVAL_TIMEOUT_SECS: u64 = 300;
 
+/// 单 Agent 任务级状态束（20260919002 per-agent 隔离）。
+///
+/// 取消标志 / 审批挂起 / 步骤恢复 / 方案推荐 / 计划审批 / 授权集 / 工具注册表
+/// 全部随 agent 走——不同 Agent 的并行任务互不串台（此前全部是全局单例，
+/// A 任务的「停止」会误伤 B 任务）。由 `try_acquire_run_lock(agent_id)` 创建或复用，
+/// `RunningGuard` Drop 时从注册表移除（复位 running + 回收状态束）。
+#[derive(Clone)]
+pub struct AgentTaskState {
+    pub agent_id: String,
+    /// 该 Agent 的并发互斥标志（true = 有任务在跑）。
+    pub running: Arc<AtomicBool>,
+    /// 任务取消标志（用户点击「停止」时由 `cancel_agent_task` 置 true）。
+    pub cancel_flag: Arc<AtomicBool>,
+    pub approval: Arc<ApprovalManager>,
+    pub recovery: Arc<crate::agent::recovery::RecoveryHub>,
+    pub choice: Arc<ChoiceHub>,
+    pub plan_approval: Arc<crate::agent::plan_approval::PlanApprovalHub>,
+    pub approval_grants: Arc<crate::agent::policy::ApprovalGrants>,
+    /// 本任务的工具注册表（基础原生 + KB/MCP/插件工具按绑定注册，任务结束随状态束回收）。
+    pub native: Arc<Mutex<ToolRegistry>>,
+}
+
+impl AgentTaskState {
+    fn new(agent_id: &str) -> Self {
+        Self {
+            agent_id: agent_id.to_string(),
+            running: Arc::new(AtomicBool::new(false)),
+            cancel_flag: Arc::new(AtomicBool::new(false)),
+            approval: Arc::new(ApprovalManager::new()),
+            recovery: crate::agent::recovery::RecoveryHub::new(),
+            choice: Arc::new(ChoiceHub::new()),
+            plan_approval: crate::agent::plan_approval::PlanApprovalHub::new(),
+            approval_grants: Arc::new(crate::agent::policy::ApprovalGrants::new()),
+            native: Arc::new(Mutex::new(ToolRegistry::new())),
+        }
+    }
+}
+
 /// 运行时共享状态（托管于 Tauri State，供命令访问）。
+///
+/// 20260919002：任务级状态全部下沉到 `AgentTaskState`（per-agent），本结构仅保留
+/// 「per-agent 状态注册表」与「run 注册表」两块路由设施。
 #[derive(Clone)]
 pub struct AgentRuntime {
-    pub approval: Arc<ApprovalManager>,
-    pub native: Arc<Mutex<ToolRegistry>>,
-    /// 任务取消标志（用户点击「停止」时由 `cancel_agent_task` 置 true）。
-    /// 以 `Arc<AtomicBool>` 形式在命令与后台任务间共享，无需额外句柄即可感知取消。
-    pub cancel_flag: Arc<AtomicBool>,
-    /// 并发互斥标志：同一 `AgentRuntime` 同一时刻只允许一个 `run_task` 流水线执行。
-    /// 互斥唯一真源是 `run_agent_task`（spawn 前）的 `try_acquire_run_lock()` 抢占，
-    /// 已被占用则同步 `Err("已有任务在运行")` 返回前端（连点「运行」不再静默吞掉）；
-    /// `run_task` 自身不再做任何补抢/忽略判断（调用约束见其文档注释）。
-    /// 复位由 `RunningGuard`（Drop 守卫）在 run_task 收尾时负责，不遗留 `running=true`。
-    pub running: Arc<AtomicBool>,
-    /// 步骤级恢复挂起中枢（子任务自动重试耗尽后等待用户决策：重试 / 跳过 / 接管）。
-    pub recovery: Arc<crate::agent::recovery::RecoveryHub>,
-    /// 方案推荐挂起中枢（Agent 调 `native__ask_user_choice` 后等待用户选择）。
-    pub choice: Arc<ChoiceHub>,
-    /// 计划审批挂起中枢（Phase 2b-3：DAG 规划完成后、执行前等待用户确认/修改/拒绝）。
-    pub plan_approval: Arc<crate::agent::plan_approval::PlanApprovalHub>,
-    /// 边审批策略授权集（15007）：计划批准/「记住」写入，命中同信号的后续操作放行。
-    /// 任务级生命周期：run_task 启动重置（与 cancel_flag/recovery/plan_approval 同批）。
-    pub approval_grants: Arc<crate::agent::policy::ApprovalGrants>,
+    /// per-agent 任务状态束注册表（key = agent_id）。
+    /// 锁抢占（`try_acquire_run_lock`）按 agent 查/建；`RunningGuard` Drop 时移除。
+    pub tasks: Arc<std::sync::Mutex<HashMap<String, AgentTaskState>>>,
     /// 自测闭环运行注册表：run_id → 单次运行记录。仅由 `run_task_ex` 写入，
     /// 供 `get_status`/`wait_task` 轮询，不改变既有 `run_agent_task` 行为（其 run_id 为 None，不入表）。
     pub run_registry: Arc<tokio::sync::Mutex<HashMap<String, RunRecord>>>,
@@ -90,49 +114,87 @@ pub struct RunRecord {
     pub error: Option<String>,
 }
 
-/// 并发互斥守卫：生命周期结束（正常退出 / 取消 / 异常 / panic）时自动复位 `running`。
-/// 持有 `Arc<AtomicBool>`（而非借用），以便跨 `spawn` 闭包移动（'static 要求）；
-/// 这样无论任务从哪条路径结束，都不会遗留 `running=true` 把后续任务永久挡在门外。
-/// 主闸门在 `run_agent_task`（spawn 前），此处守卫负责在 run_task 收尾时复位。
+/// 并发互斥守卫：生命周期结束（正常退出 / 取消 / 异常 / panic）时自动复位该 Agent 的
+/// `running` 并从注册表回收状态束。持有 `Arc<AtomicBool>`（而非借用），以便跨 `spawn`
+/// 闭包移动（'static 要求）；这样无论任务从哪条路径结束，都不会遗留 `running=true`
+/// 把该 Agent 的后续任务永久挡在门外。
 pub(crate) struct RunningGuard {
     flag: Arc<AtomicBool>,
+    tasks: Arc<std::sync::Mutex<HashMap<String, AgentTaskState>>>,
+    agent_id: String,
 }
 impl Drop for RunningGuard {
     fn drop(&mut self) {
         self.flag.store(false, Ordering::SeqCst);
+        if let Ok(mut tasks) = self.tasks.lock() {
+            tasks.remove(&self.agent_id);
+        }
     }
 }
 
 impl AgentRuntime {
     pub fn new() -> Self {
         Self {
-            approval: Arc::new(ApprovalManager::new()),
-            native: Arc::new(Mutex::new(ToolRegistry::new())),
-            cancel_flag: Arc::new(AtomicBool::new(false)),
-            running: Arc::new(AtomicBool::new(false)),
-            recovery: crate::agent::recovery::RecoveryHub::new(),
-            choice: Arc::new(ChoiceHub::new()),
-            plan_approval: crate::agent::plan_approval::PlanApprovalHub::new(),
-            approval_grants: Arc::new(crate::agent::policy::ApprovalGrants::new()),
+            tasks: Arc::new(std::sync::Mutex::new(HashMap::new())),
             run_registry: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         }
     }
 
-    /// 抢占并发互斥锁（spawn 前主闸门）。成功返回 `RunningGuard`（收尾时自动复位 `running`）；
-    /// 已被占用（上一次任务仍在运行）返回 `None`——调用方应同步 `Err` 给前端，
+    /// 抢占指定 Agent 的并发互斥锁（spawn 前主闸门，20260919002 per-agent 粒度）。
+    /// 成功返回该 Agent 的任务状态束 + `RunningGuard`（收尾时自动复位并回收）；
+    /// 该 Agent 已有任务在跑返回 `None`——调用方应同步 `Err` 给前端，
     /// 而非返回 `Ok(())` 后把任务静默忽略（UX 修复：连点「运行」可见「已有任务在运行」）。
-    pub fn try_acquire_run_lock(&self) -> Option<RunningGuard> {
-        if self
+    /// **不同 Agent 互不影响**：A 在跑不挡 B。
+    pub fn try_acquire_run_lock(&self, agent_id: &str) -> Option<(AgentTaskState, RunningGuard)> {
+        let mut tasks = self.tasks.lock().unwrap();
+        let state = tasks
+            .entry(agent_id.to_string())
+            .or_insert_with(|| AgentTaskState::new(agent_id));
+        if state
             .running
             .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
             .is_ok()
         {
-            Some(RunningGuard {
-                flag: self.running.clone(),
-            })
+            Some((
+                state.clone(),
+                RunningGuard {
+                    flag: state.running.clone(),
+                    tasks: self.tasks.clone(),
+                    agent_id: agent_id.to_string(),
+                },
+            ))
         } else {
             None
         }
+    }
+
+    /// 按需路由任务状态束：显式 agent_id 精确查找；缺省时取「唯一在跑」的任务
+    /// （决策/取消命令的平滑兼容——单任务场景前端可不传 agent_id，多任务时必须显式传）。
+    pub fn resolve_task_state(&self, agent_id: Option<&str>) -> Result<AgentTaskState, String> {
+        let tasks = self.tasks.lock().unwrap();
+        match agent_id {
+            Some(id) => tasks.get(id).cloned().ok_or_else(|| {
+                format!("智能体 {id} 当前没有运行中的任务（状态束已随上次任务回收）")
+            }),
+            None => {
+                let running: Vec<&AgentTaskState> =
+                    tasks.values().filter(|t| t.running.load(Ordering::SeqCst)).collect();
+                match running.len() {
+                    1 => Ok(running[0].clone()),
+                    0 => Err("当前没有运行中的任务".into()),
+                    _ => Err(format!(
+                        "有 {} 个任务并行在跑，请指定 agent_id 以路由决策",
+                        running.len()
+                    )),
+                }
+            }
+        }
+    }
+
+    /// 按 agent_id 精确取任务状态束（任务内工具执行时使用，如 ask_user_choice 的
+    /// choice 中枢路由）；该 Agent 无运行中任务返回 None。
+    pub fn task_state(&self, agent_id: &str) -> Option<AgentTaskState> {
+        self.tasks.lock().unwrap().get(agent_id).cloned()
     }
 
     /// 启动一轮任务（被 `run_agent_task` 命令调用，后台 spawn）。
@@ -150,19 +212,20 @@ impl AgentRuntime {
         plan_override: Option<PlanDAG>,
         pre_completed: std::collections::HashSet<String>,
         initial_context: String,
+        task: &AgentTaskState,
     ) {
         // 0) 新一轮任务开始：清除上一轮可能残留的取消标志（cancel_agent_task 已无副作用），
         //    同时保证"上一次取消未生效就立刻发起新任务"不会误杀新任务。
-        self.cancel_flag.store(false, Ordering::SeqCst);
+        task.cancel_flag.store(false, Ordering::SeqCst);
         // 新一轮开始：清空前一轮可能残留的恢复挂起态（避免上轮 cancel 残留误导前端面板）。
-        self.recovery.reset();
+        task.recovery.reset();
         // 同步清空计划审批 hub：cancel() 会无条件把 decision 置为 Cancel，若当时没有
         // 等待者消费（如用户在非门禁阶段点了停止），残留的 Cancel 会被**下一个任务**的
         // wait() 第一轮 take 走 → 新任务刚进门禁就被误判「用户取消」终止（真机 2026-09-17
         // 出现两次）。与 cancel_flag / recovery 的启动重置同源同必要。
-        self.plan_approval.reset();
+        task.plan_approval.reset();
         // 边审批策略授权集（15007）：任务级生命周期，启动重置。
-        self.approval_grants.reset();
+        task.approval_grants.reset();
 
         // 0.1) 动态重算并回写 tools_tokens：按当前已解析的 MCP/Skill 工具数覆盖写入会话表，
         //    中途移除 Skill / 停用（解绑）MCP 后，下一轮会自动下调；重新绑定则上调。
@@ -179,7 +242,8 @@ impl AgentRuntime {
         // 1) 组装工具注册表（基础原生 + 绑定的 MCP 工具）。
         //    绑定的 Skill 不再注册为工具（避免「先调 skill__xxx 拿指引再干活」的浪费轮次），
         //    改为在 pipeline::run_subtask 的 user 消息中注入 skill_markdown 指引。
-        let mut base = self.native.lock().await.clone();
+        //    20260919002：registry 随 AgentTaskState（per-agent），并行任务互不污染。
+        let mut base = task.native.lock().await.clone();
         // 沙箱模式下不注册 execute_command（宿主 shell），能力层与提示层保持一致
         native::register_native_tools(&mut base, app, cfg.allow_sandbox, &cfg.memory_mode);
         // 知识库检索工具（K2）：仅在绑定了知识库时注册（提示与能力同源）
@@ -277,7 +341,7 @@ impl AgentRuntime {
         // 注意：分支重跑（plan_override 存在）时即便意图被分为 simple_chat 也强制走复合路径，
         // 因为用户已显式给出待执行的 DAG，必须进入流水线。
         if intent.is_simple_chat() && plan_override.is_none() {
-            self.run_simple_chat(app, &cfg, &prompt, &self.cancel_flag).await;
+            self.run_simple_chat(app, &cfg, &prompt, &task.cancel_flag).await;
             return;
         }
 
@@ -298,7 +362,7 @@ impl AgentRuntime {
         };
 
         // 规划期间用户可能已点击取消：规划完成后立即检查，避免拉起无意义的流水线。
-        if self.cancel_flag.load(Ordering::SeqCst) {
+        if task.cancel_flag.load(Ordering::SeqCst) {
             tracing::info!("[agent] run_task: 规划完成后检测到取消信号，终止任务");
             events::emit_status(app, "⛔ 任务已被用户取消");
             events::emit_task_done(app, plan_usage.0, plan_usage.1);
@@ -330,7 +394,7 @@ impl AgentRuntime {
             events::emit_status(app, "✅ 计划审批策略：自动放行（无需人工确认），直接执行");
         } else if !is_branch_rerun {
             loop {
-                if self.cancel_flag.load(Ordering::SeqCst) {
+                if task.cancel_flag.load(Ordering::SeqCst) {
                     tracing::info!("[agent] run_task: 计划审批等待期间检测到取消信号，终止任务");
                     events::emit_status(app, "⛔ 任务已被用户取消");
                     events::emit_task_done(app, plan_usage.0, plan_usage.1);
@@ -345,27 +409,27 @@ impl AgentRuntime {
                     sensitive_ops: sensitive_ops.clone(),
                 };
                 events::emit_plan_approval_needed(app, &req);
-                self.plan_approval.request(req);
-                let decision = self.plan_approval.wait(&self.cancel_flag).await;
+                task.plan_approval.request(req);
+                let decision = task.plan_approval.wait(&task.cancel_flag).await;
                 match decision {
                     crate::agent::plan_approval::PlanApprovalDecision::Approve => {
-                        self.plan_approval.reset();
+                        task.plan_approval.reset();
                         // 批准 = 授权整计划敏感清单（执行期同信号操作放行）
                         for op in &sensitive_ops {
-                            self.approval_grants
+                            task.approval_grants
                                 .grant(&format!("{}:{}", op.category, op.pattern));
                         }
                         break;
                     }
                     crate::agent::plan_approval::PlanApprovalDecision::Reject => {
-                        self.plan_approval.reset();
+                        task.plan_approval.reset();
                         tracing::info!("[agent] run_task: 计划被用户拒绝，整体终止任务");
                         events::emit_status(app, "✋ 任务计划已被用户拒绝，已终止");
                         events::emit_task_done(app, plan_usage.0, plan_usage.1);
                         return;
                     }
                     crate::agent::plan_approval::PlanApprovalDecision::Revise(guidance) => {
-                        self.plan_approval.reset();
+                        task.plan_approval.reset();
                         // 空指引等价于 Approve：直接放行，避免无意义死循环。
                         if guidance.trim().is_empty() {
                             tracing::info!("[agent] run_task: 计划审批收到空修改意见，按批准处理");
@@ -381,7 +445,7 @@ impl AgentRuntime {
                         plan_usage.1 += nu.1;
                         plan_raw = nr;
                         // 重新规划期间可能取消：完成即重新进入门禁循环。
-                        if self.cancel_flag.load(Ordering::SeqCst) {
+                        if task.cancel_flag.load(Ordering::SeqCst) {
                             tracing::info!("[agent] run_task: 重新规划期间检测到取消信号，终止任务");
                             events::emit_status(app, "⛔ 任务已被用户取消");
                             events::emit_task_done(app, plan_usage.0, plan_usage.1);
@@ -390,7 +454,7 @@ impl AgentRuntime {
                         continue;
                     }
                     crate::agent::plan_approval::PlanApprovalDecision::Cancel => {
-                        self.plan_approval.reset();
+                        task.plan_approval.reset();
                         tracing::info!("[agent] run_task: 计划审批等待期间用户取消，终止任务");
                         events::emit_status(app, "⛔ 任务已被用户取消");
                         events::emit_task_done(app, plan_usage.0, plan_usage.1);
@@ -462,13 +526,13 @@ impl AgentRuntime {
             &cfg,
             &registry,
             &ctx,
-            &self.approval,
+            &task.approval,
             &mut graph,
             &session_id,
-            &self.cancel_flag,
-            &self.recovery,
+            &task.cancel_flag,
+            &task.recovery,
             false,
-            Some(&self.approval_grants),
+            Some(&task.approval_grants),
         )
         .await;
         // 收尾：保存会话子图快照（完整子图，供后续检索/复盘）。
@@ -517,7 +581,7 @@ impl AgentRuntime {
 
         // 阶段四：合并全局执行视图，切片流式推送终态文本（#20260918011 工作空间模式打字机：
         // 原实现一次性整段下发，观感「一起输出」；改为与自由会话同款逐片流式，推完再收尾 done）。
-        Self::stream_final_text(app, &result.final_text, &self.cancel_flag).await;
+        Self::stream_final_text(app, &result.final_text, &task.cancel_flag).await;
         events::emit_text_chunk(app, "", true);
 
         // token 用量 = 规划 + 各子任务累计，写回会话表并随事件带出。
@@ -2328,3 +2392,60 @@ pub(crate) fn clip_plain(s: &str, max: usize) -> String {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 20260919002 per-agent 锁语义：不同 Agent 互不阻塞；同一 Agent 互斥；
+    /// RunningGuard Drop（含提前 return / panic 路径）后锁自动复位且回收状态束。
+    #[test]
+    fn run_lock_is_per_agent() {
+        let rt = AgentRuntime::new();
+
+        // A 抢到锁；B 是另一个 Agent，照样能抢到（旧全局锁下这里会 None）
+        let (a, _ga) = rt.try_acquire_run_lock("agent-a").expect("A 首次抢锁应成功");
+        let (b, _gb) = rt.try_acquire_run_lock("agent-b").expect("B 与 A 不同，应可并行抢锁");
+
+        // 同一 Agent 重复抢锁失败（互斥）
+        assert!(rt.try_acquire_run_lock("agent-a").is_none(), "A 已在跑，重复抢锁应被拒");
+
+        // 状态束互不串台：各自独立的 cancel_flag
+        a.cancel_flag.store(true, Ordering::SeqCst);
+        assert!(a.cancel_flag.load(Ordering::SeqCst));
+        assert!(!b.cancel_flag.load(Ordering::SeqCst), "B 的取消标志不应被 A 污染");
+
+        // 显式路由：resolve 按 agent_id 精确找到
+        assert!(rt.resolve_task_state(Some("agent-a")).is_ok());
+        assert!(rt.resolve_task_state(Some("agent-c")).is_err());
+
+        // drop A 的 guard：A 的锁复位 + 状态束回收；B 不受影响
+        drop(_ga);
+        assert!(rt.resolve_task_state(Some("agent-a")).is_err(), "A 的状态束应随 guard 回收");
+        assert!(rt.resolve_task_state(Some("agent-b")).is_ok(), "B 不受影响");
+
+        // A 可再次抢锁（新一轮任务）
+        assert!(rt.try_acquire_run_lock("agent-a").is_some());
+        drop(_gb);
+    }
+
+    /// 缺省路由：单任务在跑时不传 agent_id 也能路由（平滑兼容），多任务时必须显式传。
+    #[test]
+    fn resolve_task_state_defaults() {
+        let rt = AgentRuntime::new();
+        // 无任务：Err
+        assert!(rt.resolve_task_state(None).is_err());
+
+        let (_a, ga) = rt.try_acquire_run_lock("agent-a").expect("抢锁");
+        // 唯一在跑：缺省路由成功
+        assert!(rt.resolve_task_state(None).is_ok());
+
+        let (_b, _gb) = rt.try_acquire_run_lock("agent-b").expect("B 并行");
+        // 多任务在跑：缺省路由必须报错（歧义）
+        match rt.resolve_task_state(None) {
+            Err(msg) => assert!(msg.contains("agent_id"), "错误信息应提示指定 agent_id: {msg}"),
+            Ok(_) => panic!("多任务缺省路由应报错"),
+        }
+        drop(ga);
+        drop(_gb);
+    }
+}

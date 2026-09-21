@@ -38,6 +38,7 @@ import type {
   ToolStep,
 } from './types'
 import { baseName, opAction, opOf, pathFromArgs } from './toolNarrate'
+import { dedupeKbHits, parseKbResult, type KbHit } from './KbSearchCitations'
 
 /** 会话对外暴露的实时状态。 */
 export interface AgentSessionState {
@@ -100,6 +101,9 @@ export interface AgentSessionState {
   pendingChoice: ChoiceRequest | null
   /** 回传方案推荐选择（用户点选的 optionId 唤醒后台挂起的 `native__ask_user_choice`）。 */
   submitChoice: (optionId: string, customText?: string) => Promise<void>
+  /** K3-2 任务级引用来源：本轮全部 `native__kb_search` 命中去重后的精简列表。
+   *  task_done 时定稿（空数组=本轮无知识检索）；run 启动/重置即清空。 */
+  kbSources: KbHit[]
 }
 
 function labelOf(toolName: string): string {
@@ -117,6 +121,12 @@ export function useAgentSession(): AgentSessionState {
   // 交错时间线（2026-09-18 体验重构）：模型说话与工具调用按到达顺序排列，
   // 渲染时「说话→工具→参数/结果→继续说话」自然交错（替代正文/工具两轴分离）。
   const [segments, setSegments] = useState<ChatSegment[]>([])
+  // K3-2 任务级引用来源：本轮 kb_search 命中先聚合进 ref（task_done 前持续累积），
+  // task_done 定稿为去重列表（渲染气泡底部「📚 本次引用来源」）；run/reset 清空。
+  // 20260919002 per-agent 隔离：本轮任务的 agentId（run 时记录），供取消/决策命令路由。
+  const agentIdRef = useRef<string | null>(null)
+  const kbHitsRef = useRef<Map<string, KbHit>>(new Map())
+  const [kbSources, setKbSources] = useState<KbHit[]>([])
   // 最近一次 LLM 请求的真实窗口占用（agent-llm-usage 单次口径；任务级累计走 liveTokenUsage）。
   const [lastLlmUsage, setLastLlmUsage] = useState<{ promptTokens: number; completionTokens: number } | null>(null)
   // 三层流水线：阶段二规划生成的步骤进度条（plan_generated 填充，step_started/finished 更新状态）。
@@ -352,6 +362,9 @@ export function useAgentSession(): AgentSessionState {
       setThoughts([])
       // 新消息气泡开新时间线（segments 仅承载当前轮的说话/工具交错）
       setSegments([])
+      // K3-2：引用来源随轮清空（新任务重新收集）
+      kbHitsRef.current.clear()
+      setKbSources([])
       stepsRef.current.clear()
       flushSteps()
       setPlanSteps([])
@@ -377,6 +390,9 @@ export function useAgentSession(): AgentSessionState {
 
       setRunning(true)
       startTaskTimeout()
+      // 20260919002 per-agent 隔离：记录本轮任务的 agentId，供取消 / 决策命令路由到
+      // 对应 Agent 的任务状态束（多任务并行时不再串台）。
+      agentIdRef.current = input.agentId ?? null
       try {
         // 注意：Rust 命令 `run_agent_task` 的入参是一个名为 `input` 的结构体，
         // 因此必须把字段包在 `input` 键下（Tauri 按参数名匹配，扁平传参会报
@@ -511,6 +527,9 @@ export function useAgentSession(): AgentSessionState {
     setStatusText('')
     setThoughts([])
     setSegments([])
+    // K3-2：引用来源随会话重置清空
+    kbHitsRef.current.clear()
+    setKbSources([])
     setPendingApproval(null)
     setLiveTokenUsage(null)
     setTaskError(null)
@@ -544,7 +563,7 @@ export function useAgentSession(): AgentSessionState {
       return
     }
     // 通知 Rust 取消当前任务（best-effort，命令可不存在/忽略）。
-    void invoke('cancel_agent_task').catch(() => {})
+    void invoke('cancel_agent_task', { agentId: agentIdRef.current }).catch(() => {})
     // 撤掉 20 分钟长护栏（正常 cancel 不应触发该告警）。
     clearTaskTimeout()
     // 不再乐观清运行态：终态由后端 agent-task-done/error 翻转（与既有铁律一致，#20260915004 B4）。
@@ -571,6 +590,7 @@ export function useAgentSession(): AgentSessionState {
       setRecovery(null)
       try {
         await invoke('resolve_subtask', {
+        agentId: agentIdRef.current,
           input: {
             decision,
             guidance: guidance ?? null,
@@ -616,6 +636,18 @@ export function useAgentSession(): AgentSessionState {
             if (e.step) {
               const step = { ...e.step, toolLabel: labelOf(e.step.toolName), step: currentStepRef.current ?? undefined }
               upsertStep(step)
+              // K3-2 任务级引用收集：成功的 kb_search 返回解析进聚合池（解析复用 K3-1 的
+              // parseKbResult，同构兼容 {notice,hits} 包装；同 chunk 重复出现——K3-4 full
+              // 通路回传完整版——由 task_done 时的 dedupeKbHits 按 id 去重取 content 更长者）。
+              if (step.toolName === 'native__kb_search' && step.status === 'success') {
+                const parsed = parseKbResult(step.result)
+                if (parsed) {
+                  for (const h of parsed.hits) {
+                    if (!h?.id) continue
+                    kbHitsRef.current.set(h.id, h)
+                  }
+                }
+              }
               // 成功不追加旁白（工具行已体现结果），仅失败时补一条人性化说明。
               if (step.status !== 'success') {
                 const op = step.op ?? opOf(step.toolName)
@@ -817,6 +849,10 @@ export function useAgentSession(): AgentSessionState {
           setPlanning(false)
           // 终态清扫：收敛残留的 running 步骤（见 finalizeStuckSteps 注释）
           finalizeStuckSteps()
+          // K3-2 任务级引用来源定稿：本轮全部 kb_search 命中去重（保留 content 更长者，
+          // 兼容 K3-4 full 完整版通路），供气泡底部「📚 本次引用来源」区渲染；聚合池清空。
+          setKbSources(dedupeKbHits([...kbHitsRef.current.values()]))
+          kbHitsRef.current.clear()
           // 完成后保留思考过程，方便回看智能体做了什么（新一轮 run 时在入口清空）
         },
       )
@@ -922,6 +958,7 @@ export function useAgentSession(): AgentSessionState {
   return {
     toolSteps,
     segments,
+    kbSources,
     lastLlmUsage,
     streamingText,
     isStreaming,

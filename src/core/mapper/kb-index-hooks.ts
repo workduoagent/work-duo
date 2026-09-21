@@ -10,12 +10,16 @@
  * 失败语义：任何失败仅 console 记录，绝不阻塞文件管理主流程（设计稿 §6 降级原则）。
  */
 import { isTauri } from '@/core/config'
+import { fe } from '@/core/logBridge'
 import { invoke } from '@tauri-apps/api/core'
 
 /** 单资产增量同步（digest 未变时 Rust 侧幂等跳过）。 */
 export function fireKbSyncAsset(kbId: string, assetId: string): void {
   if (!isTauri || !kbId || !assetId) return
+  fe.info('kb-index', `sync asset kbId=${kbId} assetId=${assetId}`)
   void invoke('kb_sync_asset', { input: { kbId, assetId } }).catch((e) => {
+    const msg = e instanceof Error ? e.message : String(e)
+    fe.warn('kb-index', `sync fail asset=${assetId} err=${msg}`)
     console.warn(`[kb-index] 资产同步失败（文件管理不受影响）asset=${assetId}：`, e)
   })
 }
@@ -23,7 +27,10 @@ export function fireKbSyncAsset(kbId: string, assetId: string): void {
 /** 级联清理资产向量段（资产行删除前/后调用皆可，Rust 侧幂等）。 */
 export function fireKbRemoveAsset(kbId: string, assetId: string): void {
   if (!isTauri || !kbId || !assetId) return
+  fe.info('kb-index', `remove asset kbId=${kbId} assetId=${assetId}`)
   void invoke('kb_remove_asset', { input: { kbId, assetId } }).catch((e) => {
+    const msg = e instanceof Error ? e.message : String(e)
+    fe.warn('kb-index', `remove fail asset=${assetId} err=${msg}`)
     console.warn(`[kb-index] 资产向量清理失败（文件管理不受影响）asset=${assetId}：`, e)
   })
 }

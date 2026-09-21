@@ -77,8 +77,9 @@ function rowToRound(r: AgentConversationRoundRow): AgentConversationRound {
     outputTokens: r.output_tokens ?? undefined,
     startTime: r.start_time ?? undefined,
     endTime: r.end_time ?? undefined,
-    // 交错时间线（v26）：旁白/工具/正文按真实时序；旧 round NULL = undefined 回退旧渲染
-    segments: safeParse<Array<{ kind: string; text?: string; callId?: string }>>(r.segments_json, []),
+    // 交错时间线（v26）：旁白/工具/正文按真实时序；旧 round NULL = undefined 回退旧渲染。
+    // K3-2：kb-sources 段带 hits（本次引用来源），JSON 往返原样保留，形状由消费端收窄。
+    segments: safeParse<Array<{ kind: string; text?: string; callId?: string; hits?: unknown[] }>>(r.segments_json, []),
     rawMessagesJson: r.raw_messages_json ?? undefined,
     createdAt: safeIso(r.created_at),
     updatedAt: safeIso(r.updated_at),

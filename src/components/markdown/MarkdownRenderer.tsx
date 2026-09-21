@@ -31,6 +31,17 @@ export interface MarkdownRendererProps {
    * 由调用方（如知识库查看器）按知识库实际文件解析。
    */
   resolveImageUrl?: (src: string) => Promise<string | null>
+  /**
+   * 追加的 remark 插件（可选，K3-2 内联引标等域内扩展）。
+   * 传 undefined 时行为与原渲染器完全一致；不改变基础插件栈（gfm/math）。
+   */
+  remarkPluginsExt?: unknown[]
+  /**
+   * 追加的 react-markdown components 覆盖（可选，如自定义 `kb-cite` 元素渲染）。
+   * 与内置 pre/img 覆盖合并，调用方同名字段优先生效。
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  componentsExt?: Record<string, React.FC<any>>
 }
 
 // mermaid 仅初始化一次；render 在每次代码块挂载时调用
@@ -124,8 +135,14 @@ function MdImage({
   return <img src={resolved} alt={alt} />
 }
 
-export function MarkdownRenderer({ content, className, resolveImageUrl }: MarkdownRendererProps) {
-  // 组件表随 resolveImageUrl 变化重建（img 拦截依赖它）
+export function MarkdownRenderer({
+  content,
+  className,
+  resolveImageUrl,
+  remarkPluginsExt,
+  componentsExt,
+}: MarkdownRendererProps) {
+  // 组件表随 resolveImageUrl / componentsExt 变化重建（img 拦截依赖前者，域内引标依赖后者）
   const mdComponents = useMemo(() => {
     return {
       ...mdComponentsBase,
@@ -137,14 +154,20 @@ export function MarkdownRenderer({ content, className, resolveImageUrl }: Markdo
           resolveImageUrl={resolveImageUrl}
         />
       ),
+      ...(componentsExt ?? {}),
     } as Record<string, React.FC<Record<string, unknown>>>
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [resolveImageUrl])
+  }, [resolveImageUrl, componentsExt])
+
+  const remarkPlugins = useMemo(
+    () => [...(remarkPluginsExt ?? [])] as never[],
+    [remarkPluginsExt],
+  )
 
   return (
     <div className={`md-body ${className ?? ''}`}>
       <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkMath]}
+        remarkPlugins={[remarkGfm, remarkMath, ...remarkPlugins]}
         // 放宽 KaTeX 严格模式：模型输出常在 $...$ 数学块里夹带中文 / en-dash 等「非严格 LaTeX」字符，
         // 默认 strict:'warn' 会刷大量 console.warn；strict:false 让其按文本静默回退渲染、不再告警。
         // throwOnError:false 保证即便有真语法错也只渲染成红色，而不会让整段 Markdown 渲染抛错崩掉。

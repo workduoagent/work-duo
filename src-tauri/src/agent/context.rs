@@ -362,6 +362,11 @@ pub(crate) async fn build_context_messages(
 
     // [Slot 0] 系统提示词 + 工程专属规则注入。
     let mut system_prompt = cfg.system_prompt.clone();
+    // 全局输出语言约束（#20260918010-K3-2 反馈）：SIMPLE_CHAT 等所有走 build_context_messages 的路径，
+    // 思考流（reasoning）会在界面直接展示给用户——模型英文 reasoning 不可接受，显式约束为简体中文。
+    system_prompt.push_str(
+        "\n\n【全局输出约束】思考过程（reasoning/思考链）一律用**简体中文**书写（用户会在界面直接阅读思考流）；最终回复同样使用简体中文。",
+    );
     if let Some(rules) = &custom_rules {
         if !rules.trim().is_empty() {
             system_prompt.push_str("\n\n### Project Specific Rules:\n");

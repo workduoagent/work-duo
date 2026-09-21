@@ -8,7 +8,7 @@
  *
  * 文件内容由 MultiFileViewer 自行读取（kb.path + relPath），本页只负责编排与元数据。
  */
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
   ArrowLeft,
@@ -20,6 +20,7 @@ import {
   BookOpen,
   Locate,
   DatabaseZap,
+  Tags,
 } from 'lucide-react'
 import { Empty, Spin, Modal, Progress } from 'antd'
 import { Button, Input, Field, FieldLabel } from '@/components/ui'
@@ -32,7 +33,10 @@ import {
   refreshAssets,
   deleteAssetsUnderPath,
   listAssets,
+  parseAssetTags,
+  updateAssetTags,
 } from '@/core/mapper/knowledge-mapper.ts'
+import type { KnowledgeAsset } from '@/types/core'
 import {
   readKbFileTree,
   writeKbFileContent,
@@ -273,6 +277,16 @@ export default function KnowledgeDetailPage() {
   const [indexStat, setIndexStat] = useState<{ indexed: number; total: number } | null>(null)
   /** 重建运行态（null = 空闲）。 */
   const [rebuild, setRebuild] = useState<{ running: boolean; done: number; total: number; message?: string } | null>(null)
+  // K3-3 标签：资产清单（含 meta_data.tags）+ 悬浮标签面板（右侧固定 icon 展开）
+  const [assets, setAssets] = useState<KnowledgeAsset[]>([])
+  const [tagPanelOpen, setTagPanelOpen] = useState(false)
+  /** 面板内改名态：正在编辑的标签名 + 输入值（null = 非编辑态）。 */
+  const [editingTag, setEditingTag] = useState<string | null>(null)
+  const [editingValue, setEditingValue] = useState('')
+  /** 面板底部注入输入框。 */
+  const [tagInput, setTagInput] = useState('')
+  /** 牙齿标签条点击跳转：每个标签的命中文件循环游标（per-tag 记忆上次定位到第几个）。 */
+  const tagJumpIdxRef = useRef<Map<string, number>>(new Map())
   const kbIdRef = useRef<string | null>(null)
   useEffect(() => {
     kbIdRef.current = kb?.id ?? null
@@ -284,6 +298,7 @@ export default function KnowledgeDetailPage() {
       const assets = await listAssets(id)
       const indexed = assets.filter((a) => !!a.indexedAt).length
       setIndexStat({ indexed, total: assets.length })
+      setAssets(assets)
     } catch {
       /* 状态摘要失败静默（不影响文件管理） */
     }
@@ -333,6 +348,77 @@ export default function KnowledgeDetailPage() {
     }
   }
 
+  /* --------------------- K3-3 标签悬浮面板（右侧固定入口） --------------------- */
+
+  /** 标签聚合：本库全部资产的 meta_data.tags → { 标签: 资产数 }（按数量降序）。 */
+  const tagCloud = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const a of assets) {
+      for (const t of parseAssetTags(a.metaData)) {
+        counts.set(t, (counts.get(t) ?? 0) + 1)
+      }
+    }
+    return [...counts.entries()].sort((a, b) => b[1] - a[1])
+  }, [assets])
+
+  /** 选中文件对应的资产（面板标签操作的绑定对象）。 */
+  const selectedAsset = useMemo(
+    () => assets.find((a) => a.filePath === selected),
+    [assets, selected],
+  )
+  const selectedTags = useMemo(
+    () => (selectedAsset ? parseAssetTags(selectedAsset.metaData) : []),
+    [selectedAsset],
+  )
+
+  /** 彩虹随机色（同标签恒色）：标签名 hash → HSL 色相，浅底深字。 */
+  const tagStyle = (tag: string): React.CSSProperties => {
+    let h = 0
+    for (const ch of tag) h = (h * 31 + (ch.codePointAt(0) ?? 0)) % 360
+    return {
+      background: `hsl(${h} 72% 90%)`,
+      color: `hsl(${h} 65% 30%)`,
+      borderColor: `hsl(${h} 55% 76%)`,
+    }
+  }
+
+  const refreshAfterTagChange = async () => {
+    await loadIndexStat()
+  }
+
+  /** 注入：把标签加到当前文件（已存在则忽略）。 */
+  const addTagToFile = async (tag: string) => {
+    if (!selectedAsset || !tag.trim()) return
+    const t = tag.trim()
+    const cur = parseAssetTags(selectedAsset.metaData)
+    if (cur.includes(t)) {
+      message.warning(`当前文件已有标签「${t}」`)
+      return
+    }
+    await updateAssetTags(selectedAsset.id, [...cur, t])
+    await refreshAfterTagChange()
+  }
+
+  /** 删除：从当前文件移除标签。 */
+  const removeTagFromFile = async (tag: string) => {
+    if (!selectedAsset) return
+    await updateAssetTags(
+      selectedAsset.id,
+      parseAssetTags(selectedAsset.metaData).filter((t) => t !== tag),
+    )
+    await refreshAfterTagChange()
+  }
+
+  /** 编辑：在当前文件内把标签改名（保持原顺序）。 */
+  const renameTagInFile = async (from: string, to: string) => {
+    if (!selectedAsset || !to.trim() || to === from) return
+    await updateAssetTags(
+      selectedAsset.id,
+      parseAssetTags(selectedAsset.metaData).map((t) => (t === from ? to.trim() : t)),
+    )
+    await refreshAfterTagChange()
+  }
+
   if (loading) {
     return (
       <div className="kb-detail">
@@ -374,24 +460,9 @@ export default function KnowledgeDetailPage() {
                 </span>
                 <span className="kb-detail__meta-item">更新于 {formatRelativeTime(kb.updatedAt)}</span>
               </div>
-              {/* K1' 索引行：重建按钮 + 状态摘要 + 进度（仅 Tauri 环境展示） */}
+              {/* K1' 索引行：进度提示（重建入口在目录树工具栏，索引量经按钮底色体现，不再展示文字统计） */}
               {isTauri && (
                 <div className="kb-detail__index-row">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    disabled={!!rebuild?.running}
-                    onClick={handleRebuild}
-                    title="重新解析并索引全部文件（md/txt）"
-                  >
-                    <DatabaseZap size={14} />
-                    重建索引
-                  </Button>
-                  {indexStat && (
-                    <span className="kb-detail__index-stat">
-                      已索引 {indexStat.indexed}/{indexStat.total} 个资产
-                    </span>
-                  )}
                   {rebuild?.running && (
                     <div className="kb-detail__index-progress">
                       <Progress
@@ -421,6 +492,32 @@ export default function KnowledgeDetailPage() {
                     {activeDir && <span className="kb-tree__active-dir">{activeDir}</span>}
                   </span>
                 <div className="kb-detail__tree-tools">
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    title={
+                      indexStat
+                        ? `重建索引（已索引 ${indexStat.indexed} 个资产，越多底色越红）`
+                        : '重建索引'
+                    }
+                    disabled={!!rebuild?.running}
+                    onClick={handleRebuild}
+                    style={
+                      indexStat && indexStat.indexed > 0
+                        ? (() => {
+                            // K3-3 用户方案：索引越多背景越红（20 个封顶全红）
+                            const i = Math.min(indexStat.indexed / 20, 1)
+                            return {
+                              background: `hsl(4 ${30 + 50 * i}% ${94 - 46 * i}%)`,
+                              borderColor: `hsl(4 60% ${80 - 30 * i}%)`,
+                              color: `hsl(4 70% ${30 - 10 * i}%)`,
+                            }
+                          })()
+                        : undefined
+                    }
+                  >
+                    <DatabaseZap size={15} />
+                  </Button>
                   <Button
                     variant="ghost"
                     size="icon-sm"
@@ -473,7 +570,14 @@ export default function KnowledgeDetailPage() {
 
               <div className="kb-detail__explorer-view">
                 {selected ? (
-                  <MultiFileViewer kb={kb} relPath={selected} />
+                  <MultiFileViewer
+                    kb={kb}
+                    relPath={selected}
+                    onFileChanged={() => {
+                      // 编辑保存后静默刷新：digest 变化 → 增量索引重切该文件进向量库
+                      void refreshAssets(kb).catch(() => {})
+                    }}
+                  />
                 ) : (
                   <div className="kb-detail__muted">请从左侧选择一个文件</div>
                 )}
@@ -483,6 +587,113 @@ export default function KnowledgeDetailPage() {
       ) : (
         <div className="kb-detail__empty">
           <Empty description="未找到该知识库" />
+        </div>
+      )}
+
+      {/* K3-3 标签悬浮栈：右缘 icon（管理入口，恒显）+ 牙齿式标签条竖排
+          （彩虹随机色、hover 向左抽出展开、点击循环定位命中文件）。 */}
+      {isTauri && kb && (
+        <div className="kb-detail__tagstack">
+          <button
+            type="button"
+            className={`kb-detail__float-tag${tagPanelOpen ? ' kb-detail__float-tag--open' : ''}`}
+            title={
+              tagCloud.length > 0
+                ? `标签管理（全库 ${tagCloud.length} 个标签）`
+                : '标签管理（暂无标签，选中文件后注入）'
+            }
+            disabled={!selectedAsset && tagCloud.length === 0}
+            onClick={() => setTagPanelOpen((v) => !v)}
+          >
+            <Tags size={17} />
+          </button>
+          {tagCloud.map(([tag, count]) => (
+            <button
+              key={tag}
+              type="button"
+              className="kb-detail__tagdrawer"
+              style={tagStyle(tag)}
+              title={`${tag} · ${count} 个文件（点击定位）`}
+              onClick={() => {
+                const paths = assets
+                  .filter((a) => parseAssetTags(a.metaData).includes(tag))
+                  .map((a) => a.filePath)
+                  .sort()
+                if (paths.length === 0) return
+                // 同一标签多次点击：在命中文件间循环切换
+                const idx = (tagJumpIdxRef.current.get(tag) ?? 0) % paths.length
+                tagJumpIdxRef.current.set(tag, idx + 1)
+                setSelected(paths[idx])
+                setLocateNonce((n) => n + 1)
+              }}
+            >
+              <span className="kb-detail__tagdrawer-name">{tag}</span>
+              <span className="kb-detail__tagdrawer-n">{count}</span>
+            </button>
+          ))}
+        </div>
+      )}
+      {tagPanelOpen && (
+        <div className="kb-detail__tagpanel">
+          <div className="kb-detail__tagpanel-chips">
+            {!selected && (
+              <span className="kb-detail__tagpanel-empty">请先在左侧选择一个文件</span>
+            )}
+            {selected && selectedTags.length === 0 && (
+              <span className="kb-detail__tagpanel-empty">未打标签，输入后回车注入</span>
+            )}
+            {selectedTags.map((t) =>
+              editingTag === t ? (
+                <Input
+                  key={t}
+                  value={editingValue}
+                  autoFocus
+                  onChange={(e) => setEditingValue(e.target.value)}
+                  onBlur={() => {
+                    void renameTagInFile(t, editingValue)
+                    setEditingTag(null)
+                  }}
+                  onPressEnter={() => {
+                    void renameTagInFile(t, editingValue)
+                    setEditingTag(null)
+                  }}
+                  style={{ width: 110 }}
+                />
+              ) : (
+                <span key={t} className="kb-detail__tagchip" style={tagStyle(t)}>
+                  <button
+                    type="button"
+                    className="kb-detail__tagchip-name"
+                    title={`点击改名：${t}`}
+                    onClick={() => {
+                      setEditingTag(t)
+                      setEditingValue(t)
+                    }}
+                  >
+                    {t}
+                  </button>
+                  <button
+                    type="button"
+                    className="kb-detail__tagchip-x"
+                    title="从当前文件删除"
+                    onClick={() => void removeTagFromFile(t)}
+                  >
+                    ×
+                  </button>
+                </span>
+              ),
+            )}
+          </div>
+          <Input
+            value={tagInput}
+            placeholder="输入标签，回车注入当前文件"
+            disabled={!selectedAsset}
+            onChange={(e) => setTagInput(e.target.value)}
+            onPressEnter={() => {
+              void addTagToFile(tagInput)
+              setTagInput('')
+            }}
+          />
         </div>
       )}
 

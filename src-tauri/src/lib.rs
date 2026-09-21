@@ -108,6 +108,7 @@ pub fn run() {
             fs_helper::canonicalize_path,
             fs_helper::migrate_storage_dir,
             logging::get_run_logs,
+            logging::log_frontend,
             mcp_server::mcp_resolve_result,
             agent::embedding::probe_embedding,
             agent::memory::backfill_memory_vectors,
