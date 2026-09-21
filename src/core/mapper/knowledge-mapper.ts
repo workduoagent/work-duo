@@ -13,6 +13,7 @@
  *  - 非 Tauri 环境（浏览器 dev）回退 localStorage，保证可调试（资产扫描返回空）。
  */
 import { isTauri } from '@/core/config'
+import { invoke } from '@tauri-apps/api/core'
 import { fe } from '@/core/logBridge'
 import { safeIso } from './safeTime'
 import type { KnowledgeBase, KnowledgeAsset, KnowledgeAssetType } from '@/types/core'
@@ -246,7 +247,7 @@ export async function updateKnowledgeBase(kb: {
   return listKnowledgeBases()
 }
 
-/** 删除知识库：清目录 + 清资产 + 删行。返回最新列表。 */
+/** 删除知识库：清向量段 + 清目录 + 清资产 + 删行。返回最新列表。 */
 export async function deleteKnowledgeBase(kb: KnowledgeBase): Promise<KnowledgeBase[]> {
   if (!isTauri) {
     const list = lsList().filter((k) => k.id !== kb.id)
@@ -254,23 +255,19 @@ export async function deleteKnowledgeBase(kb: KnowledgeBase): Promise<KnowledgeB
     return list
   }
   const db = await getDb()
-  // 先级联清理向量段（需要资产 id 清单，删行后即无从查起）
-  await deleteKnowledgeBaseAssets(kb.id)
+  // 先级联清理该库全部向量段（单命令按 kb_id 一把删，同步等待——fire-and-forget 在
+  // 删库后立即关应用的场景下可能丢清理，导致 Lance 段孤儿残留；2026-09-21 缺口修复）。
+  try {
+    await invoke('kb_remove_kb_index', { input: { kbId: kb.id } })
+  } catch (e) {
+    // 清理失败不阻断删除（幂等，可经 kb_rebuild/手动清理补救），但留痕
+    fe.warn('kb', `kb_remove_kb_index fail id=${kb.id} err=${e instanceof Error ? e.message : String(e)}`)
+  }
   await db.execute('DELETE FROM knowledge_asset WHERE kb_id = ?', [kb.id])
   await db.execute('DELETE FROM knowledge_base WHERE id = ?', [kb.id])
   if (kb.path) await removeKbDir(kb.path)
   fe.info('kb', `deleteKnowledgeBase ok identifier=${kb.identifier} id=${kb.id}`)
   return listKnowledgeBases()
-}
-// 整库删除：级联清理该库全部资产的向量段（fire-and-forget，幂等）
-async function deleteKnowledgeBaseAssets(kbId: string): Promise<void> {
-  if (!isTauri) return
-  const db = await getDb()
-  const rows = await db.select<KnowledgeAssetRow[]>(
-    'SELECT id FROM knowledge_asset WHERE kb_id = ?',
-    [kbId],
-  )
-  for (const r of rows) fireKbRemoveAsset(kbId, r.id)
 }
 
 /** 列出某知识库的全部资产（按 file_path 排序）。 */

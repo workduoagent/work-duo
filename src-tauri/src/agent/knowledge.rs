@@ -703,6 +703,20 @@ pub(crate) async fn remove_asset_index(app: &AppHandle, kb_id: &str, asset_id: &
     Ok(())
 }
 
+/// 级联清理**整个知识库**的向量段（删除知识库前调用；幂等）。
+/// 2026-09-21 缺口修复：此前 deleteKnowledgeBase 只删 SQLite 两表 + 磁盘目录，
+/// Lance 向量段（存于全局 .vectors 库）残留为孤儿——磁盘目录删除不影响 .vectors。
+pub(crate) async fn remove_kb_index(app: &AppHandle, kb_id: &str) -> Result<(), String> {
+    let Some(vs) = vector_store::get_shared(app).await else {
+        return Err("向量库不可用".into());
+    };
+    let filter = format!("kb_id = '{}'", esc(kb_id));
+    vs.delete_by_filter(vector_store::VectorTable::KbChunks, &filter)
+        .await?;
+    tracing::info!("[agent] remove_kb_index: 已清理知识库 {kb_id} 的全部向量段");
+    Ok(())
+}
+
 /* ---------------- 全量重建 ---------------- */
 
 static KB_REBUILD_RUNNING: AtomicBool = AtomicBool::new(false);

@@ -116,6 +116,7 @@ pub fn run() {
             agent::vector_store::set_vector_path,
             agent::commands::kb_sync_asset,
             agent::commands::kb_remove_asset,
+            agent::commands::kb_remove_kb_index,
             agent::commands::kb_rebuild_index
         ])
         .run(tauri::generate_context!())

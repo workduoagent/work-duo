@@ -2171,6 +2171,18 @@ pub async fn kb_remove_asset(app: AppHandle, input: KbAssetInput) -> Result<(), 
     knowledge::remove_asset_index(&app, &input.kb_id, &input.asset_id).await
 }
 
+/// 删除知识库前级联清理该库全部向量段（2026-09-21 缺口修复：防孤儿段残留）。
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KbIdInput {
+    pub kb_id: String,
+}
+
+#[tauri::command]
+pub async fn kb_remove_kb_index(app: AppHandle, input: KbIdInput) -> Result<(), String> {
+    knowledge::remove_kb_index(&app, &input.kb_id).await
+}
+
 /// 前端入参：全量重建。
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
