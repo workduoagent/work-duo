@@ -285,10 +285,7 @@ node scripts/kb_driver.mjs
 11. **前端日志已透传到后端**：`kbFs`/`kb-index`/`knowledge-mapper`/`mcpBridge(kb:*)` 的关键操作会经 `log_frontend`
    落到同一份 Rust 日志（`[时间][模块][fe][web:0]-LEVEL-内容`），`agent_get_run_logs` 可一并回看——排 KB 问题优先看
    这些 `[fe]` 行确认「前端写盘/触发索引」是否真发生。KB 驱动见 `scripts/kb_driver.mjs`。
-12. **`agent_run_task.workspace` 决定运行模式（高频踩坑）**：传**非空绝对路径** → 绑定工作空间模式（系统提示注入该路径、
-   `.wd_mem` 记忆与知识片段检索按该空间隔离、产物落盘到该目录）；**不传 / `null` / `""`** → 回退「自由对话」沙盒目录
-   （每个智能体自带的 `$APPDATA/.workspace/<identifier>`，非真实工程）。外部编程工具调用时务必显式带真实目录绝对路径，
-   并在 `prompt` 里写明"在 {workspace} 目录下操作"，二者一致即可锁定绑定模式；误丢该字段会静默跑进沙盒、结果落错地方。
+12. **`agent_run_task.workspace` = 绑定工作空间**：传真实目录绝对路径即把 Agent 绑定到该工作空间（不传=自由对话沙盒）。外部工具按需在调用时带上即可。
 
 ## 集成核对清单
 
