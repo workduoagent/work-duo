@@ -557,7 +557,7 @@ async fn call_tool(app: &AppHandle, name: &str, args: &Value) -> Value {
         "plugin_upsert" => dispatch_ui(app, "plugin:upsert", args.clone()).await,
         "plugin_delete" => dispatch_ui(app, "plugin:delete", args.clone()).await,
         "plugin_set_enabled" => dispatch_ui(app, "plugin:set_enabled", args.clone()).await,
-        "plugin_test" => dispatch_ui(app, "plugin:test", args.clone()).await,
+        "plugin_test" => dispatch_ui_timeout(app, "plugin:test", args.clone(), 180).await,
         "plugin_extract_meta" => dispatch_ui(app, "plugin:extract_meta", args.clone()).await,
         "plugin_list_run_logs" => dispatch_ui(app, "plugin:list_run_logs", args.clone()).await,
         // —— 知识库模块：UI 级真实 handler（创建/编辑/删除/列资产/新增文件/导入/建文件夹/移除/重建索引）——
@@ -629,6 +629,21 @@ fn merge_input(args: &Value) -> Result<commands::RunAgentTaskInput, String> {
 
 /// 经 Tauri 事件派发 UI 意图，等待前端回传。
 async fn dispatch_ui(app: &AppHandle, intent: &str, payload: Value) -> Value {
+    dispatch_ui_timeout(app, intent, payload, 60).await
+}
+
+/// `dispatch_ui` 的可配置超时变体。
+///
+/// 背景：UI 意图工具经 `mcp:intent` 派发到前端真实 handler 并等待回传。
+/// 多数操作（CRUD）在 60s 内完成；但 `plugin:test`（端到端沙箱试跑）在
+/// 首次冷启动 / 依赖自愈场景下耗时更长（python 经 micromamba 启动、依赖安装
+/// 单独 120s），固定 60s 会误判超时。故对这类长耗时意图放开超时上限。
+async fn dispatch_ui_timeout(
+    app: &AppHandle,
+    intent: &str,
+    payload: Value,
+    timeout_secs: u64,
+) -> Value {
     let req_id = next_req_id();
     let (tx, rx) = tokio::sync::oneshot::channel::<Value>();
     pending().lock().unwrap().insert(req_id.clone(), tx);
@@ -636,10 +651,10 @@ async fn dispatch_ui(app: &AppHandle, intent: &str, payload: Value) -> Value {
         "mcp:intent",
         json!({ "id": req_id, "intent": intent, "payload": payload }),
     );
-    match tokio::time::timeout(Duration::from_secs(60), rx).await {
+    match tokio::time::timeout(Duration::from_secs(timeout_secs), rx).await {
         Ok(Ok(v)) => v,
         Ok(Err(_)) => json!({ "error": "前端回传通道已关闭（receiver dropped）" }),
-        Err(_) => json!({ "error": "等待前端 handler 响应超时（60s）" }),
+        Err(_) => json!({ "error": format!("等待前端 handler 响应超时（{}s）", timeout_secs) }),
     }
 }
 

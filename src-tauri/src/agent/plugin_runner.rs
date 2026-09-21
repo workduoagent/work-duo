@@ -18,9 +18,9 @@ use std::time::Duration;
 use serde::Serialize;
 use serde_json::Value as JsonValue;
 use tauri::Manager;
-use tauri_plugin_shell::process::CommandEvent;
-use tauri_plugin_shell::ShellExt;
 use tauri_plugin_sql::{DbInstances, DbPool};
+use tokio::io::AsyncWriteExt;
+use tokio::process::Command as AsyncCommand;
 
 use crate::bun_manager::BunManager;
 use crate::mamba_manager::MambaManager;
@@ -218,17 +218,6 @@ fn plugin_runs_dir(app: &tauri::AppHandle) -> PathBuf {
                 .unwrap_or_else(|| PathBuf::from("."))
         });
     base.join("plugin_runs")
-}
-
-/// 把单个 CommandEvent 累积进 stdout/stderr/exit_code。
-fn apply_event(ev: CommandEvent, stdout: &mut String, stderr: &mut String, code: &mut Option<i32>) {
-    match ev {
-        CommandEvent::Stdout(b) => stdout.push_str(&String::from_utf8_lossy(&b)),
-        CommandEvent::Stderr(b) => stderr.push_str(&String::from_utf8_lossy(&b)),
-        CommandEvent::Error(e) => stderr.push_str(&e),
-        CommandEvent::Terminated(p) => *code = p.code,
-        _ => {}
-    }
 }
 
 /// 把以 `\n` 分隔的行按 UTF-8 字符边界安全截断到 max_bytes（避免拆坏多字节字符）。
@@ -441,8 +430,15 @@ fn set_failure(result: &mut PluginRunResult, out: &SidecarOutcome, error_type: &
 ///
 /// 不另起收集任务，直接在当前 async 任务里 `tokio::select!` 驱动 `rx.recv()` 与超时；
 /// 超时后 `child.kill()` + `kill_process_tree(pid)`，再排空剩余输出后返回。
+/// 原生子进程执行（参数走 stdin 首行 + 超时杀树）。
+///
+/// 改用 `tokio::process::Command` 而非 `tauri-plugin-shell` 的 sidecar：
+/// 端到端复测发现后者 `CommandChild::write()` 注入的 stdin **无法可靠送达**
+/// micromamba/python 子进程，导致 Python Runner 壳永久阻塞在 `sys.stdin.readline()`，
+/// 被 60s 硬超时杀树（零依赖 `print` 脚本都如此）。原生 `Command` 显式 `.stdin(piped)`
+/// 写完即关管道，与 `native.rs` 沙箱执行同源可靠。
 async fn run_sidecar_with_stdin(
-    app: &tauri::AppHandle,
+    _app: &tauri::AppHandle,
     sidecar: &str,
     args: Vec<String>,
     cwd: Option<&Path>,
@@ -450,69 +446,93 @@ async fn run_sidecar_with_stdin(
     stdin_data: Option<&str>,
     timeout: Duration,
 ) -> Result<SidecarOutcome, String> {
-    let mut cmd = app
-        .shell()
-        .sidecar(sidecar)
-        .map_err(|e| format!("准备 {sidecar} sidecar 失败：{e}"))?
-        .args(args);
+    let bin = resolve_sidecar_path(sidecar)?;
+    let mut cmd = AsyncCommand::new(&bin);
+    cmd.args(&args);
     for (k, v) in extra_envs {
-        cmd = cmd.env(k.as_str(), v.as_str());
+        cmd.env(k, v);
     }
     if let Some(dir) = cwd {
-        cmd = cmd.current_dir(dir);
+        cmd.current_dir(dir);
     }
-    let (mut rx, mut child) = cmd
+    cmd.kill_on_drop(false)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    let mut child = cmd
         .spawn()
         .map_err(|e| format!("启动 {sidecar} 进程失败：{e}"))?;
 
-    // 注入 stdin 首行 JSON。sidecar 的 stdin 永远 piped 且无法关闭 EOF，故只写一行 + 换行，
-    // Runner 壳只读首行，不等待 EOF——进程不阻塞。
+    // 注入 stdin 首行 JSON（参数走 stdin 不 argv，见 ADR #3）。写完即关闭管道，
+    // Runner 壳只读首行、不等待 EOF，进程不阻塞。
     if let Some(data) = stdin_data {
         let line = if data.ends_with('\n') {
             data.to_string()
         } else {
             format!("{data}\n")
         };
-        let _ = child.write(line.as_bytes());
-    }
-
-    let pid = child.pid();
-    let deadline = tokio::time::Instant::now() + timeout;
-    let mut stdout = String::new();
-    let mut stderr = String::new();
-    let mut code: Option<i32> = None;
-    let mut timed_out = false;
-
-    loop {
-        if timed_out {
-            // 已超时杀树，仅排空剩余输出（最多再等 3s），随后结束。
-            match tokio::time::timeout(Duration::from_secs(3), rx.recv()).await {
-                Ok(Some(ev)) => apply_event(ev, &mut stdout, &mut stderr, &mut code),
-                _ => break,
-            }
-        } else {
-            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
-            // 用 timeout 包裹 recv（不依赖 tokio 的 `macros` feature），超时即杀树。
-            match tokio::time::timeout(remaining, rx.recv()).await {
-                Ok(Some(ev)) => apply_event(ev, &mut stdout, &mut stderr, &mut code),
-                Ok(None) => break,
-                Err(_) => {
-                    timed_out = true;
-                    // `child.kill()` 会 move 走 child（CommandChild::kill(self)），而循环仍可能
-                    // 进入 timed_out 排空分支导致其被二次使用；此处直接杀进程树（已覆盖派生解释器），
-                    // 不再调用 child.kill()，避免 use-after-move。
-                    kill_process_tree(pid);
-                }
-            }
+        if let Some(mut stdin) = child.stdin.take() {
+            let _ = stdin.write_all(line.as_bytes()).await;
+            let _ = stdin.flush().await;
+            drop(stdin);
         }
     }
 
-    Ok(SidecarOutcome {
-        stdout,
-        stderr,
-        exit_code: code,
-        timed_out,
-    })
+    let pid = child.id().unwrap_or(0);
+
+    // child 在此 move 进 collect 闭包；超时分支（Err）会让 collect 被丢弃并释放 child，
+    // 故超时分支只杀进程树、不再引用 child。
+    let collect = async {
+        child
+            .wait_with_output()
+            .await
+            .map_err(|e| format!("收集 {sidecar} 输出失败：{e}"))
+    };
+    match tokio::time::timeout(timeout, collect).await {
+        Ok(Ok(out)) => Ok(SidecarOutcome {
+            stdout: String::from_utf8_lossy(&out.stdout).to_string(),
+            stderr: String::from_utf8_lossy(&out.stderr).to_string(),
+            exit_code: out.status.code(),
+            timed_out: false,
+        }),
+        Ok(Err(e)) => Err(e),
+        Err(_) => {
+            // 超时：杀进程树（覆盖 micromamba 派生的 python 子进程）。
+            kill_process_tree(pid);
+            Ok(SidecarOutcome {
+                stdout: String::new(),
+                stderr: String::new(),
+                exit_code: Some(1),
+                timed_out: true,
+            })
+        }
+    }
+}
+
+/// 解析 externalBin sidecar 二进制路径。
+///
+/// Tauri 在 dev/打包时把 `binaries/<triple>` 改名为 `<name>` 放在主程序同目录，
+/// 故优先取「当前 exe 目录/<name>」；回退原始 `binaries/<name>` 目录，最后回退 PATH。
+fn resolve_sidecar_path(sidecar: &str) -> Result<PathBuf, String> {
+    let exe = std::env::current_exe().map_err(|e| format!("获取当前 exe 路径失败：{e}"))?;
+    let dir = exe
+        .parent()
+        .ok_or_else(|| "当前 exe 无父目录".to_string())?;
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    if cfg!(target_os = "windows") {
+        candidates.push(dir.join(format!("{sidecar}.exe")));
+        candidates.push(dir.join("binaries").join(format!("{sidecar}.exe")));
+    } else {
+        candidates.push(dir.join(sidecar));
+        candidates.push(dir.join("binaries").join(sidecar));
+    }
+    for c in &candidates {
+        if c.exists() {
+            return Ok(c.clone());
+        }
+    }
+    // 最后回退 PATH（含 .exe 再试一次）
+    Ok(PathBuf::from(sidecar))
 }
 
 /// 写 `plugin_run_log`（stdout/stderr 各 ≤64KB；params ≤8KB，见 §5.1）。
