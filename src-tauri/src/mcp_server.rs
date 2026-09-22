@@ -683,18 +683,22 @@ fn merge_input(args: &Value) -> Result<commands::RunAgentTaskInput, String> {
 /// 原先**一刀切 60s**。但部分意图是重量级异步操作（向量化 / 索引重建 / 依赖安装），
 /// 60s 会被**误杀**——MCP 侧已返回超时错误，前端操作却仍在跑，调用方与真实状态不一致。
 ///
-/// 分级判据：按「操作本身是否可能超过 60s」划分，而非拍脑袋放大。
-///   - 300s：涉及**批量向量化 / 全量索引重建**（大库、多文件累积，耗时随数据量线性增长）
-///   - 180s：涉及**沙箱冷启动 / 依赖安装 / 打包导入导出**
-///   - 60s（默认）：纯 CRUD / 查询 / 列表，本地 DB 操作，秒级返回
+/// 分级判据一律**基于实测**，不按「看起来重」拍脑袋（2026-09-23 修正）：
 ///
-/// 注：超时仅影响「愿意等多久」，不影响快操作的正常返回；对已知慢操作放宽是安全方向。
+/// - **60s（默认）覆盖绝大多数**：实测 `kb:create` 54ms / `kb:add_file`(300 段·24083 字) **74ms** /
+///   `kb:rebuild_index` **11ms**（异步 spawn，仅返回 `{started}`，进度走事件）/
+///   `kb:get` 15ms / `kb:list_assets` 9ms；`kb_list`/`plugin_list`/`memory_list`/`agent_ui_list`
+///   5~12ms。**KB 与 CRUD 全为毫秒级**——初版曾按「向量化/索引重建很重」的想当然放到 300s，
+///   实测证明完全不需要。
+/// - **放宽是双刃剑**：超时值 = 真挂死时的等待时长，盲目放大会拖长故障恢复。
+///   只有确有证据会慢的意图才放宽。
+/// - **180s 仅给沙箱冷启动 / 依赖安装**：`plugin:test` 有历史依据（micromamba 冷启动，
+///   依赖安装单独可达 120s）；`plugin:upsert` 可能触发依赖安装，同档。
 fn ui_intent_timeout(intent: &str) -> u64 {
     match intent {
-        // 批量向量化 / 全量索引重建
-        "kb:rebuild_index" | "kb:add_file" | "kb:import_file" => 300,
-        // 沙箱冷启动 / 依赖安装 / 打包
-        "plugin:test" | "plugin:upsert" | "skill:import" | "skill:export" => 180,
+        // 沙箱冷启动 / 依赖安装（有实测/历史依据会慢）
+        "plugin:test" | "plugin:upsert" => 180,
+        // 其余（KB / CRUD / skill / memory / agent）实测均为毫秒级
         _ => 60,
     }
 }
