@@ -90,7 +90,7 @@ curl -s -X POST http://127.0.0.1:18755/mcp \
 | `agent_submit_recovery_decision` | 回传步骤级恢复决策（子任务失败重试耗尽后的恢复门禁；不回应则 run 永久挂起） | `decision`(retry/skip/takeover/change-approach)+`guidance?`(+`agentId`) |
 | `agent_cancel_task` | 取消指定 Agent 的当前任务 | `agentId?` |
 | `agent_get_run_logs` | 增量读 Rust 运行日志 | `cursor` / `since_ts` / `level` / `limit` |
-| `agent_get_run_trace` | 取本 run 轨迹缓冲；**返回外层是 `{"trace":{...}}` 包裹**，取字段须先剥一层：`r.trace.{events, thinking, reply, counts}` | 无（进程级缓冲，最近一次 run） |
+| `agent_get_run_trace` | 取**指定 run** 的轨迹缓冲；**返回外层是 `{"run_id":..., "trace":{...}}` 包裹**，取字段须先剥 `trace` 层：`r.trace.{events, thinking, reply, counts}`。#8 per-run：必须传 `run_id`（由 `agent_run_task` 返回的 `run_id`），按 run 取独立桶，**并发 run 互不串台**；不传则返回空桶 | `run_id`（必填，来自 `agent_run_task` 返回） |
 
 ### B. 模块发现层（Rust 直读 workduo.db，零业务副作用）
 | 工具 | 作用 |
@@ -197,7 +197,7 @@ curl -s -X POST http://127.0.0.1:18755/mcp \
 3. `agent_round_create` `{sessionId, roundIndex:0, userQuestion:"..."}` → 取 `round.id`。
 4. `agent_run_task` `{agentId:<id 主键>, prompt, sessionId, roundId, workspace}` → `{run_id}`。`workspace` 传**真实目录绝对路径**即把 Agent 绑定到该工作空间（不传则自由对话沙盒）。
 5. `agent_wait_task` `{run_id, timeout_ms:120000}`。
-6. `agent_get_run_trace` → 返回 `{"trace":{events,thinking,reply,counts}}`（**先剥 `trace` 层**再取字段）；查 `trace.events` 有无 `native__kb_search`、`trace.reply` 是否非空。
+6. `agent_get_run_trace` `{run_id}` → 返回 `{"run_id":..., "trace":{events,thinking,reply,counts}}`（**先剥 `trace` 层**再取字段）；查 `trace.events` 有无 `native__kb_search`、`trace.reply` 是否非空。#8 per-run 后**必须传 `run_id`**，否则取空桶。
 7. `agent_round_update` `{roundId, patch:{assistantAnswer, thinkingContent, ...}}`（不回填则 UI 历史看不到正文）。
 8. `agent_session_update` `{id, patch:{status:"COMPLETED"}}`。
 9. `agent_session_get` / `agent_round_list` 核对持久化。
