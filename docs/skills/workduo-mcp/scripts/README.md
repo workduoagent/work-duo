@@ -9,7 +9,7 @@
 | `agent_task_driver.mjs` | **标准驱动库**（ESM，供其它脚本 import）：MCP 客户端（init/callTool/rawPost）/ 终态轮询 `pollRun`（三类挂起自动应答：计划审批·敏感工具审批·恢复门禁）/ 轨迹解包 `traceInner` / KB 事件提取 / 增量日志 `logFetcher` / `startRun` 组装 | `import { initMcp, callTool, startRun, … } from './agent_task_driver.mjs'` |
 | `agent_e2e_audit.mjs` | **全模块四阶段评分审计**（100 分制）：P1 发现 → P2 基建装配（KB 10 文件全链路 + 插件试跑）→ P3 RAG 快路径（SIMPLE_CHAT 携带 kb_search / tags 捷径 / 误杀诊断）→ P4 复合任务 Codex 基准（workspace 绑定 / PlanDAG / verified / 产物磁盘穿透）+ 数据留痕一致性 | `node agent_e2e_audit.mjs`（客户端须运行中；报告写 cwd `e2e_audit_report.json`，`E2E_REPORT_PATH` 可改） |
 | `agent_intent_probe.mjs` | **意图探针**：KB 事实问答核验「SIMPLE_CHAT 快路径 + 检索命中」（#1 回归件；`PROBE_KB_ID` 指定已索引 KB，exit 0 = PASS） | `node agent_intent_probe.mjs` |
-| `trace_isolation_probe.mjs` | **#8 per-run 隔离探针**：并发启动两个 Agent run，分别取 `agent_get_run_trace{run_id}`，断言两桶互不串台（A 桶不含 B 标记、B 桶不含 A 标记）。机制层已由 events.rs 单测覆盖，此处做端到端并发回归 | `PROBE_AGENT_ID=<id> node trace_isolation_probe.mjs` |
+| `trace_isolation_probe.mjs` | **#8 per-run 隔离探针**：WorkDuo 单 Agent 同时只能跑一个 run（运行锁），故真并发必须来自**两个不同 Agent**；默认 `PROBE_CREATE_AGENTS=1` 自建两临时 Agent → 并发 run → 分别取 `agent_get_run_trace{run_id}` → 断言两桶互不串台（A 桶不含 B 标记、B 桶不含 A 标记）→ 跑完自动删除。机制层已由 events.rs 单测覆盖，此处做端到端并发回归 | `node trace_isolation_probe.mjs`（默认自建；`PROBE_MODEL_ID=<id>` 指定模型；或 `PROBE_CREATE_AGENTS=0 PROBE_AGENT_ID_A=<idA> PROBE_AGENT_ID_B=<idB>` 复用现成两 Agent） |
 
 驱动约定：
 - `agent_get_run_trace` 返回外层 `{"trace":{…}}`，一律用库内 `traceInner()` 解包（少剥一层是历史踩坑）。

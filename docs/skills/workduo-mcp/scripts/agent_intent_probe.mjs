@@ -20,9 +20,9 @@ async function main() {
   console.log(`[agent] ${ag?.id} session=${sess?.id}`)
 
   const prompt = '请检索知识库回答：重试策略规定的最大重试次数是多少？基于知识库作答并在引用处标注 [1]。'
-  const { status } = await startRun(ag?.id, prompt, sess?.id, {}, { maxMs: 180000 })
+  const { runId, status } = await startRun(ag?.id, prompt, sess?.id, {}, { maxMs: 180000 })
 
-  const trace = traceInner(unw(await callTool('agent_get_run_trace', {})))
+  const trace = traceInner(unw(await callTool('agent_get_run_trace', { run_id: runId })))
   const str = JSON.stringify(trace)
   const intent = (str.match(/intent_type["']?\s*[:=]\s*["']?(\w+)/i) || [])[1]
   const reason = (str.match(/"reason"\s*:\s*"([^"]{0,90})/) || [])[1]
