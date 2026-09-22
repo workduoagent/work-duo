@@ -10,11 +10,16 @@
 | `agent_e2e_audit.mjs` | **全模块四阶段评分审计**（100 分制）：P1 发现 → P2 基建装配（KB 10 文件全链路 + 插件试跑）→ P3 RAG 快路径（SIMPLE_CHAT 携带 kb_search / tags 捷径 / 误杀诊断）→ P4 复合任务 Codex 基准（workspace 绑定 / PlanDAG / verified / 产物磁盘穿透）+ 数据留痕一致性 | `node agent_e2e_audit.mjs`（客户端须运行中；报告写 cwd `e2e_audit_report.json`，`E2E_REPORT_PATH` 可改） |
 | `agent_intent_probe.mjs` | **意图探针**：KB 事实问答核验「SIMPLE_CHAT 快路径 + 检索命中」（#1 回归件；`PROBE_KB_ID` 指定已索引 KB，exit 0 = PASS） | `node agent_intent_probe.mjs` |
 | `trace_isolation_probe.mjs` | **#8 per-run 隔离探针**：WorkDuo 单 Agent 同时只能跑一个 run（运行锁），故真并发必须来自**两个不同 Agent**；默认 `PROBE_CREATE_AGENTS=1` 自建两临时 Agent → 并发 run → 分别取 `agent_get_run_trace{run_id}` → 断言两桶互不串台（A 桶不含 B 标记、B 桶不含 A 标记）→ 跑完自动删除。机制层已由 events.rs 单测覆盖，此处做端到端并发回归 | `node trace_isolation_probe.mjs`（默认自建；`PROBE_MODEL_ID=<id>` 指定模型；或 `PROBE_CREATE_AGENTS=0 PROBE_AGENT_ID_A=<idA> PROBE_AGENT_ID_B=<idB>` 复用现成两 Agent） |
+| `composite_hang_probe.mjs` | **复合任务挂死诊断**（区分「慢」与「死」）：跑一个必走 COMPOSITE 的真复合任务（建 3 文件），**每 10s 采样** status+trace，用事件 `ts_ms` 打时间线并算**最长静默段**（静默起点=卡死点），自动应答三类挂起；超时也输出完整证据（事件线/采样/日志/磁盘产物穿透）。exit 0=完成且有产物 / 1=终态但零产物 / 2=超时未达终态 / 3=环境错 | `PROBE_MODEL_ID=<id> node composite_hang_probe.mjs`（`PROBE_WAIT_MS` 默认 480000；**网关慢时必须放宽**，见下方基线） |
 
 驱动约定：
 - `agent_get_run_trace` 返回外层 `{"trace":{…}}`，一律用库内 `traceInner()` 解包（少剥一层是历史踩坑）。
 - 无人值守装配 Agent 用 `planAutoApproveMode:'never'` + `autoToolExecMode:true`（否则每轮复合任务卡计划门禁）；`pollRun` 已自动应答三类挂起，恢复门禁默认 `skip`。
 - 复合任务 `agent_run_task` 必须传 `workspace`（绝对路径），否则写文件被 PathGuard 拒绝（历史踩坑）。
+- **🔴 复合任务耗时基线（2026-09-22 实测，防误判「挂死」）**：同一复合任务（建 3 文件）— DeepSeek-V4.1-Flash **40s / 最长静默 6.7s**；Qwen3.6 **240s / 最长静默 105s**（规划阶段等 75s）。**正常复合任务可达 4 分钟**，故：
+  - 终态等待上限（`PROBE_WAIT_MS`）**不得 < 300s**，否则把「慢」误判成「死」；
+  - 任何「总墙钟 30s 终态」类阈值都会误杀正常 run——**慢 ≠ 死**，判据应是「无产出静默时长」而非总耗时。
+  - 当年 3 run「永久挂死」高度疑似模型侧（gpt-5.6-luna 调用不返回，该模型**已下线**），非引擎 COMPOSITE 缺陷：现役两模型复合任务均 done 且产出文件。
 - 测试资产留痕不删（红线）；驱动脚本的测试用 KB/Agent 用时间戳标识符，避免冲突。
 
 ## 二、本地插件脚本范式（标准目录）
