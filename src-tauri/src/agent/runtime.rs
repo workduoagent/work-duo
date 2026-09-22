@@ -1513,6 +1513,49 @@ fn describe_value_shape(v: &Value) -> String {
     }
 }
 
+/// 非流式 LLM 调用超时上限（筑基支柱① 终态铁律）。
+///
+/// 背景（2026-09-22 定位）：`call_llm` 原**无任何超时**——模型/网关不返回时 future 永不 resolve，
+/// 导致 `run_task` 永不结束、`RunningGuard` 永不 drop、**运行锁永占**。这正是历史「3 run 永久挂死」
+/// 的机制性根因（经实测复核：并非 COMPOSITE 逻辑缺陷，而是单纯缺少兜底）。
+/// 上层 `planner.rs:148` / `pipeline.rs:1306` 的 Err 分支本已正确容错（降级 / 标记步骤失败），
+/// 却因无限等待而永远触发不到——本超时让**既有容错真正生效**，属最小精准修复。
+///
+/// 默认超时秒数：实测最坏单次静默 105s（本地部署模型资源紧张时），留约 1.7x 余量。
+/// 判据按「无产出静默时长」而非总耗时（慢 ≠ 死，见筑基清单超时阈值铁律）。
+const DEFAULT_LLM_TIMEOUT_SECS: u64 = 180;
+/// 默认打点间隔秒数。
+const DEFAULT_LLM_TICK_SECS: u64 = 30;
+
+/// 实际超时上限：可用环境变量 `WD_LLM_TIMEOUT_SECS` 覆盖（>0 生效）。
+/// 用途：① 本地部署的慢模型（如 ollama 资源紧张）可调大；② 自测故障注入时调小（如 5s）以快速验证超时分支。
+fn llm_call_timeout() -> Duration {
+    std::env::var("WD_LLM_TIMEOUT_SECS")
+        .ok()
+        .and_then(|s| s.trim().parse::<u64>().ok())
+        .filter(|s| *s > 0)
+        .map(Duration::from_secs)
+        .unwrap_or_else(|| Duration::from_secs(DEFAULT_LLM_TIMEOUT_SECS))
+}
+
+/// 实际打点间隔：可用环境变量 `WD_LLM_TICK_SECS` 覆盖（>0 生效）。自测时调小以便快速观测。
+fn llm_wait_tick() -> Duration {
+    std::env::var("WD_LLM_TICK_SECS")
+        .ok()
+        .and_then(|s| s.trim().parse::<u64>().ok())
+        .filter(|s| *s > 0)
+        .map(Duration::from_secs)
+        .unwrap_or_else(|| Duration::from_secs(DEFAULT_LLM_TICK_SECS))
+}
+
+/// 心跳停止守卫：函数任意出口（正常返回 / Err / `?` 提前返回）自动终止打点协程，不留悬挂任务。
+struct HeartbeatGuard(Arc<AtomicBool>);
+impl Drop for HeartbeatGuard {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::Relaxed);
+    }
+}
+
 pub(crate) async fn call_llm(
     cfg: &AgentRuntimeConfig,
     messages: &[Value],
@@ -1534,6 +1577,35 @@ pub(crate) async fn call_llm(
         .build()
         .unwrap_or_else(|_| reqwest::Client::new());
     let url = normalize_chat_url(&cfg.llm_base_url);
+
+    // 观测打点（支柱③）：等待期间每 LLM_WAIT_TICK 输出一条「仍在进行中」。
+    // 非流式调用在等待期间原是零输出，长静默会被误判为挂死——打点后慢与死在日志上可区分。
+    // `_hb_guard` 借 Drop 在任意出口终止协程（含 `?` 提前返回），不留悬挂任务。
+    let call_timeout = llm_call_timeout();
+    let wait_tick = llm_wait_tick();
+    let hb_stop = Arc::new(AtomicBool::new(false));
+    let _hb_guard = {
+        let flag = hb_stop.clone();
+        let hb_model = cfg.llm_model_name.clone();
+        let hb_url = url.clone();
+        tokio::spawn(async move {
+            let mut waited = 0u64;
+            loop {
+                tokio::time::sleep(wait_tick).await;
+                if flag.load(Ordering::Relaxed) {
+                    break;
+                }
+                waited += wait_tick.as_secs();
+                tracing::info!(
+                    "[agent] call_llm: 等待响应已 {}s（model={} url={}）——仍在进行中，非挂死",
+                    waited,
+                    hb_model,
+                    hb_url
+                );
+            }
+        });
+        HeartbeatGuard(hb_stop)
+    };
 
     let mut body = json!({
         "model": cfg.llm_model_name,
@@ -1583,14 +1655,31 @@ pub(crate) async fn call_llm(
         req = req.header("Authorization", format!("Bearer {}", cfg.llm_api_key));
     }
 
-    let resp = req.send().await.map_err(|e| {
-        tracing::info!(
-            "[agent] call_llm: 请求失败（耗时={}ms）：{}",
-            request_started.elapsed().as_millis(),
-            e
-        );
-        format!("请求失败：{e}")
-    })?;
+    // 超时兜底（支柱① 终态铁律）：模型/网关不返回时强制结束等待。
+    // 无此超时时 future 永不 resolve → run_task 永不结束 → RunningGuard 永不 drop → 运行锁永占。
+    // 加超时后返回 Err，上层 planner.rs / pipeline.rs 的既有 Err 容错（降级 / 标记失败）得以真正生效。
+    let resp = timeout(call_timeout, req.send())
+        .await
+        .map_err(|_| {
+            tracing::warn!(
+                "[agent] call_llm: 等待响应超时（{}s，model={}）——终止等待，防止任务永不结束",
+                call_timeout.as_secs(),
+                cfg.llm_model_name
+            );
+            format!(
+                "LLM 调用超时：{}s 内未收到响应（model={}）",
+                call_timeout.as_secs(),
+                cfg.llm_model_name
+            )
+        })?
+        .map_err(|e| {
+            tracing::info!(
+                "[agent] call_llm: 请求失败（耗时={}ms）：{}",
+                request_started.elapsed().as_millis(),
+                e
+            );
+            format!("请求失败：{e}")
+        })?;
     let status = resp.status();
     tracing::info!(
         "[agent] call_llm: 收到 HTTP {}（耗时={}ms）",
@@ -1603,7 +1692,22 @@ pub(crate) async fn call_llm(
         tracing::info!("[agent] call_llm: HTTP {} 错误体（已脱敏/截断）={}", status, safe_text);
         return Err(format!("HTTP {}：{}", status, clip(&text, 2000)));
     }
-    let data: Value = resp.json().await.map_err(|e| format!("响应解析失败：{e}"))?;
+    // 响应体读取同样需要超时：大响应或网关慢速吐流时，读 body 阶段也可能长时间挂起。
+    let data: Value = timeout(call_timeout, resp.json())
+        .await
+        .map_err(|_| {
+            tracing::warn!(
+                "[agent] call_llm: 响应体读取超时（{}s，model={}）",
+                call_timeout.as_secs(),
+                cfg.llm_model_name
+            );
+            format!(
+                "LLM 响应读取超时：{}s 内未读完响应体（model={}）",
+                call_timeout.as_secs(),
+                cfg.llm_model_name
+            )
+        })?
+        .map_err(|e| format!("响应解析失败：{e}"))?;
     tracing::info!(
         "[agent] call_llm: 非流式响应 JSON 大小={}字符 choices={} ",
         data.to_string().chars().count(),
