@@ -3200,11 +3200,12 @@ impl AgentTool for KbSearchTool {
     fn tool_definition(&self) -> Value {
         def(
             "native__kb_search",
-            "检索已绑定的知识库（Markdown/TXT 文档），返回与查询最相关的资料片段（含源文件路径与层级位置，可溯源）。回答事实性、配置类、领域知识问题时应优先调用本工具核对资料，而非凭记忆臆测。只读，无需审批。每个片段带 cite 字段 = 任务内全局引用编号（同一片段跨调用编号不变）；**在最终回答中引用某片段内容时，请在对应句子末尾标注其引用编号**（如 [1]、[2]，紧跟句末标点前），便于用户悬浮溯源；未引用到的片段不必标注。",
+            "检索已绑定的知识库（Markdown/TXT 文档），默认范围为**全部已绑定库**（可用 kb_ids 收窄到指定库），返回与查询最相关的资料片段（含源文件路径与层级位置，可溯源）。回答事实性、配置类、领域知识问题时应优先调用本工具核对资料，而非凭记忆臆测。只读，无需审批。每个片段带 cite 字段 = 任务内全局引用编号（同一片段跨调用编号不变）；**在最终回答中引用某片段内容时，请在对应句子末尾标注其引用编号**（如 [1]、[2]，紧跟句末标点前），便于用户悬浮溯源；未引用到的片段不必标注。",
             json!({
                 "query": { "type": "string", "description": "检索查询（自然语言，可含关键词）" },
                 "top_k": { "type": "integer", "description": "返回片段数上限，默认 5，最大 8；除非确需多角度覆盖，保持默认即可" },
-                "tags": { "type": "array", "items": { "type": "string" }, "description": "可选：资产标签过滤（仅检索打了这些标签的文件；标签清单见知识库详情页标签云）。用户明确要求按标签限定范围时才传，否则省略" }
+                "kb_ids": { "type": "array", "items": { "type": "string" }, "description": "可选：限定检索的知识库范围，值为知识库的 id 或 identifier（须为当前智能体已绑定的库，指定未绑定的库会直接报错）。默认省略 = 检索全部已绑定库。**不要把库名填进 tags**" },
+                "tags": { "type": "array", "items": { "type": "string" }, "description": "可选：文档（资产）级标签过滤，匹配 meta_data.tags 文档标签——**不是知识库名/identifier**（按库限定请用 kb_ids）；仅检索打了这些标签的文件，标签清单见知识库详情页标签云。用户明确要求按标签限定范围时才传，否则省略" }
             }),
             &["query"],
         )
@@ -3238,24 +3239,72 @@ impl AgentTool for KbSearchTool {
         }
         let top_k = args.get("top_k").and_then(|v| v.as_u64()).unwrap_or(5) as usize;
         // K3-3 标签圈定（可选）：传入资产标签 → 仅在命中标签的资产范围内检索。
-        let tags: Option<Vec<String>> = args.get("tags").and_then(|v| v.as_array()).map(|a| {
+        let mut tags: Option<Vec<String>> = args.get("tags").and_then(|v| v.as_array()).map(|a| {
             a.iter()
                 .filter_map(|x| x.as_str().map(String::from))
                 .collect::<Vec<_>>()
         });
-        let hits = crate::agent::knowledge::kb_search(
+        // P-04 §4.1/4.2：按库收窄（可选）——值可为库 id 或 identifier，必须 ⊆ 绑定库（越权明确报错）。
+        let kb_req: Option<Vec<String>> = args.get("kb_ids").and_then(|v| v.as_array()).map(|a| {
+            a.iter()
+                .filter_map(|x| x.as_str().map(String::from))
+                .collect::<Vec<_>>()
+        });
+        let mut scope: Option<Vec<String>> = None;
+        if let Some(req) = kb_req.filter(|r| !r.is_empty()) {
+            scope = Some(
+                crate::agent::knowledge::resolve_kb_scope(&self.app, &self.kb_ids, &req)
+                    .await
+                    .map_err(ToolError::InvalidArgs)?,
+            );
+        } else if tags.as_ref().is_some_and(|t| !t.is_empty()) {
+            // P-04 §4.5 兼容捷径：tags 值全部精确命中绑定库的 id/identifier → 视为按库过滤
+            // （真机 2026-09-22 实锤：模型把库名塞进 tags → 标签圈定 0 命中静默空）。
+            let tags_v = tags.clone().unwrap();
+            if let Ok(resolved) =
+                crate::agent::knowledge::resolve_kb_scope(&self.app, &self.kb_ids, &tags_v).await
+            {
+                if !resolved.is_empty() {
+                    tracing::warn!(
+                        "[agent] kb_search deprecated: tags-as-kb tags={:?} → 已按库过滤 scope={:?}；请改用 kb_ids 参数",
+                        tags_v,
+                        resolved
+                    );
+                    scope = Some(resolved);
+                    tags = None;
+                }
+            }
+        }
+        let outcome = crate::agent::knowledge::kb_search(
             &self.app,
             &self.kb_ids,
             &query,
             top_k,
             false,
             tags.as_deref(),
+            scope.as_deref(),
         )
         .await
         .map_err(ToolError::ExecutionFailed)?;
-        if hits.is_empty() {
-            return Ok("知识库中未找到与查询相关的片段。".into());
+        if outcome.hits.is_empty() {
+            // P-04 §4.3：空结果结构化诊断（消灭静默空/假绿）——reason 区分「语义无命中」vs「过滤误杀」。
+            let diag = outcome.diagnostics;
+            let reason = diag.as_ref().map(|d| d.reason).unwrap_or("no_match");
+            tracing::warn!(
+                "[agent] kb_search 空结果 reason={} tags={:?} bound_kb={:?}",
+                reason,
+                tags,
+                self.kb_ids
+            );
+            let note = diag.as_ref().map(|d| d.note.as_str()).unwrap_or("");
+            return Ok(serde_json::to_string(&serde_json::json!({
+                "hits": [],
+                "diagnostics": diag,
+                "notice": format!("知识库中未找到与查询相关的片段。{note}"),
+            }))
+            .map_err(|e| ToolError::ExecutionFailed(format!("序列化检索结果失败：{e}")))?);
         }
+        let hits = outcome.hits;
         // K3-4 任务内去重：过滤本任务已返回过的 chunk（省重复 token）；全部重复时
         // 直接给收敛指令而非空列表（避免模型把「空」误读为「知识库没有」而臆测）。
         // 轮 7 实锤：模型重检同一内容时，目标 chunk 被 seen 过滤，而 fresh 里只有
@@ -3294,9 +3343,11 @@ impl AgentTool for KbSearchTool {
                 top_k,
                 true,
                 tags.as_deref(),
+                scope.as_deref(),
             )
             .await
-            .map_err(ToolError::ExecutionFailed)?;
+            .map_err(ToolError::ExecutionFailed)?
+            .hits;
             let full_hits = self.with_cite(full_hits)?;
             return Ok(serde_json::to_string(&serde_json::json!({
                 "notice": format!(
@@ -3320,9 +3371,11 @@ impl AgentTool for KbSearchTool {
                 top_k,
                 true,
                 tags.as_deref(),
+                scope.as_deref(),
             )
             .await
-            .map_err(ToolError::ExecutionFailed)?;
+            .map_err(ToolError::ExecutionFailed)?
+            .hits;
             let extras: Vec<_> = full_hits
                 .into_iter()
                 .filter(|h| better_dup_ids.contains(&h.id))
@@ -3365,6 +3418,19 @@ impl AgentTool for KbSearchTool {
 }
 
 impl KbSearchTool {
+    /// 构造独立实例（20260922 #1：SIMPLE_CHAT 快路径由 runtime 直接携带 kb_search 工具，
+    /// 纯 KB 问答跳过规划，单轮「检索→综合」即答）。
+    pub fn new_arc(app: AppHandle, kb_ids: Vec<String>) -> std::sync::Arc<Self> {
+        std::sync::Arc::new(Self {
+            app,
+            kb_ids,
+            call_count: std::sync::atomic::AtomicUsize::new(0),
+            seen_chunks: std::sync::Mutex::new(std::collections::HashSet::new()),
+            cite_by_id: std::sync::Mutex::new(std::collections::HashMap::new()),
+            cite_counter: std::sync::atomic::AtomicUsize::new(0),
+        })
+    }
+
     /// K3-2：为命中注入 `cite` 引用编号（首见分配任务内递增号，重复命中/完整版重取沿用原号），
     /// 序列化为 JSON Value 后逐条插入 cite 字段（编号属工具层会话态，不污染 KbSearchHit 结构）。
     fn with_cite(

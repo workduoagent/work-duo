@@ -171,7 +171,7 @@ fn capability_outline(cfg: &AgentRuntimeConfig) -> String {
     // 明确「优先检索而非臆测」，避免规划员把「查资料」规划成凭记忆编造。
     if !cfg.kb_ids.is_empty() {
         caps.push(
-            "知识库检索（native__kb_search(query)：检索已绑定知识库中的文档片段，返回源文件与层级位置可溯源）；\
+            "知识库检索（native__kb_search(query, kb_ids?, tags?)：默认检索**全部已绑定知识库**中的文档片段，返回源文件与层级位置可溯源；按库收窄传 kb_ids（库 id 或 identifier，须已绑定）；tags 仅用于**文档级标签**过滤（meta_data.tags，不是库名/identifier））；\
              涉及事实、配置、领域知识的问题应**优先检索知识库核对**，而非凭记忆臆测；"
                 .to_string(),
         );

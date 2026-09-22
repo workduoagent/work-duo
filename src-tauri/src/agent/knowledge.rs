@@ -938,13 +938,95 @@ fn asset_matches_tags(meta_data: Option<&str>, tags: &[String]) -> bool {
     })
 }
 
+/// 知识库检索结果（P-04）：hits + 空结果诊断。诊断仅空结果时携带，
+/// 区分「语义无命中」与「过滤条件误杀」，消灭工具层假绿/静默空。
+#[derive(Debug, Clone, serde::Serialize)]
+pub(crate) struct KbSearchOutcome {
+    pub hits: Vec<KbSearchHit>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub diagnostics: Option<KbSearchDiag>,
+}
+
+/// 空结果结构化诊断（P-04 §4.3）：
+/// `tag_filter_miss` = tags 圈定 0 资产（过滤误杀，需提示 tags ≠ 库名）；
+/// `no_match` = 过滤正确但语义/关键词均无命中。
+#[derive(Debug, Clone, serde::Serialize)]
+pub(crate) struct KbSearchDiag {
+    pub reason: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tags: Option<Vec<String>>,
+    pub note: String,
+}
+
+/// P-04 §4.2：按库收窄入参解析。值可为 knowledge_base.id 或 identifier；
+/// 必须全部解析成功且 ⊆ 绑定库，否则 Err（越权/不存在明确失败，绝不静默）。
+/// 返回空 Vec = 请求为空（不收窄）。
+pub(crate) async fn resolve_kb_scope(
+    app: &AppHandle,
+    bound_kb_ids: &[String],
+    requested: &[String],
+) -> Result<Vec<String>, String> {
+    let req: Vec<String> = requested
+        .iter()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+    if req.is_empty() {
+        return Ok(Vec::new());
+    }
+    let pool = get_pool(app).await?;
+    let mut resolved: Vec<String> = Vec::with_capacity(req.len());
+    let mut unknown: Vec<String> = Vec::new();
+    for v in &req {
+        let row = sqlx::query("SELECT id FROM knowledge_base WHERE id = ? OR identifier = ?")
+            .bind(v)
+            .bind(v)
+            .fetch_optional(&pool)
+            .await
+            .map_err(|e| format!("查询知识库失败：{e}"))?;
+        match row {
+            Some(r) => {
+                let id: String = r
+                    .try_get("id")
+                    .map_err(|e| format!("读取知识库 id 失败：{e}"))?;
+                resolved.push(id);
+            }
+            None => unknown.push(v.clone()),
+        }
+    }
+    if !unknown.is_empty() {
+        return Err(format!(
+            "kb_ids 中无法识别的知识库（既非 id 也非 identifier）：{:?}",
+            unknown
+        ));
+    }
+    let mut seen = std::collections::HashSet::new();
+    resolved.retain(|id| seen.insert(id.clone()));
+    validate_scope_subset(bound_kb_ids, &resolved)?;
+    Ok(resolved)
+}
+
+/// 纯函数：校验按库收窄结果 ⊆ 绑定库（越权明确报错，供单测）。
+fn validate_scope_subset(bound: &[String], resolved: &[String]) -> Result<(), String> {
+    let unbound: Vec<&String> = resolved.iter().filter(|id| !bound.contains(id)).collect();
+    if !unbound.is_empty() {
+        return Err(format!(
+            "kb_ids 指定了未绑定到当前智能体的知识库：{:?}（已绑定：{:?}）；请先在智能体配置中绑定后再检索",
+            unbound, bound
+        ));
+    }
+    Ok(())
+}
+
 /// 知识库检索管道（K2 设计稿 §5.3）：向量近邻 → 关键词 LIKE 降级 → 空清单。
 /// `kb_ids` 为空 = 未绑定，返回空（工具层不应注册，此处兜底防呆）。
 /// `full` = 返回未裁剪正文（上限 4000 字防极端）：用于「重检命中已全部见过」时
 /// 恢复完整原文——裁剪分级 + 去重叠加曾导致超长 chunk（如调色板 ~700 字）永远拿不回
 /// 完整版（2026-09-20 轮 4 实锤）。
 /// `tags`（K3-3）= 资产标签圈定：非空时先查 SQLite `knowledge_asset.meta_data.tags`
-/// 命中的 asset_id 集（设计稿 §2.4：SQLite 管标签过滤、Lance 管语义），无命中直接返回空。
+/// 命中的 asset_id 集（设计稿 §2.4：SQLite 管标签过滤、Lance 管语义）。
+/// `kb_scope`（P-04）= 按库收窄（须已经 `resolve_kb_scope` 解析并校验 ⊆ 绑定库）；
+/// None/空 = 默认检索全部绑定库。tags 与库收窄正交（先收库、再筛标签）。
 pub(crate) async fn kb_search(
     app: &AppHandle,
     kb_ids: &[String],
@@ -952,23 +1034,31 @@ pub(crate) async fn kb_search(
     top_k: usize,
     full: bool,
     tags: Option<&[String]>,
-) -> Result<Vec<KbSearchHit>, String> {
+    kb_scope: Option<&[String]>,
+) -> Result<KbSearchOutcome, String> {
     let query = query.trim();
-    if kb_ids.is_empty() || query.is_empty() {
-        return Ok(Vec::new());
+    // P-04：生效范围 = 按库收窄（已校验）优先，否则全部绑定库；默认不裸搜全库。
+    let scope: Vec<String> = match kb_scope.filter(|s| !s.is_empty()) {
+        Some(s) => s.to_vec(),
+        None => kb_ids.to_vec(),
+    };
+    if scope.is_empty() || query.is_empty() {
+        return Ok(KbSearchOutcome { hits: Vec::new(), diagnostics: None });
     }
     let pool = get_pool(app).await?;
     let Some(vs) = vector_store::get_shared(app).await else {
         return Err("向量库不可用".into());
     };
+    let scope_kb_log = scope.join(",");
     let kb_filter = format!(
         "kb_id IN ({})",
-        kb_ids.iter().map(|id| format!("'{}'", esc(id))).collect::<Vec<_>>().join(", ")
+        scope.iter().map(|id| format!("'{}'", esc(id))).collect::<Vec<_>>().join(", ")
     );
     // K3-3 标签圈定：资产量级小（每 KB 几十~几百），拉到 Rust 内存按 JSON tags 交集匹配，
-    // 不依赖 SQLite JSON1 扩展、容忍脏 meta_data（通用性）。无命中资产 → 直接空结果。
+    // 不依赖 SQLite JSON1 扩展、容忍脏 meta_data（通用性）。
+    // P-04：无命中资产 → 结构化 tag_filter_miss 诊断（不再静默空；tags≠库名的误用由此可观测）。
     let asset_filter = if let Some(tags) = tags.filter(|t| !t.is_empty()) {
-        let kb_in = kb_ids.iter().map(|id| format!("'{}'", esc(id))).collect::<Vec<_>>().join(", ");
+        let kb_in = scope.iter().map(|id| format!("'{}'", esc(id))).collect::<Vec<_>>().join(", ");
         let rows = sqlx::query(&format!(
             "SELECT id, meta_data FROM knowledge_asset WHERE kb_id IN ({kb_in})"
         ))
@@ -984,13 +1074,25 @@ pub(crate) async fn kb_search(
             })
             .collect();
         if matched.is_empty() {
-            tracing::info!("[agent] kb_search: 标签圈定无命中资产 tags={:?} → 返回空", tags);
-            return Ok(Vec::new());
+            tracing::info!(
+                "[agent] kb_search: 标签圈定无命中资产 tags={:?} scope_kb=[{}] → 返回空（tag_filter_miss）",
+                tags,
+                scope_kb_log
+            );
+            return Ok(KbSearchOutcome {
+                hits: Vec::new(),
+                diagnostics: Some(KbSearchDiag {
+                    reason: "tag_filter_miss",
+                    tags: Some(tags.to_vec()),
+                    note: "tags 匹配的是文档（资产）的 meta_data.tags 标签，不是知识库名/identifier；本次标签未命中任何文档。如需按库检索请用 kb_ids 参数（传库 id 或 identifier），或先在知识库详情页给文档打标签。".into(),
+                }),
+            });
         }
         tracing::info!(
-            "[agent] kb_search: 标签圈定 tags={:?} 命中 {} 个资产",
+            "[agent] kb_search: 标签圈定 tags={:?} 命中 {} 个资产（scope_kb=[{}]）",
             tags,
-            matched.len()
+            matched.len(),
+            scope_kb_log
         );
         format!(
             " AND asset_id IN ({})",
@@ -1015,26 +1117,29 @@ pub(crate) async fn kb_search(
         let hits: Vec<_> = hits.into_iter().filter(|h| is_relevant_score(h.score)).collect();
         if !hits.is_empty() {
             // K3-4 分级裁剪：首条（最优命中）保 600 字全景，其余 300 字要点。
-            return Ok(hits
-                .into_iter()
-                .enumerate()
-                .map(|(idx, h)| KbSearchHit {
-                    content: if full {
-                        clip_chars(&h.content, 4000)
-                    } else {
-                        clip_chars(&h.content, clip_limit_for(idx, &h.chunk_type))
-                    },
-                    channel: "vector".into(),
-                    score: h.score,
-                    id: h.id,
-                    kb_id: h.kb_id,
-                    asset_id: h.asset_id,
-                    origin_file_path: h.origin_file_path,
-                    path: h.path,
-                    breadcrumbs: h.breadcrumbs,
-                    chunk_type: h.chunk_type,
-                })
-                .collect());
+            return Ok(KbSearchOutcome {
+                hits: hits
+                    .into_iter()
+                    .enumerate()
+                    .map(|(idx, h)| KbSearchHit {
+                        content: if full {
+                            clip_chars(&h.content, 4000)
+                        } else {
+                            clip_chars(&h.content, clip_limit_for(idx, &h.chunk_type))
+                        },
+                        channel: "vector".into(),
+                        score: h.score,
+                        id: h.id,
+                        kb_id: h.kb_id,
+                        asset_id: h.asset_id,
+                        origin_file_path: h.origin_file_path,
+                        path: h.path,
+                        breadcrumbs: h.breadcrumbs,
+                        chunk_type: h.chunk_type,
+                    })
+                    .collect(),
+                diagnostics: None,
+            });
         }
     }
 
@@ -1053,7 +1158,7 @@ pub(crate) async fn kb_search(
         .join(" OR ");
     let kw_filter = format!("{kb_filter}{asset_filter} AND ({like_clause})");
     let rows = vs.query_kb_chunks_by_keyword(&kw_filter, top_k).await?;
-    Ok(rows
+    let hits: Vec<KbSearchHit> = rows
         .into_iter()
         .enumerate()
         .map(|(idx, h)| KbSearchHit {
@@ -1072,7 +1177,24 @@ pub(crate) async fn kb_search(
             breadcrumbs: h.breadcrumbs,
             chunk_type: h.chunk_type,
         })
-        .collect())
+        .collect();
+    if hits.is_empty() {
+        // P-04：两通道均无命中 → no_match 诊断（过滤正确、内容真无相关，与过滤误杀区分）。
+        tracing::info!(
+            "[agent] kb_search: 语义/关键词均无命中 query={:?} scope_kb=[{}] → 返回空（no_match）",
+            query,
+            scope_kb_log
+        );
+        return Ok(KbSearchOutcome {
+            hits: Vec::new(),
+            diagnostics: Some(KbSearchDiag {
+                reason: "no_match",
+                tags: tags.map(|t| t.to_vec()),
+                note: "过滤范围内没有与查询语义或关键词相关的内容；若期望有资料，请确认知识库已导入相关文档并重建索引。".into(),
+            }),
+        });
+    }
+    Ok(KbSearchOutcome { hits, diagnostics: None })
 }
 
 /// 字符安全裁剪（超长加省略号）。
@@ -1110,6 +1232,38 @@ mod tests {
         assert!(!asset_matches_tags(Some(r#"{"tags":"设计"}"#), &tags));
         assert!(!asset_matches_tags(Some(r#"{}"#), &tags));
         assert!(!asset_matches_tags(Some(r#"{"tags":["设计"]}"#), &[]));
+    }
+
+    /// P-04 §4.2：按库收窄 ⊆ 绑定库校验（纯函数）——越权必须明确报错，绝不静默。
+    #[test]
+    fn scope_subset_validation_rejects_unbound_kb() {
+        let bound = vec!["kb-a".to_string(), "kb-b".to_string()];
+        // 子集：通过
+        assert!(validate_scope_subset(&bound, &["kb-b".to_string()]).is_ok());
+        // 越权：报错且带出未绑定库与绑定清单
+        let err = validate_scope_subset(&bound, &["kb-x".to_string()]).unwrap_err();
+        assert!(err.contains("kb-x") && err.contains("kb-a"));
+        // 混合：部分越权同样拒绝
+        assert!(validate_scope_subset(&bound, &["kb-a".to_string(), "kb-x".to_string()]).is_err());
+        // 空收窄：通过（= 不收窄）
+        assert!(validate_scope_subset(&bound, &[]).is_ok());
+    }
+
+    /// P-04 §4.3：空结果诊断序列化形态——reason/note 必在，tags 按存在性输出。
+    #[test]
+    fn kb_search_diag_serialization_shape() {
+        let d = KbSearchDiag {
+            reason: "tag_filter_miss",
+            tags: Some(vec!["integration-test-kb".to_string()]),
+            note: "tags 匹配的是文档标签而非库名".into(),
+        };
+        let v = serde_json::to_value(&d).unwrap();
+        assert_eq!(v["reason"], "tag_filter_miss");
+        assert!(v["note"].is_string());
+        assert_eq!(v["tags"][0], "integration-test-kb");
+        let d2 = KbSearchDiag { reason: "no_match", tags: None, note: "无相关内容".into() };
+        let v2 = serde_json::to_value(&d2).unwrap();
+        assert!(v2.get("tags").is_none());
     }
 
     #[test]
