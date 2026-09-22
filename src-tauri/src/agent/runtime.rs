@@ -2080,28 +2080,55 @@ async fn call_llm_stream_once(
             );
             return Err("任务已被用户取消".into());
         }
-        // ② 单 chunk 静默超时：无新数据即判定断流（原实现此处裸 await，静默时永久挂起）
-        let chunk_result = match timeout(chunk_timeout, stream.next()).await {
-            Ok(Some(r)) => r,
-            Ok(None) => break, // 流正常结束
-            Err(_) => {
-                tracing::warn!(
-                    "[agent] call_llm_stream_once: SSE 静默超时（{}s 内无新数据，已耗时={}ms，model={}）——判定断流",
-                    chunk_timeout.as_secs(),
-                    request_started.elapsed().as_millis(),
-                    cfg.llm_model_name
-                );
-                return Err(format!(
-                    "流式响应静默超时：{}s 内未收到新数据（model={}）——判定为网关/模型断流",
-                    chunk_timeout.as_secs(),
-                    cfg.llm_model_name
-                ));
+        // ② 单 chunk 静默超时 + 取消并发检查。
+        //
+        // 取消必须**与拉流并发**检查：原实现把取消检查放在 `stream.next().await` 之前，
+        // 流一旦静默（无 chunk 推送），取消信号要等满 chunk_timeout 才轮到检查 →
+        // 「停止按钮」最长延迟 = chunk_timeout。2026-09-23 套件实测证实：快模型 5/5 秒响应，
+        // 慢模型 5/5 在 90s 内未终态且**锁未释放**（流静默 → 取消迟迟不被检查）。
+        // 改为 select 并发等待后，取消信号在 ~100ms 内生效。
+        let cancel_wait = async {
+            loop {
+                if cancel.load(Ordering::SeqCst) {
+                    return;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
             }
         };
-        let chunk = chunk_result.map_err(|e| {
-            tracing::info!("[agent] call_llm_stream: SSE 流读取失败（已耗时={}ms）：{}", request_started.elapsed().as_millis(), e);
-            format!("流读取失败：{e}")
-        })?;
+        let next_opt: Option<Result<Vec<u8>, String>> = tokio::select! {
+            _ = cancel_wait => {
+                tracing::info!(
+                    "[agent] call_llm_stream_once: 拉取下一片时检测到取消信号，立即断流（已耗时={}ms）",
+                    request_started.elapsed().as_millis()
+                );
+                return Err("任务已被用户取消".into());
+            }
+            r = timeout(chunk_timeout, stream.next()) => match r {
+                Ok(Some(res)) => Some(res.map(|b| b.to_vec()).map_err(|e| format!("流读取失败：{e}"))),
+                Ok(None) => None, // 流正常结束
+                Err(_) => {
+                    tracing::warn!(
+                        "[agent] call_llm_stream_once: SSE 静默超时（{}s 内无新数据，已耗时={}ms，model={}）——判定断流",
+                        chunk_timeout.as_secs(),
+                        request_started.elapsed().as_millis(),
+                        cfg.llm_model_name
+                    );
+                    return Err(format!(
+                        "流式响应静默超时：{}s 内未收到新数据（model={}）——判定为网关/模型断流",
+                        chunk_timeout.as_secs(),
+                        cfg.llm_model_name
+                    ));
+                }
+            },
+        };
+        let chunk = match next_opt {
+            Some(Ok(b)) => b,
+            Some(Err(msg)) => {
+                tracing::info!("[agent] call_llm_stream: SSE 流读取失败（已耗时={}ms）：{}", request_started.elapsed().as_millis(), msg);
+                return Err(msg);
+            }
+            None => break, // 流正常结束
+        };
         chunk_count += 1;
         buf.extend_from_slice(&chunk);
         // 处理缓冲区中所有以 \n 结尾的完整行
