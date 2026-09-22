@@ -3,7 +3,8 @@
 > 逐日细节留 `2026-*.md`；需求单一事实源=仓库根 `需求与问题跟踪-第三期.md` + `docs/memory-system-design.md`(v2) + `docs/knowledge-rag-design.md`(v1)。前端规范见《前端开发规范.md》。**🔴 红线：`.wd_mem/**` 与 `.workbuddy/memory/**` 绝不进用户可见 UI / present_files。**
 
 ## 技术栈 / 构建铁律
-React19+TS+Vite+**Tauri2**；UI=antd v5（经 `@/components/ui` 封装，禁裸 antd）；Sass 只用 `var(--color-*)`；lucide-react；HashRouter；Squad/执行图=`@xyflow/react` v12。**只跑 `node node_modules/typescript/bin/tsc --noEmit`**（bash 缺 coreutils），禁 `vite build`；调试 `npm run tauri`（dev 模式 Rust 改动自动重编译）；勿改 `vite.config.ts`。
+React19+TS+Vite+**Tauri2**；UI=antd v5（经 `@/components/ui` 封装，禁裸 antd）；Sass 只用 `var(--color-*)`；lucide-react；HashRouter；Squad/执行图=`@xyflow/react` v12。**只跑 `node node_modules/typescript/bin/tsc --noEmit`**（bash 缺 coreutils），禁 `vite build`；勿改 `vite.config.ts`。
+- **🔴 Rust 改动必须重启 App 才生效（2026-09-23 用户纠错，此前记载含糊害人）**：用 `npm run tauri` 调试；dev 的"自动重编译"只负责**重新构建产物**，**运行中的进程仍是旧二进制**——改完 `*.rs` 后**必须重启客户端**才能测到新行为。**绝不可告诉用户"改完不用重启"**，也不要在重启前安排依赖新代码的验证（会白跑，浪费用户时间）。判据：改 Rust 后的验证一律排在重启之后。
 
 ## 依赖 / 沙箱 / DDL
 - AI 只写 `package.json` 不自己装；重型前端库动态 `import()`+`shims.d.ts`。
