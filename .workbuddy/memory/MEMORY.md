@@ -15,6 +15,7 @@ React19+TS+Vite+**Tauri2**；UI=antd v5（经 `@/components/ui` 封装，禁裸 
 ## 架构 / MCP 自测闭环
 - L0 `src-tauri/src/agent/**`=ReAct 引擎；L2 领域区分唯一通道=Skill+MCP+Plugin+Agent 人设。
 - 命令 `run_agent_task`/`submit_approval_decision`/`cancel_agent_task`；`try_acquire_run_lock()` 多任务隔离已落地（20260919002 ✅，commit 3919c0a，旧「全局互斥」记载作废，锁形态以代码为准）。
+- **内建 MCP 工具数 70**（2026-09-23）：引擎 9 + 模块发现 7 + UI 意图 54（Agent/会话 12 + 插件 8 + KB 15 + 记忆 9 + **技能 10**）。技能模块原缺列表入口，已补 `skill_list`（无入参，返回 `{count,rows}`）——**每个模块都必须有 `*_list` 枚举入口**，否则外部客户端无法起步（只能靠已知 id 硬调 get）。
 - **内建 MCP Server** `src-tauri/src/mcp_server.rs` 监听 `127.0.0.1:18755/mcp`（Streamable HTTP，**69 工具**，覆盖 Agent/插件/KB/记忆/技能 五大模块 + Agent HITL 闭环 tool/plan/recovery 三类挂起）。前端零侵入桥 `src/core/mcpBridge.ts`：`listen('mcp:intent')`→真实 handler→`invoke('mcp_resolve_result')`；**UI 级工具回包统一 `{ok,data}` 信封**（驱动需拆 `data`）；`agent_get_run_trace` 回包有 `{"trace":{…}}` 外包裹层（驱动必须剥）。连接器 `~/.workbuddy/mcp.json`→`workduo-mcp`(`"type":"http"`)。
 - **前端日志透传（2026-09-21 新增）**：Rust 命令 `logging::log_frontend(level,module,message)` 把前端日志以与 tracing 同格式 `[时间][模块][fe][web:0]-LEVEL-内容` 落同一份 `workduo.log.YYYY-MM-DD`（复用 `choose_logs_dir`）。前端 `src/core/logBridge.ts` 暴露 `fe.info/warn/error/debug(module,msg)`，fire-and-forget（失败静默）。已埋点：kbFs / kb-index-hooks / knowledge-mapper / mcpBridge(kb:*)，经 `agent_get_run_logs` 可一并回看前端链路。
 
