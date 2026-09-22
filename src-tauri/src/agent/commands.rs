@@ -9,7 +9,7 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
@@ -285,6 +285,10 @@ pub async fn run_task_ex(
     let rid = run_id.clone();
 
     events::reset_trace(&rid); // #8 per-run：重置该 run 的轨迹桶
+    // 超时标志：run 被总墙钟强制终止时，registry 状态须写 "error" 而非 "done"
+    // （否则观测上分不清「正常完成」与「被强制终止」，违反支柱③可还原）。
+    let timed_out = std::sync::Arc::new(AtomicBool::new(false));
+    let to_flag = timed_out.clone();
     tauri::async_runtime::spawn(async move {
         let _running_guard = running_guard;
         // #8 per-run：当前任务的所有 emit 点经 task_local 落到 rid 桶，并发 run 互不串台。
@@ -307,6 +311,7 @@ pub async fn run_task_ex(
             {
                 Ok(()) => {}
                 Err(_) => {
+                    to_flag.store(true, Ordering::Relaxed);
                     tracing::warn!(
                         "[agent] run_task_ex: run 总墙钟超时（{}s）——强制终态，释放运行锁",
                         run_limit.as_secs()
@@ -321,7 +326,12 @@ pub async fn run_task_ex(
         .await;
         let mut reg = reg.lock().await;
         if let Some(rec) = reg.get_mut(&rid) {
-            rec.status = "done".to_string();
+            // 被总墙钟强制终止 → 记 "error"（与正常完成区分开）
+            rec.status = if timed_out.load(Ordering::Relaxed) {
+                "error".to_string()
+            } else {
+                "done".to_string()
+            };
             rec.finished_at = Some(now_ms());
         }
     });
