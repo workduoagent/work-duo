@@ -38,6 +38,8 @@ pub struct ApprovalDecisionInput {
 /// 单个挂起的审批：发送端（运行时持有，接收决策）。
 struct Pending {
     tx: oneshot::Sender<ApprovalOutcome>,
+    /// 原始请求快照（供 `current_request` 向外部 Agent 暴露「正在等什么审批」）。
+    request: ApprovalRequest,
 }
 
 /// 审批结果（发回运行时）。
@@ -75,7 +77,7 @@ impl ApprovalManager {
         self.pending
             .lock()
             .await
-            .insert(approval_id.clone(), Pending { tx });
+            .insert(approval_id.clone(), Pending { tx, request });
         tracing::info!(
             "[agent] approval: 已挂起 approval_id={} tool={} 当前pending={}个",
             approval_id,
@@ -134,5 +136,17 @@ impl ApprovalManager {
         if count > 0 {
             tracing::info!("[agent] approval: cancel_all 清空 {} 个挂起审批", count);
         }
+    }
+
+    /// 是否有审批在挂起（供 `agent_get_status` 暴露 `waiting_approval`）。
+    pub async fn has_pending(&self) -> bool {
+        !self.pending.lock().await.is_empty()
+    }
+
+    /// 取当前挂起的审批请求快照（同一时刻通常仅一个）。供 MCP 状态详情向外部 Agent
+    /// 透出「正在等哪条高危操作审批」。无挂起时返回 None。
+    pub async fn current_request(&self) -> Option<ApprovalRequest> {
+        let pending = self.pending.lock().await;
+        pending.values().next().map(|p| p.request.clone())
     }
 }

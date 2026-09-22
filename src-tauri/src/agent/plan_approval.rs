@@ -72,6 +72,13 @@ impl PlanApprovalHub {
         self.pending.lock().unwrap().is_some()
     }
 
+    /// 取当前挂起计划的摘要（供 `agent_get_status` 暴露 `waiting_approval`）。
+    /// 返回 `(goal_summary, step_count)`；无挂起计划时返回 None。
+    pub fn snapshot(&self) -> Option<(String, usize)> {
+        let p = self.pending.lock().unwrap();
+        p.as_ref().map(|req| (req.goal_summary.clone(), req.plan.tasks.len()))
+    }
+
     /// 回传审批决策并唤醒挂起的流水线。
     pub fn resolve(&self, d: PlanApprovalDecision) {
         let label = match &d {

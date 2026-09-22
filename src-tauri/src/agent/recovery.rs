@@ -53,7 +53,7 @@ pub struct AgentToolStack {
 }
 
 /// 子任务受阻时记录的可恢复请求（推前端渲染恢复面板）。
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct RecoveryRequest {
     pub step: usize,
     pub task_id: String,
@@ -149,6 +149,13 @@ impl RecoveryHub {
     /// 当前是否有子任务在等待恢复（前端可用以禁用按钮 / 显示面板）。
     pub fn is_blocked(&self) -> bool {
         self.pending.lock().unwrap().is_some()
+    }
+
+    /// 当前挂起的恢复请求快照（供 `get_status_detail` 透出给外部 Agent；无挂起为 None）。
+    /// 20260922：MCP 侧此前完全观测不到恢复等待（get_status 只透审批/计划），外部驱动
+    /// 遇步骤失败重试耗尽即永久卡死——本快照 + `agent_submit_recovery_decision` 补齐闭环。
+    pub fn snapshot(&self) -> Option<RecoveryRequest> {
+        self.pending.lock().unwrap().clone()
     }
 
     /// 回传恢复决策并唤醒挂起的流水线。

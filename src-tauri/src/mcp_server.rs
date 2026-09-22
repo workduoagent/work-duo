@@ -414,8 +414,8 @@ async fn call_tool(app: &AppHandle, name: &str, args: &Value) -> Value {
         "agent_get_status" => {
             let rt = app.state::<AgentRuntime>();
             let run_id = args.get("run_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            match commands::get_status(rt, run_id).await {
-                Ok(r) => json!({ "status": r }),
+            match commands::get_status_detail(rt, run_id).await {
+                Ok(r) => json!(r),
                 Err(e) => json!({ "error": e }),
             }
         }
@@ -423,8 +423,54 @@ async fn call_tool(app: &AppHandle, name: &str, args: &Value) -> Value {
             let rt = app.state::<AgentRuntime>();
             let run_id = args.get("run_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
             let timeout_ms = args.get("timeout_ms").and_then(|v| v.as_u64());
-            match commands::wait_task(rt, run_id, timeout_ms).await {
-                Ok(r) => json!({ "status": r }),
+            match commands::wait_task_interactive(rt, run_id, timeout_ms).await {
+                Ok(r) => json!(r),
+                Err(e) => json!({ "error": e }),
+            }
+        }
+        "agent_submit_approval" => {
+            let rt = app.state::<AgentRuntime>();
+            let agent_id = args.get("agentId").and_then(|v| v.as_str()).map(|s| s.to_string());
+            let decision: crate::agent::approval::ApprovalDecisionInput = match serde_json::from_value(args.clone()) {
+                Ok(i) => i,
+                Err(e) => return json!({ "error": format!("参数错误: {e}") }),
+            };
+            match commands::submit_approval_decision(rt, agent_id, decision).await {
+                Ok(ok) => json!({ "ok": ok }),
+                Err(e) => json!({ "error": e }),
+            }
+        }
+        "agent_submit_plan_decision" => {
+            let rt = app.state::<AgentRuntime>();
+            let agent_id = args.get("agentId").and_then(|v| v.as_str()).map(|s| s.to_string());
+            let decision: commands::SubmitPlanApprovalInput = match serde_json::from_value(args.clone()) {
+                Ok(i) => i,
+                Err(e) => return json!({ "error": format!("参数错误: {e}") }),
+            };
+            match commands::submit_plan_decision(rt, agent_id, decision).await {
+                Ok(ok) => json!({ "ok": ok }),
+                Err(e) => json!({ "error": e }),
+            }
+        }
+        "agent_submit_recovery_decision" => {
+            // 20260922：补齐恢复决策的 MCP 封装——此前步骤失败重试耗尽进入恢复门禁后，
+            // 外部 Agent 无任何工具可放行（get_status 也不透出），run 永久卡死。
+            let rt = app.state::<AgentRuntime>();
+            let agent_id = args.get("agentId").and_then(|v| v.as_str()).map(|s| s.to_string());
+            let input: commands::ResolveSubtaskInput = match serde_json::from_value(args.clone()) {
+                Ok(i) => i,
+                Err(e) => return json!({ "error": format!("参数错误: {e}") }),
+            };
+            match commands::resolve_subtask(rt, agent_id, input).await {
+                Ok(ok) => json!({ "ok": ok }),
+                Err(e) => json!({ "error": e }),
+            }
+        }
+        "agent_cancel_task" => {
+            let rt = app.state::<AgentRuntime>();
+            let agent_id = args.get("agentId").and_then(|v| v.as_str()).map(|s| s.to_string());
+            match commands::cancel_agent_task(rt, agent_id).await {
+                Ok(_) => json!({ "ok": true }),
                 Err(e) => json!({ "error": e }),
             }
         }
@@ -706,13 +752,50 @@ assistantAnswer/thinkingContent——否则 agent_conversation_round 的正文�
         ),
         tool(
             "agent_get_status",
-            "查询 run_id 的当前状态 / 轨迹快照（RunRecord）。",
+            "查询 run_id 的当前状态（含审批/恢复挂起详情）。返回 AgentStatusDetail：status(running|done|error) / agentId / waitingApproval / recoveryWaiting / pending。pending 三形态：{kind:'tool',request}（调 agent_submit_approval）、{kind:'plan',goal,stepCount}（调 agent_submit_plan_decision）、{kind:'recovery',request:{step,title,reason,summary,tier,…}}（调 agent_submit_recovery_decision）。",
             json!({ "type": "object", "properties": { "run_id": { "type": "string" } }, "required": ["run_id"] }),
         ),
         tool(
             "agent_wait_task",
-            "轮询等待 run_id 进入终态（done/error），超时返回错误。",
+            "轮询等待 run_id 终态（done/error）；但若任务卡在人工审批，立即带 interrupted=true 返回（而非空转超时），让外部 Agent 去提交审批决策。传 timeout_ms 控制上限。",
             json!({ "type": "object", "properties": { "run_id": { "type": "string" }, "timeout_ms": { "type": "number" } }, "required": ["run_id"] }),
+        ),
+        tool(
+            "agent_submit_approval",
+            "回传高危工具审批决策（对应前端审批弹窗，同源语义）。将 tasks 从审批挂起中唤醒。",
+            json!({ "type": "object", "properties": {
+                "agentId": { "type": "string", "description": "目标 Agent id（多任务并行时必填，路由到对应挂起审批；省略则取唯一在跑任务）" },
+                "approvalId": { "type": "string", "description": "审批 id（来自 agent_get_status 返回的 pending.request.approvalId）" },
+                "decision": { "type": "string", "enum": ["approve", "skip", "takeover"], "description": "approve=授权执行 / skip=跳过本次调用 / takeover=授权+注入补充指示" },
+                "guidance": { "type": "string", "description": "takeover 时的补充指示（可空，空等价于 approve）" },
+                "remember": { "type": "boolean", "description": "本任务内记住该授权（同信号后续操作不再询问），默认 false" },
+                "grantKey": { "type": "string", "description": "策略授权 key（与 pending.request.grantKey 配对；remember=true 时必带）" }
+            }, "required": ["approvalId", "decision"] }),
+        ),
+        tool(
+            "agent_submit_plan_decision",
+            "回传计划审批门禁决策（对应前端「计划确认」弹窗，同源语义）。复合任务规划完成后、执行前挂起等待。",
+            json!({ "type": "object", "properties": {
+                "agentId": { "type": "string", "description": "目标 Agent id（多任务并行时必填；省略则取唯一在跑任务）" },
+                "decision": { "type": "string", "enum": ["approve", "reject", "revise"], "description": "approve=按原计划执行 / reject=整体放弃 / revise=回灌修改意见重新规划" },
+                "guidance": { "type": "string", "description": "revise 时的修改意见（可空，空等价于 approve）" }
+            }, "required": ["decision"] }),
+        ),
+        tool(
+            "agent_submit_recovery_decision",
+            "回传步骤级恢复决策（对应前端「恢复面板」，同源语义）。子任务失败且自动重试耗尽后挂起等待：get_status 出现 pending.kind='recovery'（recoveryWaiting=true）时调用本工具放行，否则 run 永久卡在恢复门禁。",
+            json!({ "type": "object", "properties": {
+                "agentId": { "type": "string", "description": "目标 Agent id（多任务并行时必填；省略则取唯一在跑任务）" },
+                "decision": { "type": "string", "enum": ["retry", "skip", "takeover", "change-approach"], "description": "retry=重跑该步 / skip=标记跳过并继续后续步骤 / takeover=携带补充指示引导式重试 / change-approach=回灌新方案重规划" },
+                "guidance": { "type": "string", "description": "takeover / change-approach 时的补充指示（可空，空等价于各自默认回灌诊断重试）" }
+            }, "required": ["decision"] }),
+        ),
+        tool(
+            "agent_cancel_task",
+            "取消指定 Agent 的当前任务（best-effort：置位取消标志并唤醒审批/计划/恢复挂起，后台流水线尽快终止）。",
+            json!({ "type": "object", "properties": {
+                "agentId": { "type": "string", "description": "目标 Agent id（多任务并行时必填；省略则取唯一在跑任务）" }
+            } }),
         ),
         tool(
             "agent_get_run_logs",
@@ -727,6 +810,7 @@ assistantAnswer/thinkingContent——否则 agent_conversation_round 的正文�
         tool(
             "agent_get_run_trace",
             "自测闭环专用：取出当次 run 的完整执行轨迹（事件流缓冲）。\n\
+返回体为 {\"trace\":{events,thinking,reply,counts}} 包裹结构（取字段须先剥 trace 层，如 r.trace.reply）。\n\
 与 agent_get_run_logs（仅 Rust tracing 日志）互补：本工具返回 events（plan/step/tool/intent/status/task_done 等结构化事件）、\
 thinking（累计思考过程）、reply（累计正文回复）、counts（各维度计数）。\n\
 用途：判断「整链哪里断」——例如 events 里有没有 plan_generated、step 卡在哪、thinking 是否出现、reply 是否为空。\
@@ -744,10 +828,10 @@ run_task_ex / run_agent_task 启动时会 reset 该缓冲，故只反映最近�
 - skillIds: 技能 id 数组（≤3，来自 agent_list_skills）。\n\
 - pluginIds: 本地插件 id 数组（≤10，来自 agent_list_plugins）。\n\
 - kbIds: 知识库 id 数组（无上限，来自 agent_list_kbs）。\n\
-- isActive 默认 true；autoToolExecMode 默认 false；allowSandbox 默认 true；memoryMode 默认 'off'('off'|'active'|'forced')；planAutoApproveMode 默认 'always'('always'|'sensitive'|'never')。\n\
+- isActive 默认 true；autoToolExecMode 默认 false；allowSandbox 默认 true；memoryMode 默认 'off'('off'|'active'|'forced')；planAutoApproveMode 默认 'always'，语义：'always'=每次计划都人工确认（最严格）/ 'sensitive'=仅含敏感操作的计划需确认 / 'never'=计划自动放行全自动执行（外部无人值守驱动推荐；高危工具审批与恢复门禁仍独立生效）。\n\
 【选值启发-合同/文档审计类】大脑优先选 tool_calls=1 的强推理模型；MCP 选文件/文档类并挑 read/write/search/extract 工具；Skill 选文档分析/法律类；KB 绑定合同语料库；scenario 选 'office-efficiency' 或 'data-analysis'。\n\
 【必做-步骤2模型参数副本】选中 llmId 后，必须取 agent_list_models 返回的对应行 config（JSON 字符串），解析为对象后原样写入 llmConfig；ttsId/sttId 同理写入 ttsConfig/sttConfig。漏写 llmConfig 等价于 UI 未展开参数卡，模型无参调用，属漏配。\n\
-【必做-行为策略字段】isActive/autoToolExecMode/allowSandbox/memoryMode/planAutoApproveMode 必须在 payload 中**显式赋值**，不要省略（省略会落到 upsertAgent 的兜底默认，可能与 UI 向导默认值不一致：UI 向导默认 allowSandbox=true，而 upsertAgent 默认 false）。不确定时采用 UI 向导默认：isActive=true、autoToolExecMode=false、allowSandbox=true、memoryMode='off'、planAutoApproveMode='always'。\n\
+【必做-行为策略字段】isActive/autoToolExecMode/allowSandbox/memoryMode/planAutoApproveMode 必须在 payload 中**显式赋值**，不要省略（省略会落到 upsertAgent 的兜底默认，可能与 UI 向导默认值不一致：UI 向导默认 allowSandbox=true，而 upsertAgent 默认 false）。外部无人值守驱动建议：isActive=true、autoToolExecMode=true、allowSandbox=true、memoryMode='off'、planAutoApproveMode='never'（否则每轮复合任务都会卡计划门禁等确认）。\n\
 【必做-MCP 工具选择】凡 mcpTools 挂载了 MCP 服务，必须再经 agent_list_mcp_tools(mcp_id) 选出具体工具，以 {mcpId, toolId} 写入 mcpTools（服务≤3、工具≤10），不能只挂服务不勾工具。",
             json!({ "type": "object", "properties": { "payload": { "type": "object", "description": "AgentUpsertInput 字段（装配规则见 description）" } }, "required": ["payload"] }),
         ),

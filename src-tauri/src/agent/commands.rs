@@ -20,6 +20,7 @@ use tauri::State;
 
 use sqlx::Row;
 use tauri_plugin_sql::{DbInstances, DbPool};
+use serde_json;
 
 /// 运行时单轮能力上限（与前端 draft.ts 创建约束一致）：技能数、MCP 服务数。
 /// `@` 临时启用的能力并入后同样受此上限兜底，超出部分按"先绑定后启用"顺序截断。
@@ -278,6 +279,113 @@ pub async fn run_task_ex(
     });
 
     Ok(run_id)
+}
+
+/// MCP 状态详情：在 `RunRecord` 基础上叠加「审批挂起」可观测性，供外部 Agent
+/// 判断是否需要调 `agent_submit_approval` / `agent_submit_plan_decision`。
+///
+/// - `waiting_approval=true` 且 `pending` 非空：任务正卡在人工审批（高危工具或计划门禁）。
+/// - 仅当 `status=running` 时才探测 Hub（done/error 后 Hub 已被流水线清空）。
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentStatusDetail {
+    /// 运行态：`running` | `done` | `error`（取自 RunRecord，供 `wait` 终态判定）。
+    pub status: String,
+    pub run_id: String,
+    pub agent_id: String,
+    /// 是否正等待人工审批（高危工具 / 计划门禁）。
+    pub waiting_approval: bool,
+    /// 是否正等待步骤级恢复决策（子任务失败重试耗尽；决策经 agent_submit_recovery_decision）。
+    /// 20260922：此前恢复等待对 MCP 完全不可观测，外部驱动遇失败步骤即永久卡死。
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub recovery_waiting: bool,
+    /// 挂起的审批摘要：`{kind:"tool", request:ApprovalRequest}` / `{kind:"plan", goal, stepCount}`
+    /// 或 `{kind:"recovery", request:RecoveryRequest}`。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pending: Option<serde_json::Value>,
+    /// `wait_task_interactive` 因审批挂起提前返回时为 true（外部 Agent 应去 submit 而非空转）。
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub interrupted: bool,
+}
+
+/// 组装一次状态详情（读 run_registry + 探测审批 Hub）。
+async fn build_status_detail(
+    runtime: &AgentRuntime,
+    run_id: &str,
+) -> Result<AgentStatusDetail, String> {
+    let rec = {
+        let reg = runtime.run_registry.lock().await;
+        match reg.get(run_id) {
+            Some(r) => r.clone(),
+            None => return Err(format!("run_id 不存在: {run_id}")),
+        }
+    };
+    let mut detail = AgentStatusDetail {
+        status: rec.status.clone(),
+        run_id: rec.run_id.clone(),
+        agent_id: rec.agent_id.clone(),
+        waiting_approval: false,
+        recovery_waiting: false,
+        pending: None,
+        interrupted: false,
+    };
+    if rec.status == "running" {
+        if let Ok(task) = runtime.resolve_task_state(Some(&rec.agent_id)) {
+            if task.approval.has_pending().await {
+                if let Some(req) = task.approval.current_request().await {
+                    detail.waiting_approval = true;
+                    detail.pending = Some(serde_json::json!({ "kind": "tool", "request": req }));
+                }
+            } else if task.plan_approval.is_blocked() {
+                if let Some((goal, step_count)) = task.plan_approval.snapshot() {
+                    detail.waiting_approval = true;
+                    detail.pending =
+                        Some(serde_json::json!({ "kind": "plan", "goal": goal, "stepCount": step_count }));
+                }
+            } else if task.recovery.is_blocked() {
+                if let Some(req) = task.recovery.snapshot() {
+                    detail.recovery_waiting = true;
+                    detail.pending =
+                        Some(serde_json::json!({ "kind": "recovery", "request": req }));
+                }
+            }
+        }
+    }
+    Ok(detail)
+}
+
+/// 自测闭环：按 `run_id` 查询单次运行状态（含审批挂起详情）。
+pub async fn get_status_detail(
+    runtime: State<'_, AgentRuntime>,
+    run_id: String,
+) -> Result<AgentStatusDetail, String> {
+    build_status_detail(&runtime, &run_id).await
+}
+
+/// 自测闭环：轮询等待 `run_id` 终态；但若任务卡在人工审批，立即带 `interrupted=true`
+/// 返回（而非空转到超时），让外部 Agent 进入「提交审批决策 → 继续 wait」循环。
+pub async fn wait_task_interactive(
+    runtime: State<'_, AgentRuntime>,
+    run_id: String,
+    timeout_ms: Option<u64>,
+) -> Result<AgentStatusDetail, String> {
+    let timeout = std::time::Duration::from_millis(timeout_ms.unwrap_or(300_000));
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        let detail = build_status_detail(&runtime, &run_id).await?;
+        if detail.status == "done" || detail.status == "error" {
+            return Ok(detail);
+        }
+        if detail.waiting_approval {
+            let mut d = detail;
+            d.interrupted = true;
+            return Ok(d);
+        }
+        if std::time::Instant::now() >= deadline {
+            return Ok(detail);
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    }
 }
 
 /// 自测闭环：按 `run_id` 查询单次运行状态。
