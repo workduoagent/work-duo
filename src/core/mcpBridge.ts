@@ -491,6 +491,13 @@ async function dispatch(intent: string, payload: unknown): Promise<unknown> {
     }
     // —— 技能模块（设置 → 技能中心 / skill-hub）：与 SkillFormModal / detail / import 同款真实 handler ——
     // 落盘先行（persistSkillFiles）→ 入库（upsertSkill），与 skill-hub 页面 handleSave/handleImport 完全一致。
+    case 'skill:list': {
+      // 枚举全部技能：本模块唯一枚举入口（此前缺失，外部客户端无法发现已有技能）。
+      // 返回形状与其余 *_list 工具对齐（{count, rows}），驱动侧 asRows() 可直接解包。
+      const rows = await listSkills()
+      fe.info('mcpBridge.skill', `skill:list count=${rows.length}`)
+      return { count: rows.length, rows }
+    }
     case 'skill:get': {
       const key = (payload as { id?: string; identifier?: string })?.id
         ?? (payload as { id?: string; identifier?: string })?.identifier

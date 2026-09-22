@@ -637,6 +637,9 @@ async fn call_tool(app: &AppHandle, name: &str, args: &Value) -> Value {
         "memory_confirm_candidate" => dispatch_ui(app, "memory:confirm_candidate", args.clone()).await,
         "memory_reject_candidate" => dispatch_ui(app, "memory:reject_candidate", args.clone()).await,
         // —— 技能模块（设置 → 技能中心 / skill-hub）：UI 级真实 handler（增删改/启停/文件/导入导出）——
+        // 无入参：枚举全部技能。此前本模块缺列表入口，外部客户端无法发现已有技能
+        // （只能靠已知 id 调 skill_get）——与本工具链其余模块（agent/plugin/kb/memory 均有 *_list）对齐。
+        "skill_list" => dispatch_ui(app, "skill:list", Value::Null).await,
         "skill_get" => dispatch_ui(app, "skill:get", args.clone()).await,
         "skill_upsert" => dispatch_ui(app, "skill:upsert", args.clone()).await,
         "skill_delete" => dispatch_ui(app, "skill:delete", args.clone()).await,
@@ -1196,6 +1199,14 @@ thinking（累计思考过程）、reply（累计正文回复）、counts（各�
             json!({ "type": "object", "properties": { "id": { "type": "string" } }, "required": ["id"] }),
         ),
         // —— 技能模块（设置 → 技能中心 / skill-hub）——
+        tool(
+            "skill_list",
+            "【技能·列表】枚举全部技能（无入参），返回 {count, rows}。\\n\\
+这是本模块**唯一的枚举入口**：此前技能模块 9 个工具中没有列表工具，外部客户端无法发现已有技能，\\
+只能靠已知 id/identifier 调 skill_get。rows 每项含 id/identifier/name/description/status/scenario 等。\\n\\
+典型用法：先 skill_list 拿到 identifier，再调 skill_get / skill_list_files / skill_read_file。",
+            json!({ "type": "object", "properties": {} }),
+        ),
         tool(
             "skill_get",
             "【技能·查】按 id 查单个技能（含 skillMarkdown 正文与 path）。",
