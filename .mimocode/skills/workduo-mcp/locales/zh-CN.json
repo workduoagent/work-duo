@@ -1,0 +1,4 @@
+{
+  "displayName": "WorkDuo MCP 集成",
+  "brief": "把 WorkDuo 内建 MCP Server 接入外部客户端，并 UI 级驱动 Agent、插件、知识库、记忆与技能"
+}
