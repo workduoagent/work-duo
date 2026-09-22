@@ -175,16 +175,22 @@ pub async fn run_agent_task(
     let pre_completed: std::collections::HashSet<String> =
         input.pre_completed.clone().unwrap_or_default().into_iter().collect();
     let initial_context = input.initial_context.clone().unwrap_or_default();
+    // #8 per-run：UI 入口也注入内部 run_id（不入 run_registry、前端不感知），保证并发 run 的轨迹桶隔离。
+    let internal_rid = next_run_id();
 
     // 锁已在上方入口处抢占（running_guard）：跨 spawn 持有，run_task 任意出口
     // （正常 / 取消 / panic）自动复位 running 并回收状态束；本处不再抢锁。
-    events::reset_trace(); // 自测闭环：清空轨迹缓冲，保证只反映本次 run
+    events::reset_trace(&internal_rid); // #8 per-run：重置该 run 的轨迹桶
     tauri::async_runtime::spawn(async move {
         let _running_guard = running_guard;
-        tracing::info!("[agent] run_agent_task 后台任务已 spawn，开始 run_task");
-        rt.run_task(&app_clone, cfg, prompt, plan_override, pre_completed, initial_context, &task_state)
-            .await;
-        tracing::info!("[agent] run_agent_task 后台任务 run_task 结束");
+        // #8 per-run：当前任务的所有 emit 点经 task_local 落到 internal_rid 桶，并发 run 互不串台。
+        let _scope = crate::agent::events::with_run_id_scope(internal_rid.clone(), async move {
+            tracing::info!("[agent] run_agent_task 后台任务已 spawn，开始 run_task");
+            rt.run_task(&app_clone, cfg, prompt, plan_override, pre_completed, initial_context, &task_state)
+                .await;
+            tracing::info!("[agent] run_agent_task 后台任务 run_task 结束");
+        })
+        .await;
     });
     Ok(())
 }
@@ -258,18 +264,22 @@ pub async fn run_task_ex(
     let reg = runtime.run_registry.clone();
     let rid = run_id.clone();
 
-    events::reset_trace(); // 自测闭环：清空轨迹缓冲，保证只反映本次 run
+    events::reset_trace(&rid); // #8 per-run：重置该 run 的轨迹桶
     tauri::async_runtime::spawn(async move {
         let _running_guard = running_guard;
-        rt.run_task(
-            &app_clone,
-            cfg,
-            prompt,
-            plan_override,
-            pre_completed,
-            initial_context,
-            &task_state,
-        )
+        // #8 per-run：当前任务的所有 emit 点经 task_local 落到 rid 桶，并发 run 互不串台。
+        let _scope = crate::agent::events::with_run_id_scope(rid.clone(), async move {
+            rt.run_task(
+                &app_clone,
+                cfg,
+                prompt,
+                plan_override,
+                pre_completed,
+                initial_context,
+                &task_state,
+            )
+            .await;
+        })
         .await;
         let mut reg = reg.lock().await;
         if let Some(rec) = reg.get_mut(&rid) {

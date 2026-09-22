@@ -7,6 +7,7 @@
 //!  - `agent-task-error`：整轮任务异常终止。
 
 use serde::Serialize;
+use std::collections::HashMap;
 use std::sync::Mutex;
 use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -14,38 +15,105 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::AppHandle;
 use tauri::Emitter;
 
-// —— 自测闭环观测：全量事件轨迹缓冲（进程级，单 run 复用；run_task_ex / run_agent_task 启动前 reset）——
+// —— 自测闭环观测：全量事件轨迹缓冲（#8 per-run 隔离）——
 // 用途：get_run_logs 只回 Rust tracing 日志，不含思考/轨迹/正文；事件流原本只推前端、自测通道无前端订阅。
-// 此缓冲把事件流落进程内存，由新增 MCP 工具 `agent_get_run_trace` 取出，供判断整链哪里断。
-static TRACE_EVENTS: OnceLock<Mutex<Vec<serde_json::Value>>> = OnceLock::new();
-static TRACE_THINKING: OnceLock<Mutex<String>> = OnceLock::new();
-static TRACE_REPLY: OnceLock<Mutex<String>> = OnceLock::new();
+// 此缓冲把事件流落进程内存，由 MCP 工具 `agent_get_run_trace` 取出，供判断整链哪里断。
+//
+// #8 改造（2026-09-22）：原实现为三个进程级全局单例，靠 run 启动前 reset_trace() 清空复用——
+// 并发多 Agent 运行时两 run 写同一缓冲会串台（parallel run 互混）。现改为 `HashMap<run_id, RunTrace>`
+// 按 run 隔离；run_id 经 tokio task_local 在 `run_task_ex` / `run_agent_task` 的 spawned task 顶层注入
+// （见 commands.rs），任一 emit 点读 `current_run_id()` 落到对应桶，并发 run 互不影响。
+use tokio::task_local;
 
-fn trace_events() -> &'static Mutex<Vec<serde_json::Value>> {
-    TRACE_EVENTS.get_or_init(|| Mutex::new(Vec::new()))
-}
-fn trace_thinking() -> &'static Mutex<String> {
-    TRACE_THINKING.get_or_init(|| Mutex::new(String::new()))
-}
-fn trace_reply() -> &'static Mutex<String> {
-    TRACE_REPLY.get_or_init(|| Mutex::new(String::new()))
+task_local! {
+    /// 当前运行任务的 run_id（在 commands.rs 的 run_task_ex / run_agent_task spawn 顶层经 scope 注入）。
+    pub(crate) static CURRENT_RUN_ID: String;
 }
 
-/// 自测闭环：清空轨迹缓冲（每次 run_task 启动前调用，保证缓冲只反映当次 run）。
-pub fn reset_trace() {
-    if let Ok(mut v) = trace_events().lock() {
-        v.clear();
+/// 读取当前任务的 run_id；未注入时返回空串（落到默认桶，不 panic）。
+/// 终态回填（runtime.rs）也经此取 run_id，无需改动 `run_task` 签名。
+pub fn current_run_id() -> String {
+    CURRENT_RUN_ID.try_with(|s| s.clone()).unwrap_or_default()
+}
+
+/// #8 per-run：在给定 run_id 的作用域内执行 `f`，使 `current_run_id()` 在该 future 内返回 `rid`。
+/// 封装 task_local 的 scope，避免跨模块直接引用宏生成类型。
+pub fn with_run_id_scope<F>(rid: String, f: F) -> impl std::future::Future<Output = F::Output>
+where
+    F: std::future::Future,
+{
+    CURRENT_RUN_ID.scope(rid, f)
+}
+
+/// 单次运行的轨迹缓冲（per-run 隔离）。
+#[derive(Default)]
+struct RunTrace {
+    events: Vec<serde_json::Value>,
+    thinking: String,
+    reply: String,
+    started_at: i64,
+}
+
+/// per-run 轨迹缓冲表：run_id → 缓冲。进程级，并发 run 各自独立桶。
+static RUN_TRACES: OnceLock<Mutex<HashMap<String, RunTrace>>> = OnceLock::new();
+/// 缓冲表容量上限（超出按 started_at 淘汰最旧），防止长运行进程内存无限增长。
+const TRACE_CAP: usize = 128;
+
+fn run_traces() -> &'static Mutex<HashMap<String, RunTrace>> {
+    RUN_TRACES.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn now_ms() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+/// 取（或建）指定 run_id 的缓冲桶；首次访问初始化并做容量 GC。
+fn with_run_trace_mut(rid: &str, f: impl FnOnce(&mut RunTrace)) {
+    let mut map = run_traces().lock().unwrap();
+    if !map.contains_key(rid) {
+        map.insert(
+            rid.to_string(),
+            RunTrace {
+                started_at: now_ms(),
+                ..Default::default()
+            },
+        );
+        if map.len() > TRACE_CAP {
+            if let Some(oldest) = map
+                .iter()
+                .min_by_key(|(_, v)| v.started_at)
+                .map(|(k, _)| k.clone())
+            {
+                map.remove(&oldest);
+            }
+        }
     }
-    if let Ok(mut s) = trace_thinking().lock() {
-        s.clear();
-    }
-    if let Ok(mut s) = trace_reply().lock() {
-        s.clear();
+    if let Some(b) = map.get_mut(rid) {
+        f(b);
     }
 }
 
-/// 自测闭环：写入一次事件（agent-event 的 text_chunk / thinking_chunk 由专门累加器处理，此处跳过以免刷屏）。
+/// 自测闭环（#8 per-run）：为指定 run_id 新建/重置其轨迹缓冲桶，保证只反映当次 run。
+/// 不触碰其他 run 的桶（并发 run 互不干扰）。
+pub fn reset_trace(run_id: &str) {
+    let mut map = run_traces().lock().unwrap();
+    map.insert(
+        run_id.to_string(),
+        RunTrace {
+            started_at: now_ms(),
+            ..Default::default()
+        },
+    );
+}
+
+/// 自测闭环（#8 per-run）：写入一次事件到当前 run 的桶。
+/// agent-event 的 text_chunk / thinking_chunk 由专门累加器（append_reply / append_thinking）处理，
+/// 此处跳过以免刷屏。
 pub fn push_event(event: &str, payload: &impl Serialize) {
+    let rid = current_run_id();
     if event == "agent-event" {
         if let Ok(v) = serde_json::to_value(payload) {
             // AgentEventPayload 的 event_type 经 #[serde(rename = "type")] 序列化为 "type"
@@ -58,45 +126,38 @@ pub fn push_event(event: &str, payload: &impl Serialize) {
         }
     }
     if let Ok(v) = serde_json::to_value(payload) {
-        let mut arr = trace_events().lock().unwrap();
-        arr.push(serde_json::json!({
-            "event": event,
-            "payload": v,
-            "ts_ms": SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .map(|d| d.as_millis() as i64)
-                .unwrap_or(0),
-        }));
+        let ts = now_ms();
+        with_run_trace_mut(&rid, |b| {
+            b.events.push(serde_json::json!({
+                "event": event,
+                "payload": v,
+                "ts_ms": ts,
+            }));
+        });
     }
 }
 
-/// 自测闭环：累计思考片段（thinking_chunk 的 text）。
+/// 自测闭环（#8 per-run）：累计思考片段（thinking_chunk 的 text）到当前 run 的桶。
 pub fn append_thinking(text: &str) {
-    if let Ok(mut s) = trace_thinking().lock() {
-        s.push_str(text);
-    }
+    let rid = current_run_id();
+    with_run_trace_mut(&rid, |b| b.thinking.push_str(text));
 }
-/// 自测闭环：累计正文回复片段（text_chunk 的 text）。
+/// 自测闭环（#8 per-run）：累计正文回复片段（text_chunk 的 text）到当前 run 的桶。
 pub fn append_reply(text: &str) {
-    if let Ok(mut s) = trace_reply().lock() {
-        s.push_str(text);
-    }
+    let rid = current_run_id();
+    with_run_trace_mut(&rid, |b| b.reply.push_str(text));
 }
 
-/// 自测闭环：取出本 run 完整轨迹（事件列表 + 累计思考 + 累计正文 + 计数）。
-pub fn get_trace() -> serde_json::Value {
-    let events = trace_events()
-        .lock()
-        .map(|v| v.clone())
-        .unwrap_or_default();
-    let thinking = trace_thinking()
-        .lock()
-        .map(|s| s.clone())
-        .unwrap_or_default();
-    let reply = trace_reply()
-        .lock()
-        .map(|s| s.clone())
-        .unwrap_or_default();
+/// 自测闭环（#8 per-run）：取出指定 run 完整轨迹（事件列表 + 累计思考 + 累计正文 + 计数）。
+/// run_id 不存在时返回空结构（不报错，便于并发场景早查询）。
+pub fn get_trace(run_id: &str) -> serde_json::Value {
+    let (events, thinking, reply) = {
+        let map = run_traces().lock().unwrap();
+        match map.get(run_id) {
+            Some(b) => (b.events.clone(), b.thinking.clone(), b.reply.clone()),
+            None => (Vec::new(), String::new(), String::new()),
+        }
+    };
     serde_json::json!({
         "events": events,
         "thinking": thinking,
@@ -109,22 +170,27 @@ pub fn get_trace() -> serde_json::Value {
     })
 }
 
-/// 引擎终态回填用（2026-09-21）：当次 run 的思考累计快照（只读不清空，get_run_trace 仍可用）。
+/// 引擎终态回填用（2026-09-21，#8 per-run）：指定 run 的思考累计快照（只读不清空，get_run_trace 仍可用）。
 /// 此前仅前端链路在任务结束后经 updateRound 上报 thinking_content——MCP/无前端链路的轮次
 /// 该列为空，UI 会话历史看不到思考过程（用户实锤「数据均要保存」）。
-pub fn trace_thinking_snapshot() -> String {
-    trace_thinking()
+pub fn trace_thinking_snapshot(run_id: &str) -> String {
+    run_traces()
         .lock()
-        .map(|s| s.clone())
+        .unwrap()
+        .get(run_id)
+        .map(|b| b.thinking.clone())
         .unwrap_or_default()
 }
 
-/// 引擎终态回填用：从事件流提取 tool_finished 的工具调用摘要，序列化为前端 updateRound
-/// 同款落库格式 `[{name,status,args,result,step?}]`（session-helpers 重建 ToolStep 卡片按此解析）。
-pub fn trace_tool_calls_summary_json() -> String {
-    let events = trace_events()
+/// 引擎终态回填用（#8 per-run）：从指定 run 的事件流提取 tool_finished 的工具调用摘要，
+/// 序列化为前端 updateRound 同款落库格式 `[{name,status,args,result,step?}]`
+/// （session-helpers 重建 ToolStep 卡片按此解析）。
+pub fn trace_tool_calls_summary_json(run_id: &str) -> String {
+    let events = run_traces()
         .lock()
-        .map(|v| v.clone())
+        .unwrap()
+        .get(run_id)
+        .map(|b| b.events.clone())
         .unwrap_or_default();
     let mut out: Vec<serde_json::Value> = Vec::new();
     for e in events.iter() {
@@ -865,4 +931,87 @@ pub struct KbIndexProgress {
 
 pub fn emit_kb_index_progress(app: &AppHandle, p: &KbIndexProgress) {
     emit(app, EVT_KB_INDEX_PROGRESS, p);
+}
+
+// ============================ #8 per-run 隔离单测 ============================
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// #8 核心不变量：两个并发 run 写入各自的桶，互不串台。
+    /// 这正是最初「三个全局单例 + reset」实现的缺陷——并发 run 会互相覆盖。
+    #[test]
+    fn per_run_trace_isolation() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            reset_trace("runA");
+            reset_trace("runB");
+
+            with_run_id_scope("runA".to_string(), async {
+                push_event(
+                    "agent-event",
+                    &serde_json::json!({"type": "status", "message": "from-A"}),
+                );
+                append_reply("reply-A");
+                append_thinking("think-A");
+            })
+            .await;
+
+            with_run_id_scope("runB".to_string(), async {
+                push_event(
+                    "agent-event",
+                    &serde_json::json!({"type": "status", "message": "from-B"}),
+                );
+                append_reply("reply-B");
+                append_thinking("think-B");
+            })
+            .await;
+
+            let ta = get_trace("runA");
+            let tb = get_trace("runB");
+
+            // 各自桶内容隔离
+            assert_eq!(ta["reply"].as_str().unwrap(), "reply-A");
+            assert_eq!(tb["reply"].as_str().unwrap(), "reply-B");
+            assert_eq!(ta["thinking"].as_str().unwrap(), "think-A");
+            assert_eq!(tb["thinking"].as_str().unwrap(), "think-B");
+
+            // 互不包含对方内容
+            assert!(!ta["reply"].as_str().unwrap().contains("B"));
+            assert!(!tb["reply"].as_str().unwrap().contains("A"));
+
+            // 事件计数各自独立（各 1 条）
+            assert_eq!(ta["counts"]["events"].as_u64().unwrap(), 1);
+            assert_eq!(tb["counts"]["events"].as_u64().unwrap(), 1);
+            assert_eq!(ta["counts"]["reply_chars"].as_u64().unwrap(), 7);
+            assert_eq!(tb["counts"]["reply_chars"].as_u64().unwrap(), 7);
+        });
+    }
+
+    /// #8 边界：查询不存在的 run_id 返回空结构，不报错、不误读其他 run。
+    #[test]
+    fn unknown_run_returns_empty() {
+        let t = get_trace("never-existed");
+        assert_eq!(t["events"].as_array().unwrap().len(), 0);
+        assert_eq!(t["thinking"].as_str().unwrap(), "");
+        assert_eq!(t["reply"].as_str().unwrap(), "");
+        assert_eq!(t["counts"]["events"].as_u64().unwrap(), 0);
+    }
+
+    /// #8 边界：reset_trace 仅清空指定桶，不动其他 run 的桶。
+    #[test]
+    fn reset_is_per_run() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            reset_trace("keep");
+            with_run_id_scope("keep".to_string(), async {
+                append_reply("keep-content");
+            })
+            .await;
+            // reset 另一个 id，不应影响 keep
+            reset_trace("other");
+            let tk = get_trace("keep");
+            assert_eq!(tk["reply"].as_str().unwrap(), "keep-content");
+        });
+    }
 }

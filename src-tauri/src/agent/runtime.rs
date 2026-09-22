@@ -621,8 +621,10 @@ impl AgentRuntime {
                     );
                     crate::agent::round_compactor::persist_round_raw(app, round_id, &raw_json).await;
                     crate::agent::round_compactor::persist_round_answer_if_empty(app, round_id, &result.final_text).await;
-                    let trace_thinking = crate::agent::events::trace_thinking_snapshot();
-                    let trace_tools = crate::agent::events::trace_tool_calls_summary_json();
+                    // #8 per-run：取当前 run 的桶（task_local 注入的 run_id）。
+                    let rid = crate::agent::events::current_run_id();
+                    let trace_thinking = crate::agent::events::trace_thinking_snapshot(&rid);
+                    let trace_tools = crate::agent::events::trace_tool_calls_summary_json(&rid);
                     crate::agent::round_compactor::persist_round_process_if_empty(app, round_id, &trace_thinking, &trace_tools).await;
                 }
                 Err(e) => tracing::error!("[agent] run_task: 序列化精简 raw_messages_json 失败：{e}"),
@@ -922,8 +924,10 @@ impl AgentRuntime {
                 Ok(raw_json) => {
                     crate::agent::round_compactor::persist_round_raw(app, round_id, &raw_json).await;
                     crate::agent::round_compactor::persist_round_answer_if_empty(app, round_id, &simple_final_text).await;
-                    let trace_thinking = crate::agent::events::trace_thinking_snapshot();
-                    let trace_tools = crate::agent::events::trace_tool_calls_summary_json();
+                    // #8 per-run：取当前 run 的桶（task_local 注入的 run_id）。
+                    let rid = crate::agent::events::current_run_id();
+                    let trace_thinking = crate::agent::events::trace_thinking_snapshot(&rid);
+                    let trace_tools = crate::agent::events::trace_tool_calls_summary_json(&rid);
                     crate::agent::round_compactor::persist_round_process_if_empty(app, round_id, &trace_thinking, &trace_tools).await;
                 }
                 Err(e) => tracing::error!("[agent] run_simple_chat: 序列化 raw_messages_json 失败：{e}"),

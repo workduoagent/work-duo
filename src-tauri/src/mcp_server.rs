@@ -485,11 +485,14 @@ async fn call_tool(app: &AppHandle, name: &str, args: &Value) -> Value {
             }
         }
         "agent_get_run_trace" => {
-            // 自测闭环：取出本 run 的完整轨迹缓冲（事件列表 + 累计思考 + 累计正文）。
+            // 自测闭环：取出指定 run 的完整轨迹缓冲（事件列表 + 累计思考 + 累计正文）。
+            // #8 per-run：必须指定 run_id（由 run_task_ex 返回），从 HashMap 取该 run 的独立桶，
+            // 并发 run 互不串台。未带 run_id 时退化为取空桶（不会误读其他 run 的数据）。
             // get_run_logs 只回 Rust tracing 日志、不含思考/轨迹/正文；本工具补上事件流视角，
             // 用于判断「整链哪里断」：plan / step / tool / intent / status / task_done 全在 events，
             // 思考过程在 thinking，正文回复在 reply。
-            json!({ "trace": events::get_trace() })
+            let run_id = args.get("run_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            json!({ "run_id": run_id, "trace": events::get_trace(&run_id) })
         }
         // —— 模块发现层（Rust 直读 workduo.db，零业务副作用）——
         "agent_list_models" => {
@@ -809,13 +812,14 @@ assistantAnswer/thinkingContent——否则 agent_conversation_round 的正文�
         ),
         tool(
             "agent_get_run_trace",
-            "自测闭环专用：取出当次 run 的完整执行轨迹（事件流缓冲）。\n\
-返回体为 {\"trace\":{events,thinking,reply,counts}} 包裹结构（取字段须先剥 trace 层，如 r.trace.reply）。\n\
+            "自测闭环专用：取出指定 run 的完整执行轨迹（事件流缓冲）。\n\
+返回体为 {\"run_id\":..., \"trace\":{events,thinking,reply,counts}} 包裹结构（取字段须先剥 trace 层，如 r.trace.reply）。\n\
 与 agent_get_run_logs（仅 Rust tracing 日志）互补：本工具返回 events（plan/step/tool/intent/status/task_done 等结构化事件）、\
 thinking（累计思考过程）、reply（累计正文回复）、counts（各维度计数）。\n\
-用途：判断「整链哪里断」——例如 events 里有没有 plan_generated、step 卡在哪、thinking 是否出现、reply 是否为空。\
-run_task_ex / run_agent_task 启动时会 reset 该缓冲，故只反映最近一次 run；须在 wait_task 返回 done 后调用。",
-            json!({ "type": "object", "properties": {} }),
+用途：判断「整链哪里断」——例如 events 里有没有 plan_generated、step 卡在哪、thinking 是否出现、reply 是否为空。\n\
+#8 per-run：必须传 run_id（由 run_task_ex 返回的 run_id），按 run 取独立桶，并发 run 互不串台；不传则取空桶。\
+须在 wait_task 返回 done 后调用，且须用启动该 run 的同一 run_id。",
+            json!({ "type": "object", "properties": { "run_id": { "type": "string", "description": "run_task_ex 返回的运行 id；不传则返回空轨迹桶" } }, "required": ["run_id"] }),
         ),
         tool(
             "agent_ui_create",
