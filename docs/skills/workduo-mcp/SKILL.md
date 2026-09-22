@@ -34,7 +34,7 @@ MCP 客户端 **UI 级**驱动 WorkDuo 全模块。
 - 端点：`POST http://127.0.0.1:18755/mcp`（Streamable HTTP；可选 `GET /mcp` SSE）。
 - 开关：`app_config.mcp_server_enabled`（默认启用）、`mcp_server_port`（默认 18755）。改端口/开关需重启 WorkDuo。
 - 启动位置：`src-tauri/src/mcp_server.rs::start_mcp_server`，在 app setup 中以独立 std 线程监听。
-- 工具分层，共 **69** 个：引擎层(9) + 模块发现层(7) + UI 意图层(53，含 Agent/会话 12 + 插件 8 + 知识库 15 + 记忆 9 + 技能 9)。
+- 工具分层，共 **70** 个：引擎层(9) + 模块发现层(7) + UI 意图层(54，含 Agent/会话 12 + 插件 8 + 知识库 15 + 记忆 9 + 技能 10)。
 - 引擎层 + 模块发现层由 Rust 直调；UI 意图层经 `mcp:intent` 派发到 `src/core/mcpBridge.ts` 真实 handler，
   前端 `invoke('mcp_resolve_result', {id, ok, data})` 回传。技能模块同样走此「UI 意图层」——`skill:*` 意图
   由 `mcpBridge` 路由到与 skill-hub 页面**同一个**真实 handler（`skill-mapper` + `skillFs`，落盘先行再入库）。
@@ -70,14 +70,14 @@ curl -s -X POST http://127.0.0.1:18755/mcp \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
 ```
 
-应返回含 69 个工具的 `tools` 数组。
+应返回含 70 个工具的 `tools` 数组。
 
 > 注意：部分客户端会缓存工具清单。若改过 Rust 后工具数/签名没刷新，**重新加载该 MCP Server 连接**即可；
 > 也可直接打上面的 `tools/list` 端点绕过缓存核对。
 
 ---
 
-## 工具清单（69 个，按层）
+## 工具清单（70 个，按层）
 
 ### A. 引擎层（Rust 直调，无需前端）
 | 工具 | 作用 | 关键入参 |
@@ -172,6 +172,7 @@ curl -s -X POST http://127.0.0.1:18755/mcp \
 ### G. UI 意图层 — 技能中心模块（设置 → 技能中心 / skill-hub）
 | 工具 | 作用 | 关键入参 |
 |---|---|---|
+| `skill_list` | **枚举全部技能**（本模块唯一枚举入口，无入参），返回 `{count, rows}`。发现已有技能后再用 `skill_get` / `skill_list_files` 深入；其余模块均有 `*_list`，本工具补齐前技能模块缺失此能力 | 无 |
 | `skill_get` | 按 id 查单个技能（含 `skillMarkdown` 正文与 `path`） | `id` |
 | `skill_upsert` | **创建/编辑**技能并落盘（SKILL.md + 脚本 + 资源）：`skill` 必填 `identifier`/`name`；可选 `scripts:[{name,language,content}]`、`resources:[{name,dir,base64}]`（dir 为空=根目录）。落盘先行再入库，与 skill-hub 页面完全一致 | `skill` / `scripts?` / `resources?` |
 | `skill_delete` | **真实删除**技能（删库行 + 删磁盘目录），不可逆 | `id` |
@@ -244,6 +245,7 @@ curl -s -X POST http://127.0.0.1:18755/mcp \
 4. 召回演示：`memory_recall` `{id}`。
 
 ### 流程 5：技能中心管理（设置 → 技能中心）
+0. **先发现**：`skill_list`（无入参）枚举全部技能，取 `rows[].identifier` / `id` 后再深入——`skill_get` 等都需要已知 id/identifier，没有列表入口时外部无法起步。
 1. `skill_upsert` `{skill:{identifier,name,description?,scenario?,tags?,skillMarkdown?}, scripts?, resources?}` 新建/编辑技能（自动落盘 `<identifier>/SKILL.md` + 脚本 + 资源）。
 2. 核对：`skill_get` `{id}` 看 `skillMarkdown` / `path`；`agent_list_skills` 看是否已进可选集（装配 Agent 时 `enabledSkillIds` 引用）。
 3. 文件级微调：`skill_list_files` `{identifier}` 看结构 → `skill_read_file` `{identifier, relPath}` 取内容（base64）→ `skill_write_file` `{identifier, relPath, content}` 改后回写。
@@ -341,7 +343,7 @@ node scripts/kb_driver.mjs
 
 ## 集成核对清单
 
-- [ ] `tools/list` 返回 69 个工具（引擎 9 + 发现 7 + UI 53）。
+- [ ] `tools/list` 返回 70 个工具（引擎 9 + 发现 7 + UI 54）。
 - [ ] 端口 18755 有监听；外部编程工具已成功连上该 MCP Server。
 - [ ] 绑定 KB 的 Agent 跑「kb_chunks 的 id 字段格式是什么？」→ trace events 出现 `native__kb_search`，reply 引用 KB。
 - [ ] `plugin_upsert` 编写插件后 `plugin_test` 返回 `ok:true`；前端插件列表可见。
