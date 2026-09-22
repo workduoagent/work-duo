@@ -14,7 +14,7 @@ React19+TS+Vite+**Tauri2**；UI=antd v5（经 `@/components/ui` 封装，禁裸 
 ## 架构 / MCP 自测闭环
 - L0 `src-tauri/src/agent/**`=ReAct 引擎；L2 领域区分唯一通道=Skill+MCP+Plugin+Agent 人设。
 - 命令 `run_agent_task`/`submit_approval_decision`/`cancel_agent_task`；`try_acquire_run_lock()` 多任务隔离已落地（20260919002 ✅，commit 3919c0a，旧「全局互斥」记载作废，锁形态以代码为准）。
-- **内建 MCP Server** `src-tauri/src/mcp_server.rs` 监听 `127.0.0.1:18755/mcp`（Streamable HTTP，56 工具）。前端零侵入桥 `src/core/mcpBridge.ts`：`listen('mcp:intent')`→真实 handler→`invoke('mcp_resolve_result')`；**UI 级工具回包统一 `{ok,data}` 信封**（驱动需拆 `data`）。连接器 `~/.workbuddy/mcp.json`→`workduo-mcp`(`"type":"http"`)。
+- **内建 MCP Server** `src-tauri/src/mcp_server.rs` 监听 `127.0.0.1:18755/mcp`（Streamable HTTP，**68 工具**，覆盖 Agent/插件/KB/记忆/技能 五大模块 + Agent 审批闭环）。前端零侵入桥 `src/core/mcpBridge.ts`：`listen('mcp:intent')`→真实 handler→`invoke('mcp_resolve_result')`；**UI 级工具回包统一 `{ok,data}` 信封**（驱动需拆 `data`）。连接器 `~/.workbuddy/mcp.json`→`workduo-mcp`(`"type":"http"`)。
 - **前端日志透传（2026-09-21 新增）**：Rust 命令 `logging::log_frontend(level,module,message)` 把前端日志以与 tracing 同格式 `[时间][模块][fe][web:0]-LEVEL-内容` 落同一份 `workduo.log.YYYY-MM-DD`（复用 `choose_logs_dir`）。前端 `src/core/logBridge.ts` 暴露 `fe.info/warn/error/debug(module,msg)`，fire-and-forget（失败静默）。已埋点：kbFs / kb-index-hooks / knowledge-mapper / mcpBridge(kb:*)，经 `agent_get_run_logs` 可一并回看前端链路。
 
 ## 前端铁律
@@ -36,12 +36,12 @@ UI 令牌只 `var(--color-*)`；hover 禁位移/缩放；表单 `autoComplete="o
 - 第三期（记忆与知识统一检索）✅ 收官（cargo 72 passed / tsc CLEAN）。
 - 第四期 K 系列：K1a 引擎/K1b 前端/K2 检索+绑定 ✅；**K3 全部收官（2026-09-21）**：K3-1 命中卡片 ✅（三渲染位）/ K3-2 引用汇总 ✅（反馈改版：正文 `[N]` 内联引标悬浮溯源（Rust cite 编号+remarkKbCites+KbCiteMark）+ 底部按源分组 + 中文思考约束 + 流式滚动 stick-to-bottom + 30ms/字正文打字机）/ K3-3 标签云 ✅（tags 圈定 Rust 内存交集 + 详情页标签云/打标签入口）/ K3-4 上下文成本 ✅（六项优化）。cargo 86 passed / tsc 0E。
 - **Q1 顺带 4 问题 ✅ 全修（2026-09-20）**：#3 切块噪声（`is_noise_chunk` 收口 push_chunk，ⓘ 生效需重建 KB 索引）/ #2 幽灵产物去重（`resolve_artifact_entries`+`physical_key` 物理去重）/ #1 intent 空响应（重试一次+`fallback()` 信号定向降级+planner 知识问答降耗约定）/ #4=K3-4（同上）。
-- 内建 MCP 自测闭环 ✅ MVP1；三大模块（插件/KB/记忆）UI 级工具已全接入（55 工具，含 KB 标签 add/remove/rename）；前端日志透传 ✅。
+- 内建 MCP 自测闭环 ✅；**五大模块（插件/KB/记忆/技能/Agent 审批闭环）UI 级工具已全部接入（68 工具，全模块端到端实测 M1-M7 全绿）**，含 KB 标签 add/remove/rename/get、技能中心 9 个 `skill_*` 工具（upsert/delete/set_status/list_files/read_file/write_file/export/import/get）、Agent 审批三件套 `agent_submit_approval`/`agent_submit_plan_decision`/`agent_cancel_task` + 状态可观测 `waiting_approval`/`pending`；前端日志透传 ✅。
 
 ## 待办 / 长期约定
 - 20260919002 单 Agent 多任务隔离 ✅（2026-09-21，3919c0a）；20260919001 小分队打磨 🔲。
 - KB 删除级联清理向量段已修（f78701b，防 Lance 孤儿残留）；`agent_run_task` 的 workspace 字段已标注「=绑定工作空间绝对路径，不传则自由对话」（e98df0f）。
 - **🔴 Skill 同步铁律**：仓库 `docs/skills/<name>/SKILL.md` 为单一事实源；客户端 `~/.workbuddy/skills/<name>/SKILL.md` 必须同步一致。**workduo-mcp 已安装客户端 ✅（2026-09-21，SKILL.md+scripts/ 共 7 文件与仓库逐字节一致，客户端无旧版残留）**。
 - **🔴 Skill 内容红线（2026-09-21 确立）**：SKILL.md **不得出现任何第三方产品目录路径**（如 `~/.workbuddy/...`、特定 IDE/客户端路径、安装步骤指向某产品配置目录）；需引用资源只指向 **skill 内部相对路径**（如 `scripts/`）。该 skill 定位 = **给外部编程工具（任意支持 MCP 的客户端）对接 WorkDuo 内建 MCP Server 的集成指南**，不叫「自测/selftest/测试」，命名即 `workduo-mcp`（无 selftest 字眼）。
-- **用户长期约定**：SKILL+MCP 拿不到有效信息时第一时间报告做更新/补丁。
+- **用户长期约定（2026-09-22 强化）**：测试/使用中发现 MCP/SKILL 封装缺口（缺工具、语义不清、文档缺失、观测不到状态）时，**第一动作是补 `workduo-mcp` 本体**——加/改 MCP 工具（mcp_server.rs）、更新 SKILL.md、把标准驱动沉淀进 `docs/skills/workduo-mcp/scripts/`——**严禁绕过 MCP 自写一次性脚本替代**；驱动脚本只做参数编排，缺口一律回流到 SKILL+MCP 层。SKILL+MCP 拿不到有效信息时第一时间报告做更新/补丁。
 - **`get_run_logs` since_ts 坑**：行首 `[YYYY-MM-DD HH:MM:SS.mmm]` 子串字典序比较；传 ISO(`T`/`Z`) 会被全剔返回 0 行，须传**本地空格分隔**同形串或仅用 `limit`。
