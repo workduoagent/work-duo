@@ -66,14 +66,20 @@ pub async fn classify_intent(cfg: &AgentRuntimeConfig, prompt: &str) -> IntentPr
     }
 
     // 灰色地带 → LLM 轻量分类（非流式、0 工具）。
-    let sys = "你是一个意图分类器。评估用户输入的任务复杂度。\
+    let mut sys = "你是一个意图分类器。评估用户输入的任务复杂度。\
 若属于日常打招呼、单一常识问答、简单文本润色，判定为 SIMPLE_CHAT；\
 若涉及文件操作、数据抓取、代码执行、环境检查或多步骤业务，判定为 COMPOSITE_TASK。\
 同时评估执行策略：requires_planning（是否需拆解规划）、requires_tool（是否需调用工具）、\
 risk_level（low/medium/high/critical，涉及删除/安装/执行/改系统/部署等为 high）、requires_approval（是否必须人工审批）、requires_artifact（是否产出文件）。\
 只输出一行 JSON，不要任何多余文本：\
 {\"intent_type\":\"SIMPLE_CHAT 或 COMPOSITE_TASK\",\"reason\":\"一句话理由\",\
-\"requires_planning\":true,\"requires_tool\":true,\"risk_level\":\"medium\",\"requires_approval\":false,\"requires_artifact\":true}";
+\"requires_planning\":true,\"requires_tool\":true,\"risk_level\":\"medium\",\"requires_approval\":false,\"requires_artifact\":true}"
+        .to_string();
+    // 20260922 #1：KB 绑定的智能体，纯知识问答走 SIMPLE_CHAT 快路径（简单对话路径已携带
+    // native__kb_search，检索后综合即答，无需规划）。含文件写入/命令执行/多步骤的仍判 COMPOSITE。
+    if !cfg.kb_ids.is_empty() {
+        sys.push_str("\n本智能体已绑定知识库：若任务仅为检索知识库并作答（不含文件写入、代码执行、命令操作或多步骤业务流程），判定为 SIMPLE_CHAT——知识库检索工具在简单对话路径可用，无需规划。");
+    }
     let messages = vec![
         json!({ "role": "system", "content": sys }),
         json!({ "role": "user", "content": trimmed }),

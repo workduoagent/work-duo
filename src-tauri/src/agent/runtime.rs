@@ -28,6 +28,7 @@ use tokio::time::timeout;
 use crate::agent::approval::ApprovalManager;
 use crate::agent::approval::ApprovalOutcome;
 use crate::agent::choice::ChoiceHub;
+use crate::agent::tools::AgentTool;
 use crate::agent::events;
 use crate::agent::graph::KnowledgeGraph;
 use crate::agent::native;
@@ -285,18 +286,22 @@ impl AgentRuntime {
 
         // 阶段一：意图分流（规则短路优先，灰色地带走轻量 LLM 分类）。
         let mut intent = crate::agent::intent::classify_intent(&cfg, &prompt).await;
-        // KB 已绑定时强制走工具能力路径：纯 KB 问答（无「文件/代码/执行」强信号）会被判
-        // SIMPLE_CHAT，而 run_simple_chat 向模型传空工具集（&[]），native__kb_search 永远无调用
-        // 机会 → 知识库不可检索。故 KB 绑定 + SIMPLE_CHAT 时，强制 requires_tool，进入分支 B 的
-        // 流水线（registry 已含 native__kb_search），确保检索工具可被调用；纯问答不沉淀产物/写文件。
-        if !cfg.kb_ids.is_empty() && intent.is_simple_chat() {
+        // KB 已绑定 + SIMPLE_CHAT → 简单对话快路径（20260922 #1）：run_simple_chat 现已携带
+        // native__kb_search 工具（kb_ids 非空时构造实例），纯 KB 问答跳过规划直接「检索→综合」，
+        // 不再强制转 COMPOSITE（旧设计因空工具集导致 KB 不可检索而强制转换；网关慢时规划调用
+        // 纯属开销，实测可达 1~3 分钟）。requires_tool 保留为语义标记，requires_planning=false。
+        let kb_tool = if !cfg.kb_ids.is_empty() {
+            Some(crate::agent::native::KbSearchTool::new_arc(app.clone(), cfg.kb_ids.clone()))
+        } else {
+            None
+        };
+        if kb_tool.is_some() && intent.is_simple_chat() {
             tracing::info!(
-                "[agent] run_task: KB 已绑定({}个) 且意图=SIMPLE_CHAT → 强制 requires_tool 进入工具能力路径",
+                "[agent] run_task: KB 已绑定({}个) 且意图=SIMPLE_CHAT → 简单对话路径携带 native__kb_search（跳过规划）",
                 cfg.kb_ids.len()
             );
-            intent.intent_type = "COMPOSITE_TASK".into();
             intent.requires_tool = true;
-            intent.requires_planning = true;
+            intent.requires_planning = false;
             intent.requires_artifact = false;
         }
         events::emit_intent_classified(app, &intent);
@@ -341,7 +346,7 @@ impl AgentRuntime {
         // 注意：分支重跑（plan_override 存在）时即便意图被分为 simple_chat 也强制走复合路径，
         // 因为用户已显式给出待执行的 DAG，必须进入流水线。
         if intent.is_simple_chat() && plan_override.is_none() {
-            self.run_simple_chat(app, &cfg, &prompt, &task.cancel_flag).await;
+            self.run_simple_chat(app, &cfg, &prompt, &task.cancel_flag, kb_tool).await;
             return;
         }
 
@@ -764,15 +769,17 @@ impl AgentRuntime {
         }
     }
 
-    /// 分支 A（SIMPLE_CHAT）：单次流式输出，0 工具介入，毫秒级终态推送。
+    /// 分支 A（SIMPLE_CHAT）：单次流式输出 + 可选知识库检索，毫秒级终态推送。
     /// 简单对话需要延续会话上下文（含历史轮次与滚动摘要），因此走 build_context_messages；
-    /// 但 tools 传空，模型只能直出文本，不会产生工具调用。
+    /// 20260922 #1：KB 绑定时携带 native__kb_search（ReadSafe 免审批），纯问答走
+    /// 「检索→综合」快路径（有界 2 轮工具循环，跳过规划），kb 未绑定时工具集仍为空、行为不变。
     async fn run_simple_chat(
         &self,
         app: &AppHandle,
         cfg: &AgentRuntimeConfig,
         prompt: &str,
         cancel: &Arc<AtomicBool>,
+        kb_tool: Option<std::sync::Arc<crate::agent::native::KbSearchTool>>,
     ) {
         let mut messages = match crate::agent::context::build_context_messages(app, cfg, prompt).await {
             Ok(m) => m,
@@ -789,63 +796,122 @@ impl AgentRuntime {
         let mut trimmed = trim_history(&messages);
         sanitize_message_sequence(&mut trimmed);
 
+        let tool_defs = kb_tool.as_ref().map(|t| vec![t.tool_definition()]).unwrap_or_default();
         tracing::info!(
-            "[agent] run_simple_chat: 单次流式调用（上下文={}条消息[裁剪前{}条]）",
+            "[agent] run_simple_chat: 单次流式调用（上下文={}条消息[裁剪前{}条]，kb工具={}个）",
             trimmed.len(),
             messages.len(),
+            tool_defs.len(),
         );
-        // 终态正文留存（match 内 move 前拷贝一份，供空 answer 兜底回填）。
-        // Err 臂直接 return，故 match 后该值必然已赋值（声明不初始化消 unused lint）。
-        let simple_final_text;
-        match call_llm_stream(
-            app,
-            cfg,
-            &trimmed,
-            &[],
-            cancel,
-            // 增量推流：每个 SSE 正文 delta 立即作为 text_chunk 下发，前端逐字渲染为流式回复。
-            Some(&|delta: &str| {
-                if !delta.is_empty() {
-                    events::emit_text_chunk(app, delta, false);
+        // 终态正文留存：循环以带值 break 退出（Err 臂直接 return）。
+        let mut llm_messages = trimmed.clone();
+        let mut tool_rounds = 0usize;
+        let simple_final_text: String = 'chat: loop {
+            match call_llm_stream(
+                app,
+                cfg,
+                &llm_messages,
+                &tool_defs,
+                cancel,
+                // 增量推流：每个 SSE 正文 delta 立即作为 text_chunk 下发，前端逐字渲染为流式回复。
+                Some(&|delta: &str| {
+                    if !delta.is_empty() {
+                        events::emit_text_chunk(app, delta, false);
+                    }
+                }),
+                // reasoning 思考流式（#20260918011）：chat 层逐批推送（节流在 call_llm_stream 内）。
+                Some(&|delta: &str| {
+                    if !delta.is_empty() {
+                        events::emit_thinking_chunk(app, delta, false, "chat");
+                    }
+                }),
+            )
+            .await
+            {
+                Ok(outcome) => {
+                    task_usage.0 += outcome.usage.0;
+                    task_usage.1 += outcome.usage.1;
+                    // 流式过程中用户可能已点击取消：已推送片段保留，仅补取消提示并收尾。
+                    if cancel.load(Ordering::SeqCst) {
+                        tracing::info!("[agent] run_simple_chat: 流式返回后检测到取消信号，终止任务");
+                        events::emit_status(app, "⛔ 任务已被用户取消");
+                        events::emit_task_done(app, task_usage.0, task_usage.1);
+                        return;
+                    }
+                    // 终态：无工具调用 / KB 工具不可用 / 达到有界轮次上限。
+                    if outcome.tool_calls.is_empty() || kb_tool.is_none() || tool_rounds >= 2 {
+                        let content = outcome.content;
+                        tracing::info!(
+                            "[agent] run_simple_chat: 终态文本 {} 字符：{}",
+                            content.chars().count(),
+                            clip(content.trim(), 200),
+                        );
+                        // 增量推流已在 call_llm_stream 内部逐片下发；此处仅补一个 done 标记收尾。
+                        events::emit_text_chunk(app, "", true);
+                        messages.push(json!({ "role": "assistant", "content": content }));
+                        break 'chat content;
+                    }
+                    // 工具轮：执行 native__kb_search（ReadSafe 免审批），结果回灌后再来一轮。
+                    tool_rounds += 1;
+                    llm_messages.push(json!({
+                        "role": "assistant",
+                        "content": outcome.content,
+                        "tool_calls": outcome.tool_calls.clone(),
+                    }));
+                    for tc in &outcome.tool_calls {
+                        let call_id = tc.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                        let name = tc.pointer("/function/name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                        let args_str = tc.pointer("/function/arguments").and_then(|v| v.as_str()).unwrap_or("{}").to_string();
+                        let args: Value = serde_json::from_str(&args_str).unwrap_or_else(|_| json!({}));
+                        let started_at = std::time::Instant::now();
+                        let mk_step = |status: &str, result: Option<String>, dur: Option<u64>| crate::agent::types::ToolStep {
+                            call_id: call_id.clone(),
+                            tool_name: name.clone(),
+                            status: status.into(),
+                            sensitive: false,
+                            args: Some(args_str.clone()),
+                            result,
+                            duration_ms: dur,
+                            created_at: std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .map(|d| d.as_millis() as i64)
+                                .unwrap_or(0),
+                            step: Some(1),
+                            op: Some("search".into()),
+                            path: None,
+                            lines_added: None,
+                            lines_removed: None,
+                        };
+                        events::emit_tool_started(app, &mk_step("running", None, None));
+                        let result = if name == "native__kb_search" {
+                            let ctx = crate::agent::tools::ToolContext {
+                                agent_id: cfg.agent_id.clone(),
+                                session_id: cfg.session_id.clone(),
+                                ..Default::default()
+                            };
+                            match crate::agent::tools::AgentTool::execute(kb_tool.as_deref().unwrap(), args, &ctx).await {
+                                Ok(r) => r,
+                                Err(e) => format!("kb_search 执行失败：{e:?}"),
+                            }
+                        } else {
+                            format!("当前简单对话路径仅支持知识库检索（native__kb_search），{name} 不可用；请基于已有信息直接作答。")
+                        };
+                        let ok = !result.starts_with("kb_search 执行失败");
+                        events::emit_tool_finished(app, &mk_step(
+                            if ok { "success" } else { "failed" },
+                            Some(clip(&result, 2000)),
+                            Some(started_at.elapsed().as_millis() as u64),
+                        ));
+                        llm_messages.push(json!({ "role": "tool", "tool_call_id": call_id, "content": result }));
+                    }
                 }
-            }),
-            // reasoning 思考流式（#20260918011）：chat 层逐批推送（节流在 call_llm_stream 内）。
-            Some(&|delta: &str| {
-                if !delta.is_empty() {
-                    events::emit_thinking_chunk(app, delta, false, "chat");
-                }
-            }),
-        )
-        .await
-        {
-            Ok(outcome) => {
-                task_usage.0 += outcome.usage.0;
-                task_usage.1 += outcome.usage.1;
-                // 流式过程中用户可能已点击取消：已推送片段保留，仅补取消提示并收尾。
-                if cancel.load(Ordering::SeqCst) {
-                    tracing::info!("[agent] run_simple_chat: 流式返回后检测到取消信号，终止任务");
-                    events::emit_status(app, "⛔ 任务已被用户取消");
-                    events::emit_task_done(app, task_usage.0, task_usage.1);
+                Err(e) => {
+                    tracing::error!("[agent] run_simple_chat: LLM 调用失败：{e}");
+                    events::emit_task_error(app, &format!("LLM 调用失败：{e}"));
                     return;
                 }
-                let content = outcome.content;
-                simple_final_text = content.clone();
-                tracing::info!(
-                    "[agent] run_simple_chat: 终态文本 {} 字符：{}",
-                    content.chars().count(),
-                    clip(content.trim(), 200),
-                );
-                // 增量推流已在 call_llm_stream 内部逐片下发；此处仅补一个 done 标记收尾。
-                events::emit_text_chunk(app, "", true);
-                messages.push(json!({ "role": "assistant", "content": content }));
             }
-            Err(e) => {
-                tracing::error!("[agent] run_simple_chat: LLM 调用失败：{e}");
-                events::emit_task_error(app, &format!("LLM 调用失败：{e}"));
-                return;
-            }
-        }
-
+        };
         events::emit_task_done(app, task_usage.0, task_usage.1);
         if let Some(sid) = &cfg.session_id {
             crate::agent::round_compactor::persist_session_tokens(app, sid, task_usage.0, task_usage.1).await;
