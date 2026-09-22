@@ -42,7 +42,7 @@ UI 令牌只 `var(--color-*)`；hover 禁位移/缩放；表单 `autoComplete="o
 ## 待办 / 长期约定
 - 20260919002 单 Agent 多任务隔离 ✅（2026-09-21，3919c0a）；20260919001 小分队打磨 🔲。
 - KB 删除级联清理向量段已修（f78701b，防 Lance 孤儿残留）；`agent_run_task` 的 workspace 字段已标注「=绑定工作空间绝对路径，不传则自由对话」（e98df0f）。
-- **🔴 Skill 同步铁律**：仓库 `docs/skills/<name>/SKILL.md` 为单一事实源；客户端必须同步一致。**workduo-mcp 三处已对齐 ✅（2026-09-22 实测曾漂移 docs=10/~.workbuddy=7/.mimocode=9 且 SKILL.md 计数 69/65/68 三版不一；已按 docs 为源重同步，现三处各 12 文件逐字节一致：SKILL.md + locales×2 + scripts{README + agent_task_driver/agent_e2e_audit/agent_intent_probe + kb_driver/kb_tag_driver/memory_driver/plugin.bun/plugin.python}）**。
+- **🔴 Skill 同步铁律**：仓库 `docs/skills/<name>/SKILL.md` 为单一事实源；客户端必须同步一致。**workduo-mcp 客户端1 已对齐 ✅（2026-09-22 实测曾漂移 docs=10/~.workbuddy=7 且 SKILL.md 计数 69/65 两版不一；已按 docs 为源重同步 `~/.workbuddy`，现两端各 10 文件逐字节一致：SKILL.md + scripts{README + agent_task_driver/agent_e2e_audit/agent_intent_probe + kb_driver/kb_tag_driver/memory_driver/plugin.bun/plugin.python}；`.mimocode` 由用户删除，不纳入）**。
 - **🔴 Skill 内容红线（2026-09-21 确立）**：SKILL.md **不得出现任何第三方产品目录路径**（如 `~/.workbuddy/...`、特定 IDE/客户端路径、安装步骤指向某产品配置目录）；需引用资源只指向 **skill 内部相对路径**（如 `scripts/`）。该 skill 定位 = **给外部编程工具（任意支持 MCP 的客户端）对接 WorkDuo 内建 MCP Server 的集成指南**，不叫「自测/selftest/测试」，命名即 `workduo-mcp`（无 selftest 字眼）。
 - **用户长期约定（2026-09-22 强化）**：测试/使用中发现 MCP/SKILL 封装缺口（缺工具、语义不清、文档缺失、观测不到状态）时，**第一动作是补 `workduo-mcp` 本体**——加/改 MCP 工具（mcp_server.rs）、更新 SKILL.md、把标准驱动沉淀进 `docs/skills/workduo-mcp/scripts/`——**严禁绕过 MCP 自写一次性脚本替代**；驱动脚本只做参数编排，缺口一律回流到 SKILL+MCP 层。SKILL+MCP 拿不到有效信息时第一时间报告做更新/补丁。
 - **`get_run_logs` since_ts 坑**：行首 `[YYYY-MM-DD HH:MM:SS.mmm]` 子串字典序比较；传 ISO(`T`/`Z`) 会被全剔返回 0 行，须传**本地空格分隔**同形串或仅用 `limit`。
