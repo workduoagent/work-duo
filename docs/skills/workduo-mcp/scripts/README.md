@@ -11,6 +11,7 @@
 | `agent_intent_probe.mjs` | **意图探针**：KB 事实问答核验「SIMPLE_CHAT 快路径 + 检索命中」（#1 回归件；`PROBE_KB_ID` 指定已索引 KB，exit 0 = PASS） | `node agent_intent_probe.mjs` |
 | `trace_isolation_probe.mjs` | **#8 per-run 隔离探针**：WorkDuo 单 Agent 同时只能跑一个 run（运行锁），故真并发必须来自**两个不同 Agent**；默认 `PROBE_CREATE_AGENTS=1` 自建两临时 Agent → 并发 run → 分别取 `agent_get_run_trace{run_id}` → 断言两桶互不串台（A 桶不含 B 标记、B 桶不含 A 标记）→ 跑完自动删除。机制层已由 events.rs 单测覆盖，此处做端到端并发回归 | `node trace_isolation_probe.mjs`（默认自建；`PROBE_MODEL_ID=<id>` 指定模型；或 `PROBE_CREATE_AGENTS=0 PROBE_AGENT_ID_A=<idA> PROBE_AGENT_ID_B=<idB>` 复用现成两 Agent） |
 | `composite_hang_probe.mjs` | **复合任务挂死诊断**（区分「慢」与「死」）：跑一个必走 COMPOSITE 的真复合任务（建 3 文件），**每 10s 采样** status+trace，用事件 `ts_ms` 打时间线并算**最长静默段**（静默起点=卡死点），自动应答三类挂起；超时也输出完整证据（事件线/采样/日志/磁盘产物穿透）。exit 0=完成且有产物 / 1=终态但零产物 / 2=超时未达终态 / 3=环境错 | `PROBE_MODEL_ID=<id> node composite_hang_probe.mjs`（`PROBE_WAIT_MS` 默认 480000；**网关慢时必须放宽**，见下方基线） |
+| `failure_cleanup_probe.mjs` | **失败收尾回归**（筑基支柱①终态铁律）：故障注入——启动复合任务 → 中途 `agent_cancel_task` 中断 → 断言 ①到达明确终态（不停在 running）②**收尾耗时 ≤30s** ③**锁已释放**（立即再 `agent_run_task` 不得被「已有任务正在运行」拒绝）。exit 0=PASS / 1=FAIL / 3=环境错 | `node failure_cleanup_probe.mjs`（`PROBE_CANCEL_AFTER_MS` 默认 5000；`PROBE_CLEANUP_MAX_MS` 默认 30000） |
 
 驱动约定：
 - `agent_get_run_trace` 返回外层 `{"trace":{…}}`，一律用库内 `traceInner()` 解包（少剥一层是历史踩坑）。
@@ -20,6 +21,9 @@
   - 终态等待上限（`PROBE_WAIT_MS`）**不得 < 300s**，否则把「慢」误判成「死」；
   - 任何「总墙钟 30s 终态」类阈值都会误杀正常 run——**慢 ≠ 死**，判据应是「无产出静默时长」而非总耗时。
   - 当年 3 run「永久挂死」高度疑似模型侧（gpt-5.6-luna 调用不返回，该模型**已下线**），非引擎 COMPOSITE 缺陷：现役两模型复合任务均 done 且产出文件。
+- **🔴 LLM 调用超时可配置（自测必知）**：`runtime.rs call_llm` 已加超时兜底（默认 **180s**）+ 等待心跳（默认每 **30s** 一条「等待响应已 Ns——仍在进行中，非挂死」日志）。可用环境变量覆盖（>0 生效，App 启动时读取，改后需重启）：
+  - `WD_LLM_TIMEOUT_SECS` —— 本地部署的慢模型（如 ollama 内存吃紧）可调大；**自测故障注入调小（如 5s）即可快速验证超时分支**，无需干等 180s。
+  - `WD_LLM_TICK_SECS` —— 自测调小（如 1s）便于快速观测心跳日志（经 `agent_get_run_logs` 可见）。
 - 测试资产留痕不删（红线）；驱动脚本的测试用 KB/Agent 用时间戳标识符，避免冲突。
 
 ## 二、本地插件脚本范式（标准目录）
