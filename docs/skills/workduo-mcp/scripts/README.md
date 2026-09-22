@@ -12,6 +12,7 @@
 | `trace_isolation_probe.mjs` | **#8 per-run 隔离探针**：WorkDuo 单 Agent 同时只能跑一个 run（运行锁），故真并发必须来自**两个不同 Agent**；默认 `PROBE_CREATE_AGENTS=1` 自建两临时 Agent → 并发 run → 分别取 `agent_get_run_trace{run_id}` → 断言两桶互不串台（A 桶不含 B 标记、B 桶不含 A 标记）→ 跑完自动删除。机制层已由 events.rs 单测覆盖，此处做端到端并发回归 | `node trace_isolation_probe.mjs`（默认自建；`PROBE_MODEL_ID=<id>` 指定模型；或 `PROBE_CREATE_AGENTS=0 PROBE_AGENT_ID_A=<idA> PROBE_AGENT_ID_B=<idB>` 复用现成两 Agent） |
 | `composite_hang_probe.mjs` | **复合任务挂死诊断**（区分「慢」与「死」）：跑一个必走 COMPOSITE 的真复合任务（建 3 文件），**每 10s 采样** status+trace，用事件 `ts_ms` 打时间线并算**最长静默段**（静默起点=卡死点），自动应答三类挂起；超时也输出完整证据（事件线/采样/日志/磁盘产物穿透）。exit 0=完成且有产物 / 1=终态但零产物 / 2=超时未达终态 / 3=环境错 | `PROBE_MODEL_ID=<id> node composite_hang_probe.mjs`（`PROBE_WAIT_MS` 默认 480000；**网关慢时必须放宽**，见下方基线） |
 | `failure_cleanup_probe.mjs` | **失败收尾回归**（筑基支柱①终态铁律）：故障注入——启动复合任务 → 中途 `agent_cancel_task` 中断 → 断言 ①到达明确终态（不停在 running）②**收尾耗时 ≤30s** ③**锁已释放**（立即再 `agent_run_task` 不得被「已有任务正在运行」拒绝）。exit 0=PASS / 1=FAIL / 3=环境错 | `node failure_cleanup_probe.mjs`（`PROBE_CANCEL_AFTER_MS` 默认 5000；`PROBE_CLEANUP_MAX_MS` 默认 30000） |
+| `failure_suite_runner.mjs` | **故障注入套件**（凑足验收「10/10」）：编排多次注入并汇总。**异构用例而非同例重复**——混合快/慢模型 × 不同中断时机（2s/5s/8s/15s/…），覆盖「规划前 / 规划中 / 工具执行中」各阶段。exit 0=全 PASS | `SUITE_MODEL_FAST=<id> SUITE_MODEL_SLOW=<id> node failure_suite_runner.mjs`（`SUITE_REPEAT` 可压 flakiness） |
 
 驱动约定：
 - `agent_get_run_trace` 返回外层 `{"trace":{…}}`，一律用库内 `traceInner()` 解包（少剥一层是历史踩坑）。
