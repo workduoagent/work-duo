@@ -606,7 +606,8 @@ async fn call_tool(app: &AppHandle, name: &str, args: &Value) -> Value {
         "plugin_upsert" => dispatch_ui(app, "plugin:upsert", args.clone()).await,
         "plugin_delete" => dispatch_ui(app, "plugin:delete", args.clone()).await,
         "plugin_set_enabled" => dispatch_ui(app, "plugin:set_enabled", args.clone()).await,
-        "plugin_test" => dispatch_ui_timeout(app, "plugin:test", args.clone(), 180).await,
+        // 超时改走 `ui_intent_timeout` 分级（plugin:test = 180s），避免与表内定义两处不一致
+        "plugin_test" => dispatch_ui(app, "plugin:test", args.clone()).await,
         "plugin_extract_meta" => dispatch_ui(app, "plugin:extract_meta", args.clone()).await,
         "plugin_list_run_logs" => dispatch_ui(app, "plugin:list_run_logs", args.clone()).await,
         // —— 知识库模块：UI 级真实 handler（创建/编辑/删除/列资产/新增文件/导入/建文件夹/移除/重建索引）——
@@ -676,9 +677,31 @@ fn merge_input(args: &Value) -> Result<commands::RunAgentTaskInput, String> {
     serde_json::from_value(v).map_err(|e| e.to_string())
 }
 
-/// 经 Tauri 事件派发 UI 意图，等待前端回传。
+/// UI 意图超时分级表（筑基支柱② 工具契约）。
+///
+/// 背景：所有 UI 级工具都经 `dispatch_ui` 派发到前端真实 handler 并等待回传，
+/// 原先**一刀切 60s**。但部分意图是重量级异步操作（向量化 / 索引重建 / 依赖安装），
+/// 60s 会被**误杀**——MCP 侧已返回超时错误，前端操作却仍在跑，调用方与真实状态不一致。
+///
+/// 分级判据：按「操作本身是否可能超过 60s」划分，而非拍脑袋放大。
+///   - 300s：涉及**批量向量化 / 全量索引重建**（大库、多文件累积，耗时随数据量线性增长）
+///   - 180s：涉及**沙箱冷启动 / 依赖安装 / 打包导入导出**
+///   - 60s（默认）：纯 CRUD / 查询 / 列表，本地 DB 操作，秒级返回
+///
+/// 注：超时仅影响「愿意等多久」，不影响快操作的正常返回；对已知慢操作放宽是安全方向。
+fn ui_intent_timeout(intent: &str) -> u64 {
+    match intent {
+        // 批量向量化 / 全量索引重建
+        "kb:rebuild_index" | "kb:add_file" | "kb:import_file" => 300,
+        // 沙箱冷启动 / 依赖安装 / 打包
+        "plugin:test" | "plugin:upsert" | "skill:import" | "skill:export" => 180,
+        _ => 60,
+    }
+}
+
+/// 经 Tauri 事件派发 UI 意图，等待前端回传。超时按 `ui_intent_timeout` 分级。
 async fn dispatch_ui(app: &AppHandle, intent: &str, payload: Value) -> Value {
-    dispatch_ui_timeout(app, intent, payload, 60).await
+    dispatch_ui_timeout(app, intent, payload, ui_intent_timeout(intent)).await
 }
 
 /// `dispatch_ui` 的可配置超时变体。
