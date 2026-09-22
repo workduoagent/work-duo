@@ -1,6 +1,24 @@
-# WorkDuo 本地插件脚本范式（标准目录）
+# WorkDuo MCP 驱动脚本 + 本地插件脚本范式（标准目录）
 
-本目录存放「本地插件（百宝箱 → 插件）」的**标准脚本范式模板**，供外部编程工具在调用
+## 一、MCP 标准驱动脚本（外部编程工具复用，2026-09-22 沉淀）
+
+直连内建 MCP Server（`127.0.0.1:18755/mcp`，Streamable HTTP JSON-RPC）的标准驱动，**只做参数编排与断言**；能力缺口一律回流 SKILL+MCP 层（新增工具/改文档），严禁绕过 MCP 自写替代。
+
+| 脚本 | 作用 | 用法 |
+|---|---|---|
+| `agent_task_driver.mjs` | **标准驱动库**（ESM，供其它脚本 import）：MCP 客户端（init/callTool/rawPost）/ 终态轮询 `pollRun`（三类挂起自动应答：计划审批·敏感工具审批·恢复门禁）/ 轨迹解包 `traceInner` / KB 事件提取 / 增量日志 `logFetcher` / `startRun` 组装 | `import { initMcp, callTool, startRun, … } from './agent_task_driver.mjs'` |
+| `agent_e2e_audit.mjs` | **全模块四阶段评分审计**（100 分制）：P1 发现 → P2 基建装配（KB 10 文件全链路 + 插件试跑）→ P3 RAG 快路径（SIMPLE_CHAT 携带 kb_search / tags 捷径 / 误杀诊断）→ P4 复合任务 Codex 基准（workspace 绑定 / PlanDAG / verified / 产物磁盘穿透）+ 数据留痕一致性 | `node agent_e2e_audit.mjs`（客户端须运行中；报告写 cwd `e2e_audit_report.json`，`E2E_REPORT_PATH` 可改） |
+| `agent_intent_probe.mjs` | **意图探针**：KB 事实问答核验「SIMPLE_CHAT 快路径 + 检索命中」（#1 回归件；`PROBE_KB_ID` 指定已索引 KB，exit 0 = PASS） | `node agent_intent_probe.mjs` |
+
+驱动约定：
+- `agent_get_run_trace` 返回外层 `{"trace":{…}}`，一律用库内 `traceInner()` 解包（少剥一层是历史踩坑）。
+- 无人值守装配 Agent 用 `planAutoApproveMode:'never'` + `autoToolExecMode:true`（否则每轮复合任务卡计划门禁）；`pollRun` 已自动应答三类挂起，恢复门禁默认 `skip`。
+- 复合任务 `agent_run_task` 必须传 `workspace`（绝对路径），否则写文件被 PathGuard 拒绝（历史踩坑）。
+- 测试资产留痕不删（红线）；驱动脚本的测试用 KB/Agent 用时间戳标识符，避免冲突。
+
+## 二、本地插件脚本范式（标准目录）
+
+本目录另存放「本地插件（百宝箱 → 插件）」的**标准脚本范式模板**，供外部编程工具在调用
 `plugin_upsert` 编写插件时直接复制填充。插件本质是**本机 FaaS**：用户只写 `run(params)`，
 平台沙箱执行，并以 `custom__<identifier>` 注册为智能体工具。
 

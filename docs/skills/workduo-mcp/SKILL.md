@@ -34,7 +34,7 @@ MCP 客户端 **UI 级**驱动 WorkDuo 全模块。
 - 端点：`POST http://127.0.0.1:18755/mcp`（Streamable HTTP；可选 `GET /mcp` SSE）。
 - 开关：`app_config.mcp_server_enabled`（默认启用）、`mcp_server_port`（默认 18755）。改端口/开关需重启 WorkDuo。
 - 启动位置：`src-tauri/src/mcp_server.rs::start_mcp_server`，在 app setup 中以独立 std 线程监听。
-- 工具分层，共 **65** 个：引擎层(5) + 模块发现层(7) + UI 意图层(53，含 Agent/会话 12 + 插件 8 + 知识库 15 + 记忆 9 + 技能 9)。
+- 工具分层，共 **69** 个：引擎层(9) + 模块发现层(7) + UI 意图层(53，含 Agent/会话 12 + 插件 8 + 知识库 15 + 记忆 9 + 技能 9)。
 - 引擎层 + 模块发现层由 Rust 直调；UI 意图层经 `mcp:intent` 派发到 `src/core/mcpBridge.ts` 真实 handler，
   前端 `invoke('mcp_resolve_result', {id, ok, data})` 回传。技能模块同样走此「UI 意图层」——`skill:*` 意图
   由 `mcpBridge` 路由到与 skill-hub 页面**同一个**真实 handler（`skill-mapper` + `skillFs`，落盘先行再入库）。
@@ -70,23 +70,27 @@ curl -s -X POST http://127.0.0.1:18755/mcp \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
 ```
 
-应返回含 65 个工具的 `tools` 数组。
+应返回含 69 个工具的 `tools` 数组。
 
 > 注意：部分客户端会缓存工具清单。若改过 Rust 后工具数/签名没刷新，**重新加载该 MCP Server 连接**即可；
 > 也可直接打上面的 `tools/list` 端点绕过缓存核对。
 
 ---
 
-## 工具清单（65 个，按层）
+## 工具清单（69 个，按层）
 
 ### A. 引擎层（Rust 直调，无需前端）
 | 工具 | 作用 | 关键入参 |
 |---|---|---|
 | `agent_run_task` | 运行 Agent 任务，返回 `run_id`（复用 `run_task_ex`） | `agentId`(主键 id) / `prompt` / `workspace`(=绑定工作空间的绝对路径,不传则自由对话) / `sessionId` / `roundId` / `attachments` 等 |
-| `agent_get_status` | 查询 `run_id` 当前状态 / 轨迹快照 | `run_id` |
-| `agent_wait_task` | 轮询等待 `run_id` 终态（done/error） | `run_id` / `timeout_ms` |
+| `agent_get_status` | 查询 `run_id` 状态（含审批挂起详情：`waitingApproval`/`pending`） | `run_id` |
+| `agent_wait_task` | 轮询终态；卡在审批时带 `interrupted=true` 提前返回 | `run_id` / `timeout_ms` |
+| `agent_submit_approval` | 回传高危工具审批决策（approve/skip/takeover） | `approvalId`/`decision`(+`agentId`/`guidance`/`remember`/`grantKey`) |
+| `agent_submit_plan_decision` | 回传计划审批门禁决策（approve/reject/revise） | `decision`(+`agentId`/`guidance`) |
+| `agent_submit_recovery_decision` | 回传步骤级恢复决策（子任务失败重试耗尽后的恢复门禁；不回应则 run 永久挂起） | `decision`(retry/skip/takeover/change-approach)+`guidance?`(+`agentId`) |
+| `agent_cancel_task` | 取消指定 Agent 的当前任务 | `agentId?` |
 | `agent_get_run_logs` | 增量读 Rust 运行日志 | `cursor` / `since_ts` / `level` / `limit` |
-| `agent_get_run_trace` | 取本 run 轨迹缓冲：`{events, thinking, reply, counts}` | 无（进程级缓冲，最近一次 run） |
+| `agent_get_run_trace` | 取本 run 轨迹缓冲；**返回外层是 `{"trace":{...}}` 包裹**，取字段须先剥一层：`r.trace.{events, thinking, reply, counts}` | 无（进程级缓冲，最近一次 run） |
 
 ### B. 模块发现层（Rust 直读 workduo.db，零业务副作用）
 | 工具 | 作用 |
@@ -96,7 +100,7 @@ curl -s -X POST http://127.0.0.1:18755/mcp \
 | `agent_list_mcps` | 已接入 MCP 服务 |
 | `agent_list_mcp_tools` | 某 MCP 下工具（入参 `mcp_id`）；`mcpTools` 以 `{mcpId, toolId}` 为最小单元 |
 | `agent_list_plugins` | 本地插件（≤10） |
-| `agent_list_kbs` | 知识库（绑定后获得 `native__kb_search`） |
+| `agent_list_kbs` | 知识库（绑定后获得 `native__kb_search`；检索默认全绑定库，按库用其 `kb_ids` 入参传库 id/identifier，`tags` 仅文档级标签、不是库名） |
 | `agent_list_scenarios` | 场景分类（取 `value`） |
 
 ### C. UI 意图层 — Agent 与会话（派发前端真实 handler）
@@ -193,10 +197,21 @@ curl -s -X POST http://127.0.0.1:18755/mcp \
 3. `agent_round_create` `{sessionId, roundIndex:0, userQuestion:"..."}` → 取 `round.id`。
 4. `agent_run_task` `{agentId:<id 主键>, prompt, sessionId, roundId, workspace}` → `{run_id}`。`workspace` 传**真实目录绝对路径**即把 Agent 绑定到该工作空间（不传则自由对话沙盒）。
 5. `agent_wait_task` `{run_id, timeout_ms:120000}`。
-6. `agent_get_run_trace` → 查 `events` 有无 `native__kb_search`、`thinking`、`reply`。
+6. `agent_get_run_trace` → 返回 `{"trace":{events,thinking,reply,counts}}`（**先剥 `trace` 层**再取字段）；查 `trace.events` 有无 `native__kb_search`、`trace.reply` 是否非空。
 7. `agent_round_update` `{roundId, patch:{assistantAnswer, thinkingContent, ...}}`（不回填则 UI 历史看不到正文）。
 8. `agent_session_update` `{id, patch:{status:"COMPLETED"}}`。
 9. `agent_session_get` / `agent_round_list` 核对持久化。
+
+### 流程 1.1：挂起与放行（HITL，外部 Agent 自主应答）
+> **门禁策略（`planAutoApproveMode`，装配 Agent 时显式指定）**：`'always'`=每次计划都人工确认（默认，最严格）｜`'sensitive'`=仅含敏感操作的计划需确认｜`'never'`=计划自动放行、全自动执行（**外部无人值守驱动推荐**——否则每轮复合任务都会卡计划门禁）。注意：计划门禁只是三层挂起之一，选 `never` 后高危工具审批与恢复门禁仍独立生效。
+触发条件：`agent_wait_task` 返回 `interrupted=true` 且 `waitingApproval=true`，或 `agent_get_status` 出现 `pending`/`recoveryWaiting`（任务卡在高危工具审批、计划门禁或恢复门禁）。此时**不要重试 run_task**，而是按 `pending.kind` 应答：
+1. 读 `pending`：`{kind:"tool", request:{approvalId, toolName, description, args, kind, hint}}`、`{kind:"plan", goal, stepCount}` 或 `{kind:"recovery", request:{step, title, reason, summary, tier, …}}`。
+2. 高危工具审批（kind=tool）→ `agent_submit_approval` `{approvalId, decision}`（`approve`/`skip`/`takeover`，takeover 带 `guidance`；同信号想免重复询问可加 `remember:true`+`grantKey`）。
+3. 计划门禁（kind=plan）→ `agent_submit_plan_decision` `{decision}`（`approve`/`reject`/`revise`，revise 带 `guidance`）。
+4. 恢复门禁（kind=recovery，`recoveryWaiting=true`）→ `agent_submit_recovery_decision` `{decision}`（`retry`/`skip`/`takeover`/`change-approach`，takeover 与 change-approach 带 `guidance`；reason 已含失败摘要，判断不了就 `skip` 让流水线继续）。
+5. 应答后再次 `agent_wait_task` / `agent_get_status` 继续轮询，直到 `status` 变 `done`/`error`（同一挂起可能多次出现：每步都可能触发）。
+6. 卡死/想中止 → `agent_cancel_task` `{agentId}`。
+> 说明：MCP 决策与前端弹窗**同源**（同一 Hub），UI 点「允许/跳过」和外部 Agent 调 `agent_submit_*` 效果一致、幂等。恢复门禁在 `get_status` 以 `recoveryWaiting=true` + `pending.kind='recovery'` 透出（2026-09-22 起支持）。
 
 ### 流程 2：插件编写（百宝箱 → 插件）
 1. 读本 skill `scripts/plugin.python.template.py` 或 `plugin.bun.template.ts`，复制并改写 `run(params)`。
@@ -279,9 +294,18 @@ WorkDuo 的知识库等模块大量逻辑在**前端 TS** 完成（kbFs 落盘�
 
 ## 标准驱动脚本
 
-本 skill 的 `scripts/kb_driver.mjs`（纯 Node 标准库，无需依赖）直连 `127.0.0.1:18755/mcp`，覆盖
-`kb_create → kb_add_file → kb_rebuild_index（轮询 indexedAt）→ kb_list_assets → agent_get_run_logs`，
-并打印最近 60 行后端日志（含 `[fe]` 前端透传行）。用法（在 skill 目录下执行）：
+本 skill 的 `scripts/` 目录提供可循环利用的标准驱动（纯 Node 标准库，无需依赖，直连 `127.0.0.1:18755/mcp`）：
+
+| 脚本 | 作用 |
+|---|---|
+| `agent_task_driver.mjs` | **标准驱动库**（ESM import 复用）：MCP 客户端 / 终态轮询 + 三类挂起自动应答（计划审批·工具审批·恢复门禁）/ 轨迹解包 `traceInner` / KB 事件提取 / 增量日志。**新驱动一律 import 本库，禁止复刻客户端逻辑** |
+| `agent_e2e_audit.mjs` | **全模块四阶段评分审计**（100 分制：P1 发现 → P2 KB+插件装配 → P3 RAG 快路径/捷径/诊断 → P4 复合产物磁盘穿透 + 留痕一致性），报告写 cwd `e2e_audit_report.json` |
+| `agent_intent_probe.mjs` | **意图探针**：KB 事实问答核验「SIMPLE_CHAT 快路径 + 检索命中」（`PROBE_KB_ID` 指定已索引 KB，exit 0 = PASS） |
+| `kb_driver.mjs` | KB 全链路回归（create→add_file→rebuild→list_assets→logs） |
+
+驱动约定（详见 `scripts/README.md`）：驱动只做参数编排与断言，**能力缺口回流 SKILL+MCP 层**；`agent_get_run_trace` 用 `traceInner()` 剥 `{"trace":…}` 层；无人值守装配 Agent 用 `planAutoApproveMode:'never'` + `autoToolExecMode:true`；复合任务 `agent_run_task` 必须传 `workspace` 绝对路径。
+
+### kb_driver 用法（在 skill 目录下执行）
 
 ```bash
 node scripts/kb_driver.mjs
@@ -317,7 +341,7 @@ node scripts/kb_driver.mjs
 
 ## 集成核对清单
 
-- [ ] `tools/list` 返回 65 个工具（引擎 5 + 发现 7 + UI 53）。
+- [ ] `tools/list` 返回 69 个工具（引擎 9 + 发现 7 + UI 53）。
 - [ ] 端口 18755 有监听；外部编程工具已成功连上该 MCP Server。
 - [ ] 绑定 KB 的 Agent 跑「kb_chunks 的 id 字段格式是什么？」→ trace events 出现 `native__kb_search`，reply 引用 KB。
 - [ ] `plugin_upsert` 编写插件后 `plugin_test` 返回 `ok:true`；前端插件列表可见。
