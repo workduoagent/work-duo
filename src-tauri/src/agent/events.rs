@@ -48,7 +48,10 @@ pub fn reset_trace() {
 pub fn push_event(event: &str, payload: &impl Serialize) {
     if event == "agent-event" {
         if let Ok(v) = serde_json::to_value(payload) {
-            match v.get("eventType").and_then(|x| x.as_str()) {
+            // AgentEventPayload 的 event_type 经 #[serde(rename = "type")] 序列化为 "type"
+            // （2026-09-22 修复：旧判据查 "eventType" 永不命中，text/thinking_chunk 从未被跳过，
+            //   长回复会向 trace 缓冲塞几百条事件）。
+            match v.get("type").and_then(|x| x.as_str()) {
                 Some("text_chunk") | Some("thinking_chunk") => return,
                 _ => {}
             }

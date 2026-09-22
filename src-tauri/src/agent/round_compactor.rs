@@ -331,6 +331,19 @@ pub(crate) async fn persist_round_answer_if_empty(app: &AppHandle, round_id: &st
     }
 }
 
+/// 启动时孤儿轮次清扫（20260922 #4）：进程退出/崩溃会遗留 `end_time IS NULL` 的「进行中」
+/// 轮次，重启后 UI 永远显示进行中且无任务可终态化。DB 就绪后（此刻必然无在跑任务）统一
+/// 标记终态。只补 `end_time`，不动正文/思考列（内容缺失即缺失，诚实呈现）。
+pub async fn sweep_orphan_rounds(app: &AppHandle) -> Result<u64, String> {
+    let pool = get_pool(app).await?;
+    let result = sqlx::query("UPDATE agent_conversation_round SET end_time = ? WHERE end_time IS NULL")
+        .bind(now_ms())
+        .execute(&pool)
+        .await
+        .map_err(|e| format!("孤儿轮次清扫失败：{e}"))?;
+    Ok(result.rows_affected())
+}
+
 /// 终态过程兜底回填（2026-09-21 同策略扩展）：`thinking_content` / `tool_calls_summary`
 /// 此前同样只有前端链路上报，MCP 轮次为空导致 UI 思考折叠面板/工具过程缺失。
 /// 数据源 = 引擎轨迹缓冲（trace_thinking_snapshot / trace_tool_calls_summary_json），

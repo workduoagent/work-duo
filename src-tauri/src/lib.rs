@@ -86,6 +86,13 @@ pub fn run() {
                     tracing::error!("[startup] DB 就绪等待失败，后台初始化跳过：{e}");
                     return;
                 }
+                // 孤儿轮次清扫（#4）：上次进程退出遗留的 end_time IS NULL 轮次统一标记终态
+                //（此刻必然无在跑任务，置 end_time 即可；只补时间列，内容列诚实保留缺失）。
+                match agent::round_compactor::sweep_orphan_rounds(&handle).await {
+                    Ok(n) if n > 0 => tracing::info!("[startup] 孤儿轮次清扫：已将 {n} 条 end_time 为空的轮次标记终态"),
+                    Ok(_) => {}
+                    Err(e) => tracing::warn!("[startup] 孤儿轮次清扫失败：{e}"),
+                }
                 // 拉起小分队定时调度器与 API 触发服务（二者均依赖数据库就绪）。
                 agent::squad_scheduler::start_scheduler(handle.clone());
                 agent::squad_api_server::start_api_server(handle.clone());
