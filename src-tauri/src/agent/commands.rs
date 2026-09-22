@@ -186,8 +186,28 @@ pub async fn run_agent_task(
         // #8 per-run：当前任务的所有 emit 点经 task_local 落到 internal_rid 桶，并发 run 互不串台。
         let _scope = crate::agent::events::with_run_id_scope(internal_rid.clone(), async move {
             tracing::info!("[agent] run_agent_task 后台任务已 spawn，开始 run_task");
-            rt.run_task(&app_clone, cfg, prompt, plan_override, pre_completed, initial_context, &task_state)
-                .await;
+            // 支柱① 终态铁律：run 级总墙钟兜底（验收口径第③层）。
+            // 调用级超时（call_llm / call_llm_stream）只堵单点，本层兜住多步累积过长或
+            // 未覆盖路径的挂起。超时即强制终态，`RunningGuard` 随本块结束 drop → 锁必然释放。
+            let run_limit = crate::agent::runtime::run_wall_clock_limit();
+            match tokio::time::timeout(
+                run_limit,
+                rt.run_task(&app_clone, cfg, prompt, plan_override, pre_completed, initial_context, &task_state),
+            )
+            .await
+            {
+                Ok(()) => {}
+                Err(_) => {
+                    tracing::warn!(
+                        "[agent] run_agent_task: run 总墙钟超时（{}s）——强制终态，释放运行锁",
+                        run_limit.as_secs()
+                    );
+                    crate::agent::events::emit_task_error(
+                        &app_clone,
+                        &format!("运行总时长超时（{}s），已强制终止以防任务永不结束", run_limit.as_secs()),
+                    );
+                }
+            }
             tracing::info!("[agent] run_agent_task 后台任务 run_task 结束");
         })
         .await;
@@ -269,16 +289,34 @@ pub async fn run_task_ex(
         let _running_guard = running_guard;
         // #8 per-run：当前任务的所有 emit 点经 task_local 落到 rid 桶，并发 run 互不串台。
         let _scope = crate::agent::events::with_run_id_scope(rid.clone(), async move {
-            rt.run_task(
-                &app_clone,
-                cfg,
-                prompt,
-                plan_override,
-                pre_completed,
-                initial_context,
-                &task_state,
+            // 支柱① 终态铁律：run 级总墙钟兜底（同 run_agent_task，验收口径第③层）。
+            let run_limit = crate::agent::runtime::run_wall_clock_limit();
+            match tokio::time::timeout(
+                run_limit,
+                rt.run_task(
+                    &app_clone,
+                    cfg,
+                    prompt,
+                    plan_override,
+                    pre_completed,
+                    initial_context,
+                    &task_state,
+                ),
             )
-            .await;
+            .await
+            {
+                Ok(()) => {}
+                Err(_) => {
+                    tracing::warn!(
+                        "[agent] run_task_ex: run 总墙钟超时（{}s）——强制终态，释放运行锁",
+                        run_limit.as_secs()
+                    );
+                    crate::agent::events::emit_task_error(
+                        &app_clone,
+                        &format!("运行总时长超时（{}s），已强制终止以防任务永不结束", run_limit.as_secs()),
+                    );
+                }
+            }
         })
         .await;
         let mut reg = reg.lock().await;

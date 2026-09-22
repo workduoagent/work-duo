@@ -1548,6 +1548,52 @@ fn llm_wait_tick() -> Duration {
         .unwrap_or_else(|| Duration::from_secs(DEFAULT_LLM_TICK_SECS))
 }
 
+/// 流式调用默认总墙钟上限（10 分钟）：生成超长内容时总时长也必须有上限，防止失控。
+const DEFAULT_LLM_STREAM_TOTAL_SECS: u64 = 600;
+/// 流式调用默认单 chunk 静默上限（120s）：SSE 流中途这么久没有任何新数据即判定断流。
+/// 需大于本地大模型的 prefill（长 prompt 预填充）耗时，否则会误杀正常调用。
+const DEFAULT_LLM_CHUNK_TIMEOUT_SECS: u64 = 120;
+
+/// 流式总墙钟上限：可用环境变量 `WD_LLM_STREAM_TOTAL_SECS` 覆盖（>0 生效）。
+fn llm_stream_total_timeout() -> Duration {
+    std::env::var("WD_LLM_STREAM_TOTAL_SECS")
+        .ok()
+        .and_then(|s| s.trim().parse::<u64>().ok())
+        .filter(|s| *s > 0)
+        .map(Duration::from_secs)
+        .unwrap_or_else(|| Duration::from_secs(DEFAULT_LLM_STREAM_TOTAL_SECS))
+}
+
+/// 流式单 chunk 静默上限：可用环境变量 `WD_LLM_CHUNK_TIMEOUT_SECS` 覆盖（>0 生效）。
+/// 2026-09-22 实测暴露：本地模型大生成量任务下，SSE 在收到 HTTP 200 后**流静默 226s+ 无任何 chunk**，
+/// 而原 `stream.next().await` 裸等待 → run 永不终止、锁永占。本超时是其兜底。
+fn llm_stream_chunk_timeout() -> Duration {
+    std::env::var("WD_LLM_CHUNK_TIMEOUT_SECS")
+        .ok()
+        .and_then(|s| s.trim().parse::<u64>().ok())
+        .filter(|s| *s > 0)
+        .map(Duration::from_secs)
+        .unwrap_or_else(|| Duration::from_secs(DEFAULT_LLM_CHUNK_TIMEOUT_SECS))
+}
+
+/// run 级总墙钟上限（默认 10 分钟）：**任何一次 run 都必须在此时间内到达终态**。
+///
+/// 这是「失败收尾」验收口径的第③层。调用级超时（call_llm / call_llm_stream）只堵住单点，
+/// 本层兜住「多步累积过长」或「某条未被调用级超时覆盖的路径挂起」——2026-09-22 实测即暴露：
+/// 本地模型大生成量任务下 run 在 420s+ 仍未终态。超时后强制 emit_task_error，
+/// 且 `RunningGuard` 随作用域结束 drop → **锁必然释放**。
+const DEFAULT_RUN_MAX_SECS: u64 = 600;
+
+/// 可用环境变量 `WD_RUN_MAX_SECS` 覆盖（>0 生效）。慢模型环境可调大。
+pub(crate) fn run_wall_clock_limit() -> Duration {
+    std::env::var("WD_RUN_MAX_SECS")
+        .ok()
+        .and_then(|s| s.trim().parse::<u64>().ok())
+        .filter(|s| *s > 0)
+        .map(Duration::from_secs)
+        .unwrap_or_else(|| Duration::from_secs(DEFAULT_RUN_MAX_SECS))
+}
+
 /// 心跳停止守卫：函数任意出口（正常返回 / Err / `?` 提前返回）自动终止打点协程，不留悬挂任务。
 struct HeartbeatGuard(Arc<AtomicBool>);
 impl Drop for HeartbeatGuard {
@@ -2005,7 +2051,26 @@ async fn call_llm_stream_once(
     let mut tc_acc: std::collections::BTreeMap<u64, (String, String, String)> = Default::default();
     // 真实 token 用量累计（OpenAI 把 usage 放在最后一个 chunk 之前；不同网关位置略有差异，每片都取最新非空值）。
     let mut usage: (u64, u64) = (0, 0);
-    while let Some(chunk_result) = stream.next().await {
+    // 流式两道超时（支柱① 终态铁律）：
+    // ① 整体墙钟（stream_total）——生成超长内容时总时长也必须有上限；
+    // ② 单 chunk 静默（chunk_timeout）——SSE 流中途长时间无任何数据即判定断流。
+    // 判据用「无产出静默时长」而非总耗时（慢 ≠ 死，但静默够久就是死）。
+    let stream_total = llm_stream_total_timeout();
+    let chunk_timeout = llm_stream_chunk_timeout();
+    loop {
+        // ① 整体墙钟兜底
+        if request_started.elapsed() > stream_total {
+            tracing::warn!(
+                "[agent] call_llm_stream_once: 流式总时长超时（{}s，model={}）——终止，防止任务永不结束",
+                stream_total.as_secs(),
+                cfg.llm_model_name
+            );
+            return Err(format!(
+                "流式响应总时长超时：{}s（model={}）",
+                stream_total.as_secs(),
+                cfg.llm_model_name
+            ));
+        }
         // 用户中途取消：立即终止拉流（连接随函数返回被丢弃），让本轮回合在
         // 调用方处检测到取消标志后提前结束。这是"停止按钮即时生效"的核心断流点。
         if cancel.load(Ordering::SeqCst) {
@@ -2015,6 +2080,24 @@ async fn call_llm_stream_once(
             );
             return Err("任务已被用户取消".into());
         }
+        // ② 单 chunk 静默超时：无新数据即判定断流（原实现此处裸 await，静默时永久挂起）
+        let chunk_result = match timeout(chunk_timeout, stream.next()).await {
+            Ok(Some(r)) => r,
+            Ok(None) => break, // 流正常结束
+            Err(_) => {
+                tracing::warn!(
+                    "[agent] call_llm_stream_once: SSE 静默超时（{}s 内无新数据，已耗时={}ms，model={}）——判定断流",
+                    chunk_timeout.as_secs(),
+                    request_started.elapsed().as_millis(),
+                    cfg.llm_model_name
+                );
+                return Err(format!(
+                    "流式响应静默超时：{}s 内未收到新数据（model={}）——判定为网关/模型断流",
+                    chunk_timeout.as_secs(),
+                    cfg.llm_model_name
+                ));
+            }
+        };
         let chunk = chunk_result.map_err(|e| {
             tracing::info!("[agent] call_llm_stream: SSE 流读取失败（已耗时={}ms）：{}", request_started.elapsed().as_millis(), e);
             format!("流读取失败：{e}")
