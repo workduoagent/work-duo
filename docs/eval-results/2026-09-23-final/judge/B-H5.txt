@@ -1,0 +1,11 @@
+============================= test session starts =============================
+platform win32 -- Python 3.13.14, pytest-9.1.1, pluggy-1.6.0 -- C:\Users\Administrator\.workbuddy\binaries\python\envs\default\Scripts\python.exe
+cachedir: .pytest_cache
+rootdir: E:\Codes\ABC\work-duo\eval-workspace-final\eval-B-H5-9\fix-seed
+collecting ... collected 3 items
+
+test_calculator.py::test_add PASSED                                      [ 33%]
+test_calculator.py::test_subtract PASSED                                 [ 66%]
+test_calculator.py::test_divide PASSED                                   [100%]
+
+============================== 3 passed in 0.01s ==============================

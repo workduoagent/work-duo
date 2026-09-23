@@ -1,0 +1,66 @@
+{
+  "at": "2026-09-23T15:33:01.237Z",
+  "pass": true,
+  "checks": [
+    {
+      "name": "证据存在",
+      "ok": true,
+      "detail": "26 个用例（26 个 JSON 去重后）"
+    },
+    {
+      "name": "证据规模≥20 用例",
+      "ok": true,
+      "detail": "26/20"
+    },
+    {
+      "name": "终态率=100%",
+      "ok": true,
+      "detail": "26/26"
+    },
+    {
+      "name": "done率≥90%",
+      "ok": true,
+      "detail": "100% (26/26)"
+    },
+    {
+      "name": "产物达成≥90%（done 用例）",
+      "ok": true,
+      "detail": "98% (58/59)"
+    },
+    {
+      "name": "客观判分 resolved≥80%",
+      "ok": true,
+      "detail": "100% (1/1)"
+    },
+    {
+      "name": "种子用例全部已判分",
+      "ok": true,
+      "detail": "1/1"
+    },
+    {
+      "name": "非 done 终态 reply 非空",
+      "ok": true,
+      "detail": "无非 done 终态"
+    },
+    {
+      "name": "故障注入 F-1",
+      "ok": true,
+      "detail": "ok=true"
+    },
+    {
+      "name": "故障注入 F-4",
+      "ok": true,
+      "detail": "ok=true"
+    },
+    {
+      "name": "MCP 契约（72 工具+关键工具）",
+      "ok": true,
+      "detail": "72 工具，关键工具齐"
+    },
+    {
+      "name": "种子资产完整",
+      "ok": true,
+      "detail": "7 包 / 25 文件 / 损坏 0"
+    }
+  ]
+}

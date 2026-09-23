@@ -1,0 +1,196 @@
+{
+  "caseId": "B-H2",
+  "slot": 7,
+  "scene": "B",
+  "kind": "H",
+  "title": "MCP聚合器元测评",
+  "model": "96af449e-dfc0-48ec-b077-aa9f02b43d64",
+  "workspace": "E:/Codes/ABC/work-duo/eval-workspace-final/eval-B-H2-7",
+  "startedAt": "2026-09-23T15:06:03.432Z",
+  "status": "done",
+  "runId": "run-1790175963495-16",
+  "durationMs": 1238944,
+  "artifacts": [],
+  "artifactCheck": [
+    {
+      "artifact": "mcp-hub/README.md",
+      "ok": true
+    },
+    {
+      "artifact": "mcp-hub/server.js",
+      "ok": true
+    },
+    {
+      "artifact": "mcp-hub/public/index.html",
+      "ok": true
+    },
+    {
+      "artifact": "mcp-hub/SELFTEST.md",
+      "ok": true
+    }
+  ],
+  "traceCounts": {
+    "events": 551,
+    "reply_chars": 817,
+    "thinking_chars": 5266
+  },
+  "replyLen": 817,
+  "kbHits": 0,
+  "recoveries": 0,
+  "error": null,
+  "metrics": {
+    "ha": {
+      "terminal": true,
+      "status": "done"
+    },
+    "perf": {
+      "durationMs": 1238944
+    },
+    "heal": {
+      "replyLen": 817
+    }
+  },
+  "files": [
+    {
+      "rel": ".wd_mem/.gitignore",
+      "size": 310,
+      "mtime": 1790175963498.7402
+    },
+    {
+      "rel": ".wd_mem/graph/edges.jsonl",
+      "size": 5309,
+      "mtime": 1790177196667.426
+    },
+    {
+      "rel": ".wd_mem/graph/nodes.jsonl",
+      "size": 37182,
+      "mtime": 1790177196665.4333
+    },
+    {
+      "rel": ".wd_mem/graph/sessions/2b6b327f-9354-4bf5-9856-4321bb22bab0.json",
+      "size": 12600,
+      "mtime": 1790177196672.7932
+    },
+    {
+      "rel": ".wd_mem/graph/_index.json",
+      "size": 3907,
+      "mtime": 1790177196665.4333
+    },
+    {
+      "rel": ".wd_mem/knowledge/MEMORY.md",
+      "size": 133,
+      "mtime": 1790175963497.6614
+    },
+    {
+      "rel": ".wd_mem/README.md",
+      "size": 1378,
+      "mtime": 1790175963498.7402
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/auto_run_1790176512240.py",
+      "size": 182,
+      "mtime": 1790176512244.119
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/auto_run_1790176530213.py",
+      "size": 177,
+      "mtime": 1790176530215.0386
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/auto_run_1790176588284.py",
+      "size": 347,
+      "mtime": 1790176588285.2512
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/injected_check_mcp_hub.py",
+      "size": 933,
+      "mtime": 1790176267631.9675
+    },
+    {
+      "rel": ".wd_mem/scripts/check_mcp_hub.py",
+      "size": 863,
+      "mtime": 1790176260644.1445
+    },
+    {
+      "rel": "mcp-hub/backend/adapter.py",
+      "size": 9328,
+      "mtime": 1790176240306.8867
+    },
+    {
+      "rel": "mcp-hub/backend/server.py",
+      "size": 5569,
+      "mtime": 1790176240310.872
+    },
+    {
+      "rel": "mcp-hub/backend/__init__.py",
+      "size": 31,
+      "mtime": 1790176240324.712
+    },
+    {
+      "rel": "mcp-hub/backend/__pycache__/adapter.cpython-311.pyc",
+      "size": 13829,
+      "mtime": 1790176588522.8447
+    },
+    {
+      "rel": "mcp-hub/backend/__pycache__/__init__.cpython-311.pyc",
+      "size": 229,
+      "mtime": 1790176588519.2334
+    },
+    {
+      "rel": "mcp-hub/frontend/app.js",
+      "size": 13064,
+      "mtime": 1790176463787.093
+    },
+    {
+      "rel": "mcp-hub/frontend/index.html",
+      "size": 3169,
+      "mtime": 1790176463771.457
+    },
+    {
+      "rel": "mcp-hub/frontend/style.css",
+      "size": 6570,
+      "mtime": 1790176463782.9148
+    },
+    {
+      "rel": "mcp-hub/public/index.html",
+      "size": 5467,
+      "mtime": 1790176240319.3308
+    },
+    {
+      "rel": "mcp-hub/README.md",
+      "size": 2068,
+      "mtime": 1790176240313.8616
+    },
+    {
+      "rel": "mcp-hub/SELFTEST.md",
+      "size": 4280,
+      "mtime": 1790177176506.2603
+    },
+    {
+      "rel": "mcp-hub/server.js",
+      "size": 918,
+      "mtime": 1790176240316.1724
+    },
+    {
+      "rel": "mcp-hub/tests/test_adapter.py",
+      "size": 6214,
+      "mtime": 1790176581813.4448
+    },
+    {
+      "rel": "mcp-hub/tests/__pycache__/test_adapter.cpython-311.pyc",
+      "size": 11459,
+      "mtime": 1790176588474.0647
+    }
+  ],
+  "agentId": "d0b7ab73-0982-40e3-9b5b-922304c11ac7",
+  "agentIdentifier": "l2-b-h2-mue8jps2-ankt2o",
+  "modelName": "AG:DeepSeek-V4.1-Flash",
+  "seedTier": null,
+  "seedId": null,
+  "sessionId": "2b6b327f-9354-4bf5-9856-4321bb22bab0",
+  "reply": "已生成/更新 adapter.py、server.py\n**步骤 1/4 已完成。**已实现 MCP Streamable HTTP adapter、工具列表与调用 API、静态页面托管，并提供启动说明和自测指南。Python 语法检查及必需文件检查均通过；未连接真实 MCP 端点验证运行行为。\n\n产出文件（工作空间 `E:/Codes/ABC/work-duo/eval-workspace-final/eval-B-H2-7/` 下）：\n\n- `mcp-hub/backend/adapter.py`\n- `mcp-hub/backend/server.py`\n- `mcp-hub/backend/__init__.py`\n- `mcp-hub/README.md`\n- `mcp-hub/server.js`\n- `mcp-hub/public/index.html`\n- `mcp-hub/SELFTEST.md`\n\n已生成/更新 app.js、index.html\n「实现工具交互前端」已生成/更新 index.html、style.css、app.js（执行轮次达预算上限，产物经客观校验无误）\n\n已生成/更新 test_adapter.py\n「编写并运行 adapter 测试」已生成/更新 test_adapter.py（执行轮次达预算上限，产物经客观校验无误）\n\n已生成/更新 SELFTEST.md\n已完成自测指南，包含服务启动方法、通过真实端点核对工具数为 **70** 的步骤、上游不可用或调用失败时观察结构化降级响应的说明，以及最终文件树。\n\n产出文件：`E:/Codes/ABC/work-duo/eval-workspace-final/eval-B-H2-7/mcp-hub/SELFTEST.md`\n\n已确认该文件及约定要求的其他交付文件均存在。未在本次运行中连接真实 MCP 端点验证工具数量。",
+  "thinkingLen": 5266,
+  "eventCount": 551,
+  "kbCalls": 0,
+  "artifactScore": 1
+}

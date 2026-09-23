@@ -1,0 +1,124 @@
+{
+  "caseId": "A-M5",
+  "slot": 4,
+  "scene": "A",
+  "kind": "M",
+  "title": "KB导入+RAG综述",
+  "model": "96af449e-dfc0-48ec-b077-aa9f02b43d64",
+  "workspace": "E:/Codes/ABC/work-duo/eval-workspace-final/eval-A-M5-4",
+  "startedAt": "2026-09-23T14:43:57.750Z",
+  "status": "done",
+  "runId": "run-1790174637954-8",
+  "durationMs": 229009,
+  "artifacts": [],
+  "artifactCheck": [
+    {
+      "artifact": "research_note.md",
+      "ok": true
+    }
+  ],
+  "traceCounts": {
+    "events": 101,
+    "reply_chars": 1589,
+    "thinking_chars": 2296
+  },
+  "replyLen": 1589,
+  "kbHits": 0,
+  "recoveries": 0,
+  "error": null,
+  "metrics": {
+    "ha": {
+      "terminal": true,
+      "status": "done"
+    },
+    "perf": {
+      "durationMs": 229009
+    },
+    "heal": {
+      "replyLen": 1589
+    }
+  },
+  "files": [
+    {
+      "rel": ".wd_mem/.gitignore",
+      "size": 310,
+      "mtime": 1790174637958.6128
+    },
+    {
+      "rel": ".wd_mem/graph/edges.jsonl",
+      "size": 3677,
+      "mtime": 1790174863180.6055
+    },
+    {
+      "rel": ".wd_mem/graph/nodes.jsonl",
+      "size": 22603,
+      "mtime": 1790174863179.6035
+    },
+    {
+      "rel": ".wd_mem/graph/sessions/d68c0067-efa6-4aaf-afd8-1f6bf245f4e5.json",
+      "size": 14643,
+      "mtime": 1790174863181.6118
+    },
+    {
+      "rel": ".wd_mem/graph/_index.json",
+      "size": 4121,
+      "mtime": 1790174863179.6035
+    },
+    {
+      "rel": ".wd_mem/knowledge/MEMORY.md",
+      "size": 133,
+      "mtime": 1790174637958.6128
+    },
+    {
+      "rel": ".wd_mem/README.md",
+      "size": 1378,
+      "mtime": 1790174637958.6128
+    },
+    {
+      "rel": "knowledge_base/circuit_breaker.md",
+      "size": 743,
+      "mtime": 1790174771503.4841
+    },
+    {
+      "rel": "knowledge_base/fallback.md",
+      "size": 802,
+      "mtime": 1790174771505.7734
+    },
+    {
+      "rel": "knowledge_base/http_retries.md",
+      "size": 961,
+      "mtime": 1790174734439.5955
+    },
+    {
+      "rel": "knowledge_base/idempotency.md",
+      "size": 1042,
+      "mtime": 1790174734445.8953
+    },
+    {
+      "rel": "knowledge_base/rate_limiting.md",
+      "size": 768,
+      "mtime": 1790174771501.1501
+    },
+    {
+      "rel": "knowledge_base/timeouts.md",
+      "size": 1127,
+      "mtime": 1790174734441.6602
+    },
+    {
+      "rel": "research_note.md",
+      "size": 6035,
+      "mtime": 1790174844321.6912
+    }
+  ],
+  "agentId": "d3232d4c-dda8-4200-8b32-0e77c2dceb95",
+  "agentIdentifier": "l2-a-m5-mue7ravd-btz1fu",
+  "modelName": "AG:DeepSeek-V4.1-Flash",
+  "seedTier": null,
+  "seedId": null,
+  "sessionId": "d68c0067-efa6-4aaf-afd8-1f6bf245f4e5",
+  "reply": "已生成/更新 http_retries.md、timeouts.md、idempotency.md\n已创建并核实所需文件：\n\n- `E:\\Codes\\ABC\\work-duo\\eval-workspace-final\\eval-A-M5-4\\knowledge_base\\http_retries.md`\n- `E:\\Codes\\ABC\\work-duo\\eval-workspace-final\\eval-A-M5-4\\knowledge_base\\timeouts.md`\n- `E:\\Codes\\ABC\\work-duo\\eval-workspace-final\\eval-A-M5-4\\knowledge_base\\idempotency.md`\n- `E:\\Codes\\ABC\\work-duo\\eval-workspace-final\\eval-A-M5-4\\research_note.md`\n\n三篇文档已作为本地知识库语料保存；当前没有专用知识库导入或索引接口，因此未声称完成导入或索引。\n\n已生成/更新 rate_limiting.md、circuit_breaker.md、fallback.md\n已创建并核实三篇韧性模式短文，均包含对应主题内容：\n\n- `E:\\Codes\\ABC\\work-duo\\eval-workspace-final\\eval-A-M5-4\\knowledge_base\\rate_limiting.md`\n- `E:\\Codes\\ABC\\work-duo\\eval-workspace-final\\eval-A-M5-4\\knowledge_base\\circuit_breaker.md`\n- `E:\\Codes\\ABC\\work-duo\\eval-workspace-final\\eval-A-M5-4\\knowledge_base\\fallback.md`\n\n加上前序三篇，本地语料共六篇短文。当前没有专用知识库索引管理接口，因此未声称已导入或重建索引。\n\n已生成/更新 research_note.md\n已完成综述并核实 `research_note.md` 已生成，正文包含 `[1]` 至 `[6]` 引用、分组参考文献，以及专用知识库导入和索引状态无法验证的说明。\n\n本地语料与综述文件路径：\n\n- `E:\\Codes\\ABC\\work-duo\\eval-workspace-final\\eval-A-M5-4\\research_note.md`\n- `E:\\Codes\\ABC\\work-duo\\eval-workspace-final\\eval-A-M5-4\\knowledge_base\\http_retries.md`\n- `E:\\Codes\\ABC\\work-duo\\eval-workspace-final\\eval-A-M5-4\\knowledge_base\\timeouts.md`\n- `E:\\Codes\\ABC\\work-duo\\eval-workspace-final\\eval-A-M5-4\\knowledge_base\\idempotency.md`\n- `E:\\Codes\\ABC\\work-duo\\eval-workspace-final\\eval-A-M5-4\\knowledge_base\\rate_limiting.md`\n- `E:\\Codes\\ABC\\work-duo\\eval-workspace-final\\eval-A-M5-4\\knowledge_base\\circuit_breaker.md`\n- `E:\\Codes\\ABC\\work-duo\\eval-workspace-final\\eval-A-M5-4\\knowledge_base\\fallback.md`",
+  "thinkingLen": 2296,
+  "eventCount": 101,
+  "kbCalls": 0,
+  "artifactScore": 1
+}

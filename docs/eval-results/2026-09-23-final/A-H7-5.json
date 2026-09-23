@@ -1,0 +1,99 @@
+{
+  "caseId": "A-H7",
+  "slot": 5,
+  "scene": "A",
+  "kind": "H",
+  "title": "KB多跳问答报告",
+  "model": "96af449e-dfc0-48ec-b077-aa9f02b43d64",
+  "workspace": "E:/Codes/ABC/work-duo/eval-workspace-final/eval-A-H7-5",
+  "startedAt": "2026-09-23T15:06:03.431Z",
+  "status": "done",
+  "runId": "run-1790175963500-18",
+  "durationMs": 247451,
+  "artifacts": [],
+  "artifactCheck": [
+    {
+      "artifact": "deep_qa.md",
+      "ok": true
+    }
+  ],
+  "traceCounts": {
+    "events": 100,
+    "reply_chars": 247,
+    "thinking_chars": 1358
+  },
+  "replyLen": 247,
+  "kbHits": 0,
+  "recoveries": 0,
+  "error": null,
+  "metrics": {
+    "ha": {
+      "terminal": true,
+      "status": "done"
+    },
+    "perf": {
+      "durationMs": 247451
+    },
+    "heal": {
+      "replyLen": 247
+    }
+  },
+  "files": [
+    {
+      "rel": ".wd_mem/.gitignore",
+      "size": 310,
+      "mtime": 1790175963504.2522
+    },
+    {
+      "rel": ".wd_mem/deep_qa_recon.md",
+      "size": 3049,
+      "mtime": 1790176138474.0156
+    },
+    {
+      "rel": ".wd_mem/graph/edges.jsonl",
+      "size": 1385,
+      "mtime": 1790176207204.6265
+    },
+    {
+      "rel": ".wd_mem/graph/nodes.jsonl",
+      "size": 11653,
+      "mtime": 1790176207203.3665
+    },
+    {
+      "rel": ".wd_mem/graph/sessions/f563084e-9a77-41aa-a3f4-1016b2e9d121.json",
+      "size": 5348,
+      "mtime": 1790176207206.4146
+    },
+    {
+      "rel": ".wd_mem/graph/_index.json",
+      "size": 2467,
+      "mtime": 1790176207204.6265
+    },
+    {
+      "rel": ".wd_mem/knowledge/MEMORY.md",
+      "size": 133,
+      "mtime": 1790175963503.23
+    },
+    {
+      "rel": ".wd_mem/README.md",
+      "size": 1378,
+      "mtime": 1790175963504.2522
+    },
+    {
+      "rel": "deep_qa.md",
+      "size": 2889,
+      "mtime": 1790176192899.5947
+    }
+  ],
+  "agentId": "21fcd6a5-fb94-49f6-ab3a-75336b4699fd",
+  "agentIdentifier": "l2-a-h7-mue8jprt-nbqjwm",
+  "modelName": "AG:DeepSeek-V4.1-Flash",
+  "seedTier": null,
+  "seedId": null,
+  "sessionId": "f563084e-9a77-41aa-a3f4-1016b2e9d121",
+  "reply": "已生成/更新 deep_qa_recon.md\n「检索可用知识材料」已生成/更新 deep_qa_recon.md（执行轮次达预算上限，产物初核通过但未经行为级验收，暂定完成，建议人工复核）\n\n已生成/更新 deep_qa.md\n已生成问答报告，并确认文件存在。报告按超时、重试、防重和整体流程分节，明确披露了知识材料不足，未伪造设计结论或引用。\n\n产出文件：`E:\\Codes\\ABC\\work-duo\\eval-workspace-final\\eval-A-H7-5\\deep_qa.md`",
+  "thinkingLen": 1358,
+  "eventCount": 100,
+  "kbCalls": 0,
+  "artifactScore": 1
+}
