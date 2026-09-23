@@ -34,7 +34,8 @@ MCP 客户端 **UI 级**驱动 WorkDuo 全模块。
 - 端点：`POST http://127.0.0.1:18755/mcp`（Streamable HTTP；可选 `GET /mcp` SSE）。
 - 开关：`app_config.mcp_server_enabled`（默认启用）、`mcp_server_port`（默认 18755）。改端口/开关需重启 WorkDuo。
 - 启动位置：`src-tauri/src/mcp_server.rs::start_mcp_server`，在 app setup 中以独立 std 线程监听。
-- 工具分层，共 **70** 个：引擎层(9) + 模块发现层(7) + UI 意图层(54，含 Agent/会话 12 + 插件 8 + 知识库 15 + 记忆 9 + 技能 10)。
+- 工具分层，共 **71** 个：引擎层(10，含 P2 新增 `agent_get_run_progress`) + 模块发现层(7) + UI 意图层(54，含 Agent/会话 12 + 插件 8 + 知识库 15 + 记忆 9 + 技能 10)。
+- **并发语义（P2-5，2026-09-23 明确）**：同一 Agent 同一时刻只有一个 run（per-agent 运行锁，第二个 `agent_run_task` 直接 Err「已有任务正在运行」）；**并行 = 多个 Agent 各自跑**（不同 Agent 互不影响）。需要并行跑多个任务时，为每个任务装配/复用一个独立 Agent（`agent_ui_create`）。
 - 引擎层 + 模块发现层由 Rust 直调；UI 意图层经 `mcp:intent` 派发到 `src/core/mcpBridge.ts` 真实 handler，
   前端 `invoke('mcp_resolve_result', {id, ok, data})` 回传。技能模块同样走此「UI 意图层」——`skill:*` 意图
   由 `mcpBridge` 路由到与 skill-hub 页面**同一个**真实 handler（`skill-mapper` + `skillFs`，落盘先行再入库）。
@@ -70,19 +71,19 @@ curl -s -X POST http://127.0.0.1:18755/mcp \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
 ```
 
-应返回含 70 个工具的 `tools` 数组。
+应返回含 71 个工具的 `tools` 数组（P2 批次新增 agent_get_run_progress）。
 
 > 注意：部分客户端会缓存工具清单。若改过 Rust 后工具数/签名没刷新，**重新加载该 MCP Server 连接**即可；
 > 也可直接打上面的 `tools/list` 端点绕过缓存核对。
 
 ---
 
-## 工具清单（70 个，按层）
+## 工具清单（71 个，按层）
 
 ### A. 引擎层（Rust 直调，无需前端）
 | 工具 | 作用 | 关键入参 |
 |---|---|---|
-| `agent_run_task` | 运行 Agent 任务，返回 `run_id`（复用 `run_task_ex`） | `agentId`(主键 id) / `prompt` / `workspace`(=绑定工作空间的绝对路径,不传则自由对话) / `sessionId` / `roundId` / `attachments` 等 |
+| `agent_run_task` | 运行 Agent 任务，返回 `run_id`（复用 `run_task_ex`）。**`expectedArtifacts`（P2-2）**：传期望产物清单（相对工作空间路径）→ 注入系统提示做收尾核对，防「做了活不落盘最终产物」 | `agentId`(主键 id) / `prompt` / `workspace`(=绑定工作空间的绝对路径,不传则自由对话) / `sessionId` / `roundId` / `attachments` / `expectedArtifacts` 等 |
 | `agent_get_status` | 查询 `run_id` 状态（含审批挂起详情：`waitingApproval`/`pending`）。**终态三态（2026-09-23 起）**：`done`（正常完成）/ `error`（超时或预算耗尽，`error` 字段带 `run_budget_exhausted` 等结构化原因）/ `cancelled`（用户取消，error=`cancelled_by_user`） | `run_id` |
 | `agent_wait_task` | 轮询终态；卡在审批时带 `interrupted=true` 提前返回 | `run_id` / `timeout_ms` |
 | `agent_submit_approval` | 回传高危工具审批决策（approve/skip/takeover） | `approvalId`/`decision`(+`agentId`/`guidance`/`remember`/`grantKey`) |
@@ -91,6 +92,7 @@ curl -s -X POST http://127.0.0.1:18755/mcp \
 | `agent_cancel_task` | 取消指定 Agent 的当前任务 | `agentId?` |
 | `agent_get_run_logs` | 增量读 Rust 运行日志 | `cursor` / `since_ts` / `level` / `limit` |
 | `agent_get_run_trace` | 取**指定 run** 的轨迹缓冲；**返回外层是 `{"run_id":..., "trace":{...}}` 包裹**，取字段须先剥 `trace` 层：`r.trace.{events, thinking, reply, counts}`。#8 per-run：必须传 `run_id`（由 `agent_run_task` 返回的 `run_id`），按 run 取独立桶，**并发 run 互不串台**；不传则返回空桶 | `run_id`（必填，来自 `agent_run_task` 返回） |
+| `agent_get_run_progress` | **长任务进度观测（P2-1）**：轮询这个而非干等。返回 `{status, elapsedSec, budgetSec, step, totalSteps, stepTitle, lastTool}`——elapsedSec 逼近 budgetSec 即将进入预算软窗口（最后 30s 停止发起新步骤）。step/totalSteps 来自规划事件（SIMPLE_CHAT 为 0/0） | `run_id`（必填） |
 
 ### B. 模块发现层（Rust 直读 workduo.db，零业务副作用）
 | 工具 | 作用 |
@@ -353,7 +355,7 @@ node scripts/kb_driver.mjs
 
 ## 集成核对清单
 
-- [ ] `tools/list` 返回 70 个工具（引擎 9 + 发现 7 + UI 54）。
+- [ ] `tools/list` 返回 71 个工具（引擎 9 + 发现 7 + UI 55，含 P2 新增 agent_get_run_progress）。
 - [ ] 端口 18755 有监听；外部编程工具已成功连上该 MCP Server。
 - [ ] 绑定 KB 的 Agent 跑「kb_chunks 的 id 字段格式是什么？」→ trace events 出现 `native__kb_search`，reply 引用 KB。
 - [ ] `plugin_upsert` 编写插件后 `plugin_test` 返回 `ok:true`；前端插件列表可见。

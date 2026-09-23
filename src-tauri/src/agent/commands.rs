@@ -120,6 +120,10 @@ pub struct RunAgentTaskInput {
     /// 产物管道初始上下文（head 步骤的已完成摘要），供 tail 步骤续接。
     #[serde(default)]
     pub initial_context: Option<String>,
+    /// P2-2（2026-09-23）：期望产物清单（相对工作空间路径）。非空且绑定 workspace 时注入系统提示
+    /// 做收尾核对（文件名逐字一致、缺一不可）——修复「做了 90% 的活但不落盘最终产物」。
+    #[serde(default)]
+    pub expected_artifacts: Option<Vec<String>>,
 }
 
 /// 启动一轮智能体任务。
@@ -177,6 +181,7 @@ pub async fn run_agent_task(
         input.enabled_plugin_ids.clone(),
         input.attachments.clone(),
         Some(input.prompt.clone()),
+        input.expected_artifacts.clone(),
     )
     .await?;
 
@@ -314,6 +319,7 @@ pub async fn run_task_ex(
         input.enabled_plugin_ids.clone(),
         input.attachments.clone(),
         Some(input.prompt.clone()),
+        input.expected_artifacts.clone(),
     )
     .await?;
 
@@ -1041,6 +1047,7 @@ pub async fn branch_from_step(app: AppHandle, input: BranchFromStepInput) -> Res
         None, // enabled_plugin_ids：分支规划阶段不临时并入插件
         None, // attachments：分支规划阶段不携带附件
         None, // prompt：分支规划无 session，记忆召回保持 ref_count 序
+        None, // expected_artifacts：分支规划阶段无产物核对
     )
     .await?;
 
@@ -1281,6 +1288,8 @@ pub async fn load_config(
     // 本轮用户 prompt（M1 语义召回）：Some 时记忆召回先走向量检索、失败自动落关键词链；
     // None（分支规划/squad 装配等内部调用或无 session 场景）保持 ref_count 序，行为不变。
     prompt: Option<String>,
+    // P2-2（2026-09-23）：期望产物清单——非空且绑定 workspace 时注入系统提示（产物契约收尾核对）。
+    expected_artifacts: Option<Vec<String>>,
 ) -> Result<AgentRuntimeConfig, String> {
     let instances = app.state::<DbInstances>();
     let guard = instances.0.read().await;
@@ -1825,6 +1834,18 @@ pub async fn load_config(
                 "\n\n### 工作环境\n你当前的工作空间目录为：{}\n所有文件读写、Python 脚本执行、命令执行都必须在此目录或其子目录内进行。请使用相对于该目录的路径（如 `script.py`）或该目录下的绝对路径来指定文件位置，不要使用 `/workspace` 等虚拟路径。",
                 ws_trim
             ));
+            // P2-2（2026-09-23）：期望产物注入——L2 实测三个用例「做了 90% 的活但不落盘最终产物」。
+            // 在系统提示里放一张收尾核对清单：文件名逐字一致、先落盘再总结。
+            if let Some(arts) = &expected_artifacts {
+                let items: Vec<&String> = arts.iter().filter(|a| !a.trim().is_empty()).collect();
+                if !items.is_empty() {
+                    system_prompt.push_str("\n\n### 产物契约（收尾前逐项核对，缺一不可）\n任务最终必须产出以下文件（相对工作空间路径，文件名逐字一致）：\n");
+                    for a in &items {
+                        system_prompt.push_str(&format!("- {}\n", a));
+                    }
+                    system_prompt.push_str("收尾规则：先落盘全部产物文件，再输出文字总结；只写总结不落盘 = 任务失败。中间产物（原始数据/草稿）不能替代以上清单。\n");
+                }
+            }
             // 执行环境提示必须与「能力层实际注册的工具」保持一致（同源）：
             // - 沙箱开启：execute_command 未注册，只能走 native__run_python_sandbox；
             //   此时若仍教模型 cmd/sh 语法，等于诱导它去调一个根本不存在的工具，
@@ -2132,6 +2153,7 @@ pub async fn load_squad(app: &AppHandle, squad_id: &str) -> Result<SquadRuntimeC
             None, // enabled_plugin_ids
             None, // attachments
             None, // prompt：squad 装配无 session，记忆召回保持 ref_count 序
+            None, // expected_artifacts：squad 装配无产物核对
         )
         .await?;
 

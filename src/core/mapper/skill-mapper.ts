@@ -148,6 +148,11 @@ export async function getSkill(id: string): Promise<SkillInfo | undefined> {
 export async function upsertSkill(skill: SkillInfo): Promise<SkillInfo[]> {
   if (!isTauri) {
     const list = lsList()
+    // P2-3（2026-09-23）：identifier=业务唯一键——被其他 id 占用即 conflict，防并发新建互相覆盖。
+    const dup = list.find((m) => m.identifier === skill.identifier && m.id !== skill.id)
+    if (dup) {
+      throw new Error(`skill:upsert identifier 冲突：'${skill.identifier}' 已被技能 ${dup.id} 占用`)
+    }
     const idx = list.findIndex((m) => m.id === skill.id)
     const next: SkillInfo = { ...skill, updatedAt: new Date().toISOString() }
     if (idx >= 0) list[idx] = next
@@ -158,6 +163,18 @@ export async function upsertSkill(skill: SkillInfo): Promise<SkillInfo[]> {
   const basePath = await resolveSkillBasePath()
   const db = await getDb()
   const row = skillToRow(skill, basePath)
+  // P2-3（2026-09-23）：并发新建同 identifier 曾 3/3 全插成功互相覆盖（L2 F-9/F-10 实测）。
+  // ON CONFLICT(id) 只保主键唯一，管不住业务键——这里补 identifier 占用检测：
+  // 同 id 编辑放行；identifier 被其他 id 占用（含编辑时改重名）一律 conflict。
+  const dup = await db.select<{ id: string }[]>(
+    'SELECT id FROM skill_info WHERE identifier = ? AND id != ? LIMIT 1',
+    [row.identifier, row.id],
+  )
+  if (dup && dup.length > 0) {
+    throw new Error(
+      `skill:upsert identifier 冲突：'${row.identifier}' 已被技能 ${dup[0].id} 占用（并发新建请换 identifier，编辑请先 skill_get）`,
+    )
+  }
   await db.execute(
     `INSERT INTO skill_info
        (id, identifier, name, description, instruction, skill_markdown, tags, scenario, status, path, created_at, updated_at)

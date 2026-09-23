@@ -494,6 +494,83 @@ async fn call_tool(app: &AppHandle, name: &str, args: &Value) -> Value {
             let run_id = args.get("run_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
             json!({ "run_id": run_id, "trace": events::get_trace(&run_id) })
         }
+        "agent_get_run_progress" => {
+            // P2-1（2026-09-23）：长任务进度观测——外部驱动轮询这个而非干等。
+            // 数据源：run_registry（status/started_at/agentId）+ per-run trace 事件流推导
+            // 当前步骤（step_started/finished 的 plan.{step,total,title}）与最近工具（tool_started 的 step.tool_name）。
+            let run_id = args.get("run_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let rt = app.state::<AgentRuntime>();
+            let (status, started_at, agent_id) = {
+                let reg = rt.run_registry.lock().await;
+                match reg.get(&run_id) {
+                    Some(r) => (r.status.clone(), r.started_at, Some(r.agent_id.clone())),
+                    None => ("unknown".to_string(), 0i64, None),
+                }
+            };
+            let now_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as i64)
+                .unwrap_or(0);
+            let elapsed_sec = if started_at > 0 {
+                ((now_ms - started_at) / 1000).max(0)
+            } else {
+                0
+            };
+            let budget_sec = crate::agent::runtime::run_wall_clock_limit().as_secs();
+            let mut step = 0usize;
+            let mut total = 0usize;
+            let mut title = String::new();
+            let mut last_tool = String::new();
+            let trace = events::get_trace(&run_id);
+            if let Some(evts) = trace.get("events").and_then(|v| v.as_array()) {
+                for ev in evts {
+                    let p = ev.get("payload");
+                    let t = p
+                        .and_then(|p| p.get("type"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    match t {
+                        "step_started" | "step_finished" | "step_retrying" | "step_blocked" => {
+                            if let Some(plan) = p.and_then(|p| p.get("plan")) {
+                                if let (Some(s), Some(t2)) = (
+                                    plan.get("step").and_then(|v| v.as_u64()),
+                                    plan.get("total").and_then(|v| v.as_u64()),
+                                ) {
+                                    step = s as usize;
+                                    total = t2 as usize;
+                                    title = plan
+                                        .get("title")
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("")
+                                        .to_string();
+                                }
+                            }
+                        }
+                        "tool_started" => {
+                            if let Some(name) = p
+                                .and_then(|p| p.get("step"))
+                                .and_then(|s| s.get("tool_name"))
+                                .and_then(|v| v.as_str())
+                            {
+                                last_tool = name.to_string();
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            json!({
+                "run_id": run_id,
+                "status": status,
+                "agentId": agent_id,
+                "elapsedSec": elapsed_sec,
+                "budgetSec": budget_sec,
+                "step": step,
+                "totalSteps": total,
+                "stepTitle": title,
+                "lastTool": last_tool,
+            })
+        }
         // —— 模块发现层（Rust 直读 workduo.db，零业务副作用）——
         "agent_list_models" => {
             fetch_rows(
@@ -666,6 +743,7 @@ fn merge_input(args: &Value) -> Result<commands::RunAgentTaskInput, String> {
             "planOverride",
             "preCompleted",
             "initialContext",
+            "expectedArtifacts",
             "disabledSkillIds",
             "disabledMcpIds",
             "disabledMcpToolIds",
@@ -754,7 +832,7 @@ fn tools_list() -> Value {
 【入参契约】字段名必须 camelCase，与 Rust `RunAgentTaskInput(#[serde(rename_all=\"camelCase\")]` 一致：\
 agentId(必填) / prompt(必填) / workspace(可选, 工作区路径) / sessionId(可选, 会话 id) / roundId(可选, 轮次 id) / \
 attachments / planOverride / preCompleted / initialContext / disabledSkillIds / disabledMcpIds / disabledMcpToolIds / \
-enabledSkillIds / enabledMcpIds / disabledPluginIds / enabledPluginIds。\n\
+enabledSkillIds / enabledMcpIds / disabledPluginIds / enabledPluginIds / expectedArtifacts。\n\
 【自由会话 vs 任务会话】不传 workspace/sessionId/roundId = 自由会话（无产物持久化，仅事件流+轨迹缓冲）；\
 传入 workspace 且前端已建 sessionId+roundId = 任务会话（run_task 终态仅自动回填 raw_messages_json）。\n\
 【必做-结果回填】任务会话在 wait_task 终态后，必须取 agent_get_run_trace 的 reply/thinking 经 agent_round_update 回填 \
@@ -770,6 +848,7 @@ assistantAnswer/thinkingContent——否则 agent_conversation_round 的正文�
                     "roundId": { "type": "string", "description": "轮次 id（任务会话必填）" },
                     "attachments": { "type": "array", "description": "多模态附件 {type,dataUrl,name}" },
                     "planOverride": { "type": "object", "description": "分支重跑：完整计划 DAG" },
+                    "expectedArtifacts": { "type": "array", "items": { "type": "string" }, "description": "P2-2 期望产物清单（相对工作空间路径）——非空且绑定 workspace 时注入系统提示做收尾核对（文件名逐字一致、缺一不可）；修复「做了活但不落盘最终产物」" },
                     "preCompleted": { "type": "array", "description": "分支重跑：已完成 head 步骤 task_id" },
                     "initialContext": { "type": "string", "description": "分支重跑：head 步骤摘要" },
                     "disabledSkillIds": { "type": "array", "items": { "type": "string" } },
@@ -850,6 +929,12 @@ thinking（累计思考过程）、reply（累计正文回复）、counts（各�
 #8 per-run：必须传 run_id（由 run_task_ex 返回的 run_id），按 run 取独立桶，并发 run 互不串台；不传则取空桶。\
 须在 wait_task 返回 done 后调用，且须用启动该 run 的同一 run_id。",
             json!({ "type": "object", "properties": { "run_id": { "type": "string", "description": "run_task_ex 返回的运行 id；不传则返回空轨迹桶" } }, "required": ["run_id"] }),
+        ),
+        tool(
+            "agent_get_run_progress",
+            "长任务进度观测（P2-1，2026-09-23）：外部驱动轮询这个而非干等。返回 {run_id, status(done/error/cancelled/running/unknown), agentId, elapsedSec, budgetSec(默认 1800), step, totalSteps, stepTitle, lastTool}。\n\
+step/totalSteps 来自规划事件（未规划或 SIMPLE_CHAT 为 0/0）；lastTool=最近一次工具调用名；elapsedSec 逼近 budgetSec 即将进入预算软窗口（最后 30s 停止发起新步骤、优雅收尾）。",
+            json!({ "type": "object", "properties": { "run_id": { "type": "string", "description": "run_task_ex 返回的运行 id" } }, "required": ["run_id"] }),
         ),
         tool(
             "agent_ui_create",

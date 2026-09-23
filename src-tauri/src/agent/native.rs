@@ -2650,6 +2650,25 @@ impl Resolve for SsrfSafeResolver {
     }
 }
 
+/// P2-4（2026-09-23）：HTTP 瞬态错误分类——返回结构化 error_code 供上层/模型判读
+/// （裸错误串难分辨 DNS 失败 vs SSRF 拦截 vs 超时）。
+fn classify_http_error(e: &reqwest::Error) -> &'static str {
+    let chain = format!("{e:#}");
+    if chain.contains("SSRF 防护") {
+        return "ssrf_blocked";
+    }
+    if e.is_timeout() {
+        return "timeout";
+    }
+    if chain.contains("DNS 解析失败") || chain.contains("failed to lookup") || chain.contains("dns error") {
+        return "dns_error";
+    }
+    if e.is_connect() {
+        return "connection_error";
+    }
+    "http_error"
+}
+
 /// 每次工具执行生成短调用 ID，写入日志首行便于跨工具关联排查（P3 可观测性）。
 static CALL_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 fn next_call_id() -> String {
@@ -2820,10 +2839,43 @@ impl AgentTool for HttpRequestTool {
         }
 
         let start = Instant::now();
-        let resp = req
-            .send()
-            .await
-            .map_err(|e| ToolError::ExecutionFailed(format!("请求失败：{e}")))?;
+        // P2-4（2026-09-23）：瞬态网络错误（连接/DNS/超时）自动重试 ≤2 次（退避 1s/2s）——
+        // L2 实测外部源偶发 `error sending request` 一败即整步挂。非瞬态（协议/参数/白名单/SSRF）不重试；
+        // 失败统一带 error_code= 前缀供上层结构化判读（DNS/SSRF/超时不再是难分辨的裸串）。
+        const HTTP_ATTEMPTS: usize = 3; // 首次 + 2 次重试
+        let mut resp: Option<reqwest::Response> = None;
+        let mut last_err: Option<reqwest::Error> = None;
+        for attempt in 1..=HTTP_ATTEMPTS {
+            let this_req = req.try_clone().ok_or_else(|| {
+                ToolError::ExecutionFailed("请求构建失败（body 不可克隆，无法重试）".into())
+            })?;
+            match this_req.send().await {
+                Ok(r) => {
+                    resp = Some(r);
+                    break;
+                }
+                Err(e) => {
+                    if !(e.is_connect() || e.is_timeout()) || attempt == HTTP_ATTEMPTS {
+                        last_err = Some(e);
+                        break;
+                    }
+                    let wait = Duration::from_millis(1000 * attempt as u64);
+                    tracing::warn!(
+                        "[agent][{}] http_request 第 {attempt} 次瞬态失败（{e}），{}ms 后重试",
+                        call_id,
+                        wait.as_millis()
+                    );
+                    tokio::time::sleep(wait).await;
+                }
+            }
+        }
+        if let Some(e) = last_err {
+            let code = classify_http_error(&e);
+            return Err(ToolError::ExecutionFailed(format!(
+                "请求失败（error_code={code}）：{e}"
+            )));
+        }
+        let resp = resp.ok_or_else(|| ToolError::ExecutionFailed("请求未返回（内部错误）".into()))?;
         let status = resp.status();
         let headers_summary: Vec<String> = resp
             .headers()

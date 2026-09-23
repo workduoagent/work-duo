@@ -128,7 +128,10 @@ https://developer.mozilla.org/en-US/docs/Web/HTML/Element/form
 1) 创建技能 identifier=l2-crawl-notes，SKILL.md 描述「抓取 URL 列表标题并输出 markdown 索引」的步骤
 2) 用 skill_list / skill_get 核对已落库落盘
 3) 按该技能方法实际抓取 3 个 URL 标题，输出 skill_report.md
-完成后列出技能 path 与文件。`,
+完成后列出技能 path 与文件。
+⚠️ 最终交付物核对（收尾前逐项核对，缺一不可）：
+- skill_report.md（工作空间根，文件名逐字一致）
+- 收尾规则：先落盘全部产物文件，再输出文字总结；只写总结不落盘=任务失败。`,
   },
   'A-H1': {
     scene: 'A', kind: 'H', title: '限流分页+断点续爬',
@@ -160,7 +163,10 @@ https://developer.mozilla.org/en-US/docs/Web/HTML/Element/form
 1) 创建可复用 Skill identifier=l2-web-research：输入主题→多源抓取→KB 检索背景→清洗→带引用报告
 2) 准备/使用 KB（写入至少 4 篇与 Rust 异步运行时相关背景短文并索引）
 3) 按 Skill 流程产出研究报告 research_rust_async.md：主题「Rust 异步运行时」，正文 [N] 内联引标 + 底部参考
-报告必须真实引用 KB 与外部抓取内容。完成后列出文件。`,
+报告必须真实引用 KB 与外部抓取内容。完成后列出文件。
+⚠️ 最终交付物核对（收尾前逐项核对，缺一不可）：
+- research_rust_async.md（工作空间根，文件名逐字一致；中间产物 KB/抓取HTML 不能替代它）
+- 收尾规则：先落盘最终报告，再输出文字总结；只写总结不落盘=任务失败。`,
   },
   'A-H4': {
     scene: 'A', kind: 'H', title: '单Agent排队多任务（锁语义）',
@@ -314,7 +320,11 @@ KB 若不足则先 kb_add_file 补文档再检索。完成后列出文件。`,
 2) 测试用例（可 pytest 或 node:test）
 3) 若平台沙箱可用，把核心计算写成本地插件并 plugin_test
 4) selftest.md 记录自测步骤与结果
-完成后列出文件。`,
+完成后列出文件。
+⚠️ 最终交付物核对（收尾前逐项核对，缺一不可）：
+- sandbox-svc/README.md（启动方式、接口说明、依赖）
+- sandbox-svc/selftest.md（自测步骤与结果）
+- 收尾规则：先落盘全部产物文件，再输出文字总结；代码/测试写好但没有这两个 md=任务失败。`,
   },
   'B-H5': {
     scene: 'B', kind: 'H', title: '坏种子仓库修复（自愈）',
@@ -486,7 +496,8 @@ export async function runOneCase(caseId, {
     const p = prompt || spec.prompt
     console.log(`\n>>>> ${caseId}${slot ? '#' + slot : ''} model=${ag.modelName} ws=${ws}`)
     const t0 = Date.now()
-    const { runId, status } = await startRun(ag.id, p, sid, { workspace: ws, ...extraRun }, { maxMs })
+    // P2-2（2026-09-23）：CASES.artifacts 透传 expectedArtifacts → 引擎注入系统提示做收尾核对。
+    const { runId, status } = await startRun(ag.id, p, sid, { workspace: ws, expectedArtifacts: spec?.artifacts || [], ...extraRun }, { maxMs })
     const t1 = Date.now()
     rec.runId = runId
     rec.status = status
