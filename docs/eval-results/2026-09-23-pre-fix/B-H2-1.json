@@ -1,0 +1,129 @@
+{
+  "caseId": "B-H2",
+  "slot": 1,
+  "scene": "B",
+  "kind": "H",
+  "title": "MCP聚合器元测评",
+  "model": "96af449e-dfc0-48ec-b077-aa9f02b43d64",
+  "workspace": "E:/Codes/ABC/work-duo/eval-workspace/eval-B-H2-1",
+  "startedAt": "2026-09-23T03:38:42.849Z",
+  "status": "error",
+  "runId": "run-1790134722873-24",
+  "durationMs": 602989,
+  "artifacts": [],
+  "artifactCheck": [
+    {
+      "artifact": "mcp-hub/README.md",
+      "ok": false
+    },
+    {
+      "artifact": "mcp-hub/server.js",
+      "ok": false
+    },
+    {
+      "artifact": "mcp-hub/public/index.html",
+      "ok": false
+    },
+    {
+      "artifact": "mcp-hub/SELFTEST.md",
+      "ok": false
+    }
+  ],
+  "traceCounts": {
+    "events": 116,
+    "reply_chars": 0,
+    "thinking_chars": 4652
+  },
+  "replyLen": 0,
+  "kbHits": 0,
+  "recoveries": 0,
+  "error": null,
+  "metrics": {
+    "ha": {
+      "terminal": true,
+      "status": "error"
+    },
+    "perf": {
+      "durationMs": 602989
+    },
+    "heal": {
+      "replyLen": 0
+    }
+  },
+  "files": [
+    {
+      "rel": ".wd_mem/.gitignore",
+      "size": 310,
+      "mtime": 1790134722876.83
+    },
+    {
+      "rel": ".wd_mem/graph/edges.jsonl",
+      "size": 1278,
+      "mtime": 1790135120546.1882
+    },
+    {
+      "rel": ".wd_mem/graph/nodes.jsonl",
+      "size": 25623,
+      "mtime": 1790135177290.7573
+    },
+    {
+      "rel": ".wd_mem/graph/_index.json",
+      "size": 2183,
+      "mtime": 1790135177292.1975
+    },
+    {
+      "rel": ".wd_mem/knowledge/MEMORY.md",
+      "size": 133,
+      "mtime": 1790134722875.5342
+    },
+    {
+      "rel": ".wd_mem/README.md",
+      "size": 1378,
+      "mtime": 1790134722876.83
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/injected_run_mcp_hub_tests.py",
+      "size": 391,
+      "mtime": 1790135106196.4458
+    },
+    {
+      "rel": ".wd_mem/scripts/run_mcp_hub_tests.py",
+      "size": 327,
+      "mtime": 1790135102776.3044
+    },
+    {
+      "rel": "mcp-hub/app.py",
+      "size": 6310,
+      "mtime": 1790135075588.824
+    },
+    {
+      "rel": "mcp-hub/mcp_adapter.py",
+      "size": 15743,
+      "mtime": 1790135075583.6216
+    },
+    {
+      "rel": "mcp-hub/test_mcp_adapter.py",
+      "size": 7541,
+      "mtime": 1790135075592.191
+    },
+    {
+      "rel": "mcp-hub/__pycache__/mcp_adapter.cpython-311.pyc",
+      "size": 20671,
+      "mtime": 1790135106454.2532
+    },
+    {
+      "rel": "mcp-hub/__pycache__/test_mcp_adapter.cpython-311.pyc",
+      "size": 16387,
+      "mtime": 1790135106378.9055
+    }
+  ],
+  "agentId": "4a842e29-61e4-477d-9142-e8a45ee96b15",
+  "agentIdentifier": "l2-b-h2-mudjzsbn",
+  "modelName": "AG:DeepSeek-V4.1-Flash",
+  "sessionId": "9daca57d-9d3d-4cb7-a7fc-657a884d55a6",
+  "reply": "",
+  "thinkingLen": 4652,
+  "eventCount": 116,
+  "kbCalls": 0,
+  "artifactScore": 0
+}

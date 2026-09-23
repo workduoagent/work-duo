@@ -1,0 +1,131 @@
+{
+  "caseId": "B-H5",
+  "slot": 1,
+  "scene": "B",
+  "kind": "H",
+  "title": "坏种子仓库修复（自愈）",
+  "model": "96af449e-dfc0-48ec-b077-aa9f02b43d64",
+  "workspace": "E:/Codes/ABC/work-duo/eval-workspace/eval-B-H5-1",
+  "startedAt": "2026-09-23T03:11:04.083Z",
+  "status": "done",
+  "runId": "run-1790133064138-20",
+  "durationMs": 358513,
+  "artifacts": [],
+  "artifactCheck": [
+    {
+      "artifact": "fix-seed/README.md",
+      "ok": false
+    },
+    {
+      "artifact": "fix-seed/FIXLOG.md",
+      "ok": false
+    }
+  ],
+  "traceCounts": {
+    "events": 106,
+    "reply_chars": 904,
+    "thinking_chars": 3189
+  },
+  "replyLen": 904,
+  "kbHits": 0,
+  "recoveries": 0,
+  "error": null,
+  "metrics": {
+    "ha": {
+      "terminal": true,
+      "status": "done"
+    },
+    "perf": {
+      "durationMs": 358513
+    },
+    "heal": {
+      "replyLen": 904
+    }
+  },
+  "files": [
+    {
+      "rel": ".wd_mem/.gitignore",
+      "size": 310,
+      "mtime": 1790133064140.9854
+    },
+    {
+      "rel": ".wd_mem/graph/edges.jsonl",
+      "size": 1779,
+      "mtime": 1790133416770.4304
+    },
+    {
+      "rel": ".wd_mem/graph/nodes.jsonl",
+      "size": 18909,
+      "mtime": 1790133416770.4304
+    },
+    {
+      "rel": ".wd_mem/graph/sessions/90bc3af8-85c9-4668-b79e-fa63a08b943f.json",
+      "size": 9482,
+      "mtime": 1790133416772.6116
+    },
+    {
+      "rel": ".wd_mem/graph/_index.json",
+      "size": 2644,
+      "mtime": 1790133416770.4304
+    },
+    {
+      "rel": ".wd_mem/knowledge/MEMORY.md",
+      "size": 133,
+      "mtime": 1790133064139.9795
+    },
+    {
+      "rel": ".wd_mem/README.md",
+      "size": 1378,
+      "mtime": 1790133064139.9795
+    },
+    {
+      "rel": ".wd_mem/recon.md",
+      "size": 1925,
+      "mtime": 1790133248435.3225
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/injected_final_test_step3.py",
+      "size": 644,
+      "mtime": 1790133392935.402
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/injected_recon_fix_seed.py",
+      "size": 2373,
+      "mtime": 1790133230442.6743
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/injected_validate_fix_seed_step2.py",
+      "size": 652,
+      "mtime": 1790133347934.682
+    },
+    {
+      "rel": ".wd_mem/scripts/final_test_step3.py",
+      "size": 580,
+      "mtime": 1790133388797.0957
+    },
+    {
+      "rel": ".wd_mem/scripts/recon_fix_seed.py",
+      "size": 2309,
+      "mtime": 1790133225219.7986
+    },
+    {
+      "rel": ".wd_mem/scripts/validate_fix_seed_step2.py",
+      "size": 588,
+      "mtime": 1790133322564.1082
+    },
+    {
+      "rel": "FIXLOG.md",
+      "size": 1936,
+      "mtime": 1790133407010.3838
+    }
+  ],
+  "agentId": "28d42b86-7e92-420a-9c31-eaa755ce854a",
+  "agentIdentifier": "l2-b-h5-mudj08et",
+  "modelName": "AG:DeepSeek-V4.1-Flash",
+  "sessionId": "90bc3af8-85c9-4668-b79e-fa63a08b943f",
+  "reply": "已生成/更新 recon.md\n侦察步骤已完成，结论已写入：\n\n`E:\\Codes\\ABC\\work-duo\\eval-workspace\\eval-B-H5-1\\.wd_mem\\recon.md`\n\n结果摘要：\n- `fix-seed/` 当前不存在。\n- 未发现源码、测试入口、项目配置或依赖声明。\n- 因无测试入口，未执行项目测试；侦察脚本退出码为 `0`。\n- 已记录阻断问题及建议修复方向。\n\n当前步骤已完成检查与验证，但无法进行代码修复：\n\n- 已读取结论文件：  \n  `E:\\Codes\\ABC\\work-duo\\eval-workspace\\eval-B-H5-1\\.wd_mem\\recon.md`\n- 确认 `fix-seed/` 目录仍不存在，未发现可修复的源码、测试或项目配置。\n- 已生成并运行阻断校验脚本，退出码为 `0`：  \n  `E:\\Codes\\ABC\\work-duo\\eval-workspace\\eval-B-H5-1\\.wd_mem\\scripts\\validate_fix_seed_step2.py`\n- 校验结果：无可执行的语法编译、模块导入或针对性测试；未修改任何业务代码。\n\n已生成/更新 FIXLOG.md\n当前步骤已完成。\n\n- 已读取 `.wd_mem/recon.md`。\n- 已运行最终阻断校验，退出码为 `0`。\n- 结论：`fix-seed/` 不存在，无可执行测试入口、源码或依赖声明；未发现代码错误或缺失依赖。\n- 已生成并确认产物存在：\n\n`E:\\Codes\\ABC\\work-duo\\eval-workspace\\eval-B-H5-1\\FIXLOG.md`\n\nFIXLOG 已包含：\n- 问题清单\n- 修复 diff 摘要\n- 最终测试结果\n- 工作空间最终相对文件清单\n\n相关文件：\n- `FIXLOG.md`\n- `.wd_mem/recon.md`\n- `.wd_mem/scripts/validate_fix_seed_step2.py`\n- `.wd_mem/scripts/final_test_step3.py`",
+  "thinkingLen": 3189,
+  "eventCount": 106,
+  "kbCalls": 0,
+  "artifactScore": 0
+}

@@ -1,0 +1,141 @@
+{
+  "caseId": "B-H6",
+  "slot": 0,
+  "scene": "B",
+  "kind": "H",
+  "title": "数据管道+基准",
+  "model": "96af449e-dfc0-48ec-b077-aa9f02b43d64",
+  "workspace": "E:/Codes/ABC/work-duo/eval-workspace/eval-B-H6",
+  "startedAt": "2026-09-23T04:17:53.954Z",
+  "status": "error",
+  "runId": "run-1790137073980-31",
+  "durationMs": 603068,
+  "artifacts": [],
+  "artifactCheck": [
+    {
+      "artifact": "bench-pipe/README.md",
+      "ok": false
+    },
+    {
+      "artifact": "bench-pipe/BENCH.md",
+      "ok": true
+    }
+  ],
+  "traceCounts": {
+    "events": 235,
+    "reply_chars": 0,
+    "thinking_chars": 4894
+  },
+  "replyLen": 0,
+  "kbHits": 0,
+  "recoveries": 0,
+  "error": null,
+  "metrics": {
+    "ha": {
+      "terminal": true,
+      "status": "error"
+    },
+    "perf": {
+      "durationMs": 603068
+    },
+    "heal": {
+      "replyLen": 0
+    }
+  },
+  "files": [
+    {
+      "rel": ".wd_mem/.gitignore",
+      "size": 310,
+      "mtime": 1790137073983.7786
+    },
+    {
+      "rel": ".wd_mem/graph/edges.jsonl",
+      "size": 1792,
+      "mtime": 1790137633494.4878
+    },
+    {
+      "rel": ".wd_mem/graph/nodes.jsonl",
+      "size": 76872,
+      "mtime": 1790137633495.7808
+    },
+    {
+      "rel": ".wd_mem/graph/_index.json",
+      "size": 2553,
+      "mtime": 1790137633496.7861
+    },
+    {
+      "rel": ".wd_mem/knowledge/MEMORY.md",
+      "size": 133,
+      "mtime": 1790137073982.775
+    },
+    {
+      "rel": ".wd_mem/README.md",
+      "size": 1378,
+      "mtime": 1790137073983.7786
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/auto_run_1790137382206.py",
+      "size": 761,
+      "mtime": 1790137382206.2085
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/auto_run_1790137419838.py",
+      "size": 737,
+      "mtime": 1790137419841.818
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/injected_generate_data.py",
+      "size": 3981,
+      "mtime": 1790137411247.3567
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/injected_validate_aggregate.py",
+      "size": 4042,
+      "mtime": 1790137628500.5142
+    },
+    {
+      "rel": ".wd_mem/scripts/validate_aggregate.py",
+      "size": 3980,
+      "mtime": 1790137624761.6323
+    },
+    {
+      "rel": "bench-pipe/aggregate.py",
+      "size": 5051,
+      "mtime": 1790137551109.216
+    },
+    {
+      "rel": "bench-pipe/BENCH.md",
+      "size": 1495036,
+      "mtime": 1790137628840.5337
+    },
+    {
+      "rel": "bench-pipe/data.csv",
+      "size": 514277,
+      "mtime": 1790137411485.3767
+    },
+    {
+      "rel": "bench-pipe/generate_data.py",
+      "size": 3919,
+      "mtime": 1790137293596.3525
+    },
+    {
+      "rel": "bench-pipe/__pycache__/aggregate.cpython-311.pyc",
+      "size": 7931,
+      "mtime": 1790137628668.6743
+    },
+    {
+      "rel": "BENCH.md",
+      "size": 1494391,
+      "mtime": 1790137411528.7036
+    }
+  ],
+  "agentId": "8297bb28-0af3-429e-9853-3f7820b43b6e",
+  "agentIdentifier": "l2-b-h6-mudle6g7",
+  "modelName": "AG:DeepSeek-V4.1-Flash",
+  "sessionId": "6e80978a-9252-419f-a5fd-dcd6097a7596",
+  "reply": "",
+  "thinkingLen": 4894,
+  "eventCount": 235,
+  "kbCalls": 0,
+  "artifactScore": 0.5
+}

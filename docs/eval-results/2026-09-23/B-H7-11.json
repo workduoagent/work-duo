@@ -1,0 +1,141 @@
+{
+  "caseId": "B-H7",
+  "slot": 11,
+  "scene": "B",
+  "kind": "H",
+  "title": "多服务+集成测试",
+  "model": "96af449e-dfc0-48ec-b077-aa9f02b43d64",
+  "workspace": "E:/Codes/ABC/work-duo/eval-workspace/eval-B-H7-11",
+  "startedAt": "2026-09-23T06:23:32.410Z",
+  "status": "done",
+  "runId": "run-1790144612486-9",
+  "durationMs": 735809,
+  "artifacts": [],
+  "artifactCheck": [
+    {
+      "artifact": "poly/README.md",
+      "ok": true
+    },
+    {
+      "artifact": "poly/docker-compose.yml",
+      "ok": true
+    }
+  ],
+  "traceCounts": {
+    "events": 447,
+    "reply_chars": 1045,
+    "thinking_chars": 5444
+  },
+  "replyLen": 1045,
+  "kbHits": 0,
+  "recoveries": 0,
+  "error": null,
+  "metrics": {
+    "ha": {
+      "terminal": true,
+      "status": "done"
+    },
+    "perf": {
+      "durationMs": 735809
+    },
+    "heal": {
+      "replyLen": 1045
+    }
+  },
+  "files": [
+    {
+      "rel": ".wd_mem/.gitignore",
+      "size": 310,
+      "mtime": 1790144612489.0896
+    },
+    {
+      "rel": ".wd_mem/graph/edges.jsonl",
+      "size": 3665,
+      "mtime": 1790145344505.0344
+    },
+    {
+      "rel": ".wd_mem/graph/nodes.jsonl",
+      "size": 54951,
+      "mtime": 1790145344502.9485
+    },
+    {
+      "rel": ".wd_mem/graph/sessions/cae4bd00-00b6-4768-a65f-d890c31754ea.json",
+      "size": 13954,
+      "mtime": 1790145344507.4138
+    },
+    {
+      "rel": ".wd_mem/graph/_index.json",
+      "size": 3184,
+      "mtime": 1790145344503.9875
+    },
+    {
+      "rel": ".wd_mem/knowledge/MEMORY.md",
+      "size": 133,
+      "mtime": 1790144612489.0896
+    },
+    {
+      "rel": ".wd_mem/README.md",
+      "size": 1378,
+      "mtime": 1790144612489.0896
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/auto_run_1790145032072.mjs",
+      "size": 623,
+      "mtime": 1790145032072.4111
+    },
+    {
+      "rel": "poly/api.py",
+      "size": 4979,
+      "mtime": 1790144861452.9153
+    },
+    {
+      "rel": "poly/docker-compose.yml",
+      "size": 1867,
+      "mtime": 1790145021973.4785
+    },
+    {
+      "rel": "poly/Dockerfile",
+      "size": 245,
+      "mtime": 1790145021960.0066
+    },
+    {
+      "rel": "poly/FILE_TREE.txt",
+      "size": 725,
+      "mtime": 1790145334615.64
+    },
+    {
+      "rel": "poly/frontend.py",
+      "size": 2794,
+      "mtime": 1790144861445.4111
+    },
+    {
+      "rel": "poly/index.html",
+      "size": 2034,
+      "mtime": 1790144861449.5781
+    },
+    {
+      "rel": "poly/mock_external.py",
+      "size": 2842,
+      "mtime": 1790144861460.77
+    },
+    {
+      "rel": "poly/README.md",
+      "size": 6265,
+      "mtime": 1790145334612.868
+    },
+    {
+      "rel": "poly/worker.py",
+      "size": 4995,
+      "mtime": 1790144861457.009
+    }
+  ],
+  "agentId": "c2961f36-8090-4bcd-b715-d3b0f9cb53c2",
+  "agentIdentifier": "l2-b-h7-mudpvr5y-e6o906",
+  "modelName": "AG:DeepSeek-V4.1-Flash",
+  "sessionId": "cae4bd00-00b6-4768-a65f-d890c31754ea",
+  "reply": "已生成/更新 frontend.py、index.html、api.py、worker.py、mock_external.py\n步骤 1 已完成，已生成并确认以下文件：\n\n- `E:\\Codes\\ABC\\work-duo\\eval-workspace\\eval-B-H7-11\\poly\\frontend.py`\n- `E:\\Codes\\ABC\\work-duo\\eval-workspace\\eval-B-H7-11\\poly\\index.html`\n- `E:\\Codes\\ABC\\work-duo\\eval-workspace\\eval-B-H7-11\\poly\\api.py`\n- `E:\\Codes\\ABC\\work-duo\\eval-workspace\\eval-B-H7-11\\poly\\worker.py`\n- `E:\\Codes\\ABC\\work-duo\\eval-workspace\\eval-B-H7-11\\poly\\mock_external.py`\n\n已包含所需接口、JSON 响应、超时处理、错误响应、CORS、容器网络默认地址及端口配置。`api.py` 包含 `/process` 与 `WORKER_URL`，`worker.py` 包含 `MOCK_URL`，`mock_external.py` 包含 `/health` 与 `/lookup`。\n\n已生成/更新 Dockerfile、docker-compose.yml\n「配置 Docker Compose 编排」已生成/更新 Dockerfile、docker-compose.yml（执行轮次达预算上限，产物初核通过但未经行为级验收，暂定完成，建议人工复核）\n\n已跳过：编写并运行端到端集成测试（预算耗尽或重试无效，未产出交付，建议单独重跑该步）\n\n已生成/更新 README.md、FILE_TREE.txt\n已完成当前步骤，文件已生成并确认存在：\n\n- `E:\\Codes\\ABC\\work-duo\\eval-workspace\\eval-B-H7-11\\poly\\README.md`\n- `E:\\Codes\\ABC\\work-duo\\eval-workspace\\eval-B-H7-11\\poly\\FILE_TREE.txt`\n\n内容已涵盖系统架构、请求链路、目录结构、Docker Compose 启动/停止命令、测试命令、端口、环境变量、主要 API，以及运行时缓存目录忽略说明。",
+  "thinkingLen": 5444,
+  "eventCount": 447,
+  "kbCalls": 0,
+  "artifactScore": 1
+}

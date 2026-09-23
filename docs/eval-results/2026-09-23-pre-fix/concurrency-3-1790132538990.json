@@ -1,0 +1,35 @@
+{
+  "kind": "concurrency",
+  "n": 3,
+  "totalMs": 602709,
+  "done": 2,
+  "terminal": 3,
+  "survivalRate": 0.6666666666666666,
+  "terminalRate": 1,
+  "results": [
+    {
+      "caseId": "B-M4",
+      "slot": 0,
+      "status": "done",
+      "durationMs": 355582,
+      "artifactScore": 0.75,
+      "error": null
+    },
+    {
+      "caseId": "B-M5",
+      "slot": 1,
+      "status": "error",
+      "durationMs": 602641,
+      "artifactScore": 0,
+      "error": null
+    },
+    {
+      "caseId": "B-M6",
+      "slot": 2,
+      "status": "done",
+      "durationMs": 545393,
+      "artifactScore": 0,
+      "error": null
+    }
+  ]
+}

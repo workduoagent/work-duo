@@ -1,0 +1,226 @@
+{
+  "caseId": "B-H4",
+  "slot": 1,
+  "scene": "B",
+  "kind": "H",
+  "title": "沙箱微服务+测试",
+  "model": "96af449e-dfc0-48ec-b077-aa9f02b43d64",
+  "workspace": "E:/Codes/ABC/work-duo/eval-workspace/eval-B-H4-1",
+  "startedAt": "2026-09-23T08:07:38.748Z",
+  "status": "done",
+  "runId": "run-1790150858803-0",
+  "durationMs": 964275,
+  "artifacts": [],
+  "artifactCheck": [
+    {
+      "artifact": "sandbox-svc/README.md",
+      "ok": true
+    },
+    {
+      "artifact": "sandbox-svc/selftest.md",
+      "ok": true
+    }
+  ],
+  "traceCounts": {
+    "events": 313,
+    "reply_chars": 2598,
+    "thinking_chars": 4544
+  },
+  "replyLen": 2598,
+  "kbHits": 0,
+  "recoveries": 0,
+  "error": null,
+  "metrics": {
+    "ha": {
+      "terminal": true,
+      "status": "done"
+    },
+    "perf": {
+      "durationMs": 964275
+    },
+    "heal": {
+      "replyLen": 2598
+    }
+  },
+  "files": [
+    {
+      "rel": ".pytest_cache/.gitignore",
+      "size": 37,
+      "mtime": 1790136553941.7678
+    },
+    {
+      "rel": ".pytest_cache/CACHEDIR.TAG",
+      "size": 191,
+      "mtime": 1790136553941.7678
+    },
+    {
+      "rel": ".pytest_cache/README.md",
+      "size": 302,
+      "mtime": 1790136553940.7686
+    },
+    {
+      "rel": ".pytest_cache/v/cache/lastfailed",
+      "size": 39,
+      "mtime": 1790136553942.8362
+    },
+    {
+      "rel": ".pytest_cache/v/cache/nodeids",
+      "size": 694,
+      "mtime": 1790136553942.8362
+    },
+    {
+      "rel": ".wd_mem/.gitignore",
+      "size": 310,
+      "mtime": 1790135974691.5786
+    },
+    {
+      "rel": ".wd_mem/graph/edges.jsonl",
+      "size": 10094,
+      "mtime": 1790151816785.0435
+    },
+    {
+      "rel": ".wd_mem/graph/nodes.jsonl",
+      "size": 72318,
+      "mtime": 1790151816784.0137
+    },
+    {
+      "rel": ".wd_mem/graph/sessions/be4af0e4-c389-483b-8c27-65d67ede42da.json",
+      "size": 25869,
+      "mtime": 1790151816787.364
+    },
+    {
+      "rel": ".wd_mem/graph/_index.json",
+      "size": 8732,
+      "mtime": 1790151816785.0435
+    },
+    {
+      "rel": ".wd_mem/knowledge/MEMORY.md",
+      "size": 133,
+      "mtime": 1790135974691.5786
+    },
+    {
+      "rel": ".wd_mem/README.md",
+      "size": 1378,
+      "mtime": 1790135974691.5786
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/injected_run_sandbox_svc_checks.py",
+      "size": 1909,
+      "mtime": 1790136553233.994
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/injected_run_sandbox_svc_tests.py",
+      "size": 1624,
+      "mtime": 1790151763524.0874
+    },
+    {
+      "rel": ".wd_mem/scripts/check_stats_plugin.py",
+      "size": 989,
+      "mtime": 1790151189179.8572
+    },
+    {
+      "rel": ".wd_mem/scripts/run_sandbox_svc_checks.py",
+      "size": 1845,
+      "mtime": 1790136488691.2224
+    },
+    {
+      "rel": ".wd_mem/scripts/run_sandbox_svc_tests.py",
+      "size": 1560,
+      "mtime": 1790151575026.8748
+    },
+    {
+      "rel": "sandbox-svc/.pytest_cache/.gitignore",
+      "size": 37,
+      "mtime": 1790151582454.0896
+    },
+    {
+      "rel": "sandbox-svc/.pytest_cache/CACHEDIR.TAG",
+      "size": 191,
+      "mtime": 1790151582455.0874
+    },
+    {
+      "rel": "sandbox-svc/.pytest_cache/README.md",
+      "size": 302,
+      "mtime": 1790151582454.0896
+    },
+    {
+      "rel": "sandbox-svc/.pytest_cache/v/cache/nodeids",
+      "size": 786,
+      "mtime": 1790151764170.633
+    },
+    {
+      "rel": "sandbox-svc/app.py",
+      "size": 811,
+      "mtime": 1790151359851.181
+    },
+    {
+      "rel": "sandbox-svc/plugin_test.py",
+      "size": 671,
+      "mtime": 1790151359854.4429
+    },
+    {
+      "rel": "sandbox-svc/README.md",
+      "size": 1657,
+      "mtime": 1790151800723.8096
+    },
+    {
+      "rel": "sandbox-svc/requirements.txt",
+      "size": 27,
+      "mtime": 1790151150859.7046
+    },
+    {
+      "rel": "sandbox-svc/selftest.md",
+      "size": 1034,
+      "mtime": 1790151800743.1152
+    },
+    {
+      "rel": "sandbox-svc/stats_plugin.py",
+      "size": 1593,
+      "mtime": 1790136037158.9187
+    },
+    {
+      "rel": "sandbox-svc/test_app.py",
+      "size": 1063,
+      "mtime": 1790151359853.311
+    },
+    {
+      "rel": "sandbox-svc/__pycache__/app.cpython-311.pyc",
+      "size": 1725,
+      "mtime": 1790151582313.3215
+    },
+    {
+      "rel": "sandbox-svc/__pycache__/plugin_test.cpython-311-pytest-9.1.1.pyc",
+      "size": 3563,
+      "mtime": 1790151582435.54
+    },
+    {
+      "rel": "sandbox-svc/__pycache__/plugin_test.cpython-311.pyc",
+      "size": 4521,
+      "mtime": 1790136554044.228
+    },
+    {
+      "rel": "sandbox-svc/__pycache__/stats_plugin.cpython-311.pyc",
+      "size": 3126,
+      "mtime": 1790136554045.3718
+    },
+    {
+      "rel": "sandbox-svc/__pycache__/test_app.cpython-311-pytest-9.1.1.pyc",
+      "size": 8107,
+      "mtime": 1790151582311.2334
+    },
+    {
+      "rel": "sandbox-svc/__pycache__/test_app.cpython-311.pyc",
+      "size": 4393,
+      "mtime": 1790136554047.9004
+    }
+  ],
+  "agentId": "3ad97ac6-b99f-4c36-99bb-f4124b768f7b",
+  "agentIdentifier": "l2-b-h4-mudtlmv7-1fzia6",
+  "modelName": "AG:DeepSeek-V4.1-Flash",
+  "sessionId": "be4af0e4-c389-483b-8c27-65d67ede42da",
+  "reply": "已生成/更新 sandbox-svc、README.md、selftest.md\n当前步骤已完成，已确认产物生成：\n\n- 目录：`E:\\Codes\\ABC\\work-duo\\eval-workspace\\eval-B-H4-1\\sandbox-svc`\n- 文档：`E:\\Codes\\ABC\\work-duo\\eval-workspace\\eval-B-H4-1\\sandbox-svc\\README.md`\n  - 包含“启动方式”“接口说明”“依赖”章节\n- 文档：`E:\\Codes\\ABC\\work-duo\\eval-workspace\\eval-B-H4-1\\sandbox-svc\\selftest.md`\n  - 包含“自测步骤”“结果（待测试后回填）”章节\n\n本步骤未新增服务或测试代码。\n\n已生成/更新 stats_plugin.py、requirements.txt\n「实现统计核心与本地插件」已生成/更新 requirements.txt、check_stats_plugin.py（执行轮次达预算上限，产物初核通过但未经行为级验收，暂定完成，建议人工复核）\n\n已生成/更新 app.py、test_app.py、plugin_test.py\n当前步骤已完成，已生成并保留以下文件：\n\n- `E:\\Codes\\ABC\\work-duo\\eval-workspace\\eval-B-H4-1\\sandbox-svc\\app.py`\n  - 实现 Flask `POST /stats`\n  - 支持成功计算 `mean` 与 `p95`\n  - 对空数组、非法 JSON、非数组及非法元素返回 4xx 错误\n\n- `E:\\Codes\\ABC\\work-duo\\eval-workspace\\eval-B-H4-1\\sandbox-svc\\test_app.py`\n  - 覆盖成功请求、空输入、非法输入及无效 JSON\n\n- `E:\\Codes\\ABC\\work-duo\\eval-workspace\\eval-B-H4-1\\sandbox-svc\\plugin_test.py`\n  - 覆盖 `compute_stats` 的 mean、p95 及输入校验\n\n测试套件将在后续步骤统一运行。\n\n完整测试套件已执行，结果如下：\n\n- 工作目录：`E:\\Codes\\ABC\\work-duo\\eval-workspace\\eval-B-H4-1\\sandbox-svc`\n- 实际命令：`pytest -q test_app.py plugin_test.py`\n- 收集测试：13 个\n- 通过：13 个\n- 失败：0 个\n- 跳过：0 个\n- 收集错误：0 个\n- 进程退出码：`0`\n- 判定：测试成功\n\n已确认相关产物文件存在：\n\n- `E:\\Codes\\ABC\\work-duo\\eval-workspace\\eval-B-H4-1\\sandbox-svc\\app.py`\n- `E:\\Codes\\ABC\\work-duo\\eval-workspace\\eval-B-H4-1\\sandbox-svc\\stats_plugin.py`\n- `E:\\Codes\\ABC\\work-duo\\eval-workspace\\eval-B-H4-1\\sandbox-svc\\test_app.py`\n- `E:\\Codes\\ABC\\work-duo\\eval-workspace\\eval-B-H4-1\\sandbox-svc\\plugin_test.py`\n- `E:\\Codes\\ABC\\work-duo\\eval-workspace\\eval-B-H4-1\\sandbox-svc\\requirements.txt`\n\n测试执行脚本已保存至：\n\n- `E:\\Codes\\ABC\\work-duo\\eval-workspace\\eval-B-H4-1\\.wd_mem\\scripts\\run_sandbox_svc_tests.py`\n\n已生成/更新 README.md、selftest.md\n当前步骤已完成并通过交付核对。\n\n已补全文档：\n\n- `E:\\Codes\\ABC\\work-duo\\eval-workspace\\eval-B-H4-1\\sandbox-svc\\README.md`\n  - 启动方式\n  - `POST /stats` 请求与成功响应格式\n  - 错误行为\n  - 依赖说明\n- `E:\\Codes\\ABC\\work-duo\\eval-workspace\\eval-B-H4-1\\sandbox-svc\\selftest.md`\n  - 自测步骤\n  - 实际测试结果：`13 passed in 0.15s`\n  - 失败数、跳过数、收集错误及退出码\n\n实际测试结果：\n\n```text\n13 passed in 0.15s\n```\n\n最终文件清单：\n\n- `E:\\Codes\\ABC\\work-duo\\eval-workspace\\eval-B-H4-1\\sandbox-svc\\README.md`\n- `E:\\Codes\\ABC\\work-duo\\eval-workspace\\eval-B-H4-1\\sandbox-svc\\selftest.md`\n- `E:\\Codes\\ABC\\work-duo\\eval-workspace\\eval-B-H4-1\\sandbox-svc\\app.py`\n- `E:\\Codes\\ABC\\work-duo\\eval-workspace\\eval-B-H4-1\\sandbox-svc\\stats_plugin.py`\n- `E:\\Codes\\ABC\\work-duo\\eval-workspace\\eval-B-H4-1\\sandbox-svc\\test_app.py`\n- `E:\\Codes\\ABC\\work-duo\\eval-workspace\\eval-B-H4-1\\sandbox-svc\\plugin_test.py`\n- `E:\\Codes\\ABC\\work-duo\\eval-workspace\\eval-B-H4-1\\sandbox-svc\\requirements.txt`",
+  "thinkingLen": 4544,
+  "eventCount": 313,
+  "kbCalls": 0,
+  "artifactScore": 1
+}

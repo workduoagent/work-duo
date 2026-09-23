@@ -1,61 +1,184 @@
 {
-  "cases": 6,
-  "done": 6,
-  "terminal": 6,
-  "artAvg": 1,
+  "cases": 12,
+  "done": 12,
+  "terminal": 12,
+  "artAvg": 0.6597222222222222,
   "durations": {
-    "p50": 717379,
-    "p90": 801732,
-    "p99": 801732
+    "p50": 566929,
+    "p90": 904436,
+    "p99": 949530
   },
-  "faults": [],
+  "faults": [
+    {
+      "faultId": "F-1",
+      "startedAt": "2026-09-23T06:19:12.776Z",
+      "observations": [
+        {
+          "ok": true,
+          "msg": "已对 slot1 下发 agent_cancel_task",
+          "extra": {
+            "agentId": "bf1a06c1-362b-469b-8e77-3c3c67baa5da"
+          }
+        },
+        {
+          "ok": true,
+          "msg": "slot0 → done",
+          "extra": {}
+        },
+        {
+          "ok": true,
+          "msg": "slot1 → cancelled",
+          "extra": {}
+        },
+        {
+          "ok": true,
+          "msg": "slot2 → done",
+          "extra": {}
+        },
+        {
+          "ok": true,
+          "msg": "取消后锁释放/可再跑",
+          "extra": {
+            "ok": true,
+            "first": "done",
+            "second": "done",
+            "secondError": null
+          }
+        }
+      ],
+      "ok": true,
+      "finishedAt": "2026-09-23T06:23:11.371Z"
+    },
+    {
+      "faultId": "F-4",
+      "startedAt": "2026-09-23T06:18:33.195Z",
+      "observations": [
+        {
+          "ok": true,
+          "msg": "检测到计划挂起",
+          "extra": {
+            "status": "running"
+          }
+        },
+        {
+          "ok": true,
+          "msg": "submit_plan_decision approve 已发"
+        },
+        {
+          "ok": true,
+          "msg": "放行后终态 done",
+          "extra": {
+            "status": "done"
+          }
+        }
+      ],
+      "ok": true,
+      "finishedAt": "2026-09-23T06:18:59.983Z"
+    }
+  ],
   "concs": [
     {
       "kind": "concurrency",
-      "n": 5,
-      "totalMs": 801881,
-      "done": 5,
-      "terminal": 5,
+      "n": 12,
+      "totalMs": 949694,
+      "done": 12,
+      "terminal": 12,
       "survivalRate": 1,
       "terminalRate": 1,
       "results": [
         {
-          "caseId": "C-M1",
+          "caseId": "A-M2",
           "slot": 0,
           "status": "done",
-          "durationMs": 482361,
+          "durationMs": 473390,
           "artifactScore": 1,
           "error": null
         },
         {
-          "caseId": "C-M2",
+          "caseId": "A-M8",
           "slot": 1,
           "status": "done",
-          "durationMs": 491369,
-          "artifactScore": 1,
+          "durationMs": 307569,
+          "artifactScore": 0,
           "error": null
         },
         {
-          "caseId": "C-H1",
+          "caseId": "B-M3",
           "slot": 2,
           "status": "done",
-          "durationMs": 717379,
+          "durationMs": 566929,
           "artifactScore": 1,
           "error": null
         },
         {
-          "caseId": "C-H2",
+          "caseId": "B-M5",
           "slot": 3,
           "status": "done",
-          "durationMs": 801732,
+          "durationMs": 904436,
+          "artifactScore": 0.5,
+          "error": null
+        },
+        {
+          "caseId": "A-H1",
+          "slot": 4,
+          "status": "done",
+          "durationMs": 621093,
+          "artifactScore": 0.6666666666666666,
+          "error": null
+        },
+        {
+          "caseId": "A-H3",
+          "slot": 5,
+          "status": "done",
+          "durationMs": 430930,
+          "artifactScore": 0,
+          "error": null
+        },
+        {
+          "caseId": "A-H6",
+          "slot": 6,
+          "status": "done",
+          "durationMs": 307534,
           "artifactScore": 1,
           "error": null
         },
         {
-          "caseId": "C-H3",
-          "slot": 4,
+          "caseId": "B-H1",
+          "slot": 7,
           "status": "done",
-          "durationMs": 409951,
+          "durationMs": 615309,
+          "artifactScore": 0.75,
+          "error": null
+        },
+        {
+          "caseId": "B-H2",
+          "slot": 8,
+          "status": "done",
+          "durationMs": 500690,
+          "artifactScore": 1,
+          "error": null
+        },
+        {
+          "caseId": "B-H4",
+          "slot": 9,
+          "status": "done",
+          "durationMs": 397624,
+          "artifactScore": 0,
+          "error": null
+        },
+        {
+          "caseId": "B-H6",
+          "slot": 10,
+          "status": "done",
+          "durationMs": 949530,
+          "artifactScore": 1,
+          "error": null
+        },
+        {
+          "caseId": "B-H7",
+          "slot": 11,
+          "status": "done",
+          "durationMs": 735809,
           "artifactScore": 1,
           "error": null
         }

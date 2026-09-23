@@ -1,0 +1,12 @@
+{
+  "faultId": "F-8",
+  "startedAt": "2026-09-23T04:35:27.839Z",
+  "observations": [
+    {
+      "ok": true,
+      "msg": "同 identifier 并发：成功1 失败2（期望 1 成功）"
+    }
+  ],
+  "ok": true,
+  "finishedAt": "2026-09-23T04:35:27.887Z"
+}

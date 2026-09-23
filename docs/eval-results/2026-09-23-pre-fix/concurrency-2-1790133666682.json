@@ -1,0 +1,27 @@
+{
+  "kind": "concurrency",
+  "n": 2,
+  "totalMs": 602601,
+  "done": 1,
+  "terminal": 2,
+  "survivalRate": 0.5,
+  "terminalRate": 1,
+  "results": [
+    {
+      "caseId": "A-H1",
+      "slot": 0,
+      "status": "error",
+      "durationMs": 602555,
+      "artifactScore": 0.3333333333333333,
+      "error": null
+    },
+    {
+      "caseId": "B-H5",
+      "slot": 1,
+      "status": "done",
+      "durationMs": 358513,
+      "artifactScore": 0,
+      "error": null
+    }
+  ]
+}

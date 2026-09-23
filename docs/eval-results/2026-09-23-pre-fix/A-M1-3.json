@@ -1,0 +1,26 @@
+{
+  "caseId": "A-M1",
+  "slot": 3,
+  "scene": "A",
+  "kind": "M",
+  "title": "单源爬取+清洗+产物",
+  "model": "96af449e-dfc0-48ec-b077-aa9f02b43d64",
+  "workspace": "E:/Codes/ABC/work-duo/eval-workspace/eval-A-M1-3",
+  "startedAt": "2026-09-23T04:30:21.008Z",
+  "status": "harness_error",
+  "runId": null,
+  "durationMs": 24,
+  "artifacts": [],
+  "artifactCheck": [],
+  "traceCounts": null,
+  "replyLen": 0,
+  "kbHits": 0,
+  "recoveries": 0,
+  "error": "agent_ui_create 失败: {\"error\":\"error returned from database: (code: 2067) UNIQUE constraint failed: agent_info.identifier\"}",
+  "metrics": {
+    "ha": {},
+    "perf": {},
+    "heal": {}
+  },
+  "files": []
+}

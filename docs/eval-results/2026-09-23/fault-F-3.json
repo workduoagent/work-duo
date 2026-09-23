@@ -1,0 +1,17 @@
+{
+  "faultId": "F-3",
+  "startedAt": "2026-09-23T09:13:47.909Z",
+  "observations": [
+    {
+      "ok": true,
+      "msg": "自愈机制观测：step_retrying 事件 ×0（>0=引擎自动诊断重试真实发生；=0 可能源失败被工具层/重试层提前消化）"
+    },
+    {
+      "ok": true,
+      "msg": "A-H5 降级容错 status=done artifacts=1"
+    }
+  ],
+  "ok": true,
+  "autoRetryEvents": 0,
+  "finishedAt": "2026-09-23T09:25:36.091Z"
+}
