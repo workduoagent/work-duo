@@ -204,7 +204,15 @@ export async function upsertSkill(skill: SkillInfo): Promise<SkillInfo[]> {
       row.created_at,
       row.updated_at,
     ],
-  )
+  ).catch((e) => {
+    // P2-3（2026-09-23）：并发新建竞态窗口内前置检测拦不住（先查后插 TOCTOU），
+    // DB 的 UNIQUE(identifier) 是最终兜底——把裸约束错翻译成友好 conflict。
+    const msg = String(e?.message || e);
+    if (msg.includes('UNIQUE constraint failed: skill_info.identifier')) {
+      throw new Error(`skill:upsert identifier 冲突：'${row.identifier}' 已存在（并发新建竞态，请换 identifier）`)
+    }
+    throw e
+  })
   return listSkills()
 }
 
