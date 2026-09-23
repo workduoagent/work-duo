@@ -598,6 +598,148 @@ export function judgeMerge() {
   console.log(`-- 重新出评分卡: node l2_eval_harness.mjs score`)
 }
 
+/** MCP 契约探针（C4 门禁第 8 条）：tools/list → 工具数 + 关键工具在位。 */
+async function probeMcpContract(minTools = 72, required = ['agent_run_task', 'agent_get_run_progress', 'agent_sweep_orphan_rounds']) {
+  try {
+    const resp = await fetch('http://127.0.0.1:18755/mcp', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} }),
+      signal: AbortSignal.timeout(8000),
+    })
+    if (!resp.ok) return { ok: false, detail: `HTTP ${resp.status}` }
+    const text = await resp.text()
+    for (const block of text.split('\n\n')) {
+      for (const line of block.split('\n')) {
+        if (!line.startsWith('data:')) continue
+        try {
+          const j = JSON.parse(line.slice(5).trim())
+          const tools = j.result?.tools
+          if (tools) {
+            const missing = required.filter((r) => !tools.some((t) => t.name === r))
+            if (tools.length >= minTools && !missing.length) return { ok: true, detail: `${tools.length} 工具，关键工具齐` }
+            return { ok: false, detail: `tools=${tools.length}` + (missing.length ? `，缺 ${missing.join(',')}` : '') }
+          }
+        } catch { /* 非 JSON data 行，跳过 */ }
+      }
+    }
+    return { ok: false, detail: '无 tools 响应' }
+  } catch (e) {
+    return { ok: false, detail: 'MCP 不在线: ' + String(e.message || e).slice(0, 60) }
+  }
+}
+
+/** 种子资产完整性（C4 门禁第 9 条）：manifest 可解析 + 每包至少 1 个坏文件实体（seed.json 外）。 */
+function checkSeedAssets() {
+  const pkgs = fs.existsSync(SEEDS_DIR) ? fs.readdirSync(SEEDS_DIR) : []
+  let bad = 0, files = 0
+  for (const s of pkgs) {
+    try {
+      JSON.parse(fs.readFileSync(path.join(SEEDS_DIR, s, 'seed.json'), 'utf8'))
+      const entities = fs.readdirSync(path.join(SEEDS_DIR, s)).filter((f) => f !== 'seed.json')
+      files += entities.length
+      if (!entities.length) bad++
+    } catch { bad++ }
+  }
+  return { ok: bad === 0 && pkgs.length > 0, detail: `${pkgs.length} 包 / ${files} 文件 / 损坏 ${bad}` }
+}
+
+/** C4 发布门禁（2026-09-23）：离线断言器，读 OUT 证据 + MCP 探针，逐条过线。
+ * PASS/FAIL + 退出码（0/1），可直接挂 CI。阈值可 --min-done/--min-artifacts/--min-resolved 覆盖。 */
+export async function gate(opts = {}) {
+  const out = opts.outDir || OUT
+  const faultsDir = opts.faultsDir || out
+  // minDone 默认 90：error 但走完「优雅收尾」（reply 非空+产物保留，如预算截断 run_budget_exhausted）
+  // 不一票否决——那正是失败汇报机制的正确表现；收紧用 --min-done 100。
+  const minDone = opts.minDone ?? 90
+  const minArtifacts = opts.minArtifacts ?? 90
+  const minResolved = opts.minResolved ?? 80
+  const checks = []
+  const add = (name, ok, detail) => {
+    checks.push({ name, ok, detail })
+    console.log(ok ? '  ✓' : '  ✗', name, '—', detail)
+  }
+
+  console.log(`# L2 发布门禁 · ${out}`)
+
+  // 1) 收集用例（排除 fault/scorecard/env/gate/并发组汇总）
+  const files = fs.existsSync(out)
+    ? fs.readdirSync(out).filter((f) => f.endsWith('.json') && !f.startsWith('fault-') && !['scorecard.json', 'env.json', 'gate.json'].includes(f) && !f.startsWith('concurrency-'))
+    : []
+  const casesRaw = files
+    .map((f) => { try { return { f, j: JSON.parse(fs.readFileSync(path.join(out, f), 'utf8')) } } catch { return null } })
+    .filter(Boolean)
+    .filter((x) => x.j.caseId && x.j.status)
+  // 按 caseId 去重取最新（多轮槽位 JSON 共存时，门禁评「每个 case 的当前状态」）。
+  // 排序键=rec.startedAt（真实运行时间）而非文件 mtime——git checkout 等操作会重置 mtime 导致取错版本。
+  const latestByCase = new Map()
+  for (const x of casesRaw) {
+    const ts = Date.parse(x.j.startedAt || '') || 0
+    const prev = latestByCase.get(x.j.caseId)
+    if (!prev || prev.ts < ts) latestByCase.set(x.j.caseId, { ts, j: x.j })
+  }
+  const cases = [...latestByCase.values()].map((x) => x.j)
+  add('证据存在', cases.length > 0, `${cases.length} 个用例（${casesRaw.length} 个 JSON 去重后）`)
+  // 1b) 证据规模下限（防证据目录被静默清空——2026-09-23 cd671c8 曾丢 92 文件）。目录含 A/B/C 全套时 ≥30；仅 C 套 ≥5。
+  const minFiles = opts.minFiles ?? 5
+  add(`证据规模≥${minFiles} 用例`, cases.length >= minFiles, `${cases.length}/${minFiles}`)
+
+  // 2) 终态率 100%（done/error/cancelled 均为终态）
+  const terminal = cases.filter((c) => ['done', 'error', 'cancelled'].includes(c.status))
+  add('终态率=100%', cases.length > 0 && terminal.length === cases.length, `${terminal.length}/${cases.length}`)
+
+  // 3) done 率
+  const dones = cases.filter((c) => c.status === 'done')
+  const donePct = cases.length ? (dones.length / cases.length) * 100 : 0
+  add(`done率≥${minDone}%`, donePct >= minDone, `${donePct.toFixed(0)}% (${dones.length}/${cases.length})`)
+
+  // 4) 产物达成（done 用例）
+  const artTot = dones.reduce((s, c) => s + (c.artifactCheck?.length || 0), 0)
+  const artOk = dones.reduce((s, c) => s + (c.artifactCheck || []).filter((a) => a.ok).length, 0)
+  const artPct = artTot ? (artOk / artTot) * 100 : 0
+  add(`产物达成≥${minArtifacts}%（done 用例）`, artPct >= minArtifacts, `${artPct.toFixed(0)}% (${artOk}/${artTot})`)
+
+  // 5) 客观判分 resolved（有 judge 的用例）
+  const judged = cases.filter((c) => c.judge)
+  const resv = judged.filter((c) => c.judge.resolved)
+  const resPct = judged.length ? (resv.length / judged.length) * 100 : 0
+  add(`客观判分 resolved≥${minResolved}%`, judged.length > 0 && resPct >= minResolved, `${resPct.toFixed(0)}% (${resv.length}/${judged.length})`)
+
+  // 6) 种子用例必须全部已判分（漏判 = 没测，不许当通过）
+  const seedCases = cases.filter((c) => c.seedId)
+  const unjudged = seedCases.filter((c) => !c.judge)
+  add('种子用例全部已判分', seedCases.length > 0 && unjudged.length === 0, unjudged.length ? `漏判: ${unjudged.map((c) => c.caseId).join(',')}` : `${seedCases.length}/${seedCases.length}`)
+
+  // 7) 失败不空白（P0-2 契约）：非 done 终态必须有 reply
+  const notDone = cases.filter((c) => c.status !== 'done')
+  const blank = notDone.filter((c) => !(c.replyLen > 0))
+  add('非 done 终态 reply 非空', blank.length === 0, notDone.length ? `${notDone.length - blank.length}/${notDone.length}` : '无非 done 终态')
+
+  // 8) 故障注入证据 F-1/F-4（faultsDir 可与 run 证据分离——复跑场景故障机制由同一二进制的首轮验证）
+  for (const fid of ['F-1', 'F-4']) {
+    let ok = false, detail = '缺证据文件'
+    try {
+      const j = JSON.parse(fs.readFileSync(path.join(faultsDir, `fault-${fid}.json`), 'utf8'))
+      ok = j.ok === true
+      detail = `ok=${j.ok}`
+    } catch { /* 保持缺文件 */ }
+    add(`故障注入 ${fid}`, ok, detail)
+  }
+
+  // 9) MCP 契约探针 + 种子资产
+  const mcp = opts.skipMcp ? { ok: true, detail: 'skipped' } : await probeMcpContract()
+  add('MCP 契约（72 工具+关键工具）', mcp.ok, mcp.detail)
+  const seeds = checkSeedAssets()
+  add('种子资产完整', seeds.ok, seeds.detail)
+
+  const pass = checks.every((c) => c.ok)
+  fs.mkdirSync(out, { recursive: true })
+  fs.writeFileSync(path.join(out, 'gate.json'), JSON.stringify({ at: new Date().toISOString(), pass, checks }, null, 2))
+  console.log(pass ? '🟢 GATE PASS' : '🔴 GATE FAIL — 禁止发布')
+  if (!pass) process.exitCode = 1
+  return pass
+}
+
 /** 运行单用例并采集三维原始指标 */
 export async function runOneCase(caseId, {
   model = 'fast',
@@ -1109,6 +1251,17 @@ async function main() {
   if (cmd === 'inject') return injectFault(get('fault', 'F-1'))
   if (cmd === 'judge-dump') return judgeDump(get('cases', ''))
   if (cmd === 'judge-merge') return judgeMerge()
+  if (cmd === 'gate') {
+    return gate({
+      outDir: get('out', OUT),
+      faultsDir: get('faults-dir', get('out', OUT)),
+      minDone: parseInt(get('min-done', '90'), 10),
+      minArtifacts: parseInt(get('min-artifacts', '90'), 10),
+      minResolved: parseInt(get('min-resolved', '80'), 10),
+      minFiles: parseInt(get('min-files', '5'), 10),
+      skipMcp: flag('skip-mcp'),
+    })
+  }
   if (cmd === 'lock') return checkLockRelease()
   if (cmd === 'run') {
     const phase = get('phase')
