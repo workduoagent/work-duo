@@ -1,0 +1,198 @@
+{
+  "caseId": "B-M5",
+  "slot": 0,
+  "scene": "B",
+  "kind": "M",
+  "title": "迁移+seed+API测试",
+  "model": "96af449e-dfc0-48ec-b077-aa9f02b43d64",
+  "workspace": "E:/Codes/ABC/work-duo/eval-workspace-final/eval-B-M5",
+  "startedAt": "2026-09-23T16:22:30.436Z",
+  "status": "done",
+  "runId": "run-1790180550464-1",
+  "durationMs": 1213710,
+  "artifacts": [],
+  "artifactCheck": [
+    {
+      "artifact": "shop-api/README.md",
+      "ok": true
+    },
+    {
+      "artifact": "shop-api/selftest.sh",
+      "ok": true
+    }
+  ],
+  "traceCounts": {
+    "events": 727,
+    "reply_chars": 1563,
+    "thinking_chars": 5474
+  },
+  "replyLen": 1563,
+  "kbHits": 0,
+  "recoveries": 0,
+  "error": null,
+  "metrics": {
+    "ha": {
+      "terminal": true,
+      "status": "done"
+    },
+    "perf": {
+      "durationMs": 1213710
+    },
+    "heal": {
+      "replyLen": 1563
+    }
+  },
+  "files": [
+    {
+      "rel": ".wd_mem/.gitignore",
+      "size": 310,
+      "mtime": 1790179871812.1262
+    },
+    {
+      "rel": ".wd_mem/graph/edges.jsonl",
+      "size": 9312,
+      "mtime": 1790181757745.5847
+    },
+    {
+      "rel": ".wd_mem/graph/nodes.jsonl",
+      "size": 96186,
+      "mtime": 1790181757741.2036
+    },
+    {
+      "rel": ".wd_mem/graph/sessions/3601e85c-c07b-4c5e-8adb-11b76d312e08.json",
+      "size": 19396,
+      "mtime": 1790181757747.7705
+    },
+    {
+      "rel": ".wd_mem/graph/sessions/8abf3bd7-1f34-4ea9-a299-227e9b017d55.json",
+      "size": 12649,
+      "mtime": 1790180476733.8672
+    },
+    {
+      "rel": ".wd_mem/graph/_index.json",
+      "size": 6208,
+      "mtime": 1790181757741.2036
+    },
+    {
+      "rel": ".wd_mem/knowledge/MEMORY.md",
+      "size": 133,
+      "mtime": 1790179871810.6243
+    },
+    {
+      "rel": ".wd_mem/README.md",
+      "size": 1378,
+      "mtime": 1790179871812.1262
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/auto_run_1790180332187.py",
+      "size": 789,
+      "mtime": 1790180332190.1074
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/injected_verify_shop_api.py",
+      "size": 2484,
+      "mtime": 1790181134307.1082
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/injected_verify_shop_migrations.py",
+      "size": 1391,
+      "mtime": 1790180981420.0315
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/verify_shop_api.py",
+      "size": 2416,
+      "mtime": 1790181120636.821
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/verify_shop_migrations.py",
+      "size": 1323,
+      "mtime": 1790180978324.5857
+    },
+    {
+      "rel": "shop-api/.api-verify.sqlite",
+      "size": 16384,
+      "mtime": 1790181134623.01
+    },
+    {
+      "rel": "shop-api/app.py",
+      "size": 8769,
+      "mtime": 1790181097092.8115
+    },
+    {
+      "rel": "shop-api/migrate.py",
+      "size": 2874,
+      "mtime": 1790180935495.1133
+    },
+    {
+      "rel": "shop-api/migration-check-6duwxll_.sqlite",
+      "size": 0,
+      "mtime": 1790180954785.0017
+    },
+    {
+      "rel": "shop-api/migration-check-nm3npcbz.sqlite",
+      "size": 20480,
+      "mtime": 1790180969542.4038
+    },
+    {
+      "rel": "shop-api/migrations/.gitkeep",
+      "size": 0,
+      "mtime": 1790180733255.0073
+    },
+    {
+      "rel": "shop-api/migrations/001_initial.sql",
+      "size": 611,
+      "mtime": 1790180935492.9893
+    },
+    {
+      "rel": "shop-api/README.md",
+      "size": 4386,
+      "mtime": 1790181727267.8281
+    },
+    {
+      "rel": "shop-api/schema.sql",
+      "size": 596,
+      "mtime": 1790180319955.576
+    },
+    {
+      "rel": "shop-api/seed.py",
+      "size": 1539,
+      "mtime": 1790180935499.577
+    },
+    {
+      "rel": "shop-api/seed.sql",
+      "size": 413,
+      "mtime": 1790180935498.4744
+    },
+    {
+      "rel": "shop-api/selftest.sh",
+      "size": 4351,
+      "mtime": 1790181412320.777
+    },
+    {
+      "rel": "shop-api/__pycache__/app.cpython-311.pyc",
+      "size": 17132,
+      "mtime": 1790181134575.3445
+    },
+    {
+      "rel": "shop-api/__pycache__/migrate.cpython-311.pyc",
+      "size": 5602,
+      "mtime": 1790180954780.7346
+    },
+    {
+      "rel": "shop-api/__pycache__/seed.cpython-311.pyc",
+      "size": 3096,
+      "mtime": 1790180954783.7297
+    }
+  ],
+  "agentId": "7829f97a-ec70-4e36-934f-049cc1502468",
+  "agentIdentifier": "l2-b-m5-mueba147-0qfzst",
+  "modelName": "AG:DeepSeek-V4.1-Flash",
+  "seedTier": null,
+  "seedId": null,
+  "sessionId": "3601e85c-c07b-4c5e-8adb-11b76d312e08",
+  "reply": "已生成/更新 shop-api、migrations、README.md\n已完成工程骨架，尚未编写实现代码：\n\n- 目录：`E:/Codes/ABC/work-duo/eval-workspace-final/eval-B-M5/shop-api/`\n- 目录：`E:/Codes/ABC/work-duo/eval-workspace-final/eval-B-M5/shop-api/migrations/`\n- README 初稿（含接口说明、启动方式、Schema 概览等章节）：`E:/Codes/ABC/work-duo/eval-workspace-final/eval-B-M5/shop-api/README.md`\n- 自测脚本占位文件：`E:/Codes/ABC/work-duo/eval-workspace-final/eval-B-M5/shop-api/selftest.sh`\n\n已生成/更新 001_initial.sql、migrate.py、seed.sql、seed.py\n当前步骤已完成，产物已生成并核验：\n\n- `E:/Codes/ABC/work-duo/eval-workspace-final/eval-B-M5/shop-api/migrations/001_initial.sql`\n- `E:/Codes/ABC/work-duo/eval-workspace-final/eval-B-M5/shop-api/migrate.py`\n- `E:/Codes/ABC/work-duo/eval-workspace-final/eval-B-M5/shop-api/seed.sql`\n- `E:/Codes/ABC/work-duo/eval-workspace-final/eval-B-M5/shop-api/seed.py`\n\n已用临时 SQLite 数据库验证迁移和 seed 可重复执行，迁移版本记录正常，商品初始数据共 3 条。\n\n已生成/更新 app.py\n「实现商品 CRUD API」已生成/更新 app.py、verify_shop_api.py（执行轮次达预算上限，产物经客观校验无误）\n\n已生成/更新 selftest.sh\n已完成 bash + curl CRUD 自测脚本，覆盖创建、列表、单条读取、更新、删除及删除后读取验证，并使用临时 SQLite 数据库与后台 API 服务，退出时清理资源。\n\n产出文件：`E:/Codes/ABC/work-duo/eval-workspace-final/eval-B-M5/shop-api/selftest.sh`\n\n已核对文件存在，且包含 bash shebang、`curl` 和 `DELETE`。\n\n已生成/更新 README.md、selftest.sh\n已补全 README，并核对 `shop-api/README.md` 与 `shop-api/selftest.sh` 均存在；README 包含 CRUD 接口、迁移与 seed 命令、启动方式及 `products` schema 概览。自测脚本包含 `curl` CRUD 验证。\n\n`shop-api/` 下的交付文件：\n- `README.md`\n- `selftest.sh`\n- `app.py`\n- `migrate.py`\n- `migrations/001_initial.sql`\n- `schema.sql`\n- `seed.py`\n- `seed.sql`\n\n完整路径：`E:/Codes/ABC/work-duo/eval-workspace-final/eval-B-M5/shop-api/`",
+  "thinkingLen": 5474,
+  "eventCount": 727,
+  "kbCalls": 0,
+  "artifactScore": 1
+}

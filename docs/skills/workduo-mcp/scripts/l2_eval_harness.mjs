@@ -270,6 +270,8 @@ KB 若不足则先 kb_add_file 补文档再检索。完成后列出文件。`,
   'B-M5': {
     scene: 'B', kind: 'M', title: '迁移+seed+API测试',
     dims: ['heal', 'ha'],
+    // 实测耗时 1100~1325s（迁移+seed+API+自测四件套），M 级默认 600s 等待窗口会被驱动误取消
+    waitMs: 1900000,
     artifacts: ['shop-api/README.md', 'shop-api/selftest.sh'],
     prompt: `请在工作空间子目录 shop-api/ 构建：
 1) SQLite schema + 迁移脚本 + seed 数据
@@ -763,7 +765,8 @@ export async function runOneCase(caseId, {
   const spec = CASES[caseId]
   if (!spec && !prompt) throw new Error('未知案例 ' + caseId)
   const kind = spec?.kind || 'M'
-  const maxMs = waitMs || (kind === 'H' ? WAIT.H : WAIT.M)
+  // 单用例可覆盖等待窗口（CASES.waitMs）：B-M5 等长耗时 M 用例实测 1100~1300s，M 级默认 600s 会误取消
+  const maxMs = waitMs || spec?.waitMs || (kind === 'H' ? WAIT.H : WAIT.M)
   const ws = wsOf(caseId, slot)
   const modelId = await pickModel(model)
   const started = Date.now()
