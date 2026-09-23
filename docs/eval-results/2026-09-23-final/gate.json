@@ -1,5 +1,5 @@
 {
-  "at": "2026-09-23T15:55:16.398Z",
+  "at": "2026-09-23T16:56:42.139Z",
   "pass": true,
   "checks": [
     {
@@ -69,8 +69,8 @@
     {
       "name": "故障注入 F-5",
       "ok": true,
-      "detail": "ok=null (1/1 项观测)",
-      "state": "skip"
+      "detail": "ok=true (4/5 项观测)",
+      "state": "ok"
     },
     {
       "name": "故障注入 F-6",

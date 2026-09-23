@@ -1041,11 +1041,17 @@ export async function injectFault(faultId) {
         const swOk = sw?.ok === true || sw?.data?.ok === true
         note(swOk, `跨天后孤儿清扫 ${JSON.stringify(sw).slice(0, 60)}`)
       } catch (e) { note(false, 'sweep 失败: ' + String(e.message).slice(0, 100)) }
-      // 日志按天切换（次日日志文件存在 = 跨天后日志系统正常滚动）
-      const nextDay = new Date(Date.now() + 86400000).toISOString().slice(0, 10)
-      const nextLog = `E:/Codes/ABC/work-duo/src-tauri/target/debug/logs/workduo.log.${nextDay}`
-      const hasNext = fs.existsSync(nextLog)
-      note(hasNext || !crossedDay, `日志按天切换（次日文件 ${hasNext ? '已生成' : '未生成'}）`)
+      // 日志按**本地日期**命名（2026-09-24 P1 修复的核心判据，不再依赖是否真跨日）：
+      // 写入侧曾按 UTC 命名 → 本地 00:00~08:00 的日志读不到。此处校验「本地日期文件存在」；
+      // 若本地日期与 UTC 日期不同（UTC+8 的 00:00~08:00 窗口），还额外证明未落进 UTC 文件。
+      const pad = (n) => String(n).padStart(2, '0')
+      const d = new Date()
+      const localDay = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+      const utcDay = d.toISOString().slice(0, 10)
+      const logDir = 'E:/Codes/ABC/work-duo/src-tauri/target/debug/logs'
+      const localLog = `${logDir}/workduo.log.${localDay}`
+      const hasLocal = fs.existsSync(localLog)
+      note(hasLocal, `日志按本地日期命名（${localDay}${localDay !== utcDay ? `，与 UTC 日期 ${utcDay} 不同——证明未落进 UTC 文件` : ''}）`)
       rec.ok = terminalOk && evN >= 0
     } finally { await deleteEvalAgent(ag.id) }
   }

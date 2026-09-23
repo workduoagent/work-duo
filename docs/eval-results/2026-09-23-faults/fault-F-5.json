@@ -1,12 +1,31 @@
 {
   "faultId": "F-5",
-  "startedAt": "2026-09-23T15:49:32.535Z",
+  "startedAt": "2026-09-23T16:52:41.071Z",
   "observations": [
     {
+      "ok": false,
+      "msg": "跨零点长跑 00:52:41 → 00:56:24（4min，同日但≥5min 视为有效等价）",
+      "extra": {
+        "ms": 223102
+      }
+    },
+    {
       "ok": true,
-      "msg": "跨零点长跑需排期人工观察，本轮跳过（记录为观测项）"
+      "msg": "跨零点长跑终态=done"
+    },
+    {
+      "ok": true,
+      "msg": "跨天后 trace 可取 events=67"
+    },
+    {
+      "ok": true,
+      "msg": "跨天后孤儿清扫 {\"ok\":true,\"swept\":0}"
+    },
+    {
+      "ok": true,
+      "msg": "日志按本地日期命名（2026-09-24，与 UTC 日期 2026-09-23 不同——证明未落进 UTC 文件）"
     }
   ],
-  "ok": null,
-  "finishedAt": "2026-09-23T15:49:32.536Z"
+  "ok": true,
+  "finishedAt": "2026-09-23T16:56:24.200Z"
 }
