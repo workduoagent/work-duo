@@ -19,16 +19,17 @@
 - **Glob 工具坑**：绝对路径当 pattern 一律假阴性，必须 path 参数+相对 pattern。
 - get_run_logs：since_ts 用本地空格串（ISO 全剔）；**跨天只读当天文件**（跨零点直读磁盘）；agent-event 洪流捞关键字须 limit:8000。本机 bash 缺部分 coreutils（head/cp/ls 缺时走 node 替代）。
 
-## L2 生态测评（2026-09-23 收口，外部执行方执行）
-- 规模：34 用例/8 故障/12 并发组；证据 `docs/eval-results/2026-09-23/`（60 文件：scorecard/findings/env/各 JSON）；复测驱动 `l2_eval_harness.mjs`（已入 scripts/）。改进指导意见=同目录《改进指导意见.md》（P0→P1→P2）。
-- 结论：**三支柱地基好**（无永久挂死/并发不崩/锁放/可清）。卡点：①P0-1 **600s run 预算杀 12/34 用例**（多文件/多源/并发≥2 必撞，A-M2 串行已 473s）②P0-2 失败后 reply 空（emit_task_error 不写 trace.reply 不扫 workspace，events.rs:473）③P1-1 xlsx 稳定缺口（native 无 write_xlsx，A-M2 产物 0%；png 靠运气）④P1-2 取消无 cancelled 三态（registry 只 timed_out?error:done，commands.rs:330）+ submit_* 状态束回收后 Err 而非结构化 no_pending（commands.rs:642，F-4 实证）。
-- **评审修正（8/8 代码锚点已核实）**：a) 分层预算必须>调用级 180s——SIMPLE_CHAT 120s 层级倒挂，建议≥300s；b) 软超时复用 cancel_flag 两阶段（tokio timeout 到点硬 drop 内层 future，「等收尾≤30s」须到点前置位实现；reply/文件表回写只能在外层超时分支做）；c) 超时分支补写 rec.error=error_code；d) finalize 文件表过滤 .wd_mem/。
-- 执行进度：**Rust 批次已落地（2026-09-23 13:5x，target-sb cargo check 0E）**——P0-1（DEFAULT_RUN_MAX_SECS 600→1800 + `RUN_SOFT_WINDOW=30s` 两阶段软超时 `spawn_budget_watchdog`，watchdog 用完即 abort 防跨任务泄漏；**intent 分级未做**——意图在 run_task 内部才分类、包装层拿不到，SIMPLE_CHAT 由调用级超时兜底）+ P0-2（`events::finalize_run_summary` 写 reply+文件表，过滤 .wd_mem/；rec.error 补 `run_budget_exhausted`/`cancelled_by_user`）+ P1-2（`AgentTaskState.cancel_requested` 三态 registry done/error/cancelled + 6 处 submit_* 状态束回收→Ok(false) no_pending）；P1-1 `plugin.xlsx_writer/chart_png.template.py` + SKILL 流程2.1 产物契约已落且同步客户端（**18 文件一致**）。**待用户重启后** l2_eval_harness 回归 12 个 600s 用例+F-1/F-4（通过线：done≥9/12、reply 非空 100%、cancelled 100%、A-M2 xlsx+png 3/3）。
+## L2 生态测评（2026-09-23 全线闭环，18 commit：61da2bc…778c952）
+- 证据 `docs/eval-results/2026-09-23/`（scorecard.md 含 Batch C 判分区；修复前备份 -pre-fix/60 文件）；复测驱动 `l2_eval_harness.mjs`（scripts/，CLI：run/inject/judge-dump/judge-merge/score）。
+- **改进报告全清**：P0-1 预算 1800s+RUN_SOFT_WINDOW 30s 软收尾（spawn_budget_watchdog）；P0-2 finalize_run_summary 写 reply+文件表（过滤 .wd_mem/）；P1-2 取消三态+6 处 submit_* no_pending；P1-1 xlsx/png 插件模板+产物契约；P2 五项（产物契约 expectedArtifacts 注入/HTTP 重试×2+错误分类/agent_get_run_progress 进度工具/skill_upsert 冲突检测+UNIQUE 友好映射/并行=多 Agent 语义）。
+- **回归战绩**：12 个原 600s 失败用例 12/12 done、done 用例产物 100%；A-M2 xlsx+png 3/3；F-1 victim=cancelled、F-4 零误报、取消 run reply 非空。方法论：**「中间产物堆山不交最终件」收尾清单无效，改落盘时机才有效**（骨架先行+增量回写）。
+- **Batch C（SWE-bench-lite 雏形）**：C1 播种器泛化——seeds/ 种子包体系（seed.json manifest：tier/targetDir/testCmd/prompt/artifacts），7 包三级（syntax/logic/cross-file），场景 C 五用例 `run --phase 3`；C2 客观判分 judgeTests（受管 venv pytest，resolved=全绿；沙箱 node spawn EBUSY 走 judge-dump→外层 bash→judge-merge 三段式）；C3 题库首张评分卡 **resolved 6/6=100%**（2026-09-23，DeepSeek-V4.1-Flash）。C-H1 挖出并修复引擎真根因：**熔断强制总结「暂定完成」吞掉修复型重试**（有文件写入→转失败回灌诊断，7a25a91）+ 工具轮分级（基线 8/修复轮+8，WD_SUBTASK_MAX_ITERATIONS，cd671c8）。
+- 自愈双实证：B-H5 播种版 step_retrying×4（v1）→ 技术栈锁定+FIXLOG 骨架先行 371s 全绿（v2）。
 - 可用 chat 模型：DeepSeek-V4.1-Flash（主力）/GLM-5.3-Flash/MiniMax-M3；gpt-5.6-luna 嫌疑不用；Qwen3.6 已移除。
 
 ## 战略 / 长期约定
 - **筑基战略（用户定调）**：先打牢单 Agent（可控/可观测/可兜底三支柱），多 Agent（小分队）=组合运用推迟验收；对标只用共同地基不追 SWE-bench。
-- **Harness 位置=L2 边界防御**：多样化边界用例真机实测；自测一律走 workduo-mcp，缺口回流 SKILL+MCP 层，**严禁绕过 MCP 写一次性脚本**。孤儿清扫仅启动触发，拟补 agent_sweep_orphan_rounds（Rust+重启，待准）。
+- **Harness 位置=L2 边界防御**：多样化边界用例真机实测；自测一律走 workduo-mcp，缺口回流 SKILL+MCP 层，**严禁绕过 MCP 写一次性脚本**。孤儿清扫已上线 `agent_sweep_orphan_rounds`（72 号工具，冒烟 {ok:true,swept:0}）。
 - **超时阈值铁律**：判据用「无产出静默时长」绝不用总耗时；慢≠死（同任务模型间 15 倍差）；三层=调用级 180s+收尾 30s+run 级兜底；env 可调 WD_LLM_TIMEOUT_SECS/WD_LLM_CHUNK_TIMEOUT_SECS/WD_LLM_STREAM_TOTAL_SECS/WD_RUN_MAX_SECS，改后重启。
-- **Skill 同步铁律**：docs/skills/<name>/SKILL.md 单一事实源，客户端 ~/.workbuddy 同步一致；SKILL 禁第三方产品路径，资源只指 skill 内相对路径；定位=外部客户端对接指南，不叫 selftest。**待同步：docs 16 文件（新增 tool_contract_probe/l2_eval_harness）尚未全量同步客户端。**
+- **Skill 同步铁律**：docs/skills/<name>/SKILL.md 单一事实源，客户端 ~/.workbuddy 同步一致；SKILL 禁第三方产品路径，资源只指 skill 内相对路径；定位=外部客户端对接指南，不叫 selftest。同步用 node cpdir+MD5 校验脚本（会话内现写）。MCP 现为 **72 工具**（引擎 11+发现 7+UI 54）。
 - 历史：第三期记忆知识检索 ✅；K 系列 ✅；E2E 审计 100/100（2026-09-22）；20260919002 多任务隔离 ✅；20260919001 小分队打磨推迟。
