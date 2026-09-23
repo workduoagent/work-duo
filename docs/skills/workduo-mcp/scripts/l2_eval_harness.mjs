@@ -340,11 +340,21 @@ KB 若不足则先 kb_add_file 补文档再检索。完成后列出文件。`,
     scene: 'B', kind: 'H', title: '坏种子仓库修复（自愈）',
     dims: ['heal', 'ha'],
     artifacts: ['fix-seed/README.md', 'fix-seed/FIXLOG.md'],
-    prompt: `工作空间子目录 fix-seed/ 将由 harness 预置坏种子代码。请：
+    // needsSeed：harness 启动 run 前向 fix-seed/ 播种确定性坏种子（此前"将由 harness 预置"
+    // 只是 prompt 说法、从无实现——B-H5 实际一直是白手起家）。坏种子设计为**两阶段失败**：
+    // calculator.py 缺冒号（SyntaxError → import 即炸，第一轮全红）+ test_add 断言故意错
+    // （语法修好后仍红一轮）——正好触发"步骤失败 → 自动诊断重试（step_retrying）→ 修复"链路，
+    // 使 L3 步骤级自愈可被 trace 机制级观测（autoRetryEvents>0）。
+    needsSeed: true,
+    prompt: `工作空间子目录 fix-seed/ 有一个坏掉的 Python/pytest 计算器项目（calculator.py 含语法错误，test_calculator.py 含断言失败，测试全红）。请：
 1) 运行/检查测试，定位语法错误、断言失败、缺依赖
-2) 修复到测试全绿（或写明仍红原因）
-3) FIXLOG.md：问题清单 + 修复 diff 摘要 + 最终测试结果
-完成后列出文件。`,
+2) 【技术栈锁定】修复必须针对原文件 calculator.py 与 test_calculator.py 本身——禁止更换语言/框架、禁止删除原文件另起炉灶（上一轮换成 JS 重写被判不合格）
+3) 修复到 pytest 全绿（或写明仍红原因）
+4) FIXLOG.md：问题清单 + 修复 diff 摘要 + 最终测试结果；【落盘时机】开修前先建 FIXLOG.md 骨架，修完回填
+完成后列出文件。
+⚠️ 最终交付物核对（收尾前逐项核对，缺一不可）：
+- fix-seed/FIXLOG.md / fix-seed/README.md（相对 fix-seed/，文件名逐字一致；原 calculator.py / test_calculator.py 必须仍在且已修复）
+- 收尾规则：先落盘全部产物，再输出文字总结。`,
   },
   'B-H6': {
     scene: 'B', kind: 'H', title: '数据管道+基准',
@@ -469,6 +479,26 @@ export function checkArtifacts(ws, artifacts = []) {
   return artifacts.map((a) => ({ artifact: a, ok: have.has(a) || have.has(a.replace(/^\.\//, '')) }))
 }
 
+/** B-H5 坏种子播种器（2026-09-23 补实现）：向 ws/fix-seed/ 写确定性坏 Python 项目。
+ * 两阶段失败设计：语法错误（import 即炸）+ 断言错（语法修好后仍红）→ 必然触发
+ * 「步骤失败 → 引擎自动诊断重试（step_retrying）→ 修复」，让 L3 步骤级自愈可被观测。 */
+export function seedFixSeed(ws) {
+  const dir = path.join(ws, 'fix-seed')
+  fs.mkdirSync(dir, { recursive: true })
+  const badCalc = `"""简易计算器（坏种子：本文件含语法错误，import 即炸）"""\n` +
+`def add(a, b)\n    return a + b\n\n\n` +
+`def subtract(a, b):\n    return a - b\n\n\n` +
+`def divide(a, b):\n    if b == 0:\n        return None\n    return a / b\n`
+  const badTests = `from calculator import add, subtract, divide\n\n\n` +
+`def test_add():\n    assert add(2, 3) == 6\n\n\n` +
+`def test_subtract():\n    assert subtract(5, 2) == 3\n\n\n` +
+`def test_divide():\n    assert divide(10, 2) == 5\n`
+  fs.writeFileSync(path.join(dir, 'calculator.py'), badCalc)
+  fs.writeFileSync(path.join(dir, 'test_calculator.py'), badTests)
+  fs.writeFileSync(path.join(dir, 'requirements.txt'), 'pytest\n')
+  console.log('  [seed] fix-seed/ 已播种坏种子（语法错 + 断言错）')
+}
+
 /** 运行单用例并采集三维原始指标 */
 export async function runOneCase(caseId, {
   model = 'fast',
@@ -497,6 +527,8 @@ export async function runOneCase(caseId, {
   }
   let createdAgent = null
   try {
+    // needsSeed：启动前播种坏种子（B-H5，2026-09-23 补实现——此前 prompt 声称预置但从未实现）
+    if (spec?.needsSeed) seedFixSeed(ws)
     const ag = agent || (createdAgent = await createEvalAgent({ tag: caseId.toLowerCase(), modelId }))
     rec.agentId = ag.id
     rec.agentIdentifier = ag.identifier
