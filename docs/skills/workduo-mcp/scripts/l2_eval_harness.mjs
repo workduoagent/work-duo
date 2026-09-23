@@ -159,13 +159,14 @@ https://developer.mozilla.org/en-US/docs/Web/HTML/Element/form
     scene: 'A', kind: 'H', title: '全链路Skill+KB+插件',
     dims: ['heal', 'ha', 'perf'],
     artifacts: ['research_rust_async.md'],
-    prompt: `请完成全链路研究任务：
+    prompt: `请完成全链路研究任务（执行顺序有硬性要求，必须按序）：
 1) 创建可复用 Skill identifier=l2-web-research：输入主题→多源抓取→KB 检索背景→清洗→带引用报告
 2) 准备/使用 KB（写入至少 4 篇与 Rust 异步运行时相关背景短文并索引）
-3) 按 Skill 流程产出研究报告 research_rust_async.md：主题「Rust 异步运行时」，正文 [N] 内联引标 + 底部参考
+3) 【顺序硬约束】完成第 2 步后立即用工具写出 research_rust_async.md 初版（工作空间根，含标题、[N] 引标骨架与已掌握的内容）——不要等"研究全部完成"才动笔
+4) 继续补充素材，并把新内容回写进 research_rust_async.md（追加/改写同一个文件，不要另建新文件、不要改名）
 报告必须真实引用 KB 与外部抓取内容。完成后列出文件。
 ⚠️ 最终交付物核对（收尾前逐项核对，缺一不可）：
-- research_rust_async.md（工作空间根，文件名逐字一致；中间产物 KB/抓取HTML 不能替代它）
+- research_rust_async.md（工作空间根，文件名逐字一致；只有骨架不算完成——需含实质内容与参考列表）
 - 收尾规则：先落盘最终报告，再输出文字总结；只写总结不落盘=任务失败。`,
   },
   'A-H4': {
@@ -320,6 +321,7 @@ KB 若不足则先 kb_add_file 补文档再检索。完成后列出文件。`,
 2) 测试用例（可 pytest 或 node:test）
 3) 若平台沙箱可用，把核心计算写成本地插件并 plugin_test
 4) selftest.md 记录自测步骤与结果
+【落盘顺序硬约束】README.md 在写第一行代码前先建骨架（启动方式/接口/依赖占位），开发完成后补全；selftest.md 在跑测试前先建骨架，测试后回填结果——禁止全部代码写完才回头一次性补文档。
 完成后列出文件。
 ⚠️ 最终交付物核对（收尾前逐项核对，缺一不可）：
 - sandbox-svc/README.md（启动方式、接口说明、依赖）

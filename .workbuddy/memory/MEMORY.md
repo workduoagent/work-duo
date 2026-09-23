@@ -1,54 +1,34 @@
-# work-duo 长期约定（单一事实源 · 校准 2026-09-21）
+# work-duo 长期约定（单一事实源 · 校准 2026-09-23）
 
-> 逐日细节留 `2026-*.md`；需求单一事实源=仓库根 `需求与问题跟踪-第三期.md` + `docs/memory-system-design.md`(v2) + `docs/knowledge-rag-design.md`(v1)。前端规范见《前端开发规范.md》。**🔴 红线：`.wd_mem/**` 与 `.workbuddy/memory/**` 绝不进用户可见 UI / present_files。**
+> 逐日细节留 `2026-*.md`；需求跟踪=仓库根《需求与问题跟踪-汇总.md》。**🔴 红线：`.wd_mem/**` 与 `.workbuddy/memory/**` 绝不进用户可见 UI / present_files。**
 
 ## 技术栈 / 构建铁律
-React19+TS+Vite+**Tauri2**；UI=antd v5（经 `@/components/ui` 封装，禁裸 antd）；Sass 只用 `var(--color-*)`；lucide-react；HashRouter；Squad/执行图=`@xyflow/react` v12。**只跑 `node node_modules/typescript/bin/tsc --noEmit`**（bash 缺 coreutils），禁 `vite build`；勿改 `vite.config.ts`。
-- **🔴 Rust 改动必须重启 App 才生效（2026-09-23 用户纠错，此前记载含糊害人）**：用 `npm run tauri` 调试；dev 的"自动重编译"只负责**重新构建产物**，**运行中的进程仍是旧二进制**——改完 `*.rs` 后**必须重启客户端**才能测到新行为。**绝不可告诉用户"改完不用重启"**，也不要在重启前安排依赖新代码的验证（会白跑，浪费用户时间）。判据：改 Rust 后的验证一律排在重启之后。
+- React19+TS+Vite+Tauri2；antd v5 经 `@/components/ui` 封装禁裸用；Sass 只 `var(--color-*)`；lucide-react；HashRouter；执行图=@xyflow/react v12。**只跑 `node node_modules/typescript/bin/tsc --noEmit`**，禁 vite build；勿改 vite.config.ts。前端铁律：UI 令牌只 var(--color-*)；hover 禁位移缩放；表单 autoComplete=off；useNotify 禁静态 message；HITL 决策在 DecisionCenter；fixed 弹层 createPortal。
+- **🔴 Rust 改动必须重启 App 才生效**：dev 自动重编译只重建产物，运行进程仍是旧二进制；改完 *.rs 的验证一律排在重启之后。
+- 依赖：AI 只写 package.json 不装；重型前端库动态 import()+shims.d.ts。
+- SQLite workduo.db；TS 访问层 src/core/mapper/*（禁组件直写 SQL）；DDL 单一事实源 src/assets/sql/init.sql+updater.sql；**DDL 变更必查 mapper 三要素**（列/?/参数数）。Rust 读库：DbInstances→sqlx，key=sqlite:workduo.db。**Agent 配置表=`agent_info`**（模型经 llm_id 外键），Rust 侧只 SELECT，写入唯一路径=前端 agent-mapper.ts；MCP `agent_ui_create/list/update/get/delete` 走前端真实 handler 可自助建 Agent（无人值守必须显式 isActive=true/autoToolExecMode=true/allowSandbox=true/memoryMode/planAutoApproveMode='never'）。
+- cargo 沙箱自验：source ~/.workbuddy/msvc-env.sh && CARGO_TARGET_DIR=target-sb cargo test/check。
 
-## 依赖 / 沙箱 / DDL
-- AI 只写 `package.json` 不自己装；重型前端库动态 `import()`+`shims.d.ts`。
-- SQLite `workduo.db`；TS 访问层 `src/core/mapper/*`（禁组件直写 SQL）；DDL 单一事实源 `src/assets/sql/init.sql`+`updater.sql`（当前 v29）。**DDL 变更必查 mapper 三要素**（列/`?`/参数数对齐）。
-- Rust 读 SQLite：`app.state::<tauri_plugin_sql::DbInstances>`→sqlx(0.8)，key=`sqlite:workduo.db`。
-- **cargo 沙箱自验**：`source ~/.workbuddy/msvc-env.sh && CARGO_TARGET_DIR=target-sb cargo test/check`（target-sb 已 gitignore；与 dev 的 target/ 隔离防锁冲突）。
-
-## 架构 / MCP 自测闭环
-- L0 `src-tauri/src/agent/**`=ReAct 引擎；L2 领域区分唯一通道=Skill+MCP+Plugin+Agent 人设。
-- 命令 `run_agent_task`/`submit_approval_decision`/`cancel_agent_task`；`try_acquire_run_lock()` 多任务隔离已落地（20260919002 ✅，commit 3919c0a，旧「全局互斥」记载作废，锁形态以代码为准）。
-- **内建 MCP 工具数 70**（2026-09-23）：引擎 9 + 模块发现 7 + UI 意图 54（Agent/会话 12 + 插件 8 + KB 15 + 记忆 9 + **技能 10**）。技能模块原缺列表入口，已补 `skill_list`（无入参，返回 `{count,rows}`）——**每个模块都必须有 `*_list` 枚举入口**，否则外部客户端无法起步（只能靠已知 id 硬调 get）。
-- **内建 MCP Server** `src-tauri/src/mcp_server.rs` 监听 `127.0.0.1:18755/mcp`（Streamable HTTP，**69 工具**，覆盖 Agent/插件/KB/记忆/技能 五大模块 + Agent HITL 闭环 tool/plan/recovery 三类挂起）。前端零侵入桥 `src/core/mcpBridge.ts`：`listen('mcp:intent')`→真实 handler→`invoke('mcp_resolve_result')`；**UI 级工具回包统一 `{ok,data}` 信封**（驱动需拆 `data`）；`agent_get_run_trace` 回包有 `{"trace":{…}}` 外包裹层（驱动必须剥）。连接器 `~/.workbuddy/mcp.json`→`workduo-mcp`(`"type":"http"`)。
-- **前端日志透传（2026-09-21 新增）**：Rust 命令 `logging::log_frontend(level,module,message)` 把前端日志以与 tracing 同格式 `[时间][模块][fe][web:0]-LEVEL-内容` 落同一份 `workduo.log.YYYY-MM-DD`（复用 `choose_logs_dir`）。前端 `src/core/logBridge.ts` 暴露 `fe.info/warn/error/debug(module,msg)`，fire-and-forget（失败静默）。已埋点：kbFs / kb-index-hooks / knowledge-mapper / mcpBridge(kb:*)，经 `agent_get_run_logs` 可一并回看前端链路。
-
-## 前端铁律
-UI 令牌只 `var(--color-*)`；hover 禁位移/缩放；表单 `autoComplete="off"`；`useNotify()` 禁静态 message；HITL 四类决策在 DecisionCenter；fixed 弹层 createPortal 到 body。
+## 内建 MCP（70 工具）
+- mcp_server.rs 监听 127.0.0.1:18755/mcp（Streamable HTTP）：引擎 9+发现 7+UI 意图 54（Agent12/插件8/KB15/记忆9/技能10）。**每个模块必须有 *_list 枚举入口**。
+- UI 级工具回包 {ok,data} 信封；agent_get_run_trace 有 {"trace":{…}} 外包裹层（驱动先剥）。**#8 per-run trace 已落地**（with_run_id_scope 并发不串台，get 必传 run_id）。
+- 前端零侵入桥 mcpBridge.ts；连接器 ~/.workbuddy/mcp.json→workduo-mcp(type:http)。前端日志透传 logging::log_frontend→同一 workduo.log.YYYY-MM-DD（logBridge fe.*）。
 
 ## 反复踩坑铁律（必背）
-- Rust 字符串截断一律 `chars()`，`&s[..n]` 仅纯 ASCII。
-- 多行代码注入一律 Edit 工具逐点做，禁 node 脚本批量替换。
-- 关键词子串风险分级必须配误伤回归测试。
-- 消费端必须追到 JSX props 实参。
-- 打字机常速；终态文本一次性下发绕过打字机。
-- 定时器/订阅 cleanup=清除+复位两步。
-- Lance 原语全部幂等处理「表不存在」。
-- 熔断判定必须过客观校验；criteria 空严禁直接判失败重试。
-- **机制正确≠结果正确**，验收必须核对业务产物。
-- **跨链路数据落库引擎终态统一兜底**（persist_round_answer/process_if_empty，仅空时写不覆盖前端），不依赖调用方自觉；日志 clip（带注记）禁入用户可见正文（#20260921001）。
+- Rust 截断一律 chars()；多行注入 Edit 逐点做禁脚本批替换；风险分级必配误伤回归；消费端追到 JSX props；打字机常速、终态一次性下发；定时器 cleanup 两步；Lance 幂等「表不存在」；熔断必过客观校验；**机制正确≠结果正确，验收必须核对业务产物**；跨链路落库引擎终态统一兜底；日志 clip 禁入用户正文。
+- **Glob 工具坑**：绝对路径当 pattern 一律假阴性，必须 path 参数+相对 pattern。
+- get_run_logs：since_ts 用本地空格串（ISO 全剔）；**跨天只读当天文件**（跨零点直读磁盘）；agent-event 洪流捞关键字须 limit:8000。本机 bash 缺部分 coreutils（head/cp/ls 缺时走 node 替代）。
 
-## 进度快照
-- 第三期（记忆与知识统一检索）✅ 收官（cargo 72 passed / tsc CLEAN）。
-- 第四期 K 系列：K1a 引擎/K1b 前端/K2 检索+绑定 ✅；**K3 全部收官（2026-09-21）**：K3-1 命中卡片 ✅（三渲染位）/ K3-2 引用汇总 ✅（反馈改版：正文 `[N]` 内联引标悬浮溯源（Rust cite 编号+remarkKbCites+KbCiteMark）+ 底部按源分组 + 中文思考约束 + 流式滚动 stick-to-bottom + 30ms/字正文打字机）/ K3-3 标签云 ✅（tags 圈定 Rust 内存交集 + 详情页标签云/打标签入口）/ K3-4 上下文成本 ✅（六项优化）。cargo 86 passed / tsc 0E。
-- **Q1 顺带 4 问题 ✅ 全修（2026-09-20）**：#3 切块噪声（`is_noise_chunk` 收口 push_chunk，ⓘ 生效需重建 KB 索引）/ #2 幽灵产物去重（`resolve_artifact_entries`+`physical_key` 物理去重）/ #1 intent 空响应（重试一次+`fallback()` 信号定向降级+planner 知识问答降耗约定）/ #4=K3-4（同上）。
-- 内建 MCP 自测闭环 ✅；**五大模块（插件/KB/记忆/技能/Agent HITL 闭环）UI 级工具已全部接入（69 工具）**，含 KB 标签 add/remove/rename/get、技能中心 9 个 `skill_*` 工具、Agent 审批三件套 + `agent_submit_recovery_decision`（retry/skip/takeover/change-approach）+ `get_status` 透出 `recoveryWaiting`/`pending{kind:tool|plan|recovery}`；前端日志透传 ✅。
-- **E2E 审计收官（2026-09-22，100/100 满分，基线 45 分）**：① P-04 kb_search tags 语义错位修复（kb_scope 收窄+结构化诊断+tags-as-kb 捷径，R1-R5 真机 5/5）；② #1 意图回归 = **KB 事实问答走 SIMPLE_CHAT 快路径携带 native__kb_search**（撤旧「强制转 COMPOSITE」块，有界 2 轮检索→综合，跳过规划；分类器补 KB 规则）；③ #4 孤儿轮次启动清扫 / #5 push_event 判据 type / #6 trace 包裹层描述；④ `planAutoApproveMode` 语义 = always 最严格门禁 / never 全自动（无人值守用 never+autoToolExecMode）；⑤ 今日共 11 commit（ad1a6ed…eed59a9）+ 测试资产清理 45 项（KB×11/Agent×21/插件×10/磁盘 workspace×3，保留 wd_design 与 approval-loop-agent）。**标准驱动已收编 `docs/skills/workduo-mcp/scripts/`**：agent_task_driver（库）/agent_e2e_audit（评分审计）/agent_intent_probe（意图探针，exit 0=PASS），回归两命令即可。唯一遗留：#8 trace per-run 缓冲（emit 缺 run 上下文，**未实现**——events.rs 仍为全局单缓冲 `TRACE_EVENTS/THINKING/REPLY` + `reset_trace()` 清空，并行多 Agent 仍会串台）；**跨客户端同步**：2026-09-22 核查发现三处曾漂移（docs=10 / ~/.workbuddy=7 / .mimocode=9，SKILL.md 工具数 69/65/68 三版不一），已按 docs 为源重对齐为三处各 12 文件逐字节一致；**站立待办**：20260919001 小分队打磨 🔲。
+## L2 生态测评（2026-09-23 收口，外部执行方执行）
+- 规模：34 用例/8 故障/12 并发组；证据 `docs/eval-results/2026-09-23/`（60 文件：scorecard/findings/env/各 JSON）；复测驱动 `l2_eval_harness.mjs`（已入 scripts/）。改进指导意见=同目录《改进指导意见.md》（P0→P1→P2）。
+- 结论：**三支柱地基好**（无永久挂死/并发不崩/锁放/可清）。卡点：①P0-1 **600s run 预算杀 12/34 用例**（多文件/多源/并发≥2 必撞，A-M2 串行已 473s）②P0-2 失败后 reply 空（emit_task_error 不写 trace.reply 不扫 workspace，events.rs:473）③P1-1 xlsx 稳定缺口（native 无 write_xlsx，A-M2 产物 0%；png 靠运气）④P1-2 取消无 cancelled 三态（registry 只 timed_out?error:done，commands.rs:330）+ submit_* 状态束回收后 Err 而非结构化 no_pending（commands.rs:642，F-4 实证）。
+- **评审修正（8/8 代码锚点已核实）**：a) 分层预算必须>调用级 180s——SIMPLE_CHAT 120s 层级倒挂，建议≥300s；b) 软超时复用 cancel_flag 两阶段（tokio timeout 到点硬 drop 内层 future，「等收尾≤30s」须到点前置位实现；reply/文件表回写只能在外层超时分支做）；c) 超时分支补写 rec.error=error_code；d) finalize 文件表过滤 .wd_mem/。
+- 执行进度：**Rust 批次已落地（2026-09-23 13:5x，target-sb cargo check 0E）**——P0-1（DEFAULT_RUN_MAX_SECS 600→1800 + `RUN_SOFT_WINDOW=30s` 两阶段软超时 `spawn_budget_watchdog`，watchdog 用完即 abort 防跨任务泄漏；**intent 分级未做**——意图在 run_task 内部才分类、包装层拿不到，SIMPLE_CHAT 由调用级超时兜底）+ P0-2（`events::finalize_run_summary` 写 reply+文件表，过滤 .wd_mem/；rec.error 补 `run_budget_exhausted`/`cancelled_by_user`）+ P1-2（`AgentTaskState.cancel_requested` 三态 registry done/error/cancelled + 6 处 submit_* 状态束回收→Ok(false) no_pending）；P1-1 `plugin.xlsx_writer/chart_png.template.py` + SKILL 流程2.1 产物契约已落且同步客户端（**18 文件一致**）。**待用户重启后** l2_eval_harness 回归 12 个 600s 用例+F-1/F-4（通过线：done≥9/12、reply 非空 100%、cancelled 100%、A-M2 xlsx+png 3/3）。
+- 可用 chat 模型：DeepSeek-V4.1-Flash（主力）/GLM-5.3-Flash/MiniMax-M3；gpt-5.6-luna 嫌疑不用；Qwen3.6 已移除。
 
-## 待办 / 长期约定
-- **🔴 筑基战略（2026-09-22 用户定调）**：当前处于**筑基阶段**，资源（人力/物力）有限，先打牢单 Agent 再追 Codex 类专业工具。**地基 = 单 Agent 一次运行「可控 / 可观测 / 可兜底」**，拆为三根支柱：① 终态铁律（任何运行有限时内到终态，不挂死/不丢锁/不残留孤儿）；② 工具契约（参数严格校验 + 结构化错误返回绝不停默空 + 执行限时）；③ 观测闭环（trace+日志可完整还原，含 #8 per-run 缓冲）。**打牢方式**：不铺广度、堆异常路径深度覆盖，循环 = 异构任务集反复跑 → 暴露 bug 归柱 → 修代码 + 必加回归断言 → 优先填缺口最多的柱；一次只打一个缺口不并行铺线。**多 Agent（小分队）= 单 Agent 能力的组合运用**：设计/接口可保留，但验收与打磨**推迟到三根支柱全绿之后**（失败模式是单 Agent 超集）；不限定时间暂停它，是让它等地基。对标只用其"共同地基"（终态/契约/观测），不追 SWE-bench 分数；差异只在各产品往上叠的关注点（Codex=自愈、Claude Code=编辑安全、WorkBuddy=工具生态）。
-- 20260919002 单 Agent 多任务隔离 ✅（2026-09-21，3919c0a）；20260919001 小分队打磨 🔲（筑基期内推迟验收）。
-- **🔴 超时阈值铁律（2026-09-22 实测确立）**：判据一律用「**无产出静默时长**」，**绝不用总耗时**。实测同一复合任务：DeepSeek-V4.1-Flash **40.2s**（最长静默 6.7s）/ Qwen3.6 **240.5s**（规划等 75s、单调用静默 105s），两模型均 done 且产物落盘 → **COMPOSITE 路径健康**，当年「3 run 永久挂死」高度疑似 gpt-5.6-luna 模型侧调用不返回（该模型与 GLM 均已下线），引擎无缺陷证据。故任何「总墙钟 30s 终态」类阈值都会**误杀全部正常复合任务**；正确三层 = 单次 LLM 调用级超时（建议 180s，实测最坏静默 105s）→ 降级/重试 + 失败判定后收尾 ≤30s + 总墙钟 10min 兜底。**延迟因模型而异（同任务 15 倍差），非固定 3 分钟；慢 ≠ 死。** 回归驱动 `docs/skills/workduo-mcp/scripts/composite_hang_probe.mjs`（exit 0=完成有产物/2=超时挂死）；`PROBE_WAIT_MS` 不得 <300s。
-- KB 删除级联清理向量段已修（f78701b，防 Lance 孤儿残留）；`agent_run_task` 的 workspace 字段已标注「=绑定工作空间绝对路径，不传则自由对话」（e98df0f）。
-- **🔴 Skill 同步铁律**：仓库 `docs/skills/<name>/SKILL.md` 为单一事实源；客户端必须同步一致。**workduo-mcp 客户端1 已对齐 ✅（2026-09-22 实测曾漂移 docs=10/~.workbuddy=7 且 SKILL.md 计数 69/65 两版不一；已按 docs 为源重同步 `~/.workbuddy`，现两端各 10 文件逐字节一致：SKILL.md + scripts{README + agent_task_driver/agent_e2e_audit/agent_intent_probe + kb_driver/kb_tag_driver/memory_driver/plugin.bun/plugin.python}；`.mimocode` 由用户删除，不纳入）**。
-- **🔴 Skill 内容红线（2026-09-21 确立）**：SKILL.md **不得出现任何第三方产品目录路径**（如 `~/.workbuddy/...`、特定 IDE/客户端路径、安装步骤指向某产品配置目录）；需引用资源只指向 **skill 内部相对路径**（如 `scripts/`）。该 skill 定位 = **给外部编程工具（任意支持 MCP 的客户端）对接 WorkDuo 内建 MCP Server 的集成指南**，不叫「自测/selftest/测试」，命名即 `workduo-mcp`（无 selftest 字眼）。
-- **用户长期约定（2026-09-22 强化）**：测试/使用中发现 MCP/SKILL 封装缺口（缺工具、语义不清、文档缺失、观测不到状态）时，**第一动作是补 `workduo-mcp` 本体**——加/改 MCP 工具（mcp_server.rs）、更新 SKILL.md、把标准驱动沉淀进 `docs/skills/workduo-mcp/scripts/`——**严禁绕过 MCP 自写一次性脚本替代**；驱动脚本只做参数编排，缺口一律回流到 SKILL+MCP 层。SKILL+MCP 拿不到有效信息时第一时间报告做更新/补丁。
-- **`get_run_logs` since_ts 坑**：行首 `[YYYY-MM-DD HH:MM:SS.mmm]` 子串字典序比较；传 ISO(`T`/`Z`) 会被全剔返回 0 行，须传**本地空格分隔**同形串或仅用 `limit`。
-- **🔴 `get_run_logs` 跨天坑（2026-09-23 发现）**：日志按日滚动为 `workduo.log.YYYY-MM-DD`，该工具**只读当天文件**——跨过 midnight 后**昨天的日志完全读不到**（实测 00:0x 查询仅返回 3 行）。排查跨时段/跨零点问题必须直接读磁盘文件，或确保排查窗口不跨天。另：`emit agent-event` 日志量极大（每 ~30ms 一条），默认 `limit:300` 会被洪流淹没，捞特定关键字须 `limit:8000`。
-- **🔴 三层超时兜底已全部落地并有真机证据（2026-09-23 收口）**：① **调用级**——`call_llm` 180s + 等待心跳 30s；`call_llm_stream` 单 chunk 静默 120s（须大于本地大模型 prefill）+ 流式总墙钟 600s；② **收尾** ≤30s（实测取消路径 1016~4051ms ×2 PASS）；③ **run 级总墙钟** 600s（实测 601s 精确触发，强制 `emit_task_error` + 锁释放）。全部 env 可调：`WD_LLM_TIMEOUT_SECS` / `WD_LLM_TICK_SECS` / `WD_LLM_CHUNK_TIMEOUT_SECS` / `WD_LLM_STREAM_TOTAL_SECS` / `WD_RUN_MAX_SECS`（App 启动时读取，改后需重启）。**run 超时后 registry 状态写 `error` 而非 `done`**（`8680269`）。已知待证：流式静默超时是否被 `call_llm_stream` 断流重试吞掉（下次带 `WD_LLM_CHUNK_TIMEOUT_SECS=10` 验证）。
+## 战略 / 长期约定
+- **筑基战略（用户定调）**：先打牢单 Agent（可控/可观测/可兜底三支柱），多 Agent（小分队）=组合运用推迟验收；对标只用共同地基不追 SWE-bench。
+- **Harness 位置=L2 边界防御**：多样化边界用例真机实测；自测一律走 workduo-mcp，缺口回流 SKILL+MCP 层，**严禁绕过 MCP 写一次性脚本**。孤儿清扫仅启动触发，拟补 agent_sweep_orphan_rounds（Rust+重启，待准）。
+- **超时阈值铁律**：判据用「无产出静默时长」绝不用总耗时；慢≠死（同任务模型间 15 倍差）；三层=调用级 180s+收尾 30s+run 级兜底；env 可调 WD_LLM_TIMEOUT_SECS/WD_LLM_CHUNK_TIMEOUT_SECS/WD_LLM_STREAM_TOTAL_SECS/WD_RUN_MAX_SECS，改后重启。
+- **Skill 同步铁律**：docs/skills/<name>/SKILL.md 单一事实源，客户端 ~/.workbuddy 同步一致；SKILL 禁第三方产品路径，资源只指 skill 内相对路径；定位=外部客户端对接指南，不叫 selftest。**待同步：docs 16 文件（新增 tool_contract_probe/l2_eval_harness）尚未全量同步客户端。**
+- 历史：第三期记忆知识检索 ✅；K 系列 ✅；E2E 审计 100/100（2026-09-22）；20260919002 多任务隔离 ✅；20260919001 小分队打磨推迟。
