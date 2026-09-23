@@ -339,22 +339,18 @@ KB 若不足则先 kb_add_file 补文档再检索。完成后列出文件。`,
   'B-H5': {
     scene: 'B', kind: 'H', title: '坏种子仓库修复（自愈）',
     dims: ['heal', 'ha'],
-    artifacts: ['fix-seed/README.md', 'fix-seed/FIXLOG.md'],
-    // needsSeed：harness 启动 run 前向 fix-seed/ 播种确定性坏种子（此前"将由 harness 预置"
-    // 只是 prompt 说法、从无实现——B-H5 实际一直是白手起家）。坏种子设计为**两阶段失败**：
-    // calculator.py 缺冒号（SyntaxError → import 即炸，第一轮全红）+ test_add 断言故意错
-    // （语法修好后仍红一轮）——正好触发"步骤失败 → 自动诊断重试（step_retrying）→ 修复"链路，
-    // 使 L3 步骤级自愈可被 trace 机制级观测（autoRetryEvents>0）。
-    needsSeed: true,
-    prompt: `工作空间子目录 fix-seed/ 有一个坏掉的 Python/pytest 计算器项目（calculator.py 含语法错误，test_calculator.py 含断言失败，测试全红）。请：
-1) 运行/检查测试，定位语法错误、断言失败、缺依赖
-2) 【技术栈锁定】修复必须针对原文件 calculator.py 与 test_calculator.py 本身——禁止更换语言/框架、禁止删除原文件另起炉灶（上一轮换成 JS 重写被判不合格）
-3) 修复到 pytest 全绿（或写明仍红原因）
-4) FIXLOG.md：问题清单 + 修复 diff 摘要 + 最终测试结果；【落盘时机】开修前先建 FIXLOG.md 骨架，修完回填
-完成后列出文件。
-⚠️ 最终交付物核对（收尾前逐项核对，缺一不可）：
-- fix-seed/FIXLOG.md / fix-seed/README.md（相对 fix-seed/，文件名逐字一致；原 calculator.py / test_calculator.py 必须仍在且已修复）
-- 收尾规则：先落盘全部产物，再输出文字总结。`,
+    // C1 泛化（2026-09-23）：prompt/artifacts/坏种子全部迁入 seeds/py-syntax-calculator/ 包；
+    // needsSeed 布尔升级为 seedId 引用。两阶段失败设计（语法错+断言错）见种子包内文件注释。
+    seedId: 'py-syntax-calculator',
+  },
+  // ===== 场景 C：Batch C SWE-bench-lite 种子修复题（C1 泛化验证） =====
+  'C-H1': {
+    scene: 'C', kind: 'H', title: '跨文件接口错位（种子修复）',
+    dims: ['heal', 'ha'],
+    // C1 验证用例：prompt/artifacts 全部来自种子包 manifest（seed.json），CASES 只留编排属性。
+    // 跨文件缺陷：report.py import 名错位（ImportError）+ stock.py 单位契约未实现（数值断言失败）
+    // ——必须同时修两个文件才能绿，验证播种器对「跨文件」级的支持。
+    seedId: 'py-cross-file-inventory',
   },
   'B-H6': {
     scene: 'B', kind: 'H', title: '数据管道+基准',
@@ -479,24 +475,26 @@ export function checkArtifacts(ws, artifacts = []) {
   return artifacts.map((a) => ({ artifact: a, ok: have.has(a) || have.has(a.replace(/^\.\//, '')) }))
 }
 
-/** B-H5 坏种子播种器（2026-09-23 补实现）：向 ws/fix-seed/ 写确定性坏 Python 项目。
- * 两阶段失败设计：语法错误（import 即炸）+ 断言错（语法修好后仍红）→ 必然触发
- * 「步骤失败 → 引擎自动诊断重试（step_retrying）→ 修复」，让 L3 步骤级自愈可被观测。 */
-export function seedFixSeed(ws) {
-  const dir = path.join(ws, 'fix-seed')
-  fs.mkdirSync(dir, { recursive: true })
-  const badCalc = `"""简易计算器（坏种子：本文件含语法错误，import 即炸）"""\n` +
-`def add(a, b)\n    return a + b\n\n\n` +
-`def subtract(a, b):\n    return a - b\n\n\n` +
-`def divide(a, b):\n    if b == 0:\n        return None\n    return a / b\n`
-  const badTests = `from calculator import add, subtract, divide\n\n\n` +
-`def test_add():\n    assert add(2, 3) == 6\n\n\n` +
-`def test_subtract():\n    assert subtract(5, 2) == 3\n\n\n` +
-`def test_divide():\n    assert divide(10, 2) == 5\n`
-  fs.writeFileSync(path.join(dir, 'calculator.py'), badCalc)
-  fs.writeFileSync(path.join(dir, 'test_calculator.py'), badTests)
-  fs.writeFileSync(path.join(dir, 'requirements.txt'), 'pytest\n')
-  console.log('  [seed] fix-seed/ 已播种坏种子（语法错 + 断言错）')
+// ---------- C1 坏种子包体系（2026-09-23）：任意 repo 坏种子泛化 ----------
+// seeds/<包名>/ = seed.json（manifest：id/tier/targetDir/prompt/artifacts）+ 坏文件本体。
+// 三级覆盖：syntax（语法错，import 即炸）/ logic（语法对逻辑错，最隐蔽）/ cross-file（缺陷横跨两文件）。
+import { fileURLToPath } from 'node:url'
+const SEEDS_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'seeds')
+
+/** 按 seedId 把种子包播种到 ws/<targetDir>/：清空重建 → 逐文件复制（seed.json 除外）。
+ * 返回 manifest（含 prompt/artifacts，供 runOneCase 覆盖 CASES 缺省）。 */
+export function seedRepo(ws, seedId) {
+  const pkgDir = path.join(SEEDS_DIR, seedId)
+  const manifest = JSON.parse(fs.readFileSync(path.join(pkgDir, 'seed.json'), 'utf8'))
+  const target = path.join(ws, manifest.targetDir)
+  fs.rmSync(target, { recursive: true, force: true })
+  fs.mkdirSync(target, { recursive: true })
+  for (const name of fs.readdirSync(pkgDir)) {
+    if (name === 'seed.json') continue
+    fs.copyFileSync(path.join(pkgDir, name), path.join(target, name))
+  }
+  console.log(`  [seed] ${manifest.id}(${manifest.tier}) → ${target}`)
+  return manifest
 }
 
 /** 运行单用例并采集三维原始指标 */
@@ -526,20 +524,22 @@ export async function runOneCase(caseId, {
     files: [],
   }
   let createdAgent = null
+  let seedManifest = null
   try {
-    // needsSeed：启动前播种坏种子（B-H5，2026-09-23 补实现——此前 prompt 声称预置但从未实现）
-    if (spec?.needsSeed) seedFixSeed(ws)
+    // C1 泛化（2026-09-23）：seedId → 种子包播种；prompt/artifacts 由 seed.json 覆盖 CASES 缺省。
+    if (spec?.seedId) seedManifest = seedRepo(ws, spec.seedId)
     const ag = agent || (createdAgent = await createEvalAgent({ tag: caseId.toLowerCase(), modelId }))
     rec.agentId = ag.id
     rec.agentIdentifier = ag.identifier
     rec.modelName = ag.modelName
     const sid = sessionId || await mkSession(ag.identifier, caseId)
     rec.sessionId = sid
-    const p = prompt || spec.prompt
+    const arts = seedManifest?.artifacts || spec?.artifacts || []
+    const p = prompt || seedManifest?.prompt || spec.prompt
     console.log(`\n>>>> ${caseId}${slot ? '#' + slot : ''} model=${ag.modelName} ws=${ws}`)
     const t0 = Date.now()
-    // P2-2（2026-09-23）：CASES.artifacts 透传 expectedArtifacts → 引擎注入系统提示做收尾核对。
-    const { runId, status } = await startRun(ag.id, p, sid, { workspace: ws, expectedArtifacts: spec?.artifacts || [], ...extraRun }, { maxMs })
+    // P2-2（2026-09-23）：期望产物透传 expectedArtifacts → 引擎注入系统提示做收尾核对。
+    const { runId, status } = await startRun(ag.id, p, sid, { workspace: ws, expectedArtifacts: arts, ...extraRun }, { maxMs })
     const t1 = Date.now()
     rec.runId = runId
     rec.status = status
@@ -564,9 +564,9 @@ export async function runOneCase(caseId, {
     } catch (e) { rec.traceError = e.message.slice(0, 120) }
 
     rec.files = filesIn(ws)
-    rec.artifactCheck = checkArtifacts(ws, spec?.artifacts || [])
+    rec.artifactCheck = checkArtifacts(ws, arts)
     const okArts = rec.artifactCheck.filter((x) => x.ok).length
-    rec.artifactScore = (spec?.artifacts || []).length ? okArts / spec.artifacts.length : (rec.files.length > 0 ? 1 : 0)
+    rec.artifactScore = arts.length ? okArts / arts.length : (rec.files.length > 0 ? 1 : 0)
     rec.metrics.ha.terminal = ['done', 'error', 'cancelled', 'canceled'].includes(status)
     rec.metrics.ha.status = status
     rec.metrics.heal.replyLen = rec.replyLen
