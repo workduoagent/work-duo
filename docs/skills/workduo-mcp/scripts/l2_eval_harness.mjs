@@ -353,6 +353,26 @@ KB 若不足则先 kb_add_file 补文档再检索。完成后列出文件。`,
     // ——必须同时修两个文件才能绿，验证播种器对「跨文件」级的支持。
     seedId: 'py-cross-file-inventory',
   },
+  'C-M1': {
+    scene: 'C', kind: 'M', title: '语法错误修复（配置加载器）',
+    dims: ['heal'],
+    seedId: 'py-syntax-config',
+  },
+  'C-M2': {
+    scene: 'C', kind: 'M', title: '逻辑缺陷修复（购物车合计与满减）',
+    dims: ['heal'],
+    seedId: 'py-logic-cart',
+  },
+  'C-H2': {
+    scene: 'C', kind: 'H', title: '跨文件签名契约修复（签发/校验两侧）',
+    dims: ['heal', 'ha'],
+    seedId: 'py-cross-auth',
+  },
+  'C-H3': {
+    scene: 'C', kind: 'H', title: '跨文件常量漂移修复（汇率换算）',
+    dims: ['heal', 'ha'],
+    seedId: 'py-cross-format',
+  },
   'B-H6': {
     scene: 'B', kind: 'H', title: '数据管道+基准',
     dims: ['perf', 'ha'],
@@ -520,6 +540,52 @@ export function judgeTests(dir) {
   }
 }
 
+// ---------- Batch C 判分三段式（2026-09-23）：agent 沙箱内 node spawn 受限（EBUSY）时，
+// 执行段交外层 bash：judge-dump 生成判分命令 → 外层跑 pytest 落盘 → judge-merge 回填 JSON。
+export function judgeDump(idsCsv) {
+  ensureDirs()
+  const ids = idsCsv.split(',').map((s) => s.trim()).filter(Boolean)
+  const plan = []
+  for (const id of ids) {
+    const spec = CASES[id]
+    if (!spec?.seedId) { console.log(`跳过 ${id}（非种子用例）`); continue }
+    const manifest = JSON.parse(fs.readFileSync(path.join(SEEDS_DIR, spec.seedId, 'seed.json'), 'utf8'))
+    const wsDir = path.join(wsOf(id, 0), manifest.targetDir).replace(/\\/g, '/')
+    const outFile = path.join(OUT, 'judge', `${id}.txt`).replace(/\\/g, '/')
+    plan.push({ caseId: id, seedId: spec.seedId, testCmd: manifest.testCmd, wsDir, outFile })
+  }
+  fs.mkdirSync(path.join(OUT, 'judge'), { recursive: true })
+  fs.writeFileSync(path.join(OUT, 'judge', 'plan.json'), JSON.stringify(plan, null, 2))
+  console.log('-- 外层 bash 逐条执行：')
+  for (const p of plan) {
+    const args = p.testCmd.replace(/^python\s*/, '')
+    console.log(`cd "${p.wsDir}" && "${JUDGE_PY}" ${args} > "${p.outFile}" 2>&1; echo "${p.caseId} exit=$?"`)
+  }
+  console.log(`-- 完成后执行: node l2_eval_harness.mjs judge-merge && node l2_eval_harness.mjs score`)
+  return plan
+}
+
+export function judgeMerge() {
+  const jdir = path.join(OUT, 'judge')
+  const plan = JSON.parse(fs.readFileSync(path.join(jdir, 'plan.json'), 'utf8'))
+  for (const p of plan) {
+    if (!fs.existsSync(p.outFile)) { console.log(`跳过 ${p.caseId}（无判分输出）`); continue }
+    const out = fs.readFileSync(p.outFile, 'utf8')
+    const passed = +(out.match(/(\d+) passed/)?.[1] || 0)
+    const failed = +(out.match(/(\d+) failed/)?.[1] || 0)
+    const errors = +(out.match(/(\d+) error/)?.[1] || 0)
+    const noTests = out.includes('no tests ran')
+    const resolved = !noTests && failed === 0 && errors === 0
+    const caseFile = resultPath(p.caseId, 0)
+    const j = JSON.parse(fs.readFileSync(caseFile, 'utf8'))
+    j.judge = { cmd: p.testCmd, passed, failed, errors, resolved, execBy: 'outer-bash' }
+    j.resolved = resolved
+    fs.writeFileSync(caseFile, JSON.stringify(j, null, 2))
+    console.log(`[merge] ${p.caseId}: resolved=${resolved} passed=${passed} failed=${failed} errors=${errors}`)
+  }
+  console.log(`-- 重新出评分卡: node l2_eval_harness.mjs score`)
+}
+
 /** 运行单用例并采集三维原始指标 */
 export async function runOneCase(caseId, {
   model = 'fast',
@@ -555,6 +621,8 @@ export async function runOneCase(caseId, {
     rec.agentId = ag.id
     rec.agentIdentifier = ag.identifier
     rec.modelName = ag.modelName
+    rec.seedTier = seedManifest?.tier || null
+    rec.seedId = seedManifest?.id || spec?.seedId || null
     const sid = sessionId || await mkSession(ag.identifier, caseId)
     rec.sessionId = sid
     const arts = seedManifest?.artifacts || spec?.artifacts || []
@@ -969,6 +1037,25 @@ export function buildScorecard() {
     md.push(`| ${k} | ${arr.length} | ${pct(arr.filter((c) => c.status === 'done').length, arr.length)}% | ${med(arr.map((c) => c.durationMs).filter(Boolean))} |`)
   }
   md.push(``)
+  // Batch C（2026-09-23）：种子修复用例的客观判分（resolved%），与 agent 自述解耦
+  const judged = cases.filter((c) => c.resolved === true || c.resolved === false)
+  if (judged.length) {
+    md.push(`## Batch C 种子修复 · 客观判分`)
+    md.push(``)
+    md.push(`| 层级 | n | resolved% |`)
+    md.push(`|---|---|---|`)
+    for (const [k, arr] of Object.entries(by(judged, (c) => c.seedTier || '?'))) {
+      md.push(`| ${k} | ${arr.length} | ${pct(arr.filter((c) => c.resolved === true).length, arr.length)}% |`)
+    }
+    md.push(`| **合计** | ${judged.length} | **${pct(judged.filter((c) => c.resolved === true).length, judged.length)}%** |`)
+    md.push(``)
+    md.push(`| ID | seed | tier | resolved | passed/failed/errors |`)
+    md.push(`|---|---|---|---|---|`)
+    for (const c of judged) {
+      md.push(`| ${c.caseId}${c.slot ? '#' + c.slot : ''} | ${c.seedId || ''} | ${c.seedTier || ''} | ${c.resolved} | ${c.judge ? `${c.judge.passed}/${c.judge.failed}/${c.judge.errors}` : '-'} |`)
+    }
+    md.push(``)
+  }
   md.push(`## 用例明细`)
   md.push(``)
   md.push(`| ID | 标题 | status | ms | 产物 | 备注 |`)
@@ -1008,6 +1095,8 @@ async function main() {
   if (cmd === 'env') return checkEnv()
   if (cmd === 'score') return buildScorecard()
   if (cmd === 'inject') return injectFault(get('fault', 'F-1'))
+  if (cmd === 'judge-dump') return judgeDump(get('cases', ''))
+  if (cmd === 'judge-merge') return judgeMerge()
   if (cmd === 'lock') return checkLockRelease()
   if (cmd === 'run') {
     const phase = get('phase')
@@ -1016,6 +1105,7 @@ async function main() {
     const conc = parseInt(get('concurrency', '1'), 10)
     if (!ids.length && phase === '1') ids = ['A-M1', 'A-M2', 'A-M3', 'A-M4', 'A-M5', 'A-M6', 'A-M7', 'A-M8', 'B-M1', 'B-M2', 'B-M3', 'B-M4', 'B-M5', 'B-M6']
     if (!ids.length && phase === '2') ids = ['A-H1', 'A-H2', 'A-H3', 'A-H5', 'A-H6', 'A-H7', 'B-H1', 'B-H2', 'B-H4', 'B-H5', 'B-H6', 'B-H7']
+    if (!ids.length && phase === '3') ids = ['C-M1', 'C-M2', 'C-H1', 'C-H2', 'C-H3']
     if (!ids.length && phase === '0') ids = ['A-M1']
     if (conc > 1) {
       return runConcurrent(ids.map((id, i) => ({ caseId: id, model, slot: i })))

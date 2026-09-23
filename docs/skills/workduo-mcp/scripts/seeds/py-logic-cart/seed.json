@@ -1,0 +1,10 @@
+{
+  "id": "py-logic-cart",
+  "tier": "logic",
+  "lang": "python",
+  "targetDir": "cart-proj",
+  "title": "逻辑缺陷修复（购物车合计与满减）",
+  "testCmd": "python -m pytest test_cart.py -v",
+  "prompt": "工作空间子目录 cart-proj/ 的购物车测试全红，但 import 不炸——问题在**逻辑**：\n1) 跑 pytest 定位（合计漏乘单价、满减边界写错两处）\n2) 【技术栈锁定】只修 cart.py，禁止改测试、禁止换语言重写\n3) 修到 pytest 全绿\n4) SELFTEST.md：问题清单 + 修复说明 + 最终 pytest 摘要；开修前先建骨架，修完回填\n完成后列出文件。\n⚠️ 最终交付物核对（缺一不可）：cart-proj/SELFTEST.md（逐字一致；cart.py 仍在且已修复）。",
+  "artifacts": ["cart-proj/SELFTEST.md"]
+}
