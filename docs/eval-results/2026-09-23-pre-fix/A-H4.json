@@ -1,0 +1,124 @@
+{
+  "caseId": "A-H4",
+  "slot": 0,
+  "scene": "A",
+  "kind": "H",
+  "title": "单Agent排队多任务（锁语义）",
+  "model": "96af449e-dfc0-48ec-b077-aa9f02b43d64",
+  "workspace": "E:/Codes/ABC/work-duo/eval-workspace/eval-A-H4",
+  "startedAt": "2026-09-23T04:28:07.391Z",
+  "status": "done",
+  "runId": "run-1790137687422-33",
+  "durationMs": 132791,
+  "artifacts": [],
+  "artifactCheck": [
+    {
+      "artifact": "q1.csv",
+      "ok": true
+    },
+    {
+      "artifact": "q2.csv",
+      "ok": true
+    },
+    {
+      "artifact": "q3.csv",
+      "ok": true
+    },
+    {
+      "artifact": "q4.csv",
+      "ok": true
+    }
+  ],
+  "traceCounts": {
+    "events": 78,
+    "reply_chars": 725,
+    "thinking_chars": 2612
+  },
+  "replyLen": 725,
+  "kbHits": 0,
+  "recoveries": 0,
+  "error": null,
+  "metrics": {
+    "ha": {
+      "terminal": true,
+      "status": "done"
+    },
+    "perf": {
+      "durationMs": 132791
+    },
+    "heal": {
+      "replyLen": 725
+    }
+  },
+  "files": [
+    {
+      "rel": ".wd_mem/.gitignore",
+      "size": 310,
+      "mtime": 1790137687425.1384
+    },
+    {
+      "rel": ".wd_mem/graph/edges.jsonl",
+      "size": 2445,
+      "mtime": 1790137815308.2727
+    },
+    {
+      "rel": ".wd_mem/graph/nodes.jsonl",
+      "size": 38503,
+      "mtime": 1790137815307.1797
+    },
+    {
+      "rel": ".wd_mem/graph/sessions/897574e3-6360-4dd9-91e4-ad158e82fa28.json",
+      "size": 15803,
+      "mtime": 1790137815310.398
+    },
+    {
+      "rel": ".wd_mem/graph/_index.json",
+      "size": 3024,
+      "mtime": 1790137815308.2727
+    },
+    {
+      "rel": ".wd_mem/knowledge/MEMORY.md",
+      "size": 133,
+      "mtime": 1790137687425.1384
+    },
+    {
+      "rel": ".wd_mem/README.md",
+      "size": 1378,
+      "mtime": 1790137687425.1384
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/verify_outputs.py",
+      "size": 410,
+      "mtime": 1790137811114.6367
+    },
+    {
+      "rel": "q1.csv",
+      "size": 128,
+      "mtime": 1790137730387.2893
+    },
+    {
+      "rel": "q2.csv",
+      "size": 126,
+      "mtime": 1790137748586.6921
+    },
+    {
+      "rel": "q3.csv",
+      "size": 47,
+      "mtime": 1790137759389.96
+    },
+    {
+      "rel": "q4.csv",
+      "size": 245,
+      "mtime": 1790137779139.1897
+    }
+  ],
+  "agentId": "9224a967-504c-4e62-a96d-7a1f3ddf3477",
+  "agentIdentifier": "l2-a-h4-mudlrbs3",
+  "modelName": "AG:DeepSeek-V4.1-Flash",
+  "sessionId": "897574e3-6360-4dd9-91e4-ad158e82fa28",
+  "reply": "已生成/更新 q1.csv\n已成功生成并确认：\n\n`E:\\Codes\\ABC\\work-duo\\eval-workspace\\eval-A-H4\\q1.csv`\n\n包含表头 `n,square`、20 条数据记录，并包含 `20,400`。\n\n已生成/更新 q2.csv\n已成功生成斐波那契序列文件，共 20 条数据记录：\n\n`E:\\Codes\\ABC\\work-duo\\eval-workspace\\eval-A-H4\\q2.csv`\n\n已生成/更新 q3.csv\n已成功生成 q3.csv，共 16 行（含表头）和 15 条素数记录。\n\n完整路径：`E:\\Codes\\ABC\\work-duo\\eval-workspace\\eval-A-H4\\q3.csv`\n\n已生成/更新 q4.csv\n已成功生成并确认文件：\n\n`E:\\Codes\\ABC\\work-duo\\eval-workspace\\eval-A-H4\\q4.csv`\n\n包含表头 `fahrenheit,celsius` 及 11 条华氏温度记录（0 至 100，步长为 10）。\n\n已完成核对，4 个输出文件均已存在：\n\n- `E:\\Codes\\ABC\\work-duo\\eval-workspace\\eval-A-H4\\q1.csv`\n- `E:\\Codes\\ABC\\work-duo\\eval-workspace\\eval-A-H4\\q2.csv`\n- `E:\\Codes\\ABC\\work-duo\\eval-workspace\\eval-A-H4\\q3.csv`\n- `E:\\Codes\\ABC\\work-duo\\eval-workspace\\eval-A-H4\\q4.csv`",
+  "thinkingLen": 2612,
+  "eventCount": 78,
+  "kbCalls": 0,
+  "artifactScore": 1
+}

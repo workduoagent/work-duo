@@ -1,0 +1,131 @@
+{
+  "caseId": "A-H6",
+  "slot": 1,
+  "scene": "A",
+  "kind": "H",
+  "title": "插件故障recovery闭环",
+  "model": "96af449e-dfc0-48ec-b077-aa9f02b43d64",
+  "workspace": "E:/Codes/ABC/work-duo/eval-workspace/eval-A-H6-1",
+  "startedAt": "2026-09-23T03:21:40.596Z",
+  "status": "error",
+  "runId": "run-1790133700647-22",
+  "durationMs": 602652,
+  "artifacts": [],
+  "artifactCheck": [
+    {
+      "artifact": "heal_report.md",
+      "ok": false
+    },
+    {
+      "artifact": "final_data.json",
+      "ok": true
+    }
+  ],
+  "traceCounts": {
+    "events": 129,
+    "reply_chars": 0,
+    "thinking_chars": 3797
+  },
+  "replyLen": 0,
+  "kbHits": 0,
+  "recoveries": 0,
+  "error": null,
+  "metrics": {
+    "ha": {
+      "terminal": true,
+      "status": "error"
+    },
+    "perf": {
+      "durationMs": 602652
+    },
+    "heal": {
+      "replyLen": 0
+    }
+  },
+  "files": [
+    {
+      "rel": ".wd_mem/.gitignore",
+      "size": 310,
+      "mtime": 1790133700649.4338
+    },
+    {
+      "rel": ".wd_mem/graph/edges.jsonl",
+      "size": 645,
+      "mtime": 1790133773129.547
+    },
+    {
+      "rel": ".wd_mem/graph/nodes.jsonl",
+      "size": 37163,
+      "mtime": 1790134019758.349
+    },
+    {
+      "rel": ".wd_mem/graph/_index.json",
+      "size": 1111,
+      "mtime": 1790134019758.349
+    },
+    {
+      "rel": ".wd_mem/knowledge/MEMORY.md",
+      "size": 133,
+      "mtime": 1790133700649.4338
+    },
+    {
+      "rel": ".wd_mem/README.md",
+      "size": 1378,
+      "mtime": 1790133700649.4338
+    },
+    {
+      "rel": ".wd_mem/reexecute_step.py",
+      "size": 2327,
+      "mtime": 1790134010543.5808
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/injected_reexecute_step.py",
+      "size": 2391,
+      "mtime": 1790134013688.0125
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/injected_self_heal_etl.py",
+      "size": 5606,
+      "mtime": 1790133906575.7212
+    },
+    {
+      "rel": "final_data.json",
+      "size": 794,
+      "mtime": 1790134013884.091
+    },
+    {
+      "rel": "plugins/l2-fragile-etl/plugin.json",
+      "size": 156,
+      "mtime": 1790134013875.248
+    },
+    {
+      "rel": "plugins/l2-fragile-etl/plugin.py",
+      "size": 350,
+      "mtime": 1790134013881.2966
+    },
+    {
+      "rel": "plugins/l2-fragile-etl/self_heal_etl.py",
+      "size": 5542,
+      "mtime": 1790133903509.2021
+    },
+    {
+      "rel": "plugins/l2-fragile-etl/__pycache__/plugin.cpython-311.pyc",
+      "size": 708,
+      "mtime": 1790134013882.592
+    },
+    {
+      "rel": "plugins/l2-fragile-etl/__pycache__/self_heal_etl.cpython-311.pyc",
+      "size": 6838,
+      "mtime": 1790134013877.994
+    }
+  ],
+  "agentId": "a6691683-cb1e-4f7d-aa29-c95480863000",
+  "agentIdentifier": "l2-a-h6-mudjdvjr",
+  "modelName": "AG:DeepSeek-V4.1-Flash",
+  "sessionId": "0cb56c1c-de36-4aa4-971e-a3aee380a18c",
+  "reply": "",
+  "thinkingLen": 3797,
+  "eventCount": 129,
+  "kbCalls": 0,
+  "artifactScore": 0.5
+}

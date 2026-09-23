@@ -1,0 +1,112 @@
+{
+  "caseId": "A-M7",
+  "slot": 0,
+  "scene": "A",
+  "kind": "M",
+  "title": "KB标签治理",
+  "model": "96af449e-dfc0-48ec-b077-aa9f02b43d64",
+  "workspace": "E:/Codes/ABC/work-duo/eval-workspace/eval-A-M7",
+  "startedAt": "2026-09-23T02:37:59.715Z",
+  "status": "done",
+  "runId": "run-1790131079782-13",
+  "durationMs": 499964,
+  "artifacts": [],
+  "artifactCheck": [
+    {
+      "artifact": "tag_inventory.md",
+      "ok": false
+    }
+  ],
+  "traceCounts": {
+    "events": 68,
+    "reply_chars": 530,
+    "thinking_chars": 856
+  },
+  "replyLen": 530,
+  "kbHits": 0,
+  "recoveries": 2,
+  "error": null,
+  "metrics": {
+    "ha": {
+      "terminal": true,
+      "status": "done"
+    },
+    "perf": {
+      "durationMs": 499964
+    },
+    "heal": {
+      "replyLen": 530
+    }
+  },
+  "files": [
+    {
+      "rel": ".wd_mem/.gitignore",
+      "size": 310,
+      "mtime": 1790131079784.7422
+    },
+    {
+      "rel": ".wd_mem/graph/edges.jsonl",
+      "size": 1378,
+      "mtime": 1790131573422.272
+    },
+    {
+      "rel": ".wd_mem/graph/nodes.jsonl",
+      "size": 6726,
+      "mtime": 1790131573421.2622
+    },
+    {
+      "rel": ".wd_mem/graph/sessions/5e420705-2fbd-47dc-8bb8-844b46637e76.json",
+      "size": 2766,
+      "mtime": 1790131573423.2737
+    },
+    {
+      "rel": ".wd_mem/graph/_index.json",
+      "size": 2817,
+      "mtime": 1790131573422.272
+    },
+    {
+      "rel": ".wd_mem/knowledge/MEMORY.md",
+      "size": 133,
+      "mtime": 1790131079784.7422
+    },
+    {
+      "rel": ".wd_mem/README.md",
+      "size": 1378,
+      "mtime": 1790131079784.7422
+    },
+    {
+      "rel": "KB/doc-01-onboarding.md",
+      "size": 170,
+      "mtime": 1790131495448.1052
+    },
+    {
+      "rel": "KB/doc-02-api-reference.md",
+      "size": 173,
+      "mtime": 1790131495450.4736
+    },
+    {
+      "rel": "KB/doc-03-release-checklist.md",
+      "size": 163,
+      "mtime": 1790131495452.4668
+    },
+    {
+      "rel": "KB/doc-04-troubleshooting.md",
+      "size": 184,
+      "mtime": 1790131495453.4636
+    },
+    {
+      "rel": "KB/doc-05-security-baseline.md",
+      "size": 185,
+      "mtime": 1790131495455.457
+    }
+  ],
+  "agentId": "436e5bf8-1831-4fa6-ad2b-d646c78fa84d",
+  "agentIdentifier": "l2-a-m7-mudhtp9l",
+  "modelName": "AG:DeepSeek-V4.1-Flash",
+  "sessionId": "5e420705-2fbd-47dc-8bb8-844b46637e76",
+  "reply": "（暂定完成：无客观依据，建议人工确认）\n## 任务执行结果\n\n### 已完成并确认写入的文件\n\n已创建 `KB` 目录并写入 5 个文档：\n\n1. `E:\\Codes\\ABC\\work-duo\\eval-workspace\\eval-A-M7\\KB\\doc-01-onboarding.md`\n2. `E:\\Codes\\ABC\\work-duo\\eval-workspace\\eval-A-M7\\KB\\doc-02-api-reference.md`\n3. `E:\\Codes\\ABC\\work-duo\\eval-workspace\\eval-A-M7\\KB\\doc-03-release-checklist.md`\n4. `E:\\Codes\\ABC\\work-duo\\eval-workspace\\eval-A-M7\\KB\\doc-04-troubleshooting.md`\n5. `E:\\Codes\\ABC\\work-duo\\eval-workspace\\eval-A-M7\\KB\\doc-05-security-baseline.md`\n\n文档中已写入 `assetId` 与初始标签：\n\n| asset 相对路径 | assetI…(共1249字符)",
+  "thinkingLen": 856,
+  "eventCount": 68,
+  "kbCalls": 0,
+  "artifactScore": 0
+}

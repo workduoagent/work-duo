@@ -1,0 +1,120 @@
+{
+  "caseId": "A-H1",
+  "slot": 4,
+  "scene": "A",
+  "kind": "H",
+  "title": "限流分页+断点续爬",
+  "model": "96af449e-dfc0-48ec-b077-aa9f02b43d64",
+  "workspace": "E:/Codes/ABC/work-duo/eval-workspace/eval-A-H1-4",
+  "startedAt": "2026-09-23T06:23:32.409Z",
+  "status": "done",
+  "runId": "run-1790144612704-15",
+  "durationMs": 621093,
+  "artifacts": [],
+  "artifactCheck": [
+    {
+      "artifact": "wiki_dump.jsonl",
+      "ok": true
+    },
+    {
+      "artifact": "progress.json",
+      "ok": true
+    },
+    {
+      "artifact": "failed.log",
+      "ok": false
+    }
+  ],
+  "traceCounts": {
+    "events": 43,
+    "reply_chars": 457,
+    "thinking_chars": 539
+  },
+  "replyLen": 457,
+  "kbHits": 0,
+  "recoveries": 0,
+  "error": null,
+  "metrics": {
+    "ha": {
+      "terminal": true,
+      "status": "done"
+    },
+    "perf": {
+      "durationMs": 621093
+    },
+    "heal": {
+      "replyLen": 457
+    }
+  },
+  "files": [
+    {
+      "rel": ".wd_mem/.gitignore",
+      "size": 310,
+      "mtime": 1790144612706.8462
+    },
+    {
+      "rel": ".wd_mem/graph/edges.jsonl",
+      "size": 503,
+      "mtime": 1790145228053.2998
+    },
+    {
+      "rel": ".wd_mem/graph/nodes.jsonl",
+      "size": 6070,
+      "mtime": 1790145228052.2444
+    },
+    {
+      "rel": ".wd_mem/graph/sessions/641bf6a4-f7d6-4a86-b33e-c955fd3e1538.json",
+      "size": 3544,
+      "mtime": 1790145228057.7869
+    },
+    {
+      "rel": ".wd_mem/graph/_index.json",
+      "size": 1308,
+      "mtime": 1790145228052.2444
+    },
+    {
+      "rel": ".wd_mem/knowledge/MEMORY.md",
+      "size": 133,
+      "mtime": 1790144612705.5835
+    },
+    {
+      "rel": ".wd_mem/README.md",
+      "size": 1378,
+      "mtime": 1790144612706.8462
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/auto_run_1790145205093.py",
+      "size": 330,
+      "mtime": 1790145205093.8428
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/injected_wiki_crawler.py",
+      "size": 7338,
+      "mtime": 1790145003598.437
+    },
+    {
+      "rel": ".wd_mem/scripts/wiki_crawler.py",
+      "size": 7274,
+      "mtime": 1790144993326.9673
+    },
+    {
+      "rel": "progress.json",
+      "size": 2318,
+      "mtime": 1790145006689.3303
+    },
+    {
+      "rel": "wiki_dump.jsonl",
+      "size": 2284,
+      "mtime": 1790145006686.1262
+    }
+  ],
+  "agentId": "4520688f-5553-4854-8f72-d5a8f12be29f",
+  "agentIdentifier": "l2-a-h1-mudpvr60-blvvmr",
+  "modelName": "AG:DeepSeek-V4.1-Flash",
+  "sessionId": "641bf6a4-f7d6-4a86-b33e-c955fd3e1538",
+  "reply": "（暂定完成：无客观依据，建议人工确认）\n已完成带自愈的 MediaWiki 分页爬取，并确认产物生成成功。\n\n- 数据文件：`E:\\Codes\\ABC\\work-duo\\eval-workspace\\eval-A-H1-4\\wiki_dump.jsonl`\n  - 共 **40 条**\n  - 每行格式为 `{id,title}`\n  - 共拉取 **2 页**，每页 20 条，页间已限流 1 秒\n- 进度文件：`E:\\Codes\\ABC\\work-duo\\eval-workspace\\eval-A-H1-4\\progress.json`\n  - 已记录 40 个已爬 ID、分页 continuation 信息及完成状态\n  - 支持后续续爬和避免重复抓取\n- 失败日志：本次无失败，因此未生成 `failed.log`\n- 可复用爬虫脚本：`E:\\Codes\\ABC\\work-duo\\eval-workspace\\eval-A-H1-4\\.wd_mem\\scripts\\wiki_crawler.py`",
+  "thinkingLen": 539,
+  "eventCount": 43,
+  "kbCalls": 0,
+  "artifactScore": 0.6666666666666666
+}

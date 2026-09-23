@@ -1,0 +1,151 @@
+{
+  "caseId": "B-H7",
+  "slot": 1,
+  "scene": "B",
+  "kind": "H",
+  "title": "多服务+集成测试",
+  "model": "96af449e-dfc0-48ec-b077-aa9f02b43d64",
+  "workspace": "E:/Codes/ABC/work-duo/eval-workspace/eval-B-H7-1",
+  "startedAt": "2026-09-23T04:17:53.955Z",
+  "status": "error",
+  "runId": "run-1790137074005-32",
+  "durationMs": 603041,
+  "artifacts": [],
+  "artifactCheck": [
+    {
+      "artifact": "poly/README.md",
+      "ok": false
+    },
+    {
+      "artifact": "poly/docker-compose.yml",
+      "ok": false
+    }
+  ],
+  "traceCounts": {
+    "events": 185,
+    "reply_chars": 0,
+    "thinking_chars": 3667
+  },
+  "replyLen": 0,
+  "kbHits": 0,
+  "recoveries": 0,
+  "error": null,
+  "metrics": {
+    "ha": {
+      "terminal": true,
+      "status": "error"
+    },
+    "perf": {
+      "durationMs": 603041
+    },
+    "heal": {
+      "replyLen": 0
+    }
+  },
+  "files": [
+    {
+      "rel": ".wd_mem/.gitignore",
+      "size": 310,
+      "mtime": 1790137074008.0789
+    },
+    {
+      "rel": ".wd_mem/graph/edges.jsonl",
+      "size": 2418,
+      "mtime": 1790137547280.858
+    },
+    {
+      "rel": ".wd_mem/graph/nodes.jsonl",
+      "size": 32822,
+      "mtime": 1790137661757.6997
+    },
+    {
+      "rel": ".wd_mem/graph/_index.json",
+      "size": 2864,
+      "mtime": 1790137661757.6997
+    },
+    {
+      "rel": ".wd_mem/knowledge/MEMORY.md",
+      "size": 133,
+      "mtime": 1790137074006.9773
+    },
+    {
+      "rel": ".wd_mem/README.md",
+      "size": 1378,
+      "mtime": 1790137074008.0789
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/injected_compile_poly_services.py",
+      "size": 377,
+      "mtime": 1790137343963.3054
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/injected_validate_poly_frontend_compose.py",
+      "size": 1472,
+      "mtime": 1790137519102.2178
+    },
+    {
+      "rel": ".wd_mem/scripts/compile_poly_services.py",
+      "size": 313,
+      "mtime": 1790137340488.0483
+    },
+    {
+      "rel": ".wd_mem/scripts/validate_poly_frontend_compose.py",
+      "size": 1408,
+      "mtime": 1790137515292.2869
+    },
+    {
+      "rel": "poly/api/server.py",
+      "size": 5357,
+      "mtime": 1790137332332.254
+    },
+    {
+      "rel": "poly/api/__pycache__/server.cpython-311.pyc",
+      "size": 10317,
+      "mtime": 1790137344134.0251
+    },
+    {
+      "rel": "poly/compose.yml",
+      "size": 1132,
+      "mtime": 1790137461664.607
+    },
+    {
+      "rel": "poly/frontend/server.py",
+      "size": 7119,
+      "mtime": 1790137461661.4458
+    },
+    {
+      "rel": "poly/frontend/__pycache__/server.cpython-311.pyc",
+      "size": 11468,
+      "mtime": 1790137519338.2646
+    },
+    {
+      "rel": "poly/mock-external/server.py",
+      "size": 3365,
+      "mtime": 1790137332348.755
+    },
+    {
+      "rel": "poly/mock-external/__pycache__/server.cpython-311.pyc",
+      "size": 6867,
+      "mtime": 1790137344138.6113
+    },
+    {
+      "rel": "poly/worker/server.py",
+      "size": 5338,
+      "mtime": 1790137332344.8894
+    },
+    {
+      "rel": "poly/worker/__pycache__/server.cpython-311.pyc",
+      "size": 10325,
+      "mtime": 1790137344136.4685
+    }
+  ],
+  "agentId": "3a2af5ff-9919-47cc-86b9-28c81a95291c",
+  "agentIdentifier": "l2-b-h7-mudle6g6",
+  "modelName": "AG:DeepSeek-V4.1-Flash",
+  "sessionId": "5eb620f5-f1f5-46d8-be49-33f94045637b",
+  "reply": "",
+  "thinkingLen": 3667,
+  "eventCount": 185,
+  "kbCalls": 0,
+  "artifactScore": 0
+}

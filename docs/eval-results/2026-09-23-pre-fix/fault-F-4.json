@@ -1,0 +1,26 @@
+{
+  "faultId": "F-4",
+  "startedAt": "2026-09-23T04:45:47.378Z",
+  "observations": [
+    {
+      "ok": true,
+      "msg": "检测到计划挂起",
+      "extra": {
+        "status": "done"
+      }
+    },
+    {
+      "ok": false,
+      "msg": "submit_plan 失败: agent_submit_plan_decision 工具错误: {\"error\":\"智能体 dbc812ed-e7c5-47da-8156-70af575b7986 当前没有运行中的任务（状态束已随"
+    },
+    {
+      "ok": true,
+      "msg": "放行后终态 done",
+      "extra": {
+        "status": "done"
+      }
+    }
+  ],
+  "ok": true,
+  "finishedAt": "2026-09-23T04:45:58.602Z"
+}

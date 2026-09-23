@@ -1,0 +1,241 @@
+{
+  "caseId": "A-M3",
+  "slot": 1,
+  "scene": "A",
+  "kind": "M",
+  "title": "批量URL并发爬取+记忆中间态",
+  "model": "96af449e-dfc0-48ec-b077-aa9f02b43d64",
+  "workspace": "E:/Codes/ABC/work-duo/eval-workspace/eval-A-M3-1",
+  "startedAt": "2026-09-23T04:45:59.412Z",
+  "status": "done",
+  "runId": "run-1790138759441-46",
+  "durationMs": 199111,
+  "artifacts": [],
+  "artifactCheck": [
+    {
+      "artifact": "doc_index.json",
+      "ok": true
+    },
+    {
+      "artifact": "doc_summary.md",
+      "ok": true
+    }
+  ],
+  "traceCounts": {
+    "events": 100,
+    "reply_chars": 455,
+    "thinking_chars": 2054
+  },
+  "replyLen": 455,
+  "kbHits": 0,
+  "recoveries": 0,
+  "error": null,
+  "metrics": {
+    "ha": {
+      "terminal": true,
+      "status": "done"
+    },
+    "perf": {
+      "durationMs": 199111
+    },
+    "heal": {
+      "replyLen": 455
+    }
+  },
+  "files": [
+    {
+      "rel": ".wd_mem/.gitignore",
+      "size": 310,
+      "mtime": 1790129354865.0237
+    },
+    {
+      "rel": ".wd_mem/data/doc_page_01.html",
+      "size": 228458,
+      "mtime": 1790138829175.7683
+    },
+    {
+      "rel": ".wd_mem/data/doc_page_02.html",
+      "size": 213537,
+      "mtime": 1790138829683.2073
+    },
+    {
+      "rel": ".wd_mem/data/doc_page_03.html",
+      "size": 234367,
+      "mtime": 1790138829877.8647
+    },
+    {
+      "rel": ".wd_mem/data/doc_page_04.html",
+      "size": 153352,
+      "mtime": 1790138830088.4763
+    },
+    {
+      "rel": ".wd_mem/data/doc_page_05.html",
+      "size": 181499,
+      "mtime": 1790138830962.0933
+    },
+    {
+      "rel": ".wd_mem/data/doc_page_06.html",
+      "size": 201396,
+      "mtime": 1790138831489.5054
+    },
+    {
+      "rel": ".wd_mem/data/doc_page_07.html",
+      "size": 166862,
+      "mtime": 1790138832584.4514
+    },
+    {
+      "rel": ".wd_mem/data/doc_page_08.html",
+      "size": 371059,
+      "mtime": 1790138832815.4478
+    },
+    {
+      "rel": ".wd_mem/data/doc_page_09.html",
+      "size": 354406,
+      "mtime": 1790138833707.6814
+    },
+    {
+      "rel": ".wd_mem/data/doc_page_10.html",
+      "size": 195712,
+      "mtime": 1790138834265.9585
+    },
+    {
+      "rel": ".wd_mem/data/mdn_authentication.html",
+      "size": 224362,
+      "mtime": 1790129742930.2666
+    },
+    {
+      "rel": ".wd_mem/data/mdn_compression.html",
+      "size": 218451,
+      "mtime": 1790129744663.5154
+    },
+    {
+      "rel": ".wd_mem/data/mdn_connection_management.html",
+      "size": 219160,
+      "mtime": 1790129745338.6726
+    },
+    {
+      "rel": ".wd_mem/data/mdn_cookies.html",
+      "size": 240001,
+      "mtime": 1790129742335.1611
+    },
+    {
+      "rel": ".wd_mem/data/mdn_cors.html",
+      "size": 259212,
+      "mtime": 1790129742650.0188
+    },
+    {
+      "rel": ".wd_mem/data/mdn_headers.html",
+      "size": 293154,
+      "mtime": 1790129742068.4436
+    },
+    {
+      "rel": ".wd_mem/data/mdn_methods.html",
+      "size": 213537,
+      "mtime": 1790129741381.187
+    },
+    {
+      "rel": ".wd_mem/data/mdn_mime_types.html",
+      "size": 239653,
+      "mtime": 1790129746293.824
+    },
+    {
+      "rel": ".wd_mem/data/mdn_overview.html",
+      "size": 228458,
+      "mtime": 1790129741173.191
+    },
+    {
+      "rel": ".wd_mem/data/mdn_status.html",
+      "size": 234367,
+      "mtime": 1790129741811.233
+    },
+    {
+      "rel": ".wd_mem/graph/edges.jsonl",
+      "size": 2062,
+      "mtime": 1790138952265.1946
+    },
+    {
+      "rel": ".wd_mem/graph/nodes.jsonl",
+      "size": 53977,
+      "mtime": 1790138952265.1946
+    },
+    {
+      "rel": ".wd_mem/graph/sessions/7471de76-6c53-4fec-8cb9-5ddb70b87e86.json",
+      "size": 7736,
+      "mtime": 1790138952266.5872
+    },
+    {
+      "rel": ".wd_mem/graph/sessions/84ab2d0d-6770-4eaf-82f4-622c41d68a39.json",
+      "size": 4138,
+      "mtime": 1790130222630.59
+    },
+    {
+      "rel": ".wd_mem/graph/_index.json",
+      "size": 4023,
+      "mtime": 1790138952265.1946
+    },
+    {
+      "rel": ".wd_mem/knowledge/MEMORY.md",
+      "size": 133,
+      "mtime": 1790129354863.7773
+    },
+    {
+      "rel": ".wd_mem/README.md",
+      "size": 1378,
+      "mtime": 1790129354863.7773
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/auto_run_1790130126813.mjs",
+      "size": 2729,
+      "mtime": 1790130126813.4514
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/build_doc_index.mjs",
+      "size": 1710,
+      "mtime": 1790129767612.5884
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/build_doc_index_fallback.mjs",
+      "size": 3478,
+      "mtime": 1790130212328.1682
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/build_doc_index_from_saved.mjs",
+      "size": 2328,
+      "mtime": 1790138897116.1074
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/generate_doc_summary.py",
+      "size": 1915,
+      "mtime": 1790138942129.3882
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/injected_generate_doc_summary.py",
+      "size": 1979,
+      "mtime": 1790138945486.8264
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/validate_doc_index.py",
+      "size": 739,
+      "mtime": 1790138903656.9841
+    },
+    {
+      "rel": "doc_index.json",
+      "size": 1674,
+      "mtime": 1790138897161.5566
+    },
+    {
+      "rel": "doc_summary.md",
+      "size": 1390,
+      "mtime": 1790138945661.2395
+    }
+  ],
+  "agentId": "3cfea825-723c-4e4c-8b61-09b1b46aae95",
+  "agentIdentifier": "l2-a-m3-mudmeayf-qyijom",
+  "modelName": "AG:DeepSeek-V4.1-Flash",
+  "sessionId": "7471de76-6c53-4fec-8cb9-5ddb70b87e86",
+  "reply": "已生成/更新 doc_index.json\n已完成当前步骤：\n\n- 并发抓取 10 个公开文档页，并提取各页 `<title>` 与第一个 `<h1>`\n- 已生成合法 JSON 文件：`E:\\Codes\\ABC\\work-duo\\eval-workspace\\eval-A-M3-1\\doc_index.json`\n- Python 校验通过：共 10 条记录，且每条均包含 `url`、`title`、`h1`\n- 已沉淀主题清单记忆：`l2-a-m3-doc-topics`\n\n已生成/更新 doc_summary.md\n已完成文档 Markdown 汇总，且未重复发起网络请求。\n\n- 产出文件：`E:\\Codes\\ABC\\work-duo\\eval-workspace\\eval-A-M3-1\\doc_summary.md`\n- 已读取 `doc_index.json`\n- 已生成 10 条 Markdown 表格数据行\n- 已校验每行均对应索引记录\n- 文件共 16 行，满足不少于 12 行要求",
+  "thinkingLen": 2054,
+  "eventCount": 100,
+  "kbCalls": 0,
+  "artifactScore": 1
+}

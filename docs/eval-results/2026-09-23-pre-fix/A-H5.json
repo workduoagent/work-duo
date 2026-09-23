@@ -1,0 +1,132 @@
+{
+  "caseId": "A-H5",
+  "slot": 0,
+  "scene": "A",
+  "kind": "H",
+  "title": "三源聚合降级换源",
+  "model": "96af449e-dfc0-48ec-b077-aa9f02b43d64",
+  "workspace": "E:/Codes/ABC/work-duo/eval-workspace/eval-A-H5",
+  "startedAt": "2026-09-23T04:35:56.785Z",
+  "status": "done",
+  "runId": "run-1790138156809-39",
+  "durationMs": 328637,
+  "artifacts": [],
+  "artifactCheck": [
+    {
+      "artifact": "partial_report.md",
+      "ok": true
+    }
+  ],
+  "traceCounts": {
+    "events": 67,
+    "reply_chars": 433,
+    "thinking_chars": 2645
+  },
+  "replyLen": 433,
+  "kbHits": 0,
+  "recoveries": 0,
+  "error": null,
+  "metrics": {
+    "ha": {
+      "terminal": true,
+      "status": "done"
+    },
+    "perf": {
+      "durationMs": 328637
+    },
+    "heal": {
+      "replyLen": 433
+    }
+  },
+  "files": [
+    {
+      "rel": ".wd_mem/.gitignore",
+      "size": 310,
+      "mtime": 1790133700625.3115
+    },
+    {
+      "rel": ".wd_mem/data/tauri_response.json",
+      "size": 6378,
+      "mtime": 1790133961776.651
+    },
+    {
+      "rel": ".wd_mem/graph/edges.jsonl",
+      "size": 2160,
+      "mtime": 1790138480095.102
+    },
+    {
+      "rel": ".wd_mem/graph/nodes.jsonl",
+      "size": 43816,
+      "mtime": 1790138480093.798
+    },
+    {
+      "rel": ".wd_mem/graph/sessions/60a031eb-b16c-4dcf-ae73-fc7b7b3bbf18.json",
+      "size": 8267,
+      "mtime": 1790138480097.2734
+    },
+    {
+      "rel": ".wd_mem/graph/sessions/fdbabb7c-f81a-4174-a84f-b1f0357a78d6.json",
+      "size": 9531,
+      "mtime": 1790134039975.6284
+    },
+    {
+      "rel": ".wd_mem/graph/_index.json",
+      "size": 2441,
+      "mtime": 1790138480093.798
+    },
+    {
+      "rel": ".wd_mem/knowledge/MEMORY.md",
+      "size": 133,
+      "mtime": 1790133700624.1467
+    },
+    {
+      "rel": ".wd_mem/README.md",
+      "size": 1378,
+      "mtime": 1790133700624.1467
+    },
+    {
+      "rel": "file_list.txt",
+      "size": 314,
+      "mtime": 1790134031672.2385
+    },
+    {
+      "rel": "partial_report.md",
+      "size": 1095,
+      "mtime": 1790138469327.1821
+    },
+    {
+      "rel": "source_a_attempt2.json",
+      "size": 6378,
+      "mtime": 1790138301397.245
+    },
+    {
+      "rel": "source_a_attempt3.json",
+      "size": 6378,
+      "mtime": 1790138309716.353
+    },
+    {
+      "rel": "source_a_response.json",
+      "size": 6378,
+      "mtime": 1790133843990.325
+    },
+    {
+      "rel": "source_c_response.json",
+      "size": 355,
+      "mtime": 1790133847095.4814
+    },
+    {
+      "rel": "source_results.json",
+      "size": 3731,
+      "mtime": 1790138436694.9756
+    }
+  ],
+  "agentId": "9d81a478-7e67-48a1-9c1e-878190d2dbb0",
+  "agentIdentifier": "l2-a-h5-mudm1dyr-8l4gl8",
+  "modelName": "AG:DeepSeek-V4.1-Flash",
+  "sessionId": "60a031eb-b16c-4dcf-ae73-fc7b7b3bbf18",
+  "reply": "已生成/更新 source_results.json\n已完成容错多源抓取并生成合法 JSON 结果文件。\n\n产出文件：  \n`E:\\Codes\\ABC\\work-duo\\eval-workspace\\eval-A-H5\\source_results.json`\n\n结果概况：\n- 源A：HTTP 200，3次尝试后成功\n- 源B：连续3次 HTTP 500，标记为 `skipped`\n- 源C：HTTP 200，首次请求成功\n- 已记录各源 URL、状态、尝试次数、响应信息、失败原因及降级动作。\n\n已生成/更新 partial_report.md\n已完成当前步骤，且未重复发起网络请求。\n\n生成并确认存在的文件：\n\n- `E:\\Codes\\ABC\\work-duo\\eval-workspace\\eval-A-H5\\partial_report.md`\n\n工作空间文件已检查，`partial_report.md` 共 1095 字节，满足行数及内容关键词要求。",
+  "thinkingLen": 2645,
+  "eventCount": 67,
+  "kbCalls": 0,
+  "artifactScore": 1
+}
