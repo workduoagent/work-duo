@@ -10,6 +10,7 @@
 // 工作空间根：E:/Codes/ABC/work-duo/eval-workspace/
 import fs from 'node:fs'
 import path from 'node:path'
+import { spawnSync } from 'node:child_process'
 import {
   initMcp, callTool, rawPost, unw, asRows, sleep, traceInner,
   extractKbEvents, hitsOf, logFetcher, pollRun, startRun,
@@ -497,6 +498,28 @@ export function seedRepo(ws, seedId) {
   return manifest
 }
 
+// ---------- C2 客观判分器（2026-09-23）：run=done ≠ 任务完成，harness 自己跑测试 ----------
+// 判分环境 = 本机受管 venv（envs/default + pytest），与 agent 沙箱解耦——种子包是纯 Python+pytest，
+// 任何正确的解释器判分等价。resolved = failed==0 && errors==0。
+const JUDGE_PY = process.env.L2_JUDGE_PY || 'C:/Users/Administrator/.workbuddy/binaries/python/envs/default/Scripts/python.exe'
+
+export function judgeTests(dir) {
+  const r = spawnSync(`"${JUDGE_PY}"`, ['-m', 'pytest', '-q', '--tb=line'], {
+    cwd: dir, encoding: 'utf8', timeout: 300000, shell: true,
+  })
+  const out = String(r.stdout || '') + String(r.stderr || '')
+  const passed = +(out.match(/(\d+) passed/)?.[1] || 0)
+  const failed = +(out.match(/(\d+) failed/)?.[1] || 0)
+  const errors = +(out.match(/(\d+) error/)?.[1] || 0)
+  const noTests = out.includes('no tests ran')
+  return {
+    cmd: 'pytest -q', exitCode: r.status ?? -1,
+    passed, failed, errors, noTests,
+    resolved: !noTests && failed === 0 && errors === 0 && r.status === 0,
+    raw: out.slice(-1000),
+  }
+}
+
 /** 运行单用例并采集三维原始指标 */
 export async function runOneCase(caseId, {
   model = 'fast',
@@ -567,6 +590,21 @@ export async function runOneCase(caseId, {
     rec.artifactCheck = checkArtifacts(ws, arts)
     const okArts = rec.artifactCheck.filter((x) => x.ok).length
     rec.artifactScore = arts.length ? okArts / arts.length : (rec.files.length > 0 ? 1 : 0)
+    // C2 客观判分（2026-09-23）：种子修复类用例（manifest 带 testCmd）→ harness 直接跑 pytest，
+    // resolved 与 agent 自述解耦。C-H1 首跑实证价值：agent 自称 done 而客观未修，判分器当场识破。
+    if (seedManifest?.testCmd) {
+      const judgeDir = path.join(ws, seedManifest.targetDir)
+      if (fs.existsSync(judgeDir)) {
+        try {
+          rec.judge = judgeTests(judgeDir)
+          rec.resolved = rec.judge.resolved
+          console.log(`  [judge] resolved=${rec.judge.resolved} passed=${rec.judge.passed} failed=${rec.judge.failed} errors=${rec.judge.errors}`)
+        } catch (e) {
+          rec.judge = { error: e.message.slice(0, 120) }
+          rec.resolved = false
+        }
+      }
+    }
     rec.metrics.ha.terminal = ['done', 'error', 'cancelled', 'canceled'].includes(status)
     rec.metrics.ha.status = status
     rec.metrics.heal.replyLen = rec.replyLen
@@ -998,6 +1036,9 @@ async function main() {
   console.log('未知命令', cmd)
 }
 
-if (import.meta.url === `file://${process.argv[1].replace(/\\/g, '/')}` || process.argv[1]?.endsWith('l2_eval_harness.mjs')) {
+// 直接执行判定：--input-type=module -e 动态 import 本模块时 argv[1] 为 undefined，须跳过 main
+const __arg1 = process.argv[1]
+const __isMain = __arg1 && (import.meta.url === `file://${__arg1.replace(/\\/g, '/')}` || __arg1.endsWith('l2_eval_harness.mjs'))
+if (__isMain) {
   main().catch((e) => { console.error(e); process.exit(1) })
 }

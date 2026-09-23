@@ -36,6 +36,7 @@ MCP 客户端 **UI 级**驱动 WorkDuo 全模块。
 - 启动位置：`src-tauri/src/mcp_server.rs::start_mcp_server`，在 app setup 中以独立 std 线程监听。
 - 工具分层，共 **71** 个：引擎层(10，含 P2 新增 `agent_get_run_progress`) + 模块发现层(7) + UI 意图层(54，含 Agent/会话 12 + 插件 8 + 知识库 15 + 记忆 9 + 技能 10)。
 - **并发语义（P2-5，2026-09-23 明确）**：同一 Agent 同一时刻只有一个 run（per-agent 运行锁，第二个 `agent_run_task` 直接 Err「已有任务正在运行」）；**并行 = 多个 Agent 各自跑**（不同 Agent 互不影响）。需要并行跑多个任务时，为每个任务装配/复用一个独立 Agent（`agent_ui_create`）。
+- **工具轮分级（Batch C，2026-09-23）**：子任务工具轮预算基线 8（env `WD_SUBTASK_MAX_ITERATIONS`），带诊断回灌的修复型轮 +8（`WD_SUBTASK_REPAIR_EXTRA_ITERATIONS`）——修复型任务「跑测试→读码→改码→再跑测试」天然多轮，基线对其过紧（C-H1 实测）。
 - 引擎层 + 模块发现层由 Rust 直调；UI 意图层经 `mcp:intent` 派发到 `src/core/mcpBridge.ts` 真实 handler，
   前端 `invoke('mcp_resolve_result', {id, ok, data})` 回传。技能模块同样走此「UI 意图层」——`skill:*` 意图
   由 `mcpBridge` 路由到与 skill-hub 页面**同一个**真实 handler（`skill-mapper` + `skillFs`，落盘先行再入库）。

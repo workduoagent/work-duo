@@ -54,6 +54,28 @@ const MAX_PARALLEL_SUBTASKS: usize = 3;
 /// 以打破无人值守 / 同因持续失败场景下的「弹窗→处理→再失败」无限重试循环。
 const MAX_TASK_RECOVERY_ATTEMPTS: usize = 3;
 
+/// 微 ReAct 工具轮预算分级（Batch C，2026-09-23）：
+/// - 基线 MAX_SUBTASK_ITERATIONS（8）：正常子任务 1~2 轮闭环，8 已含 4 倍余量；
+/// - **修复型加成**：带诊断回灌的轮次（guidance 非空）天然是「跑测试→读码→改码→再跑测试」
+///   多轮循环，基线对其过紧——L2 C-H1 实测：跨文件修复 8 轮只够侦察+建骨架，修复没动手。
+/// - 全部 env 可调（WD_SUBTASK_MAX_ITERATIONS / WD_SUBTASK_REPAIR_EXTRA_ITERATIONS，App 启动读取）。
+fn subtask_iteration_budget(repair: bool) -> usize {
+    let base = std::env::var("WD_SUBTASK_MAX_ITERATIONS")
+        .ok()
+        .and_then(|s| s.trim().parse::<usize>().ok())
+        .filter(|v| *v > 0)
+        .unwrap_or(MAX_SUBTASK_ITERATIONS);
+    if repair {
+        let extra = std::env::var("WD_SUBTASK_REPAIR_EXTRA_ITERATIONS")
+            .ok()
+            .and_then(|s| s.trim().parse::<usize>().ok())
+            .unwrap_or(8);
+        base + extra
+    } else {
+        base
+    }
+}
+
 /// 流水线执行结果。
 pub struct PipelineResult {
     pub final_text: String,
@@ -892,6 +914,16 @@ async fn run_subtask(
 ) -> (SubTaskOutput, (u64, u64)) {
     // 认知上下文绝对隔离：崭新的 messages，0 历史包袱。
     let t0 = Instant::now(); // 子任务级耗时基准（闭环日志用）
+    // 工具轮分级（Batch C，2026-09-23）：guidance 非空 = 带诊断回灌的修复型轮次，
+    // 预算放宽（基线 + 修复加成），详见 subtask_iteration_budget。
+    let repair_round = !guidance.trim().is_empty();
+    let iter_budget = subtask_iteration_budget(repair_round);
+    if repair_round {
+        tracing::info!(
+            "[agent] pipeline: 子任务 step={} 为修复型轮次（带诊断回灌），工具轮预算 {}（基线 {}）",
+            task.step, iter_budget, MAX_SUBTASK_ITERATIONS
+        );
+    }
     let prior = if prior_summary.trim().is_empty() {
         "（无，你是第一个步骤）".to_string()
     } else {
@@ -1487,10 +1519,10 @@ async fn run_subtask(
         // step2 在 pytest 全绿后第 9 轮被熔断误判失败 → 全自动模式带诊断重试 3 次，单次任务
         // 烧掉 210 万 input tokens。熔断先过 verifier：criteria 客观满足 → 按成功闭环，不再重试。）
         tool_iterations += 1;
-        if tool_iterations > MAX_SUBTASK_ITERATIONS {
+        if tool_iterations > iter_budget {
             tracing::info!(
                 "[agent] pipeline: 子任务 step={} 超过 {} 个工具轮仍未收敛（总轮 {}），先客观校验再判定",
-                task.step, MAX_SUBTASK_ITERATIONS, round,
+                task.step, iter_budget, round,
             );
             // 超轮上限也把已产出输出并入会话累积，避免后续步骤因缺证据误判。
             if let Ok(mut prev) = session_tool_outputs.lock() {
@@ -1694,7 +1726,7 @@ async fn run_subtask(
                     title: task.title.clone(),
                     summary: format!(
                         "子任务超过 {} 轮工具调用仍未闭环{}",
-                        MAX_SUBTASK_ITERATIONS,
+                        iter_budget,
                         last_tool_error
                             .as_ref()
                             .map(|e| format!("；最近错误：{}", e.chars().take(300).collect::<String>()))
