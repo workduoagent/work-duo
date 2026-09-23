@@ -571,6 +571,14 @@ async fn call_tool(app: &AppHandle, name: &str, args: &Value) -> Value {
                 "lastTool": last_tool,
             })
         }
+        "agent_sweep_orphan_rounds" => {
+            // L2 pillar①（2026-09-23）：孤儿轮次按需清扫——此前仅 App 启动时触发（round_compactor），
+            // 外部自测无法在并发/取消后即时断言「无孤儿」。本工具补按需入口，返回本轮清扫的轮次数。
+            match crate::agent::round_compactor::sweep_orphan_rounds(app).await {
+                Ok(n) => json!({ "ok": true, "swept": n }),
+                Err(e) => json!({ "ok": false, "error": e }),
+            }
+        }
         // —— 模块发现层（Rust 直读 workduo.db，零业务副作用）——
         "agent_list_models" => {
             fetch_rows(
@@ -935,6 +943,11 @@ thinking（累计思考过程）、reply（累计正文回复）、counts（各�
             "长任务进度观测（P2-1，2026-09-23）：外部驱动轮询这个而非干等。返回 {run_id, status(done/error/cancelled/running/unknown), agentId, elapsedSec, budgetSec(默认 1800), step, totalSteps, stepTitle, lastTool}。\n\
 step/totalSteps 来自规划事件（未规划或 SIMPLE_CHAT 为 0/0）；lastTool=最近一次工具调用名；elapsedSec 逼近 budgetSec 即将进入预算软窗口（最后 30s 停止发起新步骤、优雅收尾）。",
             json!({ "type": "object", "properties": { "run_id": { "type": "string", "description": "run_task_ex 返回的运行 id" } }, "required": ["run_id"] }),
+        ),
+        tool(
+            "agent_sweep_orphan_rounds",
+            "孤儿轮次按需清扫（2026-09-23）：并发/取消/崩溃可能遗留 end_time IS NULL 的「进行中」轮次（UI 永远显示进行中）。此前仅 App 启动时清扫，本工具补按需入口——返回 {ok, swept}（本次标记终态的轮次数）。\n用途：自测驱动在并发/取消后调用本工具，再核对无残留「进行中」轮次，断言「不残留孤儿」。",
+            json!({ "type": "object", "properties": {} }),
         ),
         tool(
             "agent_ui_create",

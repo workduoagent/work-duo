@@ -71,14 +71,14 @@ curl -s -X POST http://127.0.0.1:18755/mcp \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
 ```
 
-应返回含 71 个工具的 `tools` 数组（P2 批次新增 agent_get_run_progress）。
+应返回含 72 个工具的 `tools` 数组（P2 批次新增 agent_get_run_progress）。
 
 > 注意：部分客户端会缓存工具清单。若改过 Rust 后工具数/签名没刷新，**重新加载该 MCP Server 连接**即可；
 > 也可直接打上面的 `tools/list` 端点绕过缓存核对。
 
 ---
 
-## 工具清单（71 个，按层）
+## 工具清单（72 个，按层）
 
 ### A. 引擎层（Rust 直调，无需前端）
 | 工具 | 作用 | 关键入参 |
@@ -93,7 +93,7 @@ curl -s -X POST http://127.0.0.1:18755/mcp \
 | `agent_get_run_logs` | 增量读 Rust 运行日志 | `cursor` / `since_ts` / `level` / `limit` |
 | `agent_get_run_trace` | 取**指定 run** 的轨迹缓冲；**返回外层是 `{"run_id":..., "trace":{...}}` 包裹**，取字段须先剥 `trace` 层：`r.trace.{events, thinking, reply, counts}`。#8 per-run：必须传 `run_id`（由 `agent_run_task` 返回的 `run_id`），按 run 取独立桶，**并发 run 互不串台**；不传则返回空桶 | `run_id`（必填，来自 `agent_run_task` 返回） |
 | `agent_get_run_progress` | **长任务进度观测（P2-1）**：轮询这个而非干等。返回 `{status, elapsedSec, budgetSec, step, totalSteps, stepTitle, lastTool}`——elapsedSec 逼近 budgetSec 即将进入预算软窗口（最后 30s 停止发起新步骤）。step/totalSteps 来自规划事件（SIMPLE_CHAT 为 0/0） | `run_id`（必填） |
-
+| `agent_sweep_orphan_rounds` | **孤儿轮次按需清扫**：并发/取消/崩溃遗留 end_time IS NULL 轮次，此前仅启动时清扫；返回 {ok, swept}。用途：并发/取消后调用并断言无残留「进行中」轮次 | 无入参 |
 ### B. 模块发现层（Rust 直读 workduo.db，零业务副作用）
 | 工具 | 作用 |
 |---|---|
@@ -355,7 +355,7 @@ node scripts/kb_driver.mjs
 
 ## 集成核对清单
 
-- [ ] `tools/list` 返回 71 个工具（引擎 9 + 发现 7 + UI 55，含 P2 新增 agent_get_run_progress）。
+- [ ] `tools/list` 返回 72 个工具（引擎 9 + 发现 7 + UI 55，含 P2 新增 agent_get_run_progress）。
 - [ ] 端口 18755 有监听；外部编程工具已成功连上该 MCP Server。
 - [ ] 绑定 KB 的 Agent 跑「kb_chunks 的 id 字段格式是什么？」→ trace events 出现 `native__kb_search`，reply 引用 KB。
 - [ ] `plugin_upsert` 编写插件后 `plugin_test` 返回 `ok:true`；前端插件列表可见。

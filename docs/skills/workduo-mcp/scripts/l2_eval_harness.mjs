@@ -142,6 +142,7 @@ https://developer.mozilla.org/en-US/docs/Web/HTML/Element/form
 2) 每页之间主动 sleep 1s 限流；单页失败重试 3 次，仍失败写入 failed.log 并跳过
 3) 维护 progress.json（已爬 offset/id 列表）；若 progress.json 已存在则续爬不重爬
 4) 产出 wiki_dump.jsonl（每行 {id,title}）
+5) failed.log 必须存在：有失败页则逐条记录（url+原因+重试次数）；**全程无失败也要落盘并写一行 no failures**——该文件是断言产物，缺失即任务未完成
 完成后列出文件与条数。`,
   },
   'A-H2': {
@@ -271,8 +272,11 @@ KB 若不足则先 kb_add_file 补文档再检索。完成后列出文件。`,
 1) SQLite schema + 迁移脚本 + seed 数据
 2) 商品 CRUD API
 3) selftest.sh：用 curl/自测脚本验证增删改查，退出码 0 为过
-4) README.md
-完成后列出文件。`,
+4) README.md：接口说明 + 启动方式 + schema 概览；**在写第一行代码前先建骨架，完成后补全**（禁止最后一次性补）
+完成后列出文件。
+⚠️ 最终交付物核对（收尾前逐项核对，缺一不可）：
+- shop-api/README.md / shop-api/selftest.sh（相对 shop-api/，文件名逐字一致）
+- 收尾规则：先落盘全部产物，再输出文字总结。`,
   },
   'B-M6': {
     scene: 'B', kind: 'M', title: 'SSE 实时看板',
@@ -289,11 +293,14 @@ KB 若不足则先 kb_add_file 补文档再检索。完成后列出文件。`,
     dims: ['perf', 'ha', 'heal'],
     artifacts: ['fullstack-app/docker-compose.yml', 'fullstack-app/README.md', 'fullstack-app/backend/app.py', 'fullstack-app/frontend/package.json'],
     prompt: `请在工作空间子目录 fullstack-app/ 构建完整全栈：
-1) 后端 FastAPI 或 Express + SQLite/Postgres（SQLite 亦可）+ JWT 注册/登录
+1) 后端 FastAPI 或 Express + SQLite/Postgres（SQLite 亦可）+ JWT 注册/登录；**后端入口文件必须逐字为 backend/app.py**（FastAPI 单文件入口即可，模块化结构也须有该文件作为启动入口）
 2) 前端 React：注册→登录→受保护 CRUD
 3) 单元测试（pytest 或 node:test）至少覆盖 auth 与 CRUD
-4) docker-compose.yml 一键起 + README（含端到端验证步骤）
-代码必须成体系可运行。完成后列出文件树。`,
+4) docker-compose.yml 一键起 + README（含端到端验证步骤；README 在写代码前先建骨架、完成后补全）
+代码必须成体系可运行。完成后列出文件树。
+⚠️ 最终交付物核对（收尾前逐项核对，缺一不可）：
+- fullstack-app/docker-compose.yml / fullstack-app/README.md / fullstack-app/backend/app.py / fullstack-app/frontend/package.json（路径与文件名逐字一致）
+- 收尾规则：先落盘全部产物，再输出文字总结。`,
   },
   'B-H2': {
     scene: 'B', kind: 'H', title: 'MCP聚合器元测评',
@@ -657,6 +664,16 @@ export async function injectFault(faultId) {
   if (faultId === 'F-3') {
     // 工具失败：坏源
     const recCase = await runOneCase('A-H5', { model: 'fast' })
+    // 自愈机制观测升级（2026-09-23，Batch B 验证）：不再只看结果，断言「带诊断回灌的自动重试」
+    // 是否真实发生——数 trace 事件里的 step_retrying（never 模式引擎自动重试会 emit_step_retrying）。
+    let retryEvents = 0
+    try {
+      const raw = unw(await callTool('agent_get_run_trace', { run_id: recCase.runId }))
+      const tr = traceInner(raw)
+      retryEvents = (tr?.events || []).filter((e) => e?.payload?.type === 'step_retrying').length
+    } catch {}
+    note(true, `自愈机制观测：step_retrying 事件 ×${retryEvents}（>0=引擎自动诊断重试真实发生；=0 可能源失败被工具层/重试层提前消化）`)
+    rec.autoRetryEvents = retryEvents
     rec.ok = recCase.status === 'done' && recCase.artifactScore >= 0.5
     note(rec.ok, `A-H5 降级容错 status=${recCase.status} artifacts=${recCase.artifactScore}`)
   }
