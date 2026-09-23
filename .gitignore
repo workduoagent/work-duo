@@ -35,3 +35,5 @@ dist-verify2
 pnpm-lock.yaml
 # L2 测评工作空间（运行时产物，不入库）
 eval-workspace*/
+
+eval-workspace-repeat/

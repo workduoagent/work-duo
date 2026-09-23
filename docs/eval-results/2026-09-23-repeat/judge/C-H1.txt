@@ -1,0 +1,12 @@
+============================= test session starts =============================
+platform win32 -- Python 3.13.14, pytest-9.1.1, pluggy-1.6.0 -- C:\Users\Administrator\.workbuddy\binaries\python\envs\default\Scripts\python.exe
+cachedir: .pytest_cache
+rootdir: E:\Codes\ABC\work-duo\eval-workspace-repeat\eval-C-H1-2\inv-project
+collecting ... collected 4 items
+
+test_report.py::test_report_lines_in_pieces PASSED                       [ 25%]
+test_report.py::test_report_total_in_pieces PASSED                       [ 50%]
+test_stock.py::test_get_stock_returns_pieces PASSED                      [ 75%]
+test_stock.py::test_get_stock_unknown_sku PASSED                         [100%]
+
+============================== 4 passed in 0.01s ==============================
