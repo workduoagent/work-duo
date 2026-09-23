@@ -293,10 +293,11 @@ KB 若不足则先 kb_add_file 补文档再检索。完成后列出文件。`,
     dims: ['perf', 'ha', 'heal'],
     artifacts: ['fullstack-app/docker-compose.yml', 'fullstack-app/README.md', 'fullstack-app/backend/app.py', 'fullstack-app/frontend/package.json'],
     prompt: `请在工作空间子目录 fullstack-app/ 构建完整全栈：
+0) 【起手必做】先用工具落四个交付物骨架（防止预算耗尽时交付物缺失）：fullstack-app/docker-compose.yml、fullstack-app/README.md（占位）、fullstack-app/backend/app.py（最小可启动入口）、fullstack-app/frontend/package.json——四件始终保持在盘上，后续逐步充实
 1) 后端 FastAPI 或 Express + SQLite/Postgres（SQLite 亦可）+ JWT 注册/登录；**后端入口文件必须逐字为 backend/app.py**（FastAPI 单文件入口即可，模块化结构也须有该文件作为启动入口）
 2) 前端 React：注册→登录→受保护 CRUD
 3) 单元测试（pytest 或 node:test）至少覆盖 auth 与 CRUD
-4) docker-compose.yml 一键起 + README（含端到端验证步骤；README 在写代码前先建骨架、完成后补全）
+4) docker-compose.yml 一键起 + README 补全（含端到端验证步骤）
 代码必须成体系可运行。完成后列出文件树。
 ⚠️ 最终交付物核对（收尾前逐项核对，缺一不可）：
 - fullstack-app/docker-compose.yml / fullstack-app/README.md / fullstack-app/backend/app.py / fullstack-app/frontend/package.json（路径与文件名逐字一致）
