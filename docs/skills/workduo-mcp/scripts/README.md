@@ -13,6 +13,8 @@
 | `composite_hang_probe.mjs` | **复合任务挂死诊断**（区分「慢」与「死」）：跑一个必走 COMPOSITE 的真复合任务（建 3 文件），**每 10s 采样** status+trace，用事件 `ts_ms` 打时间线并算**最长静默段**（静默起点=卡死点），自动应答三类挂起；超时也输出完整证据（事件线/采样/日志/磁盘产物穿透）。exit 0=完成且有产物 / 1=终态但零产物 / 2=超时未达终态 / 3=环境错 | `PROBE_MODEL_ID=<id> node composite_hang_probe.mjs`（`PROBE_WAIT_MS` 默认 480000；**网关慢时必须放宽**，见下方基线） |
 | `failure_cleanup_probe.mjs` | **失败收尾回归**（筑基支柱①终态铁律）：故障注入——启动复合任务 → 中途 `agent_cancel_task` 中断 → 断言 ①到达明确终态（不停在 running）②**收尾耗时 ≤30s** ③**锁已释放**（立即再 `agent_run_task` 不得被「已有任务正在运行」拒绝）。exit 0=PASS / 1=FAIL / 3=环境错 | `node failure_cleanup_probe.mjs`（`PROBE_CANCEL_AFTER_MS` 默认 5000；`PROBE_CLEANUP_MAX_MS` 默认 30000） |
 | `failure_suite_runner.mjs` | **故障注入套件**（凑足验收「10/10」）：编排多次注入并汇总。**异构用例而非同例重复**——混合快/慢模型 × 不同中断时机（2s/5s/8s/15s/…），覆盖「规划前 / 规划中 / 工具执行中」各阶段。exit 0=全 PASS | `SUITE_MODEL_FAST=<id> SUITE_MODEL_SLOW=<id> node failure_suite_runner.mjs`（`SUITE_REPEAT` 可压 flakiness） |
+| `tool_contract_probe.mjs` | **工具契约边界防御**（L2 pillar②）：轰坏入参断言快速结构化拒绝（缺必填 / 非法枚举 / 越界引用 / 空标识 / 未知审批 / 超大文本），含 `memory_anchor` 缺 category 漂移观测（已知坑#7→WARN）。exit 0=全拒绝 / 1=有违反 / 2=含已知漂移 | `node tool_contract_probe.mjs`（**无需模型**，坏入参在校验层拒绝，不触发 LLM） |
+| `l2_eval_harness.mjs` | **L2 生态深度测评编排**（案例目录 + 并发 + 故障注入 + 三维评分 scorecard）。子命令：`env` / `run --cases` / `run --phase 0\|1\|2` / `concurrent --n` / `inject --fault F-*` / `score` / `lock`。结果写 `docs/eval-results/<date>/`。**预算坑**：引擎 `WD_RUN_MAX_SECS` 默认 600s，复杂 H/并发 M 可能被强制终止（非挂死）；并发创建 Agent 须 identifier 防碰撞 | `node l2_eval_harness.mjs run --cases A-M1 --model fast` |
 
 驱动约定：
 - `agent_get_run_trace` 返回外层 `{"trace":{…}}`，一律用库内 `traceInner()` 解包（少剥一层是历史踩坑）。
@@ -52,6 +54,7 @@
 - 只有 **`python`** 与 **`bun`** 两种！
 - 用户口中的「Node 脚本」在本系统对应 **`bun`**（TypeScript）运行时。**切勿填 `node`**——会导致 `test_user_plugin` 校验失败。
 - 模板文件：`plugin.python.template.py`（runtime=`python`）、`plugin.bun.template.ts`（runtime=`bun`）。
+- **产物模板（2026-09-23 补，见 SKILL「流程 2.1 产物契约」）**：`plugin.xlsx_writer.template.py`（多 sheet Excel）、`plugin.chart_png.template.py`（PNG 图，Agg 后端）。用户要 `.xlsx`/图表时**禁止手写二进制**，直接复制这两个经 `plugin_upsert` 装配。
 
 ## 头注释元数据（可选，供 `plugin_extract_meta` 解析）
 

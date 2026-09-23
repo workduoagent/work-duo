@@ -83,7 +83,7 @@ curl -s -X POST http://127.0.0.1:18755/mcp \
 | 工具 | 作用 | 关键入参 |
 |---|---|---|
 | `agent_run_task` | 运行 Agent 任务，返回 `run_id`（复用 `run_task_ex`） | `agentId`(主键 id) / `prompt` / `workspace`(=绑定工作空间的绝对路径,不传则自由对话) / `sessionId` / `roundId` / `attachments` 等 |
-| `agent_get_status` | 查询 `run_id` 状态（含审批挂起详情：`waitingApproval`/`pending`） | `run_id` |
+| `agent_get_status` | 查询 `run_id` 状态（含审批挂起详情：`waitingApproval`/`pending`）。**终态三态（2026-09-23 起）**：`done`（正常完成）/ `error`（超时或预算耗尽，`error` 字段带 `run_budget_exhausted` 等结构化原因）/ `cancelled`（用户取消，error=`cancelled_by_user`） | `run_id` |
 | `agent_wait_task` | 轮询终态；卡在审批时带 `interrupted=true` 提前返回 | `run_id` / `timeout_ms` |
 | `agent_submit_approval` | 回传高危工具审批决策（approve/skip/takeover） | `approvalId`/`decision`(+`agentId`/`guidance`/`remember`/`grantKey`) |
 | `agent_submit_plan_decision` | 回传计划审批门禁决策（approve/reject/revise） | `decision`(+`agentId`/`guidance`) |
@@ -222,6 +222,14 @@ curl -s -X POST http://127.0.0.1:18755/mcp \
 5. 绑定到 Agent：`agent_ui_update.payload.pluginIds=[<pluginId>]`（≤10）。
 6. `plugin_list` / `plugin_get` 核对已落库（前端插件列表可直接抽查）。
 
+### 流程 2.1：产物契约（xlsx / 图表类硬约定，2026-09-23 L2 实测补）
+> 用户要 `.xlsx` / 走势图等**二进制产物**时：**禁止让 Agent 手写二进制**（L2 实测 A-M2 产物 0%）。
+> 必须经 `plugin_upsert` 装配官方模板（或复用已绑定插件）→ `plugin_test` → Agent 调用生成：
+> - **Excel**：`scripts/plugin.xlsx_writer.template.py`——入参 `{outPath, sheets: {sheetName: [["cell",...],...]}}`（支持 `{headers:[...], rows:[...]}` 形态）；
+> - **图表 PNG**：`scripts/plugin.chart_png.template.py`——入参 `{outPath, kind:'line'|'bar'|'scatter', ys, xs?, title?, xLabel?, yLabel?}`（Agg 后端，无显示环境可用）。
+>
+> 硬约定：输出路径必须是 **workspace 相对路径**；文件名与用户要求**逐字一致**；缺依赖走 Runner exit 42 自愈（`dependencies` 头注释已声明 openpyxl / matplotlib）。
+
 ### 流程 3：知识库管理
 1. `kb_create` `{identifier, name, description?, scenario?}` → 取 `kb.id`。
 2. `kb_add_file` `{kbId, relPath:"docs/readme.md", content:"# ..."}` 或 `kb_import_file` `{kbId, relPath, base64}`。
@@ -303,7 +311,9 @@ WorkDuo 的知识库等模块大量逻辑在**前端 TS** 完成（kbFs 落盘�
 | `agent_task_driver.mjs` | **标准驱动库**（ESM import 复用）：MCP 客户端 / 终态轮询 + 三类挂起自动应答（计划审批·工具审批·恢复门禁）/ 轨迹解包 `traceInner` / KB 事件提取 / 增量日志。**新驱动一律 import 本库，禁止复刻客户端逻辑** |
 | `agent_e2e_audit.mjs` | **全模块四阶段评分审计**（100 分制：P1 发现 → P2 KB+插件装配 → P3 RAG 快路径/捷径/诊断 → P4 复合产物磁盘穿透 + 留痕一致性），报告写 cwd `e2e_audit_report.json` |
 | `agent_intent_probe.mjs` | **意图探针**：KB 事实问答核验「SIMPLE_CHAT 快路径 + 检索命中」（`PROBE_KB_ID` 指定已索引 KB，exit 0 = PASS） |
+| `tool_contract_probe.mjs` | **工具契约边界防御探针**（L2 pillar②）：轰「坏入参」断言快速结构化拒绝——缺必填 / 非法枚举(node) / 越界引用 / 空标识 / 未知审批 / 超大文本；含 `memory_anchor` 缺 category 漂移观测（已知坑#7，记 WARN）。exit 0=全拒绝 / 1=有违反(挂死或静默接受) / 2=含已知漂移 | `node tool_contract_probe.mjs`（**无需模型**，坏入参在校验层拒绝） |
 | `kb_driver.mjs` | KB 全链路回归（create→add_file→rebuild→list_assets→logs） |
+| `l2_eval_harness.mjs` | **L2 生态测评编排**（并发+故障注入+三维评分）：`env` / `run --cases A-M1,B-M1 [--concurrency N]` / `inject --fault F-1` / `score`。案例目录 A/B×M/H 覆盖爬取/ETL/全栈/MCP聚合器。工作空间默认 `E:/Codes/ABC/work-duo/eval-workspace/`。**run 预算（2026-09-23 已修复）**：默认 1800s + 预算前 30s 软窗口（停止发起新步骤、在途收尾）；超时终态 `error` + `error=run_budget_exhausted` + reply 含已产出文件表；取消为独立终态 `cancelled`。超时判据看终态与产物，不用「慢=死」 |
 
 驱动约定（详见 `scripts/README.md`）：驱动只做参数编排与断言，**能力缺口回流 SKILL+MCP 层**；`agent_get_run_trace` 用 `traceInner()` 剥 `{"trace":…}` 层；无人值守装配 Agent 用 `planAutoApproveMode:'never'` + `autoToolExecMode:true`；复合任务 `agent_run_task` 必须传 `workspace` 绝对路径。
 

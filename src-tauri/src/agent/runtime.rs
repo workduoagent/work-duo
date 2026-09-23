@@ -62,6 +62,9 @@ pub struct AgentTaskState {
     pub running: Arc<AtomicBool>,
     /// 任务取消标志（用户点击「停止」时由 `cancel_agent_task` 置 true）。
     pub cancel_flag: Arc<AtomicBool>,
+    /// 取消来源（P1-2）：仅用户主动取消时置 true。run 收尾据此把 registry 终态写成
+    /// `cancelled` 而非 `done`（修复 F-1：取消后仍显示 done）；预算软收尾不置位本标志。
+    pub cancel_requested: Arc<AtomicBool>,
     pub approval: Arc<ApprovalManager>,
     pub recovery: Arc<crate::agent::recovery::RecoveryHub>,
     pub choice: Arc<ChoiceHub>,
@@ -77,6 +80,7 @@ impl AgentTaskState {
             agent_id: agent_id.to_string(),
             running: Arc::new(AtomicBool::new(false)),
             cancel_flag: Arc::new(AtomicBool::new(false)),
+            cancel_requested: Arc::new(AtomicBool::new(false)),
             approval: Arc::new(ApprovalManager::new()),
             recovery: crate::agent::recovery::RecoveryHub::new(),
             choice: Arc::new(ChoiceHub::new()),
@@ -218,6 +222,7 @@ impl AgentRuntime {
         // 0) 新一轮任务开始：清除上一轮可能残留的取消标志（cancel_agent_task 已无副作用），
         //    同时保证"上一次取消未生效就立刻发起新任务"不会误杀新任务。
         task.cancel_flag.store(false, Ordering::SeqCst);
+        task.cancel_requested.store(false, Ordering::SeqCst);
         // 新一轮开始：清空前一轮可能残留的恢复挂起态（避免上轮 cancel 残留误导前端面板）。
         task.recovery.reset();
         // 同步清空计划审批 hub：cancel() 会无条件把 decision 置为 Cancel，若当时没有
@@ -1576,13 +1581,21 @@ fn llm_stream_chunk_timeout() -> Duration {
         .unwrap_or_else(|| Duration::from_secs(DEFAULT_LLM_CHUNK_TIMEOUT_SECS))
 }
 
-/// run 级总墙钟上限（默认 10 分钟）：**任何一次 run 都必须在此时间内到达终态**。
+/// run 级总墙钟上限（默认 30 分钟）：**任何一次 run 都必须在此时间内到达终态**。
 ///
 /// 这是「失败收尾」验收口径的第③层。调用级超时（call_llm / call_llm_stream）只堵住单点，
-/// 本层兜住「多步累积过长」或「某条未被调用级超时覆盖的路径挂起」——2026-09-22 实测即暴露：
-/// 本地模型大生成量任务下 run 在 420s+ 仍未终态。超时后强制 emit_task_error，
+/// 本层兜住「多步累积过长」或「某条未被调用级超时覆盖的路径挂起」。超时后强制 emit_task_error，
 /// 且 `RunningGuard` 随作用域结束 drop → **锁必然释放**。
-const DEFAULT_RUN_MAX_SECS: u64 = 600;
+///
+/// 2026-09-23 L2 生态测评（34 用例）实证：600s 预算误杀 12/34 用例——多文件项目 / 多源数据 /
+/// Skill+KB 全链路在并发 ≥2 时「正常多步累积」即撞墙（A-M2 串行都要 473s）。本层是**防挂死
+/// 兜底**，不应兼做业务 SLA：默认上调 1800s。SIMPLE_CHAT 天然被调用级超时（180s × 有界轮次）
+/// 约束，无需更紧的 run 预算——否则层级倒挂（run 预算 < 调用级超时）会先杀合法调用。
+const DEFAULT_RUN_MAX_SECS: u64 = 1800;
+
+/// 预算软窗口：run 预算到期前该时长先置位取消标志，复用既有取消基建让流水线
+/// 「停止发起新步骤、等在途调用收尾」；到点才由 timeout 硬兜底（内层 future 被 drop）。
+pub(crate) const RUN_SOFT_WINDOW: Duration = Duration::from_secs(30);
 
 /// 可用环境变量 `WD_RUN_MAX_SECS` 覆盖（>0 生效）。慢模型环境可调大。
 pub(crate) fn run_wall_clock_limit() -> Duration {

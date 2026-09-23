@@ -148,6 +148,74 @@ pub fn append_reply(text: &str) {
     with_run_trace_mut(&rid, |b| b.reply.push_str(text));
 }
 
+/// 非正常终态收尾（P0-2，2026-09-23）：把「原因 + 工作空间已产出文件清单」写入 trace.reply，
+/// 让 UI 与 MCP（agent_get_run_trace）都能看到失败现场，用户可据此决策续跑/拆分/加大预算。
+/// 必须在 `with_run_id_scope` 内调用（reply 落当前 run 桶）；文件表过滤 `.wd_mem/`（红线：
+/// 内部记忆目录绝不进用户可见正文），最多列 20 个、总数如实统计。
+pub fn finalize_run_summary(workspace: Option<&str>, error_code: &str, message: &str) {
+    let mut listed: Vec<String> = Vec::new();
+    let mut total = 0usize;
+    if let Some(ws) = workspace.map(str::trim).filter(|s| !s.is_empty()) {
+        collect_workspace_files(std::path::Path::new(ws), ws, &mut listed, &mut total, 0);
+    }
+    let mut text = String::new();
+    text.push_str("## 任务未正常完成\n");
+    text.push_str(&format!("- 原因：{}（{}）\n", error_code, message));
+    if total == 0 {
+        text.push_str("- 已产出文件：无（工作空间为空或未绑定 workspace）\n");
+    } else {
+        text.push_str(&format!(
+            "- 已产出文件（共 {} 个{}）：\n",
+            total,
+            if listed.len() < total { "，仅列前 20" } else { "" }
+        ));
+        for f in &listed {
+            text.push_str(&format!("  - {}\n", f));
+        }
+    }
+    text.push_str("- 建议：核对上方文件后决定续跑/拆分任务/加大预算（WD_RUN_MAX_SECS，改后重启生效）。\n");
+    append_reply(&text);
+    tracing::warn!(
+        "[agent] finalize_run_summary: code={} 已产出文件总数={}",
+        error_code,
+        total
+    );
+}
+
+/// 递归收集工作空间文件（相对路径 + 大小），跳过 `.wd_mem/`，最多收集 20 条、总数全统计。
+fn collect_workspace_files(
+    dir: &std::path::Path,
+    root: &str,
+    listed: &mut Vec<String>,
+    total: &mut usize,
+    depth: usize,
+) {
+    if depth > 6 {
+        return;
+    }
+    let Ok(rd) = std::fs::read_dir(dir) else { return };
+    for entry in rd.flatten() {
+        let p = entry.path();
+        let name = entry.file_name().to_string_lossy().to_string();
+        if name == ".wd_mem" {
+            continue; // 红线：内部记忆目录不进用户可见正文
+        }
+        let Ok(meta) = std::fs::metadata(&p) else { continue };
+        if meta.is_dir() {
+            collect_workspace_files(&p, root, listed, total, depth + 1);
+        } else {
+            *total += 1;
+            if listed.len() < 20 {
+                let rel = p
+                    .strip_prefix(root)
+                    .map(|r| r.to_string_lossy().replace('\\', "/"))
+                    .unwrap_or_else(|_| name.clone());
+                listed.push(format!("{}（{} B）", rel, meta.len()));
+            }
+        }
+    }
+}
+
 /// 自测闭环（#8 per-run）：取出指定 run 完整轨迹（事件列表 + 累计思考 + 累计正文 + 计数）。
 /// run_id 不存在时返回空结构（不报错，便于并发场景早查询）。
 pub fn get_trace(run_id: &str) -> serde_json::Value {

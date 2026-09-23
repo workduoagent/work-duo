@@ -123,6 +123,27 @@ pub struct RunAgentTaskInput {
 }
 
 /// 启动一轮智能体任务。
+/// 预算软窗口看门狗（P0-1 两阶段软超时，2026-09-23）：run 预算到期前 `RUN_SOFT_WINDOW` 先置位
+/// 既有 `cancel_flag`——流水线在既有边界检查点停止发起新步骤、在途调用自然收尾（timeout 到点
+/// 硬 drop 内层 future 无法「等收尾」，软阶段必须在到点前置位）。返回 JoinHandle 供 run 结束后
+/// abort，防止取消信号泄漏到该 Agent 的下一个任务。预算 ≤ 软窗口时不启用（防 0 点即取消）。
+fn spawn_budget_watchdog(
+    cancel_flag: std::sync::Arc<AtomicBool>,
+    fired: std::sync::Arc<AtomicBool>,
+    run_limit: std::time::Duration,
+) -> Option<tauri::async_runtime::JoinHandle<()>> {
+    let soft = run_limit.saturating_sub(crate::agent::runtime::RUN_SOFT_WINDOW);
+    if soft.is_zero() {
+        return None;
+    }
+    Some(tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(soft).await;
+        fired.store(true, std::sync::atomic::Ordering::SeqCst);
+        cancel_flag.store(true, std::sync::atomic::Ordering::SeqCst);
+        tracing::warn!("[agent] run 预算软窗口触发：停止发起新步骤，等待在途调用收尾");
+    }))
+}
+
 #[tauri::command]
 pub async fn run_agent_task(
     app: AppHandle,
@@ -187,24 +208,63 @@ pub async fn run_agent_task(
         let _scope = crate::agent::events::with_run_id_scope(internal_rid.clone(), async move {
             tracing::info!("[agent] run_agent_task 后台任务已 spawn，开始 run_task");
             // 支柱① 终态铁律：run 级总墙钟兜底（验收口径第③层）。
-            // 调用级超时（call_llm / call_llm_stream）只堵单点，本层兜住多步累积过长或
-            // 未覆盖路径的挂起。超时即强制终态，`RunningGuard` 随本块结束 drop → 锁必然释放。
+            // 两阶段软超时（2026-09-23 L2 评审修正）：预算到期前 RUN_SOFT_WINDOW 先置位既有
+            // cancel_flag——流水线在既有边界检查点停止发起新步骤、在途调用自然收尾（timeout
+            // 到点硬 drop 内层 future 无法「等收尾」）；watchdog 在 run 结束后 abort，
+            // 防止取消信号泄漏到该 Agent 的下一个任务。
             let run_limit = crate::agent::runtime::run_wall_clock_limit();
-            match tokio::time::timeout(
+            let cfg_workspace = cfg.workspace.clone();
+            let budget_soft = std::sync::Arc::new(AtomicBool::new(false));
+            let watchdog = spawn_budget_watchdog(
+                task_state.cancel_flag.clone(),
+                budget_soft.clone(),
+                run_limit,
+            );
+            let run_outcome = tokio::time::timeout(
                 run_limit,
                 rt.run_task(&app_clone, cfg, prompt, plan_override, pre_completed, initial_context, &task_state),
             )
-            .await
-            {
+            .await;
+            if let Some(h) = watchdog {
+                let _ = h.abort();
+            }
+            match run_outcome {
                 Ok(()) => {}
                 Err(_) => {
                     tracing::warn!(
                         "[agent] run_agent_task: run 总墙钟超时（{}s）——强制终态，释放运行锁",
                         run_limit.as_secs()
                     );
+                    // P0-2：非正常终态 reply 必须非空（原因 + 已产出文件表）。
+                    crate::agent::events::finalize_run_summary(
+                        cfg_workspace.as_deref(),
+                        "run_budget_exhausted",
+                        &format!("运行总时长超时（{}s），已强制终止", run_limit.as_secs()),
+                    );
                     crate::agent::events::emit_task_error(
                         &app_clone,
                         &format!("运行总时长超时（{}s），已强制终止以防任务永不结束", run_limit.as_secs()),
+                    );
+                }
+            }
+            // P0-2：软收尾（预算提前结束）/ 用户取消同样写观测兜底（reply 非空）。
+            if run_outcome.is_ok() {
+                if task_state.cancel_requested.load(Ordering::SeqCst) {
+                    crate::agent::events::finalize_run_summary(
+                        cfg_workspace.as_deref(),
+                        "cancelled_by_user",
+                        "任务已被用户取消；已产出文件保留，可据此续跑",
+                    );
+                } else if budget_soft.load(Ordering::SeqCst) {
+                    tracing::warn!("[agent] run_agent_task: 预算软窗口生效，任务提前收尾");
+                    crate::agent::events::finalize_run_summary(
+                        cfg_workspace.as_deref(),
+                        "run_budget_exhausted",
+                        "运行预算耗尽（软收尾），已停止发起新步骤",
+                    );
+                    crate::agent::events::emit_task_error(
+                        &app_clone,
+                        "运行预算耗尽，已保留已产出文件；可加大 WD_RUN_MAX_SECS 或拆分任务后续跑",
                     );
                 }
             }
@@ -285,17 +345,27 @@ pub async fn run_task_ex(
     let rid = run_id.clone();
 
     events::reset_trace(&rid); // #8 per-run：重置该 run 的轨迹桶
-    // 超时标志：run 被总墙钟强制终止时，registry 状态须写 "error" 而非 "done"
-    // （否则观测上分不清「正常完成」与「被强制终止」，违反支柱③可还原）。
+    // 超时/取消/预算标志（P0-1+P1-2，2026-09-23）：registry 终态区分 done / error / cancelled，
+    // 且非正常终态必须带结构化 error（否则观测上分不清「正常完成/被终止/被取消」，违反支柱③）。
     let timed_out = std::sync::Arc::new(AtomicBool::new(false));
     let to_flag = timed_out.clone();
+    let budget_soft = std::sync::Arc::new(AtomicBool::new(false));
+    let budget_out = budget_soft.clone();
+    let cancel_in = task_state.cancel_requested.clone();
+    let cancel_out = cancel_in.clone();
+    let cfg_workspace = cfg.workspace.clone();
     tauri::async_runtime::spawn(async move {
         let _running_guard = running_guard;
         // #8 per-run：当前任务的所有 emit 点经 task_local 落到 rid 桶，并发 run 互不串台。
         let _scope = crate::agent::events::with_run_id_scope(rid.clone(), async move {
-            // 支柱① 终态铁律：run 级总墙钟兜底（同 run_agent_task，验收口径第③层）。
+            // 支柱① 终态铁律：run 级总墙钟兜底（同 run_agent_task，含预算软窗口两阶段收尾）。
             let run_limit = crate::agent::runtime::run_wall_clock_limit();
-            match tokio::time::timeout(
+            let watchdog = spawn_budget_watchdog(
+                task_state.cancel_flag.clone(),
+                budget_soft.clone(),
+                run_limit,
+            );
+            let run_outcome = tokio::time::timeout(
                 run_limit,
                 rt.run_task(
                     &app_clone,
@@ -307,8 +377,11 @@ pub async fn run_task_ex(
                     &task_state,
                 ),
             )
-            .await
-            {
+            .await;
+            if let Some(h) = watchdog {
+                let _ = h.abort();
+            }
+            match run_outcome {
                 Ok(()) => {}
                 Err(_) => {
                     to_flag.store(true, Ordering::Relaxed);
@@ -316,9 +389,36 @@ pub async fn run_task_ex(
                         "[agent] run_task_ex: run 总墙钟超时（{}s）——强制终态，释放运行锁",
                         run_limit.as_secs()
                     );
+                    // P0-2：非正常终态 reply 必须非空（原因 + 已产出文件表）。
+                    crate::agent::events::finalize_run_summary(
+                        cfg_workspace.as_deref(),
+                        "run_budget_exhausted",
+                        &format!("运行总时长超时（{}s），已强制终止", run_limit.as_secs()),
+                    );
                     crate::agent::events::emit_task_error(
                         &app_clone,
                         &format!("运行总时长超时（{}s），已强制终止以防任务永不结束", run_limit.as_secs()),
+                    );
+                }
+            }
+            // P0-2：软收尾（预算提前结束）/ 用户取消同样写观测兜底（reply 非空）。
+            if run_outcome.is_ok() {
+                if cancel_in.load(Ordering::SeqCst) {
+                    crate::agent::events::finalize_run_summary(
+                        cfg_workspace.as_deref(),
+                        "cancelled_by_user",
+                        "任务已被用户取消；已产出文件保留，可据此续跑",
+                    );
+                } else if budget_soft.load(Ordering::SeqCst) {
+                    tracing::warn!("[agent] run_task_ex: 预算软窗口生效，任务提前收尾");
+                    crate::agent::events::finalize_run_summary(
+                        cfg_workspace.as_deref(),
+                        "run_budget_exhausted",
+                        "运行预算耗尽（软收尾），已停止发起新步骤",
+                    );
+                    crate::agent::events::emit_task_error(
+                        &app_clone,
+                        "运行预算耗尽，已保留已产出文件；可加大 WD_RUN_MAX_SECS 或拆分任务后续跑",
                     );
                 }
             }
@@ -326,12 +426,17 @@ pub async fn run_task_ex(
         .await;
         let mut reg = reg.lock().await;
         if let Some(rec) = reg.get_mut(&rid) {
-            // 被总墙钟强制终止 → 记 "error"（与正常完成区分开）
-            rec.status = if timed_out.load(Ordering::Relaxed) {
-                "error".to_string()
+            // 终态三态（P1-2）：error=超时/预算耗尽；cancelled=用户取消；done=正常完成。
+            // P0-2：非正常终态 rec.error 必须带结构化原因（MCP get_status 可读）。
+            if timed_out.load(Ordering::Relaxed) || budget_out.load(Ordering::Relaxed) {
+                rec.status = "error".to_string();
+                rec.error = Some("run_budget_exhausted".to_string());
+            } else if cancel_out.load(Ordering::SeqCst) {
+                rec.status = "cancelled".to_string();
+                rec.error = Some("cancelled_by_user".to_string());
             } else {
-                "done".to_string()
-            };
+                rec.status = "done".to_string();
+            }
             rec.finished_at = Some(now_ms());
         }
     });
@@ -493,7 +598,11 @@ pub async fn submit_approval_decision(
     agent_id: Option<String>,
     decision: ApprovalDecisionInput,
 ) -> Result<bool, String> {
-    let task = runtime.resolve_task_state(agent_id.as_deref())?;
+    // P1-2：无在跑任务（状态束已随上次任务回收）→ 结构化 no_pending（Ok(false)），不再 Err 吓人。
+    let task = match runtime.resolve_task_state(agent_id.as_deref()) {
+        Ok(t) => t,
+        Err(_) => return Ok(false),
+    };
     // 15007：「本任务内记住」勾选 → 把策略授权 key 写入 grants（同信号后续操作放行）。
     // 仅 approve/takeover 生效；skip 意味着拒绝，不该记住。
     if decision.remember && decision.decision != "skip" {
@@ -521,7 +630,11 @@ pub async fn submit_choice_decision(
     agent_id: Option<String>,
     input: SubmitChoiceInput,
 ) -> Result<bool, String> {
-    let task = runtime.resolve_task_state(agent_id.as_deref())?;
+    // P1-2：无在跑任务（状态束已随上次任务回收）→ 结构化 no_pending（Ok(false)），不再 Err 吓人。
+    let task = match runtime.resolve_task_state(agent_id.as_deref()) {
+        Ok(t) => t,
+        Err(_) => return Ok(false),
+    };
     Ok(task
         .choice
         .resolve(&input.choice_id, &input.option_id, input.custom_text)
@@ -538,6 +651,9 @@ pub async fn cancel_agent_task(
 ) -> Result<(), String> {
     let task = runtime.resolve_task_state(agent_id.as_deref())?;
     task.cancel_flag
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    // P1-2：记录取消来源（用户主动）——run 收尾据此写 `cancelled` 终态而非 `done`（修复 F-1）。
+    task.cancel_requested
         .store(true, std::sync::atomic::Ordering::SeqCst);
     // 若后台流水线正挂在恢复等待上，同步唤醒（否则取消信号无法跳出 wait 挂起）。
     task.recovery.cancel();
@@ -571,7 +687,11 @@ pub async fn retry_subtask(
     runtime: State<'_, AgentRuntime>,
     agent_id: Option<String>,
 ) -> Result<bool, String> {
-    let task = runtime.resolve_task_state(agent_id.as_deref())?;
+    // P1-2：无在跑任务（状态束已随上次任务回收）→ 结构化 no_pending（Ok(false)），不再 Err 吓人。
+    let task = match runtime.resolve_task_state(agent_id.as_deref()) {
+        Ok(t) => t,
+        Err(_) => return Ok(false),
+    };
     if !task.recovery.is_blocked() {
         return Ok(false); // 当前没有子任务在等待恢复
     }
@@ -585,7 +705,11 @@ pub async fn skip_subtask(
     runtime: State<'_, AgentRuntime>,
     agent_id: Option<String>,
 ) -> Result<bool, String> {
-    let task = runtime.resolve_task_state(agent_id.as_deref())?;
+    // P1-2：无在跑任务（状态束已随上次任务回收）→ 结构化 no_pending（Ok(false)），不再 Err 吓人。
+    let task = match runtime.resolve_task_state(agent_id.as_deref()) {
+        Ok(t) => t,
+        Err(_) => return Ok(false),
+    };
     if !task.recovery.is_blocked() {
         return Ok(false);
     }
@@ -601,7 +725,11 @@ pub async fn resolve_subtask(
     agent_id: Option<String>,
     input: ResolveSubtaskInput,
 ) -> Result<bool, String> {
-    let task = runtime.resolve_task_state(agent_id.as_deref())?;
+    // P1-2：无在跑任务（状态束已随上次任务回收）→ 结构化 no_pending（Ok(false)），不再 Err 吓人。
+    let task = match runtime.resolve_task_state(agent_id.as_deref()) {
+        Ok(t) => t,
+        Err(_) => return Ok(false),
+    };
     if !task.recovery.is_blocked() {
         return Ok(false);
     }
@@ -639,7 +767,12 @@ pub async fn submit_plan_decision(
     agent_id: Option<String>,
     input: SubmitPlanApprovalInput,
 ) -> Result<bool, String> {
-    let task = runtime.resolve_task_state(agent_id.as_deref())?;
+    // P1-2：无在跑任务（状态束已随上次任务回收）→ 结构化 no_pending（Ok(false)），不再 Err 吓人。
+    // 短任务可能在门禁暴露前就跑完，此时收到 false 属正常（勿重试 run_task）。
+    let task = match runtime.resolve_task_state(agent_id.as_deref()) {
+        Ok(t) => t,
+        Err(_) => return Ok(false),
+    };
     if !task.plan_approval.is_blocked() {
         return Ok(false);
     }
