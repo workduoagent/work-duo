@@ -1,0 +1,30 @@
+{
+  "faultId": "F-10",
+  "startedAt": "2026-09-23T15:52:49.864Z",
+  "observations": [
+    {
+      "ok": true,
+      "msg": "并发 skill_upsert fulfilled=3/3（内容一致性抽查见 skill_get）"
+    },
+    {
+      "ok": true,
+      "msg": "skill_list 可见",
+      "extra": {
+        "id": "144f1b00-5806-49d8-a6f0-12de6b050148"
+      }
+    },
+    {
+      "ok": true,
+      "msg": "skill_get 可读",
+      "extra": {
+        "path": "$APPDATA/.skills/l2-dupskill-muea7v7t"
+      }
+    },
+    {
+      "ok": true,
+      "msg": "清理 skill_delete 完成"
+    }
+  ],
+  "ok": true,
+  "finishedAt": "2026-09-23T15:52:49.998Z"
+}

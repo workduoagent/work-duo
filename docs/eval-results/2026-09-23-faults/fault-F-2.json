@@ -1,0 +1,31 @@
+{
+  "faultId": "F-2",
+  "startedAt": "2026-09-23T15:44:06.236Z",
+  "observations": [
+    {
+      "ok": true,
+      "msg": "短窗观测 status=timeout（期望非 running 永久挂死）",
+      "extra": {}
+    },
+    {
+      "ok": true,
+      "msg": "短窗后 get_status",
+      "extra": {
+        "status": "running",
+        "runId": "run-1790178246263-5"
+      }
+    },
+    {
+      "ok": true,
+      "msg": "短窗/超时后锁可用",
+      "extra": {
+        "ok": true,
+        "first": "done",
+        "second": "done",
+        "secondError": null
+      }
+    }
+  ],
+  "ok": true,
+  "finishedAt": "2026-09-23T15:45:13.097Z"
+}

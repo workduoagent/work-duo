@@ -1,0 +1,19 @@
+{
+  "faultId": "F-7",
+  "startedAt": "2026-09-23T15:54:54.660Z",
+  "observations": [
+    {
+      "ok": true,
+      "msg": "无 workspace 终态=done",
+      "extra": {
+        "reply": ""
+      }
+    },
+    {
+      "ok": true,
+      "msg": "工具面稳定 tools=72（期望 72）"
+    }
+  ],
+  "ok": true,
+  "finishedAt": "2026-09-23T15:55:06.940Z"
+}

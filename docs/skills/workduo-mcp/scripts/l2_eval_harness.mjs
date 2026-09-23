@@ -19,6 +19,8 @@ import {
 // ---------- 配置 ----------
 export const ROOT = process.env.L2_WS_ROOT || 'E:/Codes/ABC/work-duo/eval-workspace'
 export const OUT = process.env.L2_OUT || 'E:/Codes/ABC/work-duo/docs/eval-results/2026-09-23'
+/** MCP 工具数基线（随版本演进；F-7 故障断言与 gate 探针共用同一期望值） */
+const EXPECTED_TOOLS = 72
 export const MODELS = {
   fast: '96af449e-dfc0-48ec-b077-aa9f02b43d64', // DeepSeek-V4.1-Flash
   slow: 'bb9ab960-6615-439a-b5bc-95d2a65173b3', // MiniMax-M3
@@ -599,7 +601,7 @@ export function judgeMerge() {
 }
 
 /** MCP 契约探针（C4 门禁第 8 条）：tools/list → 工具数 + 关键工具在位。 */
-async function probeMcpContract(minTools = 72, required = ['agent_run_task', 'agent_get_run_progress', 'agent_sweep_orphan_rounds']) {
+async function probeMcpContract(minTools = EXPECTED_TOOLS, required = ['agent_run_task', 'agent_get_run_progress', 'agent_sweep_orphan_rounds']) {
   try {
     const resp = await fetch('http://127.0.0.1:18755/mcp', {
       method: 'POST',
@@ -715,20 +717,27 @@ export async function gate(opts = {}) {
   const blank = notDone.filter((c) => !(c.replyLen > 0))
   add('非 done 终态 reply 非空', blank.length === 0, notDone.length ? `${notDone.length - blank.length}/${notDone.length}` : '无非 done 终态')
 
-  // 8) 故障注入证据 F-1/F-4（faultsDir 可与 run 证据分离——复跑场景故障机制由同一二进制的首轮验证）
-  for (const fid of ['F-1', 'F-4']) {
-    let ok = false, detail = '缺证据文件'
+  // 8) 故障注入证据（faultsDir 可与 run 证据分离——复跑场景故障机制由同一二进制的首轮验证）。
+  // C4 第二版：默认要求核心 F-1/F-4；--faults F-1,F-2,... 可指定全量故障集（2026-09-23 全量 11 场景）。
+  const faultIds = (opts.faults || 'F-1,F-4').split(',').map((s) => s.trim()).filter(Boolean)
+  for (const fid of faultIds) {
+    let state = 'FAIL', detail = '缺证据文件', ok = false
     try {
       const j = JSON.parse(fs.readFileSync(path.join(faultsDir, `fault-${fid}.json`), 'utf8'))
-      ok = j.ok === true
-      detail = `ok=${j.ok}`
+      detail = `ok=${j.ok}` + (Array.isArray(j.observations) ? ` (${j.observations.filter((o) => o.ok).length}/${j.observations.length} 项观测)` : '')
+      if (j.ok === true) { ok = true; state = 'ok' } else if (j.ok === null) {
+        // ok===null = 排期/人工观察型故障（如 F-5 跨零点），未验证 ≠ 通过：单列 SKIP，不计入判定
+        state = 'skip'
+        ok = true
+      }
     } catch { /* 保持缺文件 */ }
-    add(`故障注入 ${fid}`, ok, detail)
+    checks.push({ name: `故障注入 ${fid}`, ok, detail, state })
+    console.log(state === 'skip' ? '  ⚠' : (ok ? '  ✓' : '  ✗'), `故障注入 ${fid}`, '—', detail + (state === 'skip' ? '（SKIP：未验证，不计入判定）' : ''))
   }
 
   // 9) MCP 契约探针 + 种子资产
   const mcp = opts.skipMcp ? { ok: true, detail: 'skipped' } : await probeMcpContract()
-  add('MCP 契约（72 工具+关键工具）', mcp.ok, mcp.detail)
+  add('MCP 契约（' + EXPECTED_TOOLS + ' 工具+关键工具）', mcp.ok, mcp.detail)
   const seeds = checkSeedAssets()
   add('种子资产完整', seeds.ok, seeds.detail)
 
@@ -1019,8 +1028,9 @@ export async function injectFault(faultId) {
       const r = await startRun(ag.id, '请创建 secret.txt 内容 x', sid, {}, { maxMs: 120000 }) // 无 workspace
       note(['done', 'error', 'cancelled', 'canceled'].includes(r.status), `无 workspace 终态=${r.status}`, { reply: (r.reply || '').slice(0, 80) })
       const tools = await toolsList()
-      note(tools.length === 70, `工具面稳定 tools=${tools.length}`)
-      rec.ok = ['done', 'error'].includes(r.status) && tools.length === 70
+      // 基线随 MCP 工具数演进：70(2026-09-23 初) → 72（P2 批次新增 agent_get_run_progress + agent_sweep_orphan_rounds）
+      note(tools.length === EXPECTED_TOOLS, `工具面稳定 tools=${tools.length}（期望 ${EXPECTED_TOOLS}）`)
+      rec.ok = ['done', 'error'].includes(r.status) && tools.length === EXPECTED_TOOLS
     } finally { await deleteEvalAgent(ag.id) }
   }
 
@@ -1259,6 +1269,7 @@ async function main() {
       minArtifacts: parseInt(get('min-artifacts', '90'), 10),
       minResolved: parseInt(get('min-resolved', '80'), 10),
       minFiles: parseInt(get('min-files', '5'), 10),
+      faults: get('faults', 'F-1,F-4'),
       skipMcp: flag('skip-mcp'),
     })
   }

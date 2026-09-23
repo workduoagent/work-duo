@@ -317,6 +317,7 @@ WorkDuo 的知识库等模块大量逻辑在**前端 TS** 完成（kbFs 落盘�
 | `tool_contract_probe.mjs` | **工具契约边界防御探针**（L2 pillar②）：轰「坏入参」断言快速结构化拒绝——缺必填 / 非法枚举(node) / 越界引用 / 空标识 / 未知审批 / 超大文本；含 `memory_anchor` 缺 category 漂移观测（已知坑#7，记 WARN）。exit 0=全拒绝 / 1=有违反(挂死或静默接受) / 2=含已知漂移 | `node tool_contract_probe.mjs`（**无需模型**，坏入参在校验层拒绝） |
 | `kb_driver.mjs` | KB 全链路回归（create→add_file→rebuild→list_assets→logs） |
 | `l2_eval_harness.mjs` | **L2 生态测评编排**（并发+故障注入+三维评分）：`env` / `run --cases A-M1,B-M1 [--concurrency N]` / `inject --fault F-1` / `score`。案例目录 A/B×M/H 覆盖爬取/ETL/全栈/MCP聚合器。工作空间默认 `E:/Codes/ABC/work-duo/eval-workspace/`。**run 预算（2026-09-23 已修复）**：默认 1800s + 预算前 30s 软窗口（停止发起新步骤、在途收尾）；超时终态 `error` + `error=run_budget_exhausted` + reply 含已产出文件表；取消为独立终态 `cancelled`。超时判据看终态与产物，不用「慢=死」 |
+| **发布门禁** | `node l2_eval_harness.mjs gate [--out] [--faults-dir] [--faults F-1,F-4,...] [--min-done 90] [--min-artifacts 90] [--min-resolved 80] [--min-files 5]`——12+N 条断言、PASS/FAIL+退出码，挂 CI |
 
 驱动约定（详见 `scripts/README.md`）：驱动只做参数编排与断言，**能力缺口回流 SKILL+MCP 层**；`agent_get_run_trace` 用 `traceInner()` 剥 `{"trace":…}` 层；无人值守装配 Agent 用 `planAutoApproveMode:'never'` + `autoToolExecMode:true`；复合任务 `agent_run_task` 必须传 `workspace` 绝对路径。
 

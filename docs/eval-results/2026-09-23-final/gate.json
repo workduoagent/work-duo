@@ -1,5 +1,5 @@
 {
-  "at": "2026-09-23T15:33:01.237Z",
+  "at": "2026-09-23T15:55:16.398Z",
   "pass": true,
   "checks": [
     {
@@ -45,12 +45,68 @@
     {
       "name": "故障注入 F-1",
       "ok": true,
-      "detail": "ok=true"
+      "detail": "ok=true (5/5 项观测)",
+      "state": "ok"
+    },
+    {
+      "name": "故障注入 F-2",
+      "ok": true,
+      "detail": "ok=true (3/3 项观测)",
+      "state": "ok"
+    },
+    {
+      "name": "故障注入 F-3",
+      "ok": true,
+      "detail": "ok=true (2/2 项观测)",
+      "state": "ok"
     },
     {
       "name": "故障注入 F-4",
       "ok": true,
-      "detail": "ok=true"
+      "detail": "ok=true (3/3 项观测)",
+      "state": "ok"
+    },
+    {
+      "name": "故障注入 F-5",
+      "ok": true,
+      "detail": "ok=null (1/1 项观测)",
+      "state": "skip"
+    },
+    {
+      "name": "故障注入 F-6",
+      "ok": true,
+      "detail": "ok=true (1/1 项观测)",
+      "state": "ok"
+    },
+    {
+      "name": "故障注入 F-7",
+      "ok": true,
+      "detail": "ok=true (2/2 项观测)",
+      "state": "ok"
+    },
+    {
+      "name": "故障注入 F-8",
+      "ok": true,
+      "detail": "ok=true (1/1 项观测)",
+      "state": "ok"
+    },
+    {
+      "name": "故障注入 F-10",
+      "ok": true,
+      "detail": "ok=true (4/4 项观测)",
+      "state": "ok"
+    },
+    {
+      "name": "故障注入 F-11",
+      "ok": true,
+      "detail": "ok=true (2/2 项观测)",
+      "state": "ok"
+    },
+    {
+      "name": "故障注入 F-12",
+      "ok": true,
+      "detail": "ok=true (1/1 项观测)",
+      "state": "ok"
     },
     {
       "name": "MCP 契约（72 工具+关键工具）",
