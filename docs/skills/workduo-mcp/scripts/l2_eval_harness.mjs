@@ -20,7 +20,7 @@ import {
 export const ROOT = process.env.L2_WS_ROOT || 'E:/Codes/ABC/work-duo/eval-workspace'
 export const OUT = process.env.L2_OUT || 'E:/Codes/ABC/work-duo/docs/eval-results/2026-09-23'
 /** MCP 工具数基线（随版本演进；F-7 故障断言与 gate 探针共用同一期望值） */
-const EXPECTED_TOOLS = 72
+const EXPECTED_TOOLS = 74
 export const MODELS = {
   fast: '96af449e-dfc0-48ec-b077-aa9f02b43d64', // DeepSeek-V4.1-Flash
   slow: 'bb9ab960-6615-439a-b5bc-95d2a65173b3', // MiniMax-M3
@@ -30,7 +30,8 @@ export const MODELS = {
 // 并发下 Medium 也可能 >360s（2026-09-23 实测：C-3 三任务 360s 窗口截断，但进程仍在跑）
 // 故窗口按「并发感知」放宽；判据仍是终态率，不用总耗时误杀。
 const WAIT = {
-  M: parseInt(process.env.L2_WAIT_M || '600000', 10),
+  // M 级默认与引擎 1800s 预算对齐：防驱动在 600s 误取消长耗时合法任务（D-M2/D-M3/B-M5 实测）
+  M: parseInt(process.env.L2_WAIT_M || '1900000', 10),
   H: parseInt(process.env.L2_WAIT_H || '900000', 10),
 }
 
