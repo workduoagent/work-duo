@@ -29,18 +29,71 @@ use tracing_subscriber::fmt::FmtContext;
 use tracing_subscriber::registry::Registry;
 use tracing_subscriber::EnvFilter;
 
+/// 按**本地日期**滚动的文件 writer（`workduo.log.YYYY-MM-DD`）。
+///
+/// 背景（2026-09-24 修复，F-5 跨零点实测暴露）：原用
+/// `tracing_appender::rolling::Rotation::DAILY`，而它按 **UTC** 判定日期；
+/// 本项目的日志时间戳（`chrono::Local`）与读取侧（`get_run_logs` 读
+/// `workduo.log.{本地日期}`）都是本地时间——UTC+8 下两者错位 8 小时：
+/// 本地 00:00~08:00 写的日志会落进「UTC 昨天」的文件，读取侧按本地日期读当天文件为空，
+/// **每日前 8 小时日志观测完全断层**；跨零点长跑（F-5）的日志也会混在上一天文件里。
+/// 故改为自滚动：每次写入前按本地日期校验，跨日即切换文件。
+struct LocalDailyWriter {
+    dir: std::path::PathBuf,
+    prefix: String,
+    today: String,
+    file: Option<std::fs::File>,
+}
+
+impl LocalDailyWriter {
+    fn new(dir: &std::path::Path, prefix: &str) -> std::io::Result<Self> {
+        std::fs::create_dir_all(dir)?;
+        let mut w = Self {
+            dir: dir.to_path_buf(),
+            prefix: prefix.to_string(),
+            today: String::new(),
+            file: None,
+        };
+        w.rotate_if_needed()?;
+        Ok(w)
+    }
+
+    /// 本地日期变化（或首次）时切换文件。
+    fn rotate_if_needed(&mut self) -> std::io::Result<()> {
+        let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+        if self.file.is_none() || today != self.today {
+            let p = self.dir.join(format!("{}.{}", self.prefix, today));
+            let f = std::fs::OpenOptions::new().create(true).append(true).open(p)?;
+            self.file = Some(f);
+            self.today = today;
+        }
+        Ok(())
+    }
+}
+
+impl std::io::Write for LocalDailyWriter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.rotate_if_needed()?;
+        self.file.as_mut().expect("rotate_if_needed 后 file 必存在").write(buf)
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        match self.file.as_mut() {
+            Some(f) => f.flush(),
+            None => Ok(()),
+        }
+    }
+}
+
 /// 初始化全局日志订阅器。必须在任何其他 `tracing::*` 宏调用之前调用。
 /// 返回最终选用的日志目录（便于排查看板）。
 pub fn init_logging(app: &tauri::AppHandle) -> std::path::PathBuf {
     let logs_dir = choose_logs_dir(app);
 
-    // Daily 滚动文件 appender（如 workduo.log.2026-09-09）。
-    let file_appender = tracing_appender::rolling::RollingFileAppender::new(
-        tracing_appender::rolling::Rotation::DAILY,
-        &logs_dir,
-        "workduo.log",
-    );
-    let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
+    // 按**本地日期**滚动的文件 writer（如 workduo.log.2026-09-24）。
+    // 见 LocalDailyWriter 注释：不可再用 tracing_appender 的 Rotation::DAILY（UTC 判定会与本地日期错位）。
+    let file_writer = LocalDailyWriter::new(&logs_dir, "workduo.log")
+        .unwrap_or_else(|e| panic!("日志文件打开失败（dir={}）: {e}", logs_dir.display()));
+    let (non_blocking, guard) = tracing_appender::non_blocking(file_writer);
     // 保活 worker 线程至进程结束，避免缓冲区未刷盘导致日志丢失。
     std::mem::forget(guard);
 

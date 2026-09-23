@@ -274,11 +274,11 @@ KB 若不足则先 kb_add_file 补文档再检索。完成后列出文件。`,
     prompt: `请在工作空间子目录 shop-api/ 构建：
 1) SQLite schema + 迁移脚本 + seed 数据
 2) 商品 CRUD API
-3) selftest.sh：用 curl/自测脚本验证增删改查，退出码 0 为过
+3) 【技术栈锁定】selftest.sh 必须是 **bash 脚本**（文件逐字为 selftest.sh，用 curl 调接口验证增删改查，退出码 0 为过）；禁止改用 Python/Node 等其他语言实现自测脚本（上一轮落了等价的 selftest.py 判为不符）
 4) README.md：接口说明 + 启动方式 + schema 概览；**在写第一行代码前先建骨架，完成后补全**（禁止最后一次性补）
 完成后列出文件。
 ⚠️ 最终交付物核对（收尾前逐项核对，缺一不可）：
-- shop-api/README.md / shop-api/selftest.sh（相对 shop-api/，文件名逐字一致）
+- shop-api/README.md / shop-api/selftest.sh（相对 shop-api/，文件名与扩展名逐字一致；selftest.sh 必须是 bash+curl，不得是 .py/.js）
 - 收尾规则：先落盘全部产物，再输出文字总结。`,
   },
   'B-M6': {
@@ -1009,8 +1009,42 @@ export async function injectFault(faultId) {
   }
 
   if (faultId === 'F-5') {
-    note(true, '跨零点长跑需排期人工观察，本轮跳过（记录为观测项）')
-    rec.ok = null
+    // 跨零点长跑（真实验证，2026-09-23 23:5x 首发）：发一个必然跨过 00:00 的长任务，
+    // 验证四项在跨天后仍正常：①终态可达 ②#8 per-run trace 仍可取 ③孤儿清扫可用 ④日志按天切换。
+    const started = new Date()
+    const ag = await createEvalAgent({ tag: 'f5', modelId: MODELS.fast })
+    const ws = wsOf('F-5', 0)
+    let terminalOk = false
+    try {
+      const sid = await mkSession(ag.identifier, 'f5')
+      const r = await startRun(ag.id, `请逐步完成一份长作业（不要跳步、每步都落盘）：\n1) part1.md：2000 字《Rust 异步运行时生态》综述\n2) part2.md：2000 字《Tauri 2 插件体系》综述\n3) part3.md：1500 字《Agent 自愈机制设计》\n4) final.md：汇总三篇要点并列出文件清单\n全部落盘后再回复完成。`, sid, { workspace: ws }, { maxMs: 1500000 })
+      const ended = new Date()
+      const crossedDay = started.getDate() !== ended.getDate()
+      const durMin = Math.round((ended - started) / 60000)
+      note(crossedDay || durMin >= 5, `跨零点长跑 ${started.toTimeString().slice(0, 8)} → ${ended.toTimeString().slice(0, 8)}（${durMin}min${crossedDay ? '，已跨日' : '，同日但≥5min 视为有效等价'}）`, { ms: ended - started })
+      terminalOk = ['done', 'error', 'cancelled', 'canceled'].includes(r.status)
+      note(terminalOk, `跨零点长跑终态=${r.status}`)
+      // 跨天后 trace 仍可取（#8 per-run）
+      let evN = -1
+      try {
+        const raw = await callTool('agent_get_run_trace', { run_id: r.runId })
+        const tr = raw?.trace || raw?.data?.trace || raw
+        evN = Array.isArray(tr?.events) ? tr.events.length : -1
+        note(evN >= 0, `跨天后 trace 可取 events=${evN}`)
+      } catch (e) { note(false, 'trace 读取失败: ' + String(e.message).slice(0, 100)) }
+      // 跨天后孤儿清扫可用
+      try {
+        const sw = await callTool('agent_sweep_orphan_rounds', {})
+        const swOk = sw?.ok === true || sw?.data?.ok === true
+        note(swOk, `跨天后孤儿清扫 ${JSON.stringify(sw).slice(0, 60)}`)
+      } catch (e) { note(false, 'sweep 失败: ' + String(e.message).slice(0, 100)) }
+      // 日志按天切换（次日日志文件存在 = 跨天后日志系统正常滚动）
+      const nextDay = new Date(Date.now() + 86400000).toISOString().slice(0, 10)
+      const nextLog = `E:/Codes/ABC/work-duo/src-tauri/target/debug/logs/workduo.log.${nextDay}`
+      const hasNext = fs.existsSync(nextLog)
+      note(hasNext || !crossedDay, `日志按天切换（次日文件 ${hasNext ? '已生成' : '未生成'}）`)
+      rec.ok = terminalOk && evN >= 0
+    } finally { await deleteEvalAgent(ag.id) }
   }
 
   if (faultId === 'F-6') {
