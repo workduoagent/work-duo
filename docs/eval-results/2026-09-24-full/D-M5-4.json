@@ -1,0 +1,108 @@
+{
+  "caseId": "D-M5",
+  "slot": 4,
+  "scene": "D",
+  "kind": "M",
+  "title": "系统原生工具组合",
+  "model": "96af449e-dfc0-48ec-b077-aa9f02b43d64",
+  "workspace": "E:/Codes/ABC/work-duo/eval-workspace-full/eval-D-M5-4",
+  "startedAt": "2026-09-23T17:44:00.079Z",
+  "status": "done",
+  "runId": "run-1790185441306-25",
+  "durationMs": 229040,
+  "artifacts": [],
+  "artifactCheck": [
+    {
+      "artifact": "native_probe.md",
+      "ok": true
+    },
+    {
+      "artifact": "stats.json",
+      "ok": true
+    }
+  ],
+  "traceCounts": {
+    "events": 40,
+    "reply_chars": 247,
+    "thinking_chars": 170
+  },
+  "replyLen": 247,
+  "kbHits": 0,
+  "recoveries": 0,
+  "error": null,
+  "metrics": {
+    "ha": {
+      "terminal": true,
+      "status": "done"
+    },
+    "perf": {
+      "durationMs": 229040
+    },
+    "heal": {
+      "replyLen": 247
+    }
+  },
+  "files": [
+    {
+      "rel": ".wd_mem/.gitignore",
+      "size": 310,
+      "mtime": 1790185441311.113
+    },
+    {
+      "rel": ".wd_mem/graph/edges.jsonl",
+      "size": 749,
+      "mtime": 1790185665800.264
+    },
+    {
+      "rel": ".wd_mem/graph/nodes.jsonl",
+      "size": 6073,
+      "mtime": 1790185665800.264
+    },
+    {
+      "rel": ".wd_mem/graph/sessions/f2a26b22-f006-4f13-a178-cf8b627de6a0.json",
+      "size": 2777,
+      "mtime": 1790185665802.6255
+    },
+    {
+      "rel": ".wd_mem/graph/_index.json",
+      "size": 1326,
+      "mtime": 1790185665800.264
+    },
+    {
+      "rel": ".wd_mem/knowledge/MEMORY.md",
+      "size": 133,
+      "mtime": 1790185441310.1104
+    },
+    {
+      "rel": ".wd_mem/README.md",
+      "size": 1378,
+      "mtime": 1790185441311.113
+    },
+    {
+      "rel": "data.txt",
+      "size": 51,
+      "mtime": 1790185634569.3252
+    },
+    {
+      "rel": "native_probe.md",
+      "size": 966,
+      "mtime": 1790185656936.2917
+    },
+    {
+      "rel": "stats.json",
+      "size": 200,
+      "mtime": 1790185656934.035
+    }
+  ],
+  "agentId": "41f21efb-8848-41ed-a123-9102a72f55a6",
+  "agentIdentifier": "l2-d-m5-muee6u1j-v6qzi6",
+  "modelName": "AG:DeepSeek-V4.1-Flash",
+  "seedTier": null,
+  "seedId": null,
+  "sessionId": "f2a26b22-f006-4f13-a178-cf8b627de6a0",
+  "reply": "（暂定完成：无客观依据，建议人工确认）\n任务完成，已生成并确认产物：\n\n- `E:\\Codes\\ABC\\work-duo\\eval-workspace-full\\eval-D-M5-4\\native_probe.md`\n- `E:\\Codes\\ABC\\work-duo\\eval-workspace-full\\eval-D-M5-4\\stats.json`\n\n统计结果：20 个整数，总和 210，均值 10.5，最大值 20，最小值 1。GitHub 公共接口请求状态码为 HTTP 200。",
+  "thinkingLen": 170,
+  "eventCount": 40,
+  "kbCalls": 0,
+  "artifactScore": 1
+}

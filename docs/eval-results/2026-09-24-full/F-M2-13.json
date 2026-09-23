@@ -1,0 +1,233 @@
+{
+  "caseId": "F-M2",
+  "slot": 13,
+  "scene": "F",
+  "kind": "M",
+  "title": "runtime/scripts 复用（跨轮）",
+  "model": "96af449e-dfc0-48ec-b077-aa9f02b43d64",
+  "workspace": "E:/Codes/ABC/work-duo/eval-workspace-full/eval-F-M2-13",
+  "startedAt": "2026-09-23T17:44:00.081Z",
+  "status": "done",
+  "runId": "run-1790185519178-32",
+  "durationMs": 600070,
+  "artifacts": [],
+  "artifactCheck": [
+    {
+      "artifact": "reuse/report.txt",
+      "ok": true
+    }
+  ],
+  "traceCounts": {
+    "events": 94,
+    "reply_chars": 466,
+    "thinking_chars": 2308
+  },
+  "replyLen": 466,
+  "kbHits": 0,
+  "recoveries": 0,
+  "error": null,
+  "metrics": {
+    "ha": {
+      "terminal": true,
+      "status": "done"
+    },
+    "perf": {
+      "durationMs": 600070
+    },
+    "heal": {
+      "replyLen": 466
+    }
+  },
+  "files": [
+    {
+      "rel": ".wd_mem/.gitignore",
+      "size": 310,
+      "mtime": 1790185440335.801
+    },
+    {
+      "rel": ".wd_mem/graph/edges.jsonl",
+      "size": 2796,
+      "mtime": 1790186034815.8423
+    },
+    {
+      "rel": ".wd_mem/graph/nodes.jsonl",
+      "size": 22103,
+      "mtime": 1790186034813.8254
+    },
+    {
+      "rel": ".wd_mem/graph/sessions/37fc7e35-0ad3-41c5-a1d3-7229b861af30.json",
+      "size": 2918,
+      "mtime": 1790185516131.4778
+    },
+    {
+      "rel": ".wd_mem/graph/sessions/66e14997-b8c4-4b56-a006-922a0f1d889a.json",
+      "size": 7949,
+      "mtime": 1790186034816.892
+    },
+    {
+      "rel": ".wd_mem/graph/_index.json",
+      "size": 4218,
+      "mtime": 1790186034814.8435
+    },
+    {
+      "rel": ".wd_mem/knowledge/MEMORY.md",
+      "size": 133,
+      "mtime": 1790185440334.8025
+    },
+    {
+      "rel": ".wd_mem/README.md",
+      "size": 1378,
+      "mtime": 1790185440334.8025
+    },
+    {
+      "rel": ".wd_mem/recon.md",
+      "size": 1253,
+      "mtime": 1790185656966.4136
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/auto_run_1790185511879.py",
+      "size": 385,
+      "mtime": 1790185511880.6553
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/injected_execute_reused_wordcount.py",
+      "size": 1278,
+      "mtime": 1790186016153.4092
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/injected_validate_and_report.py",
+      "size": 2181,
+      "mtime": 1790185826057.2957
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/injected_wordcount.py",
+      "size": 1973,
+      "mtime": 1790185490820.7285
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/wordcount.py",
+      "size": 1867,
+      "mtime": 1790185505546.355
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/wordcount_sample.txt",
+      "size": 47,
+      "mtime": 1790185487364.4573
+    },
+    {
+      "rel": ".wd_mem/scripts/execute_reused_wordcount.py",
+      "size": 1208,
+      "mtime": 1790186002817.2356
+    },
+    {
+      "rel": ".wd_mem/scripts/validate_and_report.py",
+      "size": 2111,
+      "mtime": 1790185823576.942
+    },
+    {
+      "rel": "reuse/input.txt",
+      "size": 643,
+      "mtime": 1790185684190.9927
+    },
+    {
+      "rel": "reuse/report.txt",
+      "size": 1030,
+      "mtime": 1790186016342.8481
+    }
+  ],
+  "agentId": "cde09a75-04c7-4b3f-a3fd-cb8f71ff3b7f",
+  "agentIdentifier": "l2-f-m2-muee6u1p-bctl9q",
+  "modelName": "AG:DeepSeek-V4.1-Flash",
+  "seedTier": null,
+  "seedId": null,
+  "sessionId": "37fc7e35-0ad3-41c5-a1d3-7229b861af30",
+  "rounds": [
+    {
+      "round": 1,
+      "sessionId": "37fc7e35-0ad3-41c5-a1d3-7229b861af30",
+      "runId": "run-1790185440331-17",
+      "status": "done"
+    },
+    {
+      "round": 2,
+      "sessionId": "66e14997-b8c4-4b56-a006-922a0f1d889a",
+      "runId": "run-1790185519178-32",
+      "status": "done"
+    }
+  ],
+  "sessionIds": [
+    "37fc7e35-0ad3-41c5-a1d3-7229b861af30",
+    "66e14997-b8c4-4b56-a006-922a0f1d889a"
+  ],
+  "reply": "已生成/更新 recon.md\n已完成脚本检查并生成产物：\n\n- 结论：存在可复用脚本，优先复用 `.wd_mem/runtime/scripts/wordcount.py`\n- 产出文件：`E:/Codes/ABC/work-duo/eval-workspace-full/eval-F-M2-13/.wd_mem/recon.md`\n\n已生成/更新 report.txt\n「创建统计输入文件」已生成/更新 input.txt、validate_and_report.py（执行轮次达预算上限，产物经客观校验无误）\n\n已生成/更新 report.txt\n已完成统计并生成报告。\n\n- 已复用脚本：`.wd_mem/runtime/scripts/wordcount.py`\n- 统计输入：`reuse/input.txt`\n- 统计结果：1 行，已输出词频统计\n- 报告文件完整路径：`E:/Codes/ABC/work-duo/eval-workspace-full/eval-F-M2-13/reuse/report.txt`",
+  "thinkingLen": 2308,
+  "eventCount": 94,
+  "kbCalls": 0,
+  "artifactScore": 1,
+  "wdMem": {
+    "structureOk": true,
+    "usedCount": 3,
+    "total": 7,
+    "items": [
+      {
+        "key": "memory",
+        "label": "长期记忆 MEMORY.md",
+        "present": true,
+        "used": true,
+        "path": ".wd_mem/knowledge/MEMORY.md",
+        "count": "0KB"
+      },
+      {
+        "key": "sessions",
+        "label": "会话摘要 sessions/",
+        "present": true,
+        "used": false,
+        "path": ".wd_mem/sessions",
+        "count": 0
+      },
+      {
+        "key": "graph",
+        "label": "实体图 graph/",
+        "present": true,
+        "used": true,
+        "path": ".wd_mem/graph",
+        "count": 4
+      },
+      {
+        "key": "artifacts",
+        "label": "设计沉淀 knowledge/artifacts/",
+        "present": true,
+        "used": false,
+        "path": ".wd_mem/knowledge/artifacts",
+        "count": 0
+      },
+      {
+        "key": "scripts",
+        "label": "可复用脚本 runtime/scripts/",
+        "present": true,
+        "used": true,
+        "path": ".wd_mem/runtime/scripts",
+        "count": 6
+      },
+      {
+        "key": "data",
+        "label": "中间数据 runtime/data/",
+        "present": true,
+        "used": false,
+        "path": ".wd_mem/runtime/data",
+        "count": 0
+      },
+      {
+        "key": "outputs",
+        "label": "产物归档 runtime/outputs/",
+        "present": true,
+        "used": false,
+        "path": ".wd_mem/runtime/outputs",
+        "count": 0
+      }
+    ],
+    "leaks": [
+      "reuse/report.txt"
+    ]
+  }
+}

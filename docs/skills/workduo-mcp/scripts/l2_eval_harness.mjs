@@ -405,6 +405,236 @@ KB 若不足则先 kb_add_file 补文档再检索。完成后列出文件。`,
     artifacts: [],
     prompt: '（由 harness 并发：2 个全栈 + 2 个 ETL）',
   },
+
+  // ========== 场景 D：能力面覆盖（MCP / Skill / 插件 / KB / 原生工具）==========
+  // 2026-09-24 全量扩展轮：考核各能力模块是否真能被 Agent 用起来（不是只在代码里存在）。
+  'D-M1': {
+    scene: 'D', kind: 'M', title: 'MCP 工具面发现与跨层调用',
+    dims: ['ha'],
+    artifacts: ['mcp_probe_report.md'],
+    prompt: `请探测并实际使用本平台的 MCP 工具能力，产出 mcp_probe_report.md：
+1) 说明你能看到哪些工具分层（引擎层/发现层/UI 意图层各举 2 例，写清工具名）
+2) 实际调用「模块发现层」的列举类工具（如模型/技能/插件/知识库/记忆的列举），记录返回条数
+3) 实际调用至少 1 个 UI 意图层写工具（例如创建一个测试技能，随后删除它），记录成功与否
+4) 报告中必须写出工具真实名称与真实返回条数，不得编造。
+⚠️ 最终交付物核对：mcp_probe_report.md（工作空间根，文件名逐字一致）；先落盘再总结。`,
+  },
+  'D-M2': {
+    scene: 'D', kind: 'M', title: '已装配技能/知识的复用能力',
+    dims: ['ha'],
+    waitMs: 1900000,
+    artifacts: ['skill_lifecycle.md', 'cleaned.csv'],
+    // 设计边界（2026-09-24 D-M1 实测）：技能的「创建/绑定/更新/删除」属 UI 意图层工具
+    // （skill_upsert/agent_ui_update），不对 Agent 运行时暴露——Agent 只能**使用**已装配的技能。
+    // 故本例考核：能否感知并使用已装配的技能与知识库完成真实任务。
+    prompt: `考核你对「已装配技能与知识」的感知与复用能力，产出 skill_lifecycle.md 与 cleaned.csv：
+1) 先说明你当前能看到哪些已装配的技能/知识能力（写出名称；若看不到任何技能或列举工具，如实写明"不可见"）
+2) 造一份含脏数据的示例数据集（≥8 行：含空值、重复、格式不一致），就地保存为 raw.csv
+3) 按你能用到的技能方法（或数据清洗通用方法）完成清洗，结果写 cleaned.csv（去空值/去重/格式统一）
+4) 若已装配知识库，用知识库检索工具查一次与你任务相关的内容，并在报告中写明检索结果与是否采用
+5) skill_lifecycle.md 记录：可见能力清单、每步工具名与结果、清洗前后行数对比
+⚠️ 最终交付物核对：skill_lifecycle.md + cleaned.csv；先落盘再总结。不得编造未见到的能力。`,
+  },
+  'D-M3': {
+    scene: 'D', kind: 'M', title: 'MCP 工具产出 Excel（能力面）',
+    dims: ['ha'],
+    waitMs: 1900000,
+    artifacts: ['plugin_probe.md', 'report.xlsx'],
+    // 设计边界：平台当前 plugin_list=0（无插件），且插件管理属 UI 意图层不对 Agent 暴露。
+    // 故改为考核「用已装配 MCP 工具 + 沙箱完成 xlsx 产物」——这是 Agent 真实可及路径。
+    prompt: `用你实际可用的工具产出 Excel，并产出 plugin_probe.md 与 report.xlsx：
+1) 先用已装配的 MCP 检索工具（如搜索/网页读取）获取一组真实数据（例如某技术主题的最新动态，≥10 条要点）；若工具不可用则改用自造数据并写明
+2) 用沙箱（Python）或你可用的文件工具生成 report.xlsx：含两个 sheet（summary 与 detail），detail ≥10 行
+3) plugin_probe.md 记录：用了哪些工具（真实名称）、数据来源、生成方式、xlsx 是否成功写入、若走不通写明报错原文
+⚠️ 最终交付物核对：plugin_probe.md + report.xlsx（工作空间根）；先落盘再总结。`,
+  },
+  'D-M4': {
+    scene: 'D', kind: 'M', title: '知识库检索与引用（Agent 视角）',
+    dims: ['ha'],
+    artifacts: ['kb_probe.md'],
+    // 设计边界：KB 的创建/写入/删除属 UI 意图层（kb_create/kb_add_file），不对 Agent 暴露；
+    // Agent 侧仅有 native__kb_search（绑定后注入）。故考核检索与引用，创建/删除记为不可测。
+    prompt: `考核知识库（KB）检索与引用能力，产出 kb_probe.md：
+1) 用知识库检索工具查 2 个不同主题（例如"架构设计"与"记忆"），记录每次命中条数与首条摘要前 80 字
+2) 判断检索结果是否与本工作空间的工程相关，写明是否采用
+3) 若你能写入知识库则写入一篇短文并记录工具名；若不能写入，如实写明"无写入工具"（不要伪造）
+4) kb_probe.md 记录：工具真实名称、每次检索命中数、摘要、可用性结论
+⚠️ 最终交付物核对：kb_probe.md；先落盘再总结。`,
+  },
+  'D-M5': {
+    scene: 'D', kind: 'M', title: '系统原生工具组合',
+    dims: ['ha'],
+    artifacts: ['native_probe.md', 'stats.json'],
+    prompt: `用系统原生工具（文件读写/目录列举/命令执行/HTTP 请求）完成一次小任务，产出 native_probe.md 与 stats.json：
+1) 用原生写文件工具写 data.txt（20 个整数，每行一个）
+2) 用原生读文件工具读回并计算：个数/总和/均值/最大/最小
+3) 若平台开放了 HTTP 工具，请求一个公开接口（如 https://api.github.com/repos/rust-lang/rust）并记录状态码；不可用则写明被拒原因
+4) stats.json 存上述统计结果；native_probe.md 记录每步用的工具名与返回
+⚠️ 最终交付物核对：native_probe.md + stats.json；先落盘再总结。`,
+  },
+  'D-M6': {
+    scene: 'D', kind: 'M', title: '沙箱执行（Python/Node）',
+    dims: ['ha'],
+    artifacts: ['sandbox_probe.md', 'sandbox_out.txt'],
+    prompt: `用沙箱工具执行代码并产出 sandbox_probe.md 与 sandbox_out.txt：
+1) 写一个 Python 脚本到工作空间（计算斐波那契前 20 项）
+2) 用沙箱执行工具运行它，把标准输出写入 sandbox_out.txt
+3) 若平台同时提供 Node 沙箱，再跑一段 Node 代码（同样输出到同一文件或追加说明）
+4) sandbox_probe.md 记录：脚本路径、执行工具名、退出状态、输出前 5 行、不可用时的报错原文
+⚠️ 最终交付物核对：sandbox_probe.md + sandbox_out.txt；先落盘再总结。`,
+  },
+  'D-H1': {
+    scene: 'D', kind: 'H', title: '多能力组合工程（MCP+Skill+KB+产物）',
+    dims: ['ha', 'heal'],
+    artifacts: ['combo/README.md', 'combo/data_report.md'],
+    prompt: `在 combo/ 目录完成一个组合工程，产出 README.md 与 data_report.md：
+1) 建知识库写入 2 篇背景资料（主题自定但需与"电商订单分析"相关）并重建索引
+2) 创建一个分析技能（讲"如何做订单数据汇总"）并绑定使用
+3) 造一份订单数据（≥30 行 CSV：order_id/amount/channel/date）
+4) 按技能方法汇总：按 channel 统计订单数与销售额，写进 data_report.md，并引用知识库背景
+5) README.md：说明用了哪些能力、各自工具名、产物清单
+⚠️ 最终交付物核对：combo/README.md + combo/data_report.md；先落盘再总结。`,
+  },
+  'D-H2': {
+    scene: 'D', kind: 'H', title: '原生工具深链路（抓取→清洗→图表）',
+    dims: ['ha', 'heal'],
+    artifacts: ['pipeline/raw.json', 'pipeline/clean.csv', 'pipeline/chart.png'],
+    prompt: `在 pipeline/ 目录用原生工具完成数据链路，产出 raw.json、clean.csv、chart.png：
+1) HTTP 抓取一个公开 JSON 接口（如 https://api.github.com/users/rust-lang/repos?per_page=50）存 raw.json
+2) 清洗：抽取字段（name/stars/forks）写 clean.csv（≥20 行，去空值）
+3) 用插件模板（chart_png）或沙箱绘图生成 chart.png（stars 前 10 的柱状图）
+4) 每步记录工具名与返回；接口不可用时写明错误码并改用自造数据继续完成后两步
+⚠️ 最终交付物核对：pipeline/raw.json + pipeline/clean.csv + pipeline/chart.png；先落盘再总结。`,
+  },
+
+  // ========== 场景 E：上下文压缩与记忆传递专项 ==========
+  'E-M1': {
+    scene: 'E', kind: 'M', title: '同会话多轮递进',
+    dims: ['ha', 'heal'],
+    artifacts: ['multi/round1.md', 'multi/round2.md', 'multi/round3.md'],
+    // 多轮：同一 session 依次下发三轮，考核上下文延续（后轮必须引用前轮产物）
+    rounds: [
+      `第 1 轮：在 multi/ 目录建 round1.md，写下"项目代号=银鹤计划、负责人=陈默、截止=2026-12-31"三条事实。`,
+      `第 2 轮：读取 round1.md，在 multi/round2.md 中基于上述三条事实写一段项目启动说明（200 字），必须原样包含项目代号与负责人姓名。`,
+      `第 3 轮：读取前两轮产物，在 multi/round3.md 中写收尾清单（≥5 条），其中第 1 条必须写"项目代号：银鹤计划"。完成后回复"三轮完成"。`,
+    ],
+  },
+  'E-M2': {
+    scene: 'E', kind: 'M', title: '长上下文压缩后信息保留',
+    dims: ['ha', 'heal'],
+    artifacts: ['ctx/seed_facts.md', 'ctx/recall.md'],
+    rounds: [
+      `第 1 轮：在 ctx/seed_facts.md 中写入 10 条互不相关的事实（编号 1-10，每条含一个具体数值或专有名词，例如"3号矿脉深度=1240米"）。`,
+      `第 2 轮：请围绕"数据治理"主题写一份 1500 字以上的长文（不要引用 seed_facts 内容，仅用于拉长上下文），写入 ctx/essay.md。`,
+      `第 3 轮：读取 seed_facts.md，把第 3 条与第 7 条事实原样抄写到 ctx/recall.md，并注明"来源：seed_facts.md 第N条"。完成后回复你抄写的两条原文。`,
+    ],
+  },
+  'E-M3': {
+    scene: 'E', kind: 'M', title: '跨会话记忆传递（MEMORY.md）',
+    dims: ['ha', 'heal'],
+    artifacts: ['mem/plant.md'],
+    rounds: [
+      `第 1 轮：在 mem/plant.md 写入"密语=青竹夜雨-7391"，并把它写入本工作空间的长期记忆文件（.wd_mem/MEMORY.md）中，回复"已写入长期记忆"。`,
+      `第 2 轮（全新会话）：不要读任何文件，直接回答：本工作空间的长期记忆里记录的密语是什么？把答案写入 mem/answer.txt。`,
+    ],
+    newSessionPerRound: true, // 第 2 轮起开新 session，考核跨会话记忆传递
+  },
+  'E-H1': {
+    scene: 'E', kind: 'H', title: '长任务中途压缩后仍完成产物',
+    dims: ['ha', 'heal', 'perf'],
+    artifacts: ['longrun/part_a.md', 'longrun/part_b.md', 'longrun/final.md'],
+    rounds: [
+      `第 1 轮：在 longrun/part_a.md 写 2000 字《分布式一致性协议综述》（含 Raft/Paxos 对比），并把"本任务关键约束：输出文件名必须为 part_a.md / part_b.md / final.md"写入 .wd_mem/MEMORY.md。`,
+      `第 2 轮：在 longrun/part_b.md 写 2000 字《分布式事务工程实践》，并在开头复述 MEMORY.md 中记录的关键约束。`,
+      `第 3 轮：读取前两轮产物，在 longrun/final.md 写 800 字总结 + 文件清单，并再次复述关键约束。完成后回复"长任务完成"。`,
+    ],
+  },
+
+  // ========== 场景 F：.wd_mem 严谨性专项（工程类，用户重点考核）==========
+  'F-M1': {
+    scene: 'F', kind: 'M', title: '.wd_mem 结构完整性',
+    dims: ['ha'],
+    artifacts: ['shop2/app.py', 'shop2/README.md'],
+    wdMemCheck: true, // 跑完做 .wd_mem 七要素检查
+    prompt: `在 shop2/ 构建一个小工程（商品查询服务 + README），完成后**主动使用 .wd_mem 记忆区**：
+1) shop2/app.py：商品查询服务（读取商品列表，支持按名称过滤）
+2) shop2/README.md：启动方式与接口说明
+3) 把本次的可复用脚本存进 .wd_mem/runtime/scripts/，中间数据存 .wd_mem/runtime/data/，设计约定写进 .wd_mem/knowledge/artifacts/，并在 .wd_mem/MEMORY.md 追加本工程的两条长期约定
+回复时列出你在 .wd_mem 下实际创建了哪些文件（相对路径）。
+⚠️ 最终交付物核对：shop2/app.py + shop2/README.md；先落盘再总结。`,
+  },
+  'F-M2': {
+    scene: 'F', kind: 'M', title: 'runtime/scripts 复用（跨轮）',
+    dims: ['ha', 'heal'],
+    artifacts: ['reuse/report.txt'],
+    wdMemCheck: true,
+    rounds: [
+      `第 1 轮：写一个可复用脚本（统计文本行数与词频）存到 .wd_mem/runtime/scripts/wordcount.py，并说明它的用法。`,
+      `第 2 轮：重新运行——先检查 .wd_mem/runtime/scripts/ 是否已有可用脚本，若有则直接复用（不要重写），用它统计 reuse/input.txt（请先造这个输入文件，内容≥200 字）的结果写入 reuse/report.txt。回复是否复用了已有脚本。`,
+    ],
+    newSessionPerRound: true,
+  },
+  'F-M3': {
+    scene: 'F', kind: 'M', title: 'runtime/data 复用（跨轮）',
+    dims: ['ha', 'heal'],
+    artifacts: ['datause/summary.md'],
+    wdMemCheck: true,
+    rounds: [
+      `第 1 轮：造一份数据（≥15 行销售记录）存到 .wd_mem/runtime/data/sales.csv。`,
+      `第 2 轮：不要重新造数据——直接读取 .wd_mem/runtime/data/sales.csv 汇总（总额/行数/Top3），写入 datause/summary.md。回复你读取的文件路径。`,
+    ],
+    newSessionPerRound: true,
+  },
+  'F-M4': {
+    scene: 'F', kind: 'M', title: 'knowledge/artifacts 沉淀与检索',
+    dims: ['ha', 'heal'],
+    artifacts: ['artrecall/answer.md'],
+    wdMemCheck: true,
+    rounds: [
+      `第 1 轮：把一条工程约定写入 .wd_mem/knowledge/artifacts/convention.md：「本项目所有金额单位统一为分，禁止使用元」。`,
+      `第 2 轮（新会话）：接到新需求——写一个金额格式化函数。请先检索 .wd_mem/knowledge/artifacts/ 的历史约定再动手，把检索到的约定与你的实现写入 artrecall/answer.md。回复你检索到的约定原文。`,
+    ],
+    newSessionPerRound: true,
+  },
+  'F-M5': {
+    scene: 'F', kind: 'M', title: 'graph 实体图与 sessions 摘要',
+    dims: ['ha'],
+    artifacts: ['graphprobe/entities.md'],
+    wdMemCheck: true,
+    prompt: `完成一次工程任务并观测记忆区状态，产出 graphprobe/entities.md：
+1) 建一个小模块（graphprobe/模块：用户-订单两个实体 + 关系说明，代码或文档均可）
+2) 检查 .wd_mem/graph/ 目录下是否产生了内容；若有，读取并说明其中记录了什么实体/关系
+3) 检查 .wd_mem/sessions/ 下是否有会话摘要文件；若有，读取并摘录其前 5 行
+4) entities.md 记录上述检查结果（有就写真实内容，无就写"目录为空"——不得编造）
+⚠️ 最终交付物核对：graphprobe/entities.md；先落盘再总结。`,
+  },
+  'F-M6': {
+    scene: 'F', kind: 'M', title: 'sessions 摘要与 outputs 归档（两区能力验证）',
+    dims: ['ha', 'heal'],
+    artifacts: ['sixround/final.md', 'sixround/archive_note.md'],
+    wdMemCheck: true,
+    // sessions/ 需 ≥5 个未压缩轮次才触发滚动压缩（round_compactor trigger_threshold=5），
+    // 故本例跑 6 轮以真正触发；同时显式要求归档产物到 runtime/outputs/ 验证该区可用。
+    rounds: [
+      `第 1 轮：在 sixround/ 建 r1.md，写"阶段一：需求采集"（100 字）。`,
+      `第 2 轮：在 sixround/ 建 r2.md，写"阶段二：方案设计"（100 字），并复述 r1 的要点。`,
+      `第 3 轮：在 sixround/ 建 r3.md，写"阶段三：开发实现"（100 字）。`,
+      `第 4 轮：在 sixround/ 建 r4.md，写"阶段四：测试验证"（100 字）。`,
+      `第 5 轮：在 sixround/ 建 r5.md，写"阶段五：上线部署"（100 字）。`,
+      `第 6 轮：①读取前 5 轮产物，在 sixround/final.md 写 300 字总结（必须包含五个阶段名称）；②把 r1~r5 与 final.md 的副本归档进 .wd_mem/runtime/outputs/ 目录；③在 sixround/archive_note.md 记录归档了哪些文件、以及 .wd_mem/sessions/ 下是否出现了会话摘要文件（有则写出文件名与前 3 行，无则写"未生成"）。不得编造。`,
+    ],
+  },
+  'F-H1': {
+    scene: 'F', kind: 'H', title: '工程全链路 .wd_mem 严谨性（大工程）',
+    dims: ['ha', 'heal', 'perf'],
+    artifacts: ['wdapp/backend/app.py', 'wdapp/frontend/index.html', 'wdapp/README.md'],
+    wdMemCheck: true,
+    rounds: [
+      `第 1 轮：在 wdapp/ 建后端（backend/app.py：任务清单 API，支持增查改）与前端（frontend/index.html：调用接口展示列表），并把架构约定写入 .wd_mem/knowledge/artifacts/arch.md、把两条长期约定写入 .wd_mem/MEMORY.md、把可复用脚本存进 .wd_mem/runtime/scripts/。`,
+      `第 2 轮（新会话）：先复用 .wd_mem 下已有的脚本与约定，补 wdapp/README.md（架构说明+启动方式+你在 .wd_mem 里沉淀的内容清单），并核对后端前端是否齐全、缺失则补齐。完成后回复你从 .wd_mem 复用了什么。`,
+    ],
+    newSessionPerRound: true,
+  },
 }
 
 // ---------- 工具函数 ----------
@@ -443,10 +673,54 @@ export async function pickModel(which = 'fast') {
   return which
 }
 
-export async function createEvalAgent({ tag, modelId, kbIds = [], pluginIds = [], skillIds = [] }) {
+/** 列举平台可用能力（MCP 工具 / 技能 / 插件 / 知识库），供测评 Agent 装配。
+ * 2026-09-24：此前 createEvalAgent 传 mcpTools:[] 且 kbIds/pluginIds/skillIds 全空——
+ * 导致 Agent 运行时只有 native__* 工具，D 系列能力面用例「测了个寂寞」（D-M1 实测暴露）。 */
+export async function enumerateCapabilities() {
+  const out = { kbIds: [], pluginIds: [], skillIds: [], mcpTools: [] }
+  const rows = (r) => {
+    const a = Array.isArray(r) ? r : (Array.isArray(r?.data) ? r.data : (Array.isArray(r?.rows) ? r.rows : []))
+    return a
+  }
+  try {
+    const mcps = rows(await callTool('agent_list_mcps', {}))
+    for (const m of mcps) {
+      try {
+        const tools = rows(await callTool('agent_list_mcp_tools', { mcp_id: m.id }, { timeoutMs: 20000 }))
+        for (const t of tools) {
+          const toolId = t.id || t.tool_id || t.toolId || t.name
+          if (toolId) out.mcpTools.push({ mcpId: m.id, toolId })
+        }
+      } catch { /* 单个 MCP 列举失败不阻断 */ }
+    }
+  } catch { /* 无 MCP */ }
+  try { out.skillIds = rows(await callTool('agent_list_skills', {})).slice(0, 3).map((x) => x.id) } catch { /* 无技能 */ }
+  try { out.pluginIds = rows(await callTool('agent_list_plugins', {})).slice(0, 10).map((x) => x.id) } catch { /* 无插件 */ }
+  try { out.kbIds = rows(await callTool('agent_list_kbs', {})).map((x) => x.id) } catch { /* 无 KB */ }
+  return out
+}
+
+export async function createEvalAgent({ tag, modelId, kbIds = null, pluginIds = null, skillIds = null, mcpTools = null, bindAll = true }) {
   const models = asRows(await callTool('agent_list_models', {}))
   const model = models.find((m) => m.id === modelId) || models.find((m) => m.id === MODELS.fast)
   if (!model) throw new Error('找不到可用模型 ' + modelId)
+  // 默认装配平台全部可用能力（bindAll），否则 Agent 只有 native__* 原生工具。
+  if (bindAll && (kbIds === null || pluginIds === null || skillIds === null || mcpTools === null)) {
+    try {
+      const caps = await enumerateCapabilities()
+      kbIds = kbIds ?? caps.kbIds
+      pluginIds = pluginIds ?? caps.pluginIds
+      skillIds = skillIds ?? caps.skillIds
+      mcpTools = mcpTools ?? caps.mcpTools
+      if (!caps.mcpTools.length && !caps.skillIds.length && !caps.kbIds.length) {
+        console.log('  [warn] 平台无可用 MCP/技能/KB —— Agent 仅具 native__* 原生工具')
+      }
+    } catch (e) { console.log('  [warn] 能力列举失败，降级为空绑定:', e.message.slice(0, 80)) }
+  }
+  const _kbIds = kbIds || []
+  const _pluginIds = pluginIds || []
+  const _skillIds = skillIds || []
+  const _mcpTools = mcpTools || []
   let llmConfig = {}
   try { llmConfig = typeof model.config === 'string' ? JSON.parse(model.config || '{}') : (model.config || {}) } catch {}
   // 并发创建必须避免 Date.now 碰撞（C-5 实测曾撞 UNIQUE）
@@ -464,8 +738,8 @@ export async function createEvalAgent({ tag, modelId, kbIds = [], pluginIds = []
     allowSandbox: true,
     memoryMode: 'active',
     planAutoApproveMode: 'never',
-    kbIds, pluginIds, skillIds,
-    mcpTools: [],
+    kbIds: _kbIds, pluginIds: _pluginIds, skillIds: _skillIds,
+    mcpTools: _mcpTools,
   } }, { timeoutMs: 30000 }))
   if (!ag?.id) throw new Error('agent_ui_create 失败: ' + JSON.stringify(ag).slice(0, 160))
   return { id: ag.id, identifier: ident, modelId: model.id, modelName: model.name || model.model_name }
@@ -498,6 +772,58 @@ export function filesIn(dir) {
 export function checkArtifacts(ws, artifacts = []) {
   const have = new Set(filesIn(ws).map((f) => f.rel))
   return artifacts.map((a) => ({ artifact: a, ok: have.has(a) || have.has(a.replace(/^\.\//, '')) }))
+}
+
+// ---------- .wd_mem 严谨性检查（2026-09-24 全量扩展轮，用户重点考核项）----------
+// 规范结构（src-tauri/src/agent/wd_mem.rs）：
+//   MEMORY.md（长期记忆，全量注入 Slot 0）/ README.md / .gitignore
+//   sessions/（会话滚动压缩 {session_id}.summary.md）
+//   graph/（单 Agent 统一实体图）
+//   knowledge/artifacts/（设计蓝图·约定·避坑，向量检索注入）
+//   runtime/{scripts,data,outputs}/（可复用脚本 / 中间数据 / 产物归档）
+// 旧版根下 scripts/data/outputs/MEMORY.md/artifacts 会被迁移，按新旧两处均认可。
+const WD_MEM_EXPECT = [
+  { key: 'memory', label: '长期记忆 MEMORY.md', paths: ['.wd_mem/MEMORY.md', '.wd_mem/knowledge/MEMORY.md'] },
+  { key: 'sessions', label: '会话摘要 sessions/', dirs: ['.wd_mem/sessions'] },
+  { key: 'graph', label: '实体图 graph/', dirs: ['.wd_mem/graph'] },
+  { key: 'artifacts', label: '设计沉淀 knowledge/artifacts/', dirs: ['.wd_mem/knowledge/artifacts', '.wd_mem/artifacts'] },
+  { key: 'scripts', label: '可复用脚本 runtime/scripts/', dirs: ['.wd_mem/runtime/scripts', '.wd_mem/scripts'] },
+  { key: 'data', label: '中间数据 runtime/data/', dirs: ['.wd_mem/runtime/data', '.wd_mem/data'] },
+  { key: 'outputs', label: '产物归档 runtime/outputs/', dirs: ['.wd_mem/runtime/outputs', '.wd_mem/outputs'] },
+]
+
+/** 检查工作空间的 .wd_mem：结构是否存在、各区是否被真正使用（有内容）、以及红线（不得进用户可见产物）。 */
+export function checkWdMem(ws) {
+  const exists = (p) => fs.existsSync(path.join(ws, p))
+  const listFiles = (d) => {
+    if (!exists(d)) return []
+    try {
+      return fs.readdirSync(path.join(ws, d)).filter((n) => n !== '.gitkeep')
+    } catch { return [] }
+  }
+  const items = WD_MEM_EXPECT.map((e) => {
+    if (e.paths) {
+      const hit = e.paths.find(exists)
+      const size = hit ? fs.statSync(path.join(ws, hit)).size : 0
+      return { key: e.key, label: e.label, present: !!hit, used: size > 0, path: hit || e.paths[0], count: hit ? Math.round(size / 1024) + 'KB' : 0 }
+    }
+    const hit = e.dirs.find(exists)
+    const n = hit ? listFiles(hit).length : 0
+    return { key: e.key, label: e.label, present: !!hit, used: n > 0, path: hit || e.dirs[0], count: n }
+  })
+  const structureOk = items.every((i) => i.present)
+  const usedCount = items.filter((i) => i.used).length
+  // 红线：用户可见产物（工作空间根的非 .wd_mem 文件/目录）中不得出现 .wd_mem 路径引用
+  const visible = filesIn(ws).filter((f) => !f.rel.startsWith('.wd_mem/'))
+  let leaks = []
+  for (const f of visible) {
+    if (!/\.(md|txt|json|csv|html|py|sh)$/i.test(f.rel)) continue
+    try {
+      const c = fs.readFileSync(path.join(ws, f.rel), 'utf8')
+      if (c.includes('.wd_mem')) leaks.push(f.rel)
+    } catch { /* 忽略不可读 */ }
+  }
+  return { structureOk, usedCount, total: items.length, items, leaks }
 }
 
 // ---------- C1 坏种子包体系（2026-09-23）：任意 repo 坏种子泛化 ----------
@@ -789,14 +1115,36 @@ export async function runOneCase(caseId, {
     rec.modelName = ag.modelName
     rec.seedTier = seedManifest?.tier || null
     rec.seedId = seedManifest?.id || spec?.seedId || null
-    const sid = sessionId || await mkSession(ag.identifier, caseId)
+    let sid = sessionId || await mkSession(ag.identifier, caseId)
     rec.sessionId = sid
     const arts = seedManifest?.artifacts || spec?.artifacts || []
     const p = prompt || seedManifest?.prompt || spec.prompt
     console.log(`\n>>>> ${caseId}${slot ? '#' + slot : ''} model=${ag.modelName} ws=${ws}`)
     const t0 = Date.now()
-    // P2-2（2026-09-23）：期望产物透传 expectedArtifacts → 引擎注入系统提示做收尾核对。
-    const { runId, status } = await startRun(ag.id, p, sid, { workspace: ws, expectedArtifacts: arts, ...extraRun }, { maxMs })
+    // 多轮模式（2026-09-24 扩展）：spec.rounds 依次下发，同一 workspace（可指定 newSessionPerRound
+    // 让每轮换新 session，用于考核跨会话记忆传递）。rec.rounds 记录每轮状态与 reply 摘要。
+    const rounds = spec?.rounds || null
+    let runId = null, status = null
+    if (Array.isArray(rounds) && rounds.length) {
+      rec.rounds = []
+      for (let i = 0; i < rounds.length; i++) {
+        if (i > 0 && spec.newSessionPerRound) {
+          sid = await mkSession(ag.identifier, `${caseId}-r${i + 1}`)
+          rec.sessionIds = rec.sessionIds || [rec.sessionId]
+          rec.sessionIds.push(sid)
+        }
+        console.log(`  [round ${i + 1}/${rounds.length}] session=${sid.slice(-6)}`)
+        const r = await startRun(ag.id, rounds[i], sid, { workspace: ws, expectedArtifacts: i === rounds.length - 1 ? arts : [], ...extraRun }, { maxMs })
+        rec.rounds.push({ round: i + 1, sessionId: sid, runId: r.runId, status: r.status, durationMs: r.durationMs })
+        runId = r.runId
+        status = r.status
+      }
+    } else {
+      // P2-2（2026-09-23）：期望产物透传 expectedArtifacts → 引擎注入系统提示做收尾核对。
+      const r = await startRun(ag.id, p, sid, { workspace: ws, expectedArtifacts: arts, ...extraRun }, { maxMs })
+      runId = r.runId
+      status = r.status
+    }
     const t1 = Date.now()
     rec.runId = runId
     rec.status = status
@@ -838,6 +1186,13 @@ export async function runOneCase(caseId, {
           rec.resolved = false
         }
       }
+    }
+    // .wd_mem 严谨性检查（2026-09-24 扩展，用户重点考核）：结构 7 要素 + 各区是否被真正使用 + 红线泄漏
+    if (spec?.wdMemCheck) {
+      try {
+        rec.wdMem = checkWdMem(ws)
+        console.log(`  [wd_mem] 结构${rec.wdMem.structureOk ? '完整' : '缺失'} 已使用 ${rec.wdMem.usedCount}/${rec.wdMem.total} 区${rec.wdMem.leaks.length ? ` ⚠ 泄漏 ${rec.wdMem.leaks.length} 处` : ''}`)
+      } catch (e) { rec.wdMem = { error: e.message.slice(0, 120) } }
     }
     rec.metrics.ha.terminal = ['done', 'error', 'cancelled', 'canceled'].includes(status)
     rec.metrics.ha.status = status
@@ -1325,6 +1680,8 @@ async function main() {
     if (!ids.length && phase === '1') ids = ['A-M1', 'A-M2', 'A-M3', 'A-M4', 'A-M5', 'A-M6', 'A-M7', 'A-M8', 'B-M1', 'B-M2', 'B-M3', 'B-M4', 'B-M5', 'B-M6']
     if (!ids.length && phase === '2') ids = ['A-H1', 'A-H2', 'A-H3', 'A-H5', 'A-H6', 'A-H7', 'B-H1', 'B-H2', 'B-H4', 'B-H5', 'B-H6', 'B-H7']
     if (!ids.length && phase === '3') ids = ['C-M1', 'C-M2', 'C-H1', 'C-H2', 'C-H3']
+    // phase 4（2026-09-24 全量扩展轮）：场景 D 能力面 + E 上下文/记忆 + F .wd_mem 严谨性
+    if (!ids.length && phase === '4') ids = ['D-M1', 'D-M2', 'D-M3', 'D-M4', 'D-M5', 'D-M6', 'D-H1', 'D-H2', 'E-M1', 'E-M2', 'E-M3', 'E-H1', 'F-M1', 'F-M2', 'F-M3', 'F-M4', 'F-M5', 'F-H1']
     if (!ids.length && phase === '0') ids = ['A-M1']
     if (conc > 1) {
       return runConcurrent(ids.map((id, i) => ({ caseId: id, model, slot: i })))

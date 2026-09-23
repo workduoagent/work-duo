@@ -1,0 +1,313 @@
+{
+  "caseId": "F-M6",
+  "slot": 0,
+  "scene": "F",
+  "kind": "M",
+  "title": "sessions 摘要与 outputs 归档（两区能力验证）",
+  "model": "96af449e-dfc0-48ec-b077-aa9f02b43d64",
+  "workspace": "E:/Codes/ABC/work-duo/eval-workspace-full/eval-F-M6",
+  "startedAt": "2026-09-23T18:08:51.876Z",
+  "status": "done",
+  "runId": "run-1790187583739-44",
+  "durationMs": 1007480,
+  "artifacts": [],
+  "artifactCheck": [
+    {
+      "artifact": "sixround/final.md",
+      "ok": true
+    },
+    {
+      "artifact": "sixround/archive_note.md",
+      "ok": true
+    }
+  ],
+  "traceCounts": {
+    "events": 150,
+    "reply_chars": 1248,
+    "thinking_chars": 2761
+  },
+  "replyLen": 1248,
+  "kbHits": 0,
+  "recoveries": 0,
+  "error": null,
+  "metrics": {
+    "ha": {
+      "terminal": true,
+      "status": "done"
+    },
+    "perf": {
+      "durationMs": 1007480
+    },
+    "heal": {
+      "replyLen": 1248
+    }
+  },
+  "files": [
+    {
+      "rel": ".wd_mem/.gitignore",
+      "size": 310,
+      "mtime": 1790186931956.6482
+    },
+    {
+      "rel": ".wd_mem/graph/edges.jsonl",
+      "size": 6308,
+      "mtime": 1790187933116.4927
+    },
+    {
+      "rel": ".wd_mem/graph/nodes.jsonl",
+      "size": 77689,
+      "mtime": 1790187933112.8025
+    },
+    {
+      "rel": ".wd_mem/graph/sessions/ea6caf9c-5577-4897-af96-93c802226a15.json",
+      "size": 29427,
+      "mtime": 1790187933120.8682
+    },
+    {
+      "rel": ".wd_mem/graph/_index.json",
+      "size": 7729,
+      "mtime": 1790187933115.0122
+    },
+    {
+      "rel": ".wd_mem/knowledge/MEMORY.md",
+      "size": 133,
+      "mtime": 1790186931955.6516
+    },
+    {
+      "rel": ".wd_mem/README.md",
+      "size": 1378,
+      "mtime": 1790186931955.6516
+    },
+    {
+      "rel": ".wd_mem/runtime/outputs/final.md",
+      "size": 1074,
+      "mtime": 1790187753111.6926
+    },
+    {
+      "rel": ".wd_mem/runtime/outputs/r1_r1.md",
+      "size": 373,
+      "mtime": 1790186962888.6145
+    },
+    {
+      "rel": ".wd_mem/runtime/outputs/r2_r2.md",
+      "size": 427,
+      "mtime": 1790187023005.1448
+    },
+    {
+      "rel": ".wd_mem/runtime/outputs/r3_r3.md",
+      "size": 334,
+      "mtime": 1790187472105.9695
+    },
+    {
+      "rel": ".wd_mem/runtime/outputs/r4_r4.md",
+      "size": 421,
+      "mtime": 1790187548049.797
+    },
+    {
+      "rel": ".wd_mem/runtime/outputs/r5_r5.md",
+      "size": 484,
+      "mtime": 1790187577606.718
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/auto_run_1790187084996.mjs",
+      "size": 752,
+      "mtime": 1790187084999.1025
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/auto_run_1790187098375.mjs",
+      "size": 640,
+      "mtime": 1790187098375.6519
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/auto_run_1790187110948.mjs",
+      "size": 596,
+      "mtime": 1790187110950.4277
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/auto_run_1790187124153.mjs",
+      "size": 641,
+      "mtime": 1790187124154.335
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/auto_run_1790187129333.mjs",
+      "size": 596,
+      "mtime": 1790187129333.7627
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/auto_run_1790187135244.mjs",
+      "size": 572,
+      "mtime": 1790187135246.034
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/auto_run_1790187149117.mjs",
+      "size": 554,
+      "mtime": 1790187149117.456
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/auto_run_1790187825211.mjs",
+      "size": 796,
+      "mtime": 1790187825213.2163
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/auto_run_1790187879592.mjs",
+      "size": 944,
+      "mtime": 1790187879595.569
+    },
+    {
+      "rel": "sixround/archive_note.md",
+      "size": 1096,
+      "mtime": 1790187927361.2378
+    },
+    {
+      "rel": "sixround/final.md",
+      "size": 1074,
+      "mtime": 1790187753111.6926
+    },
+    {
+      "rel": "sixround/r1.md",
+      "size": 373,
+      "mtime": 1790186962888.6145
+    },
+    {
+      "rel": "sixround/r2.md",
+      "size": 427,
+      "mtime": 1790187023005.1448
+    },
+    {
+      "rel": "sixround/r3.md",
+      "size": 334,
+      "mtime": 1790187472105.9695
+    },
+    {
+      "rel": "sixround/r4.md",
+      "size": 421,
+      "mtime": 1790187548049.797
+    },
+    {
+      "rel": "sixround/r5.md",
+      "size": 484,
+      "mtime": 1790187577606.718
+    },
+    {
+      "rel": "sixround/recon.md",
+      "size": 3063,
+      "mtime": 1790187688211.2415
+    }
+  ],
+  "agentId": "01ffd633-409c-440a-9aab-96a2a379651d",
+  "agentIdentifier": "l2-f-m6-muef2t2v-e2xbop",
+  "modelName": "AG:DeepSeek-V4.1-Flash",
+  "seedTier": null,
+  "seedId": null,
+  "sessionId": "ea6caf9c-5577-4897-af96-93c802226a15",
+  "rounds": [
+    {
+      "round": 1,
+      "sessionId": "ea6caf9c-5577-4897-af96-93c802226a15",
+      "runId": "run-1790186931952-39",
+      "status": "done"
+    },
+    {
+      "round": 2,
+      "sessionId": "ea6caf9c-5577-4897-af96-93c802226a15",
+      "runId": "run-1790186971312-40",
+      "status": "done"
+    },
+    {
+      "round": 3,
+      "sessionId": "ea6caf9c-5577-4897-af96-93c802226a15",
+      "runId": "run-1790187031848-41",
+      "status": "done"
+    },
+    {
+      "round": 4,
+      "sessionId": "ea6caf9c-5577-4897-af96-93c802226a15",
+      "runId": "run-1790187513915-42",
+      "status": "done"
+    },
+    {
+      "round": 5,
+      "sessionId": "ea6caf9c-5577-4897-af96-93c802226a15",
+      "runId": "run-1790187556324-43",
+      "status": "done"
+    },
+    {
+      "round": 6,
+      "sessionId": "ea6caf9c-5577-4897-af96-93c802226a15",
+      "runId": "run-1790187583739-44",
+      "status": "done"
+    }
+  ],
+  "reply": "已生成/更新 recon.md\n核查完成：已读取 `r1.md` 至 `r5.md`，汇总五个阶段名称、各轮内容要点与来源路径；`.wd_mem/sessions/` 为空，未生成会话摘要。\n\n产物已成功生成并验证：`E:/Codes/ABC/work-duo/eval-workspace-full/eval-F-M6/sixround/recon.md`\n\n已生成/更新 final.md\n已完成并生成以下文件：\n\n- `E:\\Codes\\ABC\\work-duo\\eval-workspace-full\\eval-F-M6\\sixround\\final.md`\n- `E:\\Codes\\ABC\\work-duo\\eval-workspace-full\\eval-F-M6\\sixround\\archive_note.md`\n\n`final.md` 已依据 `recon.md` 撰写约 300 字总结，并准确包含五个阶段名称。\n\n已生成/更新 outputs\n已按 `sixround/recon.md` 中记录的来源路径，将前三轮产物复制到归档目录；原文件未移动或修改。已确认归档副本存在：\n\n- `E:\\Codes\\ABC\\work-duo\\eval-workspace-full\\eval-F-M6\\.wd_mem\\runtime\\outputs\\r1_r1.md`\n- `E:\\Codes\\ABC\\work-duo\\eval-workspace-full\\eval-F-M6\\.wd_mem\\runtime\\outputs\\r2_r2.md`\n- `E:\\Codes\\ABC\\work-duo\\eval-workspace-full\\eval-F-M6\\.wd_mem\\runtime\\outputs\\r3_r3.md`\n\n已生成/更新 outputs\n已完成归档，原文件保留未移动。归档副本已确认存在：\n\n- `E:\\Codes\\ABC\\work-duo\\eval-workspace-full\\eval-F-M6\\.wd_mem\\runtime\\outputs\\r4_r4.md`\n- `E:\\Codes\\ABC\\work-duo\\eval-workspace-full\\eval-F-M6\\.wd_mem\\runtime\\outputs\\r5_r5.md`\n- `E:\\Codes\\ABC\\work-duo\\eval-workspace-full\\eval-F-M6\\.wd_mem\\runtime\\outputs\\final.md`\n\n已生成/更新 archive_note.md\n已完成并确认生成归档清单，列明 6 个实际归档文件及路径；`.wd_mem/sessions/` 为空，记录为“未生成”。\n\n产出文件：`E:/Codes/ABC/work-duo/eval-workspace-full/eval-F-M6/sixround/archive_note.md`",
+  "thinkingLen": 2761,
+  "eventCount": 150,
+  "kbCalls": 0,
+  "artifactScore": 1,
+  "wdMem": {
+    "structureOk": true,
+    "usedCount": 4,
+    "total": 7,
+    "items": [
+      {
+        "key": "memory",
+        "label": "长期记忆 MEMORY.md",
+        "present": true,
+        "used": true,
+        "path": ".wd_mem/knowledge/MEMORY.md",
+        "count": "0KB"
+      },
+      {
+        "key": "sessions",
+        "label": "会话摘要 sessions/",
+        "present": true,
+        "used": false,
+        "path": ".wd_mem/sessions",
+        "count": 0
+      },
+      {
+        "key": "graph",
+        "label": "实体图 graph/",
+        "present": true,
+        "used": true,
+        "path": ".wd_mem/graph",
+        "count": 4
+      },
+      {
+        "key": "artifacts",
+        "label": "设计沉淀 knowledge/artifacts/",
+        "present": true,
+        "used": false,
+        "path": ".wd_mem/knowledge/artifacts",
+        "count": 0
+      },
+      {
+        "key": "scripts",
+        "label": "可复用脚本 runtime/scripts/",
+        "present": true,
+        "used": true,
+        "path": ".wd_mem/runtime/scripts",
+        "count": 9
+      },
+      {
+        "key": "data",
+        "label": "中间数据 runtime/data/",
+        "present": true,
+        "used": false,
+        "path": ".wd_mem/runtime/data",
+        "count": 0
+      },
+      {
+        "key": "outputs",
+        "label": "产物归档 runtime/outputs/",
+        "present": true,
+        "used": true,
+        "path": ".wd_mem/runtime/outputs",
+        "count": 6
+      }
+    ],
+    "leaks": [
+      "sixround/archive_note.md",
+      "sixround/recon.md"
+    ]
+  }
+}

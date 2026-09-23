@@ -1,0 +1,148 @@
+{
+  "caseId": "D-H1",
+  "slot": 6,
+  "scene": "D",
+  "kind": "H",
+  "title": "多能力组合工程（MCP+Skill+KB+产物）",
+  "model": "96af449e-dfc0-48ec-b077-aa9f02b43d64",
+  "workspace": "E:/Codes/ABC/work-duo/eval-workspace-full/eval-D-H1-6",
+  "startedAt": "2026-09-23T17:44:00.080Z",
+  "status": "done",
+  "runId": "run-1790185440257-8",
+  "durationMs": 463969,
+  "artifacts": [],
+  "artifactCheck": [
+    {
+      "artifact": "combo/README.md",
+      "ok": true
+    },
+    {
+      "artifact": "combo/data_report.md",
+      "ok": true
+    }
+  ],
+  "traceCounts": {
+    "events": 140,
+    "reply_chars": 756,
+    "thinking_chars": 2984
+  },
+  "replyLen": 756,
+  "kbHits": 0,
+  "recoveries": 0,
+  "error": null,
+  "metrics": {
+    "ha": {
+      "terminal": true,
+      "status": "done"
+    },
+    "perf": {
+      "durationMs": 463969
+    },
+    "heal": {
+      "replyLen": 756
+    }
+  },
+  "files": [
+    {
+      "rel": ".wd_mem/.gitignore",
+      "size": 310,
+      "mtime": 1790185440272.4124
+    },
+    {
+      "rel": ".wd_mem/graph/edges.jsonl",
+      "size": 3553,
+      "mtime": 1790185898999.3904
+    },
+    {
+      "rel": ".wd_mem/graph/nodes.jsonl",
+      "size": 22514,
+      "mtime": 1790185898998.2996
+    },
+    {
+      "rel": ".wd_mem/graph/sessions/586b6956-b4f7-4724-a722-58e6121b2877.json",
+      "size": 11750,
+      "mtime": 1790185899001.525
+    },
+    {
+      "rel": ".wd_mem/graph/_index.json",
+      "size": 3592,
+      "mtime": 1790185898998.2996
+    },
+    {
+      "rel": ".wd_mem/knowledge/MEMORY.md",
+      "size": 133,
+      "mtime": 1790185440271.309
+    },
+    {
+      "rel": ".wd_mem/README.md",
+      "size": 1378,
+      "mtime": 1790185440272.4124
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/injected_generate_orders.py",
+      "size": 1552,
+      "mtime": 1790185769863.7874
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/injected_summarize_orders.py",
+      "size": 2470,
+      "mtime": 1790185845641.44
+    },
+    {
+      "rel": ".wd_mem/scripts/generate_orders.py",
+      "size": 1483,
+      "mtime": 1790185766343.7039
+    },
+    {
+      "rel": ".wd_mem/scripts/summarize_orders.py",
+      "size": 2401,
+      "mtime": 1790185836822.3955
+    },
+    {
+      "rel": "combo/background/channel_analysis.md",
+      "size": 7015,
+      "mtime": 1790185646517.5396
+    },
+    {
+      "rel": "combo/background/order_metrics.md",
+      "size": 6227,
+      "mtime": 1790185554730.343
+    },
+    {
+      "rel": "combo/background/sources_index.json",
+      "size": 1730,
+      "mtime": 1790185664643.4443
+    },
+    {
+      "rel": "combo/data_report.md",
+      "size": 2615,
+      "mtime": 1790185891809.778
+    },
+    {
+      "rel": "combo/orders.csv",
+      "size": 2216,
+      "mtime": 1790185770044.842
+    },
+    {
+      "rel": "combo/order_analysis_skill.md",
+      "size": 7392,
+      "mtime": 1790185734836.0088
+    },
+    {
+      "rel": "combo/README.md",
+      "size": 2691,
+      "mtime": 1790185891825.492
+    }
+  ],
+  "agentId": "c4ae1837-4058-471c-905a-7660d9b17034",
+  "agentIdentifier": "l2-d-h1-muee6u1l-lqz8i3",
+  "modelName": "AG:DeepSeek-V4.1-Flash",
+  "seedTier": null,
+  "seedId": null,
+  "sessionId": "586b6956-b4f7-4724-a722-58e6121b2877",
+  "reply": "已生成/更新 order_metrics.md、channel_analysis.md、sources_index.json\n步骤 1 已完成，产物已成功生成并保留：\n\n- `combo/background/order_metrics.md`\n- `combo/background/channel_analysis.md`\n- `combo/background/sources_index.json`\n\n已完成知识库检索，但未找到匹配内容。由于当前工具不支持向平台知识库写入文档或重建索引，已在本地资料和 `sources_index.json` 中明确记录该限制。\n\n已生成/更新 order_analysis_skill.md\n已完成并确认技能说明文件已生成，内容涵盖字段检查、按 channel 汇总订单数与销售额、结果核对及背景资料引用方法。该文件是本地技能说明，不代表已完成平台技能注册或绑定。\n\n文件路径：`E:/Codes/ABC/work-duo/eval-workspace-full/eval-D-H1-6/combo/order_analysis_skill.md`\n\n已生成/更新 orders.csv\n已生成并验证订单 CSV：`E:/Codes/ABC/work-duo/eval-workspace-full/eval-D-H1-6/combo/orders.csv`。文件包含 4 个指定字段、60 条可复现订单记录（含表头共 61 行）。\n\n已生成/更新 data_report.md、README.md\n「汇总并编写交付说明」已生成/更新 summarize_orders.py、data_report.md、README.md（执行轮次达预算上限，产物经客观校验无误）",
+  "thinkingLen": 2984,
+  "eventCount": 140,
+  "kbCalls": 1,
+  "artifactScore": 1
+}

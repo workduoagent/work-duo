@@ -1,0 +1,27 @@
+{
+  "kind": "concurrency",
+  "n": 2,
+  "totalMs": 651241,
+  "done": 2,
+  "terminal": 2,
+  "survivalRate": 1,
+  "terminalRate": 1,
+  "results": [
+    {
+      "caseId": "D-M2",
+      "slot": 0,
+      "status": "done",
+      "durationMs": 645119,
+      "artifactScore": 1,
+      "error": null
+    },
+    {
+      "caseId": "D-M3",
+      "slot": 1,
+      "status": "done",
+      "durationMs": 651101,
+      "artifactScore": 1,
+      "error": null
+    }
+  ]
+}
