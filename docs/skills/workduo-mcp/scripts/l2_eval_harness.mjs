@@ -550,7 +550,15 @@ export function judgeDump(idsCsv) {
     const spec = CASES[id]
     if (!spec?.seedId) { console.log(`跳过 ${id}（非种子用例）`); continue }
     const manifest = JSON.parse(fs.readFileSync(path.join(SEEDS_DIR, spec.seedId, 'seed.json'), 'utf8'))
-    const wsDir = path.join(wsOf(id, 0), manifest.targetDir).replace(/\\/g, '/')
+    // 槽位感知：从该 caseId 最新结果 JSON 的 workspace 字段取真实工作空间（并发槽位有 -N 后缀）。
+    const cands = fs.readdirSync(OUT).filter((f) => (f === `${id}.json` || f.startsWith(`${id}-`)) && f.endsWith('.json'))
+    let wsRoot = wsOf(id, 0)
+    if (cands.length) {
+      let best = null, bt = -1
+      for (const f of cands) { const st = fs.statSync(path.join(OUT, f)); if (st.mtimeMs > bt) { bt = st.mtimeMs; best = f } }
+      try { wsRoot = JSON.parse(fs.readFileSync(path.join(OUT, best), 'utf8')).workspace || wsRoot } catch { /* 保留缺省 */ }
+    }
+    const wsDir = path.join(wsRoot, manifest.targetDir).replace(/\\/g, '/')
     const outFile = path.join(OUT, 'judge', `${id}.txt`).replace(/\\/g, '/')
     plan.push({ caseId: id, seedId: spec.seedId, testCmd: manifest.testCmd, wsDir, outFile })
   }
@@ -576,7 +584,11 @@ export function judgeMerge() {
     const errors = +(out.match(/(\d+) error/)?.[1] || 0)
     const noTests = out.includes('no tests ran')
     const resolved = !noTests && failed === 0 && errors === 0
-    const caseFile = resultPath(p.caseId, 0)
+    // 槽位感知：并发 run 产生 C-M2-1.json 等后缀文件，取该 caseId 最新的 JSON 合并（judge-dump 同理）。
+    const cands = fs.readdirSync(OUT).filter((f) => (f === `${p.caseId}.json` || f.startsWith(`${p.caseId}-`)) && f.endsWith('.json'))
+    if (!cands.length) { console.log(`跳过 ${p.caseId}（无结果 JSON）`); continue }
+    let caseFile = null, bt = -1
+    for (const f of cands) { const st = fs.statSync(path.join(OUT, f)); if (st.mtimeMs > bt) { bt = st.mtimeMs; caseFile = path.join(OUT, f) } }
     const j = JSON.parse(fs.readFileSync(caseFile, 'utf8'))
     j.judge = { cmd: p.testCmd, passed, failed, errors, resolved, execBy: 'outer-bash' }
     j.resolved = resolved

@@ -1,0 +1,197 @@
+{
+  "caseId": "C-H2",
+  "slot": 3,
+  "scene": "C",
+  "kind": "H",
+  "title": "跨文件签名契约修复（签发/校验两侧）",
+  "model": "96af449e-dfc0-48ec-b077-aa9f02b43d64",
+  "workspace": "E:/Codes/ABC/work-duo/eval-workspace/eval-C-H2-3",
+  "startedAt": "2026-09-23T12:12:28.833Z",
+  "status": "done",
+  "runId": "run-1790165548924-2",
+  "durationMs": 801732,
+  "artifacts": [],
+  "artifactCheck": [
+    {
+      "artifact": "auth-proj/SELFTEST.md",
+      "ok": true
+    },
+    {
+      "artifact": "auth-proj/README.md",
+      "ok": true
+    }
+  ],
+  "traceCounts": {
+    "events": 231,
+    "reply_chars": 1071,
+    "thinking_chars": 5417
+  },
+  "replyLen": 1071,
+  "kbHits": 0,
+  "recoveries": 0,
+  "error": null,
+  "metrics": {
+    "ha": {
+      "terminal": true,
+      "status": "done"
+    },
+    "perf": {
+      "durationMs": 801732
+    },
+    "heal": {
+      "replyLen": 1071
+    }
+  },
+  "files": [
+    {
+      "rel": ".wd_mem/.gitignore",
+      "size": 310,
+      "mtime": 1790165548929.2036
+    },
+    {
+      "rel": ".wd_mem/final_audit.py",
+      "size": 1421,
+      "mtime": 1790166333752.7466
+    },
+    {
+      "rel": ".wd_mem/graph/edges.jsonl",
+      "size": 4176,
+      "mtime": 1790166343934.1602
+    },
+    {
+      "rel": ".wd_mem/graph/nodes.jsonl",
+      "size": 36686,
+      "mtime": 1790166343933.6582
+    },
+    {
+      "rel": ".wd_mem/graph/sessions/bcdd3d9e-32a1-4d2c-abf6-da78f2d06ee0.json",
+      "size": 15291,
+      "mtime": 1790166343935.454
+    },
+    {
+      "rel": ".wd_mem/graph/_index.json",
+      "size": 3879,
+      "mtime": 1790166343934.1602
+    },
+    {
+      "rel": ".wd_mem/knowledge/MEMORY.md",
+      "size": 133,
+      "mtime": 1790165548928.1765
+    },
+    {
+      "rel": ".wd_mem/pytest_probe.py",
+      "size": 411,
+      "mtime": 1790165774826.284
+    },
+    {
+      "rel": ".wd_mem/README.md",
+      "size": 1378,
+      "mtime": 1790165548929.2036
+    },
+    {
+      "rel": ".wd_mem/recon.md",
+      "size": 1953,
+      "mtime": 1790166020029.2595
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/injected_final_audit.py",
+      "size": 1485,
+      "mtime": 1790166337016.6045
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/injected_pytest_probe.py",
+      "size": 475,
+      "mtime": 1790166228684.6157
+    },
+    {
+      "rel": "auth-proj/.pytest_cache/.gitignore",
+      "size": 37,
+      "mtime": 1790165790118.8887
+    },
+    {
+      "rel": "auth-proj/.pytest_cache/CACHEDIR.TAG",
+      "size": 191,
+      "mtime": 1790165790119.5708
+    },
+    {
+      "rel": "auth-proj/.pytest_cache/README.md",
+      "size": 302,
+      "mtime": 1790165790118.8887
+    },
+    {
+      "rel": "auth-proj/.pytest_cache/v/cache/lastfailed",
+      "size": 2,
+      "mtime": 1790166229070.841
+    },
+    {
+      "rel": "auth-proj/.pytest_cache/v/cache/nodeids",
+      "size": 79,
+      "mtime": 1790166337381.2888
+    },
+    {
+      "rel": "auth-proj/auth.py",
+      "size": 392,
+      "mtime": 1790166144775.327
+    },
+    {
+      "rel": "auth-proj/README.md",
+      "size": 1546,
+      "mtime": 1790166277657.975
+    },
+    {
+      "rel": "auth-proj/requirements.txt",
+      "size": 7,
+      "mtime": 1790165368895.5652
+    },
+    {
+      "rel": "auth-proj/SELFTEST.md",
+      "size": 1546,
+      "mtime": 1790166259436.0913
+    },
+    {
+      "rel": "auth-proj/test_auth.py",
+      "size": 303,
+      "mtime": 1790165368895.5652
+    },
+    {
+      "rel": "auth-proj/verify.py",
+      "size": 786,
+      "mtime": 1790166144779.9062
+    },
+    {
+      "rel": "auth-proj/__pycache__/auth.cpython-311.pyc",
+      "size": 750,
+      "mtime": 1790166229063.1438
+    },
+    {
+      "rel": "auth-proj/__pycache__/test_auth.cpython-311-pytest-9.1.1.pyc",
+      "size": 2971,
+      "mtime": 1790165790073.785
+    },
+    {
+      "rel": "auth-proj/__pycache__/verify.cpython-311.pyc",
+      "size": 1393,
+      "mtime": 1790166229067.7068
+    }
+  ],
+  "agentId": "73ef7094-3fa0-46db-b420-a0c0cdd5763e",
+  "agentIdentifier": "l2-c-h2-mue2chth-b8vocb",
+  "modelName": "AG:DeepSeek-V4.1-Flash",
+  "seedTier": "cross-file",
+  "seedId": "py-cross-auth",
+  "sessionId": "bcdd3d9e-32a1-4d2c-abf6-da78f2d06ee0",
+  "reply": "已生成/更新 recon.md、SELFTEST.md\n当前步骤已完成，且未修改 `auth.py`、`verify.py` 或测试文件。\n\n已执行并记录基线 `pytest`：退出码 `1`，结果 `F.`；`test_roundtrip` 失败，`test_tamper_rejected` 通过。已定位签发侧与校验侧偏离契约的具体原因。\n\n产出文件：\n\n- `E:\\Codes\\ABC\\work-duo\\eval-workspace\\eval-C-H2-3\\.wd_mem\\recon.md`\n- `E:\\Codes\\ABC\\work-duo\\eval-workspace\\eval-C-H2-3\\auth-proj\\SELFTEST.md`\n- `E:\\Codes\\ABC\\work-duo\\eval-workspace\\eval-C-H2-3\\auth-proj\\README.md`\n\n已生成/更新 auth.py、verify.py\n「按契约修复签发与校验实现」已生成/更新 verify.py、auth.py（执行轮次达预算上限，产物经客观校验无误）\n\n已生成/更新 SELFTEST.md、README.md\n「回填自测报告并同步 README」已生成/更新 SELFTEST.md、README.md（执行轮次达预算上限，产物经客观校验无误）\n\n最终一致性审计通过：\n\n- `pytest` 退出码：`0`\n- 测试结果：`2 passed`\n- 所需文件均存在\n- `auth-proj/README.md` 与 `auth-proj/SELFTEST.md` 内容逐字节一致\n\n最终交付文件：\n\n- `E:\\Codes\\ABC\\work-duo\\eval-workspace\\eval-C-H2-3\\auth-proj\\SELFTEST.md`\n- `E:\\Codes\\ABC\\work-duo\\eval-workspace\\eval-C-H2-3\\auth-proj\\README.md`\n- `E:\\Codes\\ABC\\work-duo\\eval-workspace\\eval-C-H2-3\\auth-proj\\auth.py`\n- `E:\\Codes\\ABC\\work-duo\\eval-workspace\\eval-C-H2-3\\auth-proj\\verify.py`\n- `E:\\Codes\\ABC\\work-duo\\eval-workspace\\eval-C-H2-3\\.wd_mem\\recon.md`",
+  "thinkingLen": 5417,
+  "eventCount": 231,
+  "kbCalls": 0,
+  "artifactScore": 1,
+  "judge": {
+    "cmd": "python -m pytest test_auth.py -v",
+    "passed": 2,
+    "failed": 0,
+    "errors": 0,
+    "resolved": true,
+    "execBy": "outer-bash"
+  },
+  "resolved": true
+}

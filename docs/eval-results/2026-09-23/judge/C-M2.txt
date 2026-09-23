@@ -1,0 +1,11 @@
+============================= test session starts =============================
+platform win32 -- Python 3.13.14, pytest-9.1.1, pluggy-1.6.0 -- C:\Users\Administrator\.workbuddy\binaries\python\envs\default\Scripts\python.exe
+cachedir: .pytest_cache
+rootdir: E:\Codes\ABC\work-duo\eval-workspace\eval-C-M2-1\cart-proj
+collecting ... collected 3 items
+
+test_cart.py::test_total_multiplies_price PASSED                         [ 33%]
+test_cart.py::test_discount_boundary PASSED                              [ 66%]
+test_cart.py::test_discount_below PASSED                                 [100%]
+
+============================== 3 passed in 0.01s ==============================
