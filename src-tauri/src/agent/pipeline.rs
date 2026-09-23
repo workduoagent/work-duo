@@ -1670,6 +1670,9 @@ async fn run_subtask(
             // 9 轮 30+ 次 kb_search 正文恒空 → 熔断 → 重跑 → 再循环）。此处追加一轮
             // 「禁止调用工具、立即基于已有资料输出最终结果」的强制总结：产出非空正文 →
             // 按暂定完成收尾（模型自主输出无法客观核验，标暂定并提示人工复核）。
+            // Batch C（2026-09-23）：强制总结的诊断文本要能跨过本块进入统一 failed 返回，
+            // 供修复型重试轮回灌——故声明在块外。
+            let mut forced_diag: Option<String> = None;
             if task.success_criteria.is_empty() {
                 messages.push(serde_json::json!({
                     "role": "user",
@@ -1683,12 +1686,24 @@ async fn run_subtask(
                         let text = outcome.content.trim().to_string();
                         if text.chars().count() >= 10 {
                             let summary = runtime::clip(&text, 500);
-                            tracing::info!(
-                                "[agent] pipeline: 子任务 step={} 熔断强制总结生效（{}字符），按暂定完成收尾",
-                                task.step,
-                                text.chars().count()
-                            );
-                            return (
+                            // Batch C（2026-09-23）：本子任务发生过文件写入时，「暂定完成」会吞掉
+                            // never 模式的自动诊断重试（C-H1 实测：只建骨架即被暂定完成收尾，
+                            // 修复没动手）。语义修正：有文件写入 → 强制总结文本转为诊断上下文，
+                            // 按失败进入修复型重试轮（预算 16）；零文件写入（纯检索/阅读）保持 K2 暂定完成语义。
+                            if !changed_files.is_empty() {
+                                tracing::warn!(
+                                    "[agent] pipeline: 子任务 step={} 熔断强制总结但已有 {} 个文件写入——暂定完成让位于修复型重试",
+                                    task.step,
+                                    changed_files.len()
+                                );
+                                forced_diag = Some(summary);
+                            } else {
+                                tracing::info!(
+                                    "[agent] pipeline: 子任务 step={} 熔断强制总结生效（{}字符），按暂定完成收尾",
+                                    task.step,
+                                    text.chars().count()
+                                );
+                                return (
                                 SubTaskOutput {
                                     step: task.step,
                                     title: task.title.clone(),
@@ -1713,6 +1728,7 @@ async fn run_subtask(
                                 },
                                 usage,
                             );
+                            }
                         }
                     }
                     Err(e) => {
@@ -1725,11 +1741,15 @@ async fn run_subtask(
                     step: task.step,
                     title: task.title.clone(),
                     summary: format!(
-                        "子任务超过 {} 轮工具调用仍未闭环{}",
+                        "子任务超过 {} 轮工具调用仍未闭环{}{}",
                         iter_budget,
                         last_tool_error
                             .as_ref()
                             .map(|e| format!("；最近错误：{}", e.chars().take(300).collect::<String>()))
+                            .unwrap_or_default(),
+                        forced_diag
+                            .as_ref()
+                            .map(|s| format!("；强制总结诊断（作为修复方向，勿重蹈覆辙）：{}", s))
                             .unwrap_or_default(),
                     ),
                     success: false,
