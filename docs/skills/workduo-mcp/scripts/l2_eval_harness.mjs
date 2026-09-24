@@ -927,8 +927,9 @@ export function judgeDump(idsCsv) {
   fs.writeFileSync(path.join(OUT, 'judge', 'plan.json'), JSON.stringify(plan, null, 2))
   console.log('-- 外层 bash 逐条执行：')
   for (const p of plan) {
-    const args = p.testCmd.replace(/^python\s*/, '')
-    console.log(`cd "${p.wsDir}" && "${JUDGE_PY}" ${args} > "${p.outFile}" 2>&1; echo "${p.caseId} exit=$?"`)
+    // 规范化：剥掉 python/pytest 前缀，统一以受管 python -m pytest 执行（manifest 两种写法都兼容）
+    const norm = p.testCmd.replace(/^python\s+/, '').replace(/^pytest\s+/, '-m pytest ')
+    console.log(`cd "${p.wsDir}" && "${JUDGE_PY}" ${norm} > "${p.outFile}" 2>&1; echo "${p.caseId} exit=$?"`)
   }
   console.log(`-- 完成后执行: node l2_eval_harness.mjs judge-merge && node l2_eval_harness.mjs score`)
   return plan

@@ -27,19 +27,21 @@ def test_no_realm_returns_none():
 
 def test_no_catastrophic_backtracking():
     # CVE-2020-8492：恶意头触发指数回溯。判分方式：子进程 10s 超时即红。
+    # 恶意输入经 stdin 传入（Windows 命令行 32K 限制，不能内联进 -c 参数）。
     evil = 'x,' * 20000
     here = os.path.dirname(os.path.abspath(__file__))
     code = (
         'import sys\n'
         'sys.path.insert(0, %r)\n'
         'from auth_compat import parse_www_authenticate\n'
-        'parse_www_authenticate(%r)\n'
-        "print('done')\n" % (here, evil)
+        'parse_www_authenticate(sys.stdin.read())\n'
+        "print('done')\n" % (here,)
     )
     t0 = time.perf_counter()
     try:
         p = subprocess.run(
             [sys.executable, '-c', code],
+            input=evil,
             capture_output=True,
             timeout=10,
             text=True,
