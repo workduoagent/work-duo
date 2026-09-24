@@ -1729,17 +1729,24 @@ export async function checkEnv() {
 export function buildScorecard() {
   ensureDirs()
   const files = fs.readdirSync(OUT).filter((f) => f.endsWith('.json'))
+  // 槽位混算修复（2026-09-24）：同 caseId 多跑/多槽位记录（如 S-J6.json + S-J6-1.json）只取
+  // mtime 最新一条——历史失败槽位不得拖低最新成绩（口径=每个用例算一次，以最近一跑为准）。
+  const latestById = new Map()
   const cases = []
   const faults = []
   const concs = []
   for (const f of files) {
     try {
       const j = JSON.parse(fs.readFileSync(path.join(OUT, f), 'utf8'))
-      if (j.caseId) cases.push(j)
-      else if (j.faultId) faults.push(j)
+      const mtime = fs.statSync(path.join(OUT, f)).mtimeMs
+      if (j.caseId) {
+        const prev = latestById.get(j.caseId)
+        if (!prev || mtime > prev.__mtime) latestById.set(j.caseId, { ...j, __mtime: mtime })
+      } else if (j.faultId) faults.push(j)
       else if (j.kind === 'concurrency') concs.push(j)
     } catch {}
   }
+  for (const { __mtime, ...j } of latestById.values()) cases.push(j)
   const by = (arr, fn) => arr.reduce((m, x) => { const k = fn(x); (m[k] = m[k] || []).push(x); return m }, {})
   const pct = (n, d) => (d ? Math.round((n / d) * 1000) / 10 : 0)
   const med = (a) => { if (!a.length) return null; const s = [...a].sort((x, y) => x - y); return s[Math.floor(s.length / 2)] }

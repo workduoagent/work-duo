@@ -41,7 +41,9 @@ use crate::agent::types::SubTaskOutput;
 /// 微 ReAct 局部熔断：单个子任务「工具轮」上限（正常子任务 1~2 轮即可闭环）。
 /// 注意：仅「调用了工具的轮」计入此预算；模型只发文本汇报的终态轮不计入，
 /// 确保「产物已生成、但预算都花在工具上、没机会发汇报」的子任务不会被误判未闭环。
-const MAX_SUBTASK_ITERATIONS: usize = 8;
+/// 2026-09-24 十六轮对照实验（S-J6，docs/eval-results/2026-09-24-16iter/）后由 8 转正 16：
+/// 16 预算下修复型任务 12 轮自然闭环、无侦察拖延、resolved 持平——基线放宽不劣化。
+const MAX_SUBTASK_ITERATIONS: usize = 16;
 /// 子任务内连续工具错误即时拦截阈值。
 const MAX_SUBTASK_CONSECUTIVE_ERRORS: usize = 2;
 /// 自动执行模式下同一批次内最大并发子任务数。
@@ -54,8 +56,8 @@ const MAX_PARALLEL_SUBTASKS: usize = 3;
 /// 以打破无人值守 / 同因持续失败场景下的「弹窗→处理→再失败」无限重试循环。
 const MAX_TASK_RECOVERY_ATTEMPTS: usize = 3;
 
-/// 微 ReAct 工具轮预算分级（Batch C，2026-09-23）：
-/// - 基线 MAX_SUBTASK_ITERATIONS（8）：正常子任务 1~2 轮闭环，8 已含 4 倍余量；
+/// 微 ReAct 工具轮预算分级（Batch C，2026-09-23；2026-09-24 基线 8→16）：
+/// - 基线 MAX_SUBTASK_ITERATIONS（16）：正常子任务 1~2 轮闭环，16 含 8 倍余量；
 /// - **修复型加成**：带诊断回灌的轮次（guidance 非空）天然是「跑测试→读码→改码→再跑测试」
 ///   多轮循环，基线对其过紧——L2 C-H1 实测：跨文件修复 8 轮只够侦察+建骨架，修复没动手。
 /// - 全部 env 可调（WD_SUBTASK_MAX_ITERATIONS / WD_SUBTASK_REPAIR_EXTRA_ITERATIONS，App 启动读取）。
