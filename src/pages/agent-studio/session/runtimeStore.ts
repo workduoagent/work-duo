@@ -142,20 +142,41 @@ interface Entry {
   refs: RuntimeRefs
 }
 
-const entries = new Map<string, Entry>()
-const subscribers = new Set<() => void>()
-const terminalHandlers = new Map<string, TerminalHandler>()
-
-/** 正在运行任务的会话 / 智能体（事件路由依据：事件不带会话 id）。 */
-let runningSessionId: string | null = null
-let runningAgentId: string | null = null
-
 /**
- * 事件桥是否已注册。用 **globalThis** 存而不是模块级变量：Vite HMR 热替换本模块时
- * 模块作用域会重建，模块级标记会跟着复位 → 监听被重复注册 → 每个事件被处理多次
- * （曾表现为「一次任务弹多条完成通知」）。挂到 globalThis 上跨热更新存活，保证只注册一次。
+ * 模块可变状态整体挂到 **globalThis**（跨 Vite HMR 热更新存活）。
+ *
+ * 为什么必须这样：本模块会被 Vite HMR 重执行（开发期每次编辑都触发），模块作用域
+ * 整个重建——若状态放模块级，会出现三连灾难：①运行中任务的全部运行态直接丢失；
+ * ②Tauri 监听被重复注册，每个事件被处理多次（曾表现为「一次任务弹多条完成通知」）；
+ * ③新旧两份注册表脱节，旧监听写旧状态、新代码读新状态 → 事件流断裂，**通知再也不弹**。
+ * 挂 globalThis 后重执行时复用同一份状态与标记，彻底规避。
  */
-const bridgeFlagHolder = globalThis as unknown as { __wdRuntimeBridgeStarted?: boolean }
+interface RuntimeGlobalState {
+  entries: Map<string, Entry>
+  subscribers: Set<() => void>
+  terminalHandlers: Map<string, TerminalHandler>
+  pendingHandlers: Map<string, PendingHandler>
+  lastPendingKind: Map<string, string>
+  /** 正在运行任务的会话 / 智能体（事件路由依据：事件不带会话 id）。 */
+  runningSessionId: string | null
+  runningAgentId: string | null
+  /** 事件桥是否已注册（跨 HMR 存活，保证只注册一次）。 */
+  bridgeStarted: boolean
+}
+
+const __wdGlobal = globalThis as unknown as { __wdRuntimeStore?: RuntimeGlobalState }
+const S: RuntimeGlobalState = __wdGlobal.__wdRuntimeStore ?? (__wdGlobal.__wdRuntimeStore = {
+  entries: new Map<string, Entry>(),
+  subscribers: new Set<() => void>(),
+  terminalHandlers: new Map<string, TerminalHandler>(),
+  pendingHandlers: new Map<string, PendingHandler>(),
+  lastPendingKind: new Map<string, string>(),
+  runningSessionId: null,
+  runningAgentId: null,
+  bridgeStarted: false,
+})
+
+const { entries, subscribers, terminalHandlers, pendingHandlers, lastPendingKind } = S
 
 function notify() {
   for (const cb of subscribers) cb()
@@ -202,7 +223,7 @@ export function resetRuntime(sessionId: string) {
 }
 
 export function getRunningSessionId(): string | null {
-  return runningSessionId
+  return S.runningSessionId
 }
 
 export function isSessionRunning(sessionId: string | null): boolean {
@@ -212,14 +233,14 @@ export function isSessionRunning(sessionId: string | null): boolean {
 
 /** 该智能体是否有任务在跑（用于输入框禁用：同一智能体一次只能跑一个任务）。 */
 export function isAgentRunning(agentId: string | null | undefined): boolean {
-  if (!agentId || !runningAgentId) return false
-  return runningAgentId === agentId && runningSessionId !== null
+  if (!agentId || !S.runningAgentId) return false
+  return S.runningAgentId === agentId && S.runningSessionId !== null
 }
 
 /** 标记某会话开始运行（run 入口调用；事件据此路由）。 */
 export function beginRun(sessionId: string, agentId: string | null, meta: { roundId?: string | null; lastPrompt?: string }) {
-  runningSessionId = sessionId
-  runningAgentId = agentId
+  S.runningSessionId = sessionId
+  S.runningAgentId = agentId
   const e = entryOf(sessionId, true)
   if (e) {
     e.refs.agentId = agentId
@@ -238,8 +259,8 @@ export function beginRun(sessionId: string, agentId: string | null, meta: { roun
 
 /** 结束运行态（终态事件或取消时调用）。 */
 export function endRun() {
-  runningSessionId = null
-  runningAgentId = null
+  S.runningSessionId = null
+  S.runningAgentId = null
 }
 
 export function setRunMeta(sessionId: string, meta: { roundId?: string | null; lastPrompt?: string }) {
@@ -280,6 +301,53 @@ function fireTerminal(info: RunTerminalInfo) {
       cb(info)
     } catch (e) {
       console.error('[runtime] terminal handler failed', e)
+    }
+  }
+}
+
+/* --------------------- HITL 挂起提醒（授权/审批/选择/恢复） --------------------- */
+
+/** 挂起事件 → 人类可读类别（通知标题用）。 */
+const PENDING_EVENT_KINDS: Record<string, string> = {
+  'agent-awaiting-approval': '高危操作授权',
+  'agent-recovery-needed': '步骤恢复决策',
+  'agent-choice-needed': '方案选择',
+  'agent-plan-approval-needed': '计划审批',
+}
+
+export interface PendingNotifyInfo {
+  sessionId: string
+  agentId: string | null
+  kind: string
+}
+
+type PendingHandler = (info: PendingNotifyInfo) => void
+
+// pendingHandlers / lastPendingKind 两张 Map 挂在共享状态 S 上（跨 HMR 存活），见文件头部。
+
+/**
+ * 注册挂起提醒处理器（**按 key 幂等替换**，防 HMR 重复注册——同 setTerminalHandler）。
+ * 触发时机：授权 / 计划审批 / 方案选择 / 步骤恢复等 HITL 挂起事件到达。
+ */
+export function setPendingNotifyHandler(key: string, cb: PendingHandler) {
+  pendingHandlers.set(key, cb)
+}
+
+function firePendingNotify(sessionId: string, event: string) {
+  const kind = PENDING_EVENT_KINDS[event] ?? '需要你确认'
+  if (lastPendingKind.get(sessionId) === kind) return
+  lastPendingKind.set(sessionId, kind)
+  console.info('[runtime] pending notify', { sessionId, kind, handlers: pendingHandlers.size })
+  const info: PendingNotifyInfo = {
+    sessionId,
+    agentId: entries.get(sessionId)?.refs.agentId ?? null,
+    kind,
+  }
+  for (const cb of pendingHandlers.values()) {
+    try {
+      cb(info)
+    } catch (e) {
+      console.error('[runtime] pending notify handler failed', e)
     }
   }
 }
@@ -398,7 +466,8 @@ function applyAgentEvent(rt: RuntimeState, refs: RuntimeRefs, e: AgentEvent): Ru
     case 'plan_generated':
       refs.steps.clear()
       rt = flushSteps(rt, refs)
-      rt = { ...rt, artifacts: [], traceIntent: undefined, traceThinking: [], planning: false, planApproval: null }
+      // statusText 一并清：修改后重新出计划时，旧的「⏸ 计划待确认…」提示不能残留
+      rt = { ...rt, artifacts: [], traceIntent: undefined, traceThinking: [], planning: false, planApproval: null, statusText: '' }
       if (e.plan?.tasks) rt = { ...rt, planSteps: e.plan.tasks }
       break
     case 'step_started':
@@ -485,14 +554,13 @@ function applyAgentEvent(rt: RuntimeState, refs: RuntimeRefs, e: AgentEvent): Ru
 /* 监听在模块级只注册一次，页面卸载不注销——这是「切走再回来不丢事件」的关键。 */
 
 export function ensureRuntimeBridge() {
-  // 用 globalThis 标记而非模块级变量：HMR 热替换本模块时模块作用域重建、标记复位
-  // 会导致监听被重复注册（每个事件被处理多次）。挂 globalThis 跨热更新存活。
-  if (!isTauri || bridgeFlagHolder.__wdRuntimeBridgeStarted) return
-  bridgeFlagHolder.__wdRuntimeBridgeStarted = true
+  // bridgeStarted 挂在 globalThis 的共享状态 S 上（跨 HMR 存活），保证只注册一次。
+  if (!isTauri || S.bridgeStarted) return
+  S.bridgeStarted = true
 
   /** 事件统一路由到「正在运行的会话」；没有运行中的任务则忽略（避免污染其它会话）。 */
   const route = (fn: (rt: RuntimeState, refs: RuntimeRefs) => RuntimeState) => {
-    const id = runningSessionId
+    const id = S.runningSessionId
     if (!id) return
     mutateRuntime(id, fn)
   }
@@ -502,7 +570,9 @@ export function ensureRuntimeBridge() {
   })
 
   void listen<ApprovalRequest>('agent-awaiting-approval', (ev) => {
-    route((rt, refs) => {
+    const id = S.runningSessionId
+    if (!id) return
+    mutateRuntime(id, (rt, refs) => {
       refs.pendingHold = true
       return {
         ...rt,
@@ -510,10 +580,12 @@ export function ensureRuntimeBridge() {
         statusText: '⏸ 等待授权：请在弹窗中选择允许 / 拒绝，任务已暂停',
       }
     })
+    // HITL 阻塞态：任务暂停等人操作。用户没在看该会话时必须提醒到位，否则任务默默卡死。
+    firePendingNotify(id, 'agent-awaiting-approval')
   })
 
   void listen<{ promptTokens: number; completionTokens: number }>('agent-task-done', (ev) => {
-    const id = runningSessionId
+    const id = S.runningSessionId
     if (!id) return
     mutateRuntime(id, (rt, refs) => {
       refs.lastTaskUsage = ev.payload ?? null
@@ -543,12 +615,13 @@ export function ensureRuntimeBridge() {
         usage: ev.payload ?? null,
       })
       endRun()
+      lastPendingKind.delete(id) // 新一轮任务在同一会话挂起时仍可再次提醒
       return next
     })
   })
 
   void listen<string>('agent-task-error', (ev) => {
-    const id = runningSessionId
+    const id = S.runningSessionId
     if (!id) return
     mutateRuntime(id, (rt, refs) => {
       refs.pendingHold = false
@@ -573,23 +646,32 @@ export function ensureRuntimeBridge() {
         usage: null,
       })
       endRun()
+      lastPendingKind.delete(id)
       return next
     })
   })
 
   void listen<RecoveryRequest>('agent-recovery-needed', (ev) => {
-    route((rt) => ({ ...rt, recovery: ev.payload }))
+    const id = S.runningSessionId
+    if (!id) return
+    mutateRuntime(id, (rt) => ({ ...rt, recovery: ev.payload }))
+    firePendingNotify(id, 'agent-recovery-needed')
   })
 
   void listen<ChoiceRequest>('agent-choice-needed', (ev) => {
-    route((rt, refs) => {
+    const id = S.runningSessionId
+    if (!id) return
+    mutateRuntime(id, (rt, refs) => {
       refs.pendingHold = true
       return { ...rt, pendingChoice: ev.payload }
     })
+    firePendingNotify(id, 'agent-choice-needed')
   })
 
   void listen<PlanApprovalRequest>('agent-plan-approval-needed', (ev) => {
-    route((rt, refs) => {
+    const id = S.runningSessionId
+    if (!id) return
+    mutateRuntime(id, (rt, refs) => {
       refs.pendingHold = true
       return {
         ...rt,
@@ -597,6 +679,7 @@ export function ensureRuntimeBridge() {
         statusText: '⏸ 计划待确认：请在弹窗中批准 / 修改 / 拒绝，任务已暂停',
       }
     })
+    firePendingNotify(id, 'agent-plan-approval-needed')
   })
 
   void listen<{ promptTokens: number; completionTokens: number }>('agent-token-update', (ev) => {

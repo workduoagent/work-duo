@@ -99,7 +99,10 @@ import {
   isSessionRunning,
   isAgentRunning,
   setTerminalHandler,
+  setPendingNotifyHandler,
+  getRunMeta,
   type RunTerminalInfo,
+  type PendingNotifyInfo,
 } from './session/runtimeStore'
 import {
   listProjects,
@@ -328,6 +331,9 @@ const lastSessionByAgent = new Map<string, string>()
  */
 let chatViewSessionRef: string | null = null
 
+/** 会话列表快照（组件同步进来，供模块级提醒逻辑取会话名）。 */
+let sessionsSnapshot: AgentConversationSession[] = []
+
 /** 由对话页注册：若当前正停在该会话所属智能体的对话页，则直接切会话（返回 true）。 */
 let openSessionRef: ((sid: string, agentId: string) => boolean) | null = null
 
@@ -420,6 +426,38 @@ setTerminalHandler('chat-terminal', (info: RunTerminalInfo) => {
       console.error('[chat] 终态落库失败', e)
     }
   })()
+})
+
+/**
+ * HITL 挂起提醒（授权 / 计划审批 / 方案选择 / 步骤恢复）：
+ * 这些是**阻塞态**——任务暂停等人操作，人不在对话页时任务就默默卡死，必须提醒到位。
+ * 通知用固定 key（`pending-<sessionId>`）：同类重推时 antd 会原地替换而不是叠加；
+ * 用户点开该会话或提交决策后由组件侧关闭（见下方 effect）。
+ */
+setPendingNotifyHandler('chat-pending-notify', (info: PendingNotifyInfo) => {
+  console.info('[chat] pending notify handler', { sessionId: info.sessionId, kind: info.kind, viewing: chatViewSessionRef })
+  if (chatViewSessionRef === info.sessionId) return // 正在看该会话，界面里已有决策面板，不打扰
+  const api = getNotifyApi()
+  if (!api) return
+  // 会话名：优先从当前列表拿，拿不到就用运行元信息里的首问
+  const meta = getRunMeta(info.sessionId)
+  const sess = sessionsSnapshot.find((s) => s.id === info.sessionId)
+  const rawName = sess?.sessionName || meta.lastPrompt || '未命名会话'
+  const brief = rawName.length > 24 ? `${rawName.slice(0, 24)}…` : rawName
+  api.notification.warning({
+    key: `pending-${info.sessionId}`, // 固定 key：同类重推原地替换，不叠加
+    message: `任务暂停：${info.kind}`,
+    description: brief,
+    placement: 'bottomRight',
+    duration: 0, // 挂起未处理前不自动消失（手动关闭 / 处理后自动收起）
+    className: 'agent-task-notify',
+    btn: (
+      <Button size="sm" onClick={() => jumpToSession(info.agentId, info.sessionId)}>
+        去处理
+      </Button>
+    ),
+  })
+  void notifyOSWhenHidden(`任务暂停：${info.kind}`, rawName)
 })
 
 export default function AgentChatPage() {
@@ -1647,8 +1685,10 @@ export default function AgentChatPage() {
   }, [agent?.id, activeSessionId])
 
   // 供模块级终态逻辑判断「用户此刻是否在看这个会话」（决定是否弹完成提醒）。
+  // 同时：用户点开该会话即收起它的「任务暂停」通知（界面里已有决策面板，不必再弹）。
   useEffect(() => {
     chatViewSessionRef = activeSessionId
+    if (activeSessionId) getNotifyApi()?.notification?.destroy(`pending-${activeSessionId}`)
   }, [activeSessionId])
   useEffect(() => {
     return () => {
@@ -1667,6 +1707,19 @@ export default function AgentChatPage() {
       openSessionRef = null
     }
   }, [agent?.id, openSession])
+
+  // 同步会话列表快照给模块级提醒逻辑（取会话名用）
+  useEffect(() => {
+    sessionsSnapshot = sessions
+  }, [sessions])
+
+  // 挂起通知收起（其二）：提交决策后挂起态解除 → 精准关掉对应那条通知。
+  useEffect(() => {
+    const hasPending = !!(pendingApproval || recovery || pendingChoice || planApproval)
+    if (!hasPending && activeSessionId) {
+      getNotifyApi()?.notification?.destroy(`pending-${activeSessionId}`)
+    }
+  }, [pendingApproval, recovery, pendingChoice, planApproval, activeSessionId])
 
   // 切页回来（对话页重挂）：恢复上次查看的会话。
   // **刻意不走 openSession**——它会 resetRuntime 清掉该会话的运行态，把正在跑的任务
