@@ -1,0 +1,30 @@
+{
+  "caseId": "D8-1",
+  "dim": "D8",
+  "title": "取消+锁",
+  "status": "done",
+  "autoPass": true,
+  "autoScore": 1,
+  "durationMs": 23230,
+  "asserts": [
+    {
+      "name": "terminal_after_cancel",
+      "ok": true,
+      "detail": "cancelled"
+    },
+    {
+      "name": "cleanup_fast",
+      "ok": true,
+      "detail": "18088ms"
+    },
+    {
+      "name": "lock_released",
+      "ok": true,
+      "detail": ""
+    }
+  ],
+  "counts": {},
+  "runId": null,
+  "notes": "",
+  "at": "2026-09-24T06:39:15.818Z"
+}
