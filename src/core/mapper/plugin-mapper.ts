@@ -181,6 +181,12 @@ export async function getPlugin(id: string): Promise<UserPluginTool | undefined>
 
 /** 新增或更新（按 id 幂等；更新时保留 created_at）。返回最新列表。 */
 export async function upsertPlugin(input: UpsertUserPluginInput): Promise<UserPluginTool> {
+  // runtime 契约校验（2026-09-24，capability PL-3 实测）：执行器仅支持 python|bun，
+  // 其他值（如 node）此前能创建成功、执行时才失败——延迟暴露误导用户，必须在入口结构化拒绝。
+  const ALLOWED_RUNTIMES = ['python', 'bun']
+  if (!ALLOWED_RUNTIMES.includes(String(input.runtime))) {
+    throw new Error(`插件 runtime 不支持: ${String(input.runtime)}（仅允许 python | bun）`)
+  }
   const id = input.id || crypto.randomUUID()
   const now = new Date().toISOString()
   const existing = !isTauri ? lsListPlugins().find((p) => p.id === id) : undefined

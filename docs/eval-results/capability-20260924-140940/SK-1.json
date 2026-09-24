@@ -1,0 +1,30 @@
+{
+  "caseId": "SK-1",
+  "dim": "Skill",
+  "title": "技能发现",
+  "status": "done",
+  "autoPass": true,
+  "autoScore": 1,
+  "durationMs": 16,
+  "asserts": [
+    {
+      "name": "skill_list_rows",
+      "ok": true,
+      "detail": "n=2"
+    },
+    {
+      "name": "agent_list_skills",
+      "ok": true,
+      "detail": "n=2"
+    },
+    {
+      "name": "known_present_or_empty_env",
+      "ok": true,
+      "detail": "python-dev,react-ts-vite-antd-sass"
+    }
+  ],
+  "counts": {},
+  "runId": null,
+  "notes": "",
+  "at": "2026-09-24T06:11:59.157Z"
+}
