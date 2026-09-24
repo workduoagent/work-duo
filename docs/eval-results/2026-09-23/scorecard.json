@@ -1,12 +1,12 @@
 {
-  "cases": 12,
-  "done": 12,
-  "terminal": 12,
-  "artAvg": 0.6597222222222222,
+  "cases": 25,
+  "done": 24,
+  "terminal": 25,
+  "artAvg": 0.8266666666666665,
   "durations": {
-    "p50": 566929,
-    "p90": 904436,
-    "p99": 949530
+    "p50": 615309,
+    "p90": 964275,
+    "p99": 1771951
   },
   "faults": [
     {
@@ -48,6 +48,23 @@
       ],
       "ok": true,
       "finishedAt": "2026-09-23T06:23:11.371Z"
+    },
+    {
+      "faultId": "F-3",
+      "startedAt": "2026-09-23T09:13:47.909Z",
+      "observations": [
+        {
+          "ok": true,
+          "msg": "自愈机制观测：step_retrying 事件 ×0（>0=引擎自动诊断重试真实发生；=0 可能源失败被工具层/重试层提前消化）"
+        },
+        {
+          "ok": true,
+          "msg": "A-H5 降级容错 status=done artifacts=1"
+        }
+      ],
+      "ok": true,
+      "autoRetryEvents": 0,
+      "finishedAt": "2026-09-23T09:25:36.091Z"
     },
     {
       "faultId": "F-4",
@@ -179,6 +196,154 @@
           "slot": 11,
           "status": "done",
           "durationMs": 735809,
+          "artifactScore": 1,
+          "error": null
+        }
+      ]
+    },
+    {
+      "kind": "concurrency",
+      "n": 2,
+      "totalMs": 964362,
+      "done": 2,
+      "terminal": 2,
+      "survivalRate": 1,
+      "terminalRate": 1,
+      "results": [
+        {
+          "caseId": "A-H3",
+          "slot": 0,
+          "status": "done",
+          "durationMs": 907066,
+          "artifactScore": 1,
+          "error": null
+        },
+        {
+          "caseId": "B-H4",
+          "slot": 1,
+          "status": "done",
+          "durationMs": 964275,
+          "artifactScore": 1,
+          "error": null
+        }
+      ]
+    },
+    {
+      "kind": "concurrency",
+      "n": 3,
+      "totalMs": 1341340,
+      "done": 3,
+      "terminal": 3,
+      "survivalRate": 1,
+      "terminalRate": 1,
+      "results": [
+        {
+          "caseId": "A-H3",
+          "slot": 0,
+          "status": "done",
+          "durationMs": 1341185,
+          "artifactScore": 0,
+          "error": null
+        },
+        {
+          "caseId": "A-M8",
+          "slot": 1,
+          "status": "done",
+          "durationMs": 388788,
+          "artifactScore": 1,
+          "error": null
+        },
+        {
+          "caseId": "B-H4",
+          "slot": 2,
+          "status": "done",
+          "durationMs": 651064,
+          "artifactScore": 0.5,
+          "error": null
+        }
+      ]
+    },
+    {
+      "kind": "concurrency",
+      "n": 3,
+      "totalMs": 1772055,
+      "done": 2,
+      "terminal": 3,
+      "survivalRate": 0.6666666666666666,
+      "terminalRate": 1,
+      "results": [
+        {
+          "caseId": "B-M5",
+          "slot": 0,
+          "status": "done",
+          "durationMs": 1135952,
+          "artifactScore": 1,
+          "error": null
+        },
+        {
+          "caseId": "A-H1",
+          "slot": 1,
+          "status": "done",
+          "durationMs": 617747,
+          "artifactScore": 1,
+          "error": null
+        },
+        {
+          "caseId": "B-H1",
+          "slot": 2,
+          "status": "error",
+          "durationMs": 1771951,
+          "artifactScore": 0.75,
+          "error": null
+        }
+      ]
+    },
+    {
+      "kind": "concurrency",
+      "n": 5,
+      "totalMs": 801881,
+      "done": 5,
+      "terminal": 5,
+      "survivalRate": 1,
+      "terminalRate": 1,
+      "results": [
+        {
+          "caseId": "C-M1",
+          "slot": 0,
+          "status": "done",
+          "durationMs": 482361,
+          "artifactScore": 1,
+          "error": null
+        },
+        {
+          "caseId": "C-M2",
+          "slot": 1,
+          "status": "done",
+          "durationMs": 491369,
+          "artifactScore": 1,
+          "error": null
+        },
+        {
+          "caseId": "C-H1",
+          "slot": 2,
+          "status": "done",
+          "durationMs": 717379,
+          "artifactScore": 1,
+          "error": null
+        },
+        {
+          "caseId": "C-H2",
+          "slot": 3,
+          "status": "done",
+          "durationMs": 801732,
+          "artifactScore": 1,
+          "error": null
+        },
+        {
+          "caseId": "C-H3",
+          "slot": 4,
+          "status": "done",
+          "durationMs": 409951,
           "artifactScore": 1,
           "error": null
         }
