@@ -25,6 +25,7 @@
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
+use std::path::Path;
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
@@ -638,6 +639,29 @@ async fn call_tool(app: &AppHandle, name: &str, args: &Value) -> Value {
                 Err(e) => json!({ "ok": false, "error": e }),
             }
         }
+        // —— D' 产物回滚（2026-09-24）：工作空间快照列举 / 回滚（run 前由 pipeline 自动快照）——
+        "agent_snapshot_list" => {
+            let agent_id = args.get("agentId").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            if agent_id.is_empty() {
+                return json!({ "ok": false, "error": "缺少 agentId" });
+            }
+            match crate::ws_snapshot::list_snapshots(app, &agent_id) {
+                Ok(list) => json!({ "ok": true, "count": list.len(), "snapshots": list }),
+                Err(e) => json!({ "ok": false, "error": e }),
+            }
+        }
+        "agent_snapshot_rollback" => {
+            let agent_id = args.get("agentId").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let stamp = args.get("stamp").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let ws = args.get("workspace").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            if agent_id.is_empty() || stamp.is_empty() || ws.is_empty() {
+                return json!({ "ok": false, "error": "缺少 agentId / stamp / workspace" });
+            }
+            match crate::ws_snapshot::rollback_workspace(app, &agent_id, Path::new(&ws), &stamp) {
+                Ok(msg) => json!({ "ok": true, "message": msg }),
+                Err(e) => json!({ "ok": false, "error": e }),
+            }
+        }
         // —— 模块发现层（Rust 直读 workduo.db，零业务副作用）——
         "agent_list_models" => {
             fetch_rows(
@@ -1020,6 +1044,16 @@ step/totalSteps 来自规划事件（未规划或 SIMPLE_CHAT 为 0/0）；lastT
             "agent_sweep_orphan_rounds",
             "孤儿轮次按需清扫（2026-09-23）：并发/取消/崩溃可能遗留 end_time IS NULL 的「进行中」轮次（UI 永远显示进行中）。此前仅 App 启动时清扫，本工具补按需入口——返回 {ok, swept}（本次标记终态的轮次数）。\n用途：自测驱动在并发/取消后调用本工具，再核对无残留「进行中」轮次，断言「不残留孤儿」。",
             json!({ "type": "object", "properties": {} }),
+        ),
+        tool(
+            "agent_snapshot_list",
+            "工作空间快照列举（D' 产物回滚，2026-09-24）：每次 run_task 前引擎自动对工作空间业务文件做快照（排除 .wd_mem 等内部结构），每 agent 保留最近 5 份。返回 {ok, count, snapshots:[{stamp, path, files}]}。用途：任务产物写坏/需要回退时，先用本工具查可用快照，再调 agent_snapshot_rollback。",
+            json!({ "type": "object", "properties": { "agentId": { "type": "string", "description": "智能体 id" } }, "required": ["agentId"] }),
+        ),
+        tool(
+            "agent_snapshot_rollback",
+            "工作空间回滚到指定快照（D' 产物回滚，2026-09-24）：清空工作空间业务文件并从快照恢复（.wd_mem 等内部结构保留）。回滚前引擎自动对当前状态再做一次安全快照（回滚可撤销）。配合 agent_snapshot_list 使用。\n⚠️ 会覆盖工作空间当前业务文件——先确认当前无未保存的有价值改动。",
+            json!({ "type": "object", "properties": { "agentId": { "type": "string", "description": "智能体 id" }, "stamp": { "type": "string", "description": "快照时间戳（agent_snapshot_list 返回）" }, "workspace": { "type": "string", "description": "工作空间根目录绝对路径" } }, "required": ["agentId", "stamp", "workspace"] }),
         ),
         tool(
             "agent_ui_create",

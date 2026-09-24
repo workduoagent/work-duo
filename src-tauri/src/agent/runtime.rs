@@ -1615,6 +1615,47 @@ impl Drop for HeartbeatGuard {
     }
 }
 
+/// LLM 调用限流（D' 限流，2026-09-24）：`WD_LLM_RPM` 设每分钟请求上限（按模型名分别
+/// 计数；0/未设置 = 不限流）。实现为最小调用间隔节流：调用前等待至距上次同模型调用
+/// ≥ 60/RPM 秒。锁不跨 await（等待在锁外 sleep）。桌面单用户场景足够。
+static LLM_RATE_LIMIT: std::sync::Mutex<Option<std::collections::HashMap<String, std::time::Instant>>> =
+    std::sync::Mutex::new(None);
+
+async fn llm_rate_limit_wait(model: &str) {
+    let rpm: u64 = std::env::var("WD_LLM_RPM")
+        .ok()
+        .and_then(|s| s.trim().parse::<u64>().ok())
+        .unwrap_or(0);
+    if rpm == 0 {
+        return;
+    }
+    let min_interval = std::time::Duration::from_millis(60_000 / rpm.max(1));
+    loop {
+        let wait = {
+            let mut guard = LLM_RATE_LIMIT.lock().unwrap_or_else(|e| e.into_inner());
+            let map = guard.get_or_insert_with(std::collections::HashMap::new);
+            let now = std::time::Instant::now();
+            let earliest = match map.get(model) {
+                Some(t) => *t + min_interval,
+                None => now,
+            };
+            if earliest <= now {
+                map.insert(model.to_string(), now);
+                None
+            } else {
+                Some(earliest.duration_since(now))
+            }
+        };
+        match wait {
+            Some(d) => {
+                tracing::info!("[agent] LLM 限流：model={} 距下次调用还需 {:?}（WD_LLM_RPM={rpm}）", model, d);
+                tokio::time::sleep(d).await;
+            }
+            None => return,
+        }
+    }
+}
+
 pub(crate) async fn call_llm(
     cfg: &AgentRuntimeConfig,
     messages: &[Value],
@@ -1623,6 +1664,7 @@ pub(crate) async fn call_llm(
     if cfg.llm_base_url.is_empty() || cfg.llm_model_name.is_empty() {
         return Err("智能体未绑定有效的 LLM（base_url / model_name 为空）".into());
     }
+    llm_rate_limit_wait(&cfg.llm_model_name).await;
 
     tracing::info!(
         "[agent] call_llm: 请求 URL={} model={} 是否带 Key={}",
@@ -1883,6 +1925,7 @@ pub(crate) async fn call_llm_stream(
     on_reasoning: Option<&(dyn Fn(&str) + Send + Sync)>,
 ) -> Result<StreamOutcome, String> {
     const MAX_RETRY: usize = 1;
+    llm_rate_limit_wait(cfg.llm_model_name.as_str()).await;
     let mut last: Option<Result<StreamOutcome, String>> = None;
     for attempt in 0..=MAX_RETRY {
         let outcome =

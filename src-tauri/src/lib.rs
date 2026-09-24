@@ -4,6 +4,7 @@ mod mcp;
 mod mamba_manager;
 mod bun_manager;
 mod sandbox_audit;
+mod ws_snapshot;
 mod fs_helper;
 mod logging;
 mod mcp_server;

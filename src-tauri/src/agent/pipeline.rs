@@ -184,6 +184,14 @@ pub async fn run_pipeline(
     // 15007 边审批策略授权集（主 Agent 传入；小分队等无授权集场景传 None → 策略不适用，维持旧行为）。
     grants: Option<&crate::agent::policy::ApprovalGrants>,
 ) -> PipelineResult {
+    // D' 产物回滚（2026-09-24）：run 前对工作空间业务文件做快照（尽力而为，失败仅告警）。
+    // 回滚入口：MCP `agent:snapshot_list` / `agent:snapshot_rollback`。
+    if let Some(ws) = &ctx.workspace {
+        match crate::ws_snapshot::snapshot_workspace(app, &ctx.agent_id, ws) {
+            Ok(p) => tracing::info!("[agent] 工作空间快照完成：{}", p.display()),
+            Err(e) => tracing::warn!("[agent] 工作空间快照失败（不阻塞任务）：{e}"),
+        }
+    }
     // 步数只统计「本轮」任务：二次规划会把上一轮节点置 obsolete（已被取代），
     // 不计入本轮步数，否则同会话多轮会显示「步骤 1/N（N 含历史）」且回复聚合所有历史步骤。
     let total = graph
