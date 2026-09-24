@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Database, RotateCcw, Globe, Plus, Trash2, ShieldAlert, RefreshCw } from 'lucide-react'
 import { invoke } from '@tauri-apps/api/core'
 import { Button, Input } from '@/components/ui'
@@ -39,20 +39,19 @@ export function SecurityPanel({ settings, onChange }: Props) {
   const [auditLogs, setAuditLogs] = useState<SandboxAuditEntry[]>([])
   const [auditLoading, setAuditLoading] = useState(false)
 
-  // 挂载时拉一次；「刷新」按钮通过置 auditLoading 重新触发。
-  useEffect(() => {
-    let alive = true
+  // 拉取审计日志（挂载时一次；刷新按钮手动触发——依赖数组必须为空，
+  // 否则 setAuditLoading(true) → 依赖变化 → effect 重跑 → 死循环闪屏（实测踩坑）。
+  const loadAudit = useCallback(() => {
     setAuditLoading(true)
     fetchAuditLogs().then((list) => {
-      if (alive) {
-        setAuditLogs(list)
-        setAuditLoading(false)
-      }
+      setAuditLogs(list)
+      setAuditLoading(false)
     })
-    return () => {
-      alive = false
-    }
-  }, [auditLoading])
+  }, [])
+
+  useEffect(() => {
+    loadAudit()
+  }, [loadAudit])
 
   return (
     <div className="set-section">
@@ -136,7 +135,7 @@ export function SecurityPanel({ settings, onChange }: Props) {
         title={<span className="set-item__title-inline"><span className="set-item__title-icon"><ShieldAlert size={15} /></span>沙箱脚本行为审计</span>}
         description="Python / Bun 沙箱脚本的网络访问、工作空间外路径写入、进程派生与依赖安装均记录在案（只观测不拦截）。日志文件位于安装目录 logs/ 下，按天分文件。"
         control={
-          <Button variant="soft" size="sm" onClick={() => setAuditLoading(true)}>
+          <Button variant="soft" size="sm" onClick={loadAudit}>
             <RefreshCw size={14} className={auditLoading ? 'animate-spin' : undefined} />
             刷新
           </Button>
