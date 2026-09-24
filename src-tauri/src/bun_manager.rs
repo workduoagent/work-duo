@@ -129,11 +129,24 @@ impl BunManager {
 /// 全程 `spawn()` + `CommandEvent` 异步流，不阻塞调用线程。
 /// 关键点：强制注入 `BUN_INSTALL`（cache 落 `bun_root/.bun`）与 `BUN_CONFIG_REGISTRY`
 /// （npmmirror 镜像），保证绿便携 + 国内可达，不依赖用户本机 ~/.bun / npm 配置。
+///
+/// 网络策略默认 `Allow`（平台自身操作保持联网）；运行用户脚本请用
+/// `run_bun_sidecar_policy(..., NetPolicy::Blocked)`（Bun fetch/axios 遵守代理 env）。
 async fn run_bun_sidecar(
     app: &AppHandle,
     bun_root: &Path,
     args: Vec<String>,
     cwd: Option<&Path>,
+) -> Result<(String, String, Option<i32>), String> {
+    run_bun_sidecar_policy(app, bun_root, args, cwd, crate::mamba_manager::NetPolicy::Allow).await
+}
+
+async fn run_bun_sidecar_policy(
+    app: &AppHandle,
+    bun_root: &Path,
+    args: Vec<String>,
+    cwd: Option<&Path>,
+    net: crate::mamba_manager::NetPolicy,
 ) -> Result<(String, String, Option<i32>), String> {
     let mut cmd = app
         .shell()
@@ -148,6 +161,13 @@ async fn run_bun_sidecar(
         .env("NODE_PATH", bun_root.join("node_modules").to_string_lossy().to_string());
     if let Some(dir) = cwd {
         cmd = cmd.current_dir(dir);
+    }
+    if net == crate::mamba_manager::NetPolicy::Blocked
+        && crate::mamba_manager::net_block_enabled()
+    {
+        for (k, v) in crate::mamba_manager::net_block_envs() {
+            cmd = cmd.env(k, v);
+        }
     }
     let (mut rx, child) = cmd
         .spawn()
@@ -508,7 +528,11 @@ async fn run_script_with_selfheal(
     cwd: Option<&Path>,
 ) -> Result<ScriptRunResult, String> {
     let args = vec![tmp_path.to_string_lossy().to_string()];
-    let (stdout, stderr, code) = run_bun_sidecar(app, bun_root, args, cwd).await?;
+    // 网络默认关（2026-09-24）：运行用户 JS 一律注入断网 env（Bun fetch/axios 遵守代理 env；
+    // 依赖安装走 install_packages_silent 的 Allow 通道不受影响）。
+    let net = crate::mamba_manager::NetPolicy::Blocked;
+    let (stdout, stderr, code) =
+        run_bun_sidecar_policy(app, bun_root, args, cwd, net).await?;
     if code != Some(0) {
         if let Some(mods) = missing_modules(&stderr) {
             tracing::info!(
@@ -519,7 +543,8 @@ async fn run_script_with_selfheal(
                 Ok(specs) => {
                     tracing::info!("[agent] run_node: 已自动安装依赖（{}），重试执行", specs);
                     let args2 = vec![tmp_path.to_string_lossy().to_string()];
-                    let (o2, e2, c2) = run_bun_sidecar(app, bun_root, args2, cwd).await?;
+                    let (o2, e2, c2) =
+                        run_bun_sidecar_policy(app, bun_root, args2, cwd, net).await?;
                     return match c2 {
                         Some(0) => Ok(ScriptRunResult { stdout: o2, exit_code: c2 }),
                         Some(c) => Err(format!("脚本执行失败（退出码 {c}）：\n{e2}")),

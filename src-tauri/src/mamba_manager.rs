@@ -126,6 +126,94 @@ ssl_verify: true
     }
 }
 
+/// 沙箱网络策略（2026-09-24 网络默认关批次，G 系列审计无界实证的拦截层）。
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum NetPolicy {
+    /// 运行用户脚本：注入无效代理 + sitecustomize 禁 socket（进程级默认离线）。
+    Blocked,
+    /// 平台自身操作（依赖安装 / 环境管理 / 版本探测）：保持联网，行为不变。
+    Allow,
+}
+
+/// 逃生开关：`WD_SANDBOX_NET=on` 时全程不注入断网 env（放行脚本联网，用于用户显式要求
+/// 沙箱联网的任务）。缺省 off = 断网生效。
+pub(crate) fn net_block_enabled() -> bool {
+    std::env::var("WD_SANDBOX_NET")
+        .map(|v| !v.trim().eq_ignore_ascii_case("on"))
+        .unwrap_or(true)
+}
+
+/// 断网注入 env：代理指向 discard 端口 127.0.0.1:9——所有遵守代理环境变量的
+/// HTTP 库（requests/urllib/httpx/axios/fetch）连接立即失败。raw socket 由
+/// Python 侧 sitecustomize 守卫兜底（Bun 侧无同款机制，由观测层兜底）。
+pub(crate) fn net_block_envs() -> Vec<(String, String)> {
+    const DEAD: &str = "http://127.0.0.1:9";
+    ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"]
+        .iter()
+        .map(|k| (k.to_string(), DEAD.to_string()))
+        .chain([
+            ("NO_PROXY".to_string(), String::new()),
+            ("no_proxy".to_string(), String::new()),
+        ])
+        .collect()
+}
+
+/// Python 断网守卫：`sitecustomize.py` 由解释器启动时自动 import（早于一切用户 import），
+/// monkey-patch socket 层——raw socket / create_connection / getaddrinfo（含 DNS）全禁。
+/// 仅在 `WD_SANDBOX_NET_GUARD=1` 时生效，因此依赖安装通道（不注入该标记）不受影响。
+const NET_GUARD_SITECUSTOMIZE: &str = r#"# WorkDuo 沙箱默认离线守卫（mamba_manager 注入 PYTHONPATH + WD_SANDBOX_NET_GUARD=1 启用）
+import os as _os
+
+if _os.environ.get("WD_SANDBOX_NET_GUARD") == "1":
+    def _net_blocked(*_args, **_kwargs):
+        raise RuntimeError(
+            "沙箱默认离线：脚本网络访问已被禁用（平台侧 WD_SANDBOX_NET=on 可放行）。"
+            "需要外部数据请改用 http_request 工具（带 SSRF 防护）。"
+        )
+
+    import socket as _socket
+
+    _socket.socket = _net_blocked
+    _socket.create_connection = _net_blocked
+    _socket.getaddrinfo = _net_blocked
+"#;
+
+/// 确保 net-guard 目录与 sitecustomize.py 在位（幂等），返回 guard 目录字符串。
+pub(crate) fn ensure_python_net_guard(mamba_root: &Path) -> Result<String, String> {
+    let dir = mamba_root.join("net-guard");
+    let file = dir.join("sitecustomize.py");
+    if !file.exists() {
+        std::fs::create_dir_all(&dir).map_err(|e| format!("创建 net-guard 目录失败：{e}"))?;
+        std::fs::write(&file, NET_GUARD_SITECUSTOMIZE)
+            .map_err(|e| format!("写入 sitecustomize.py 失败：{e}"))?;
+    }
+    Ok(dir.to_string_lossy().to_string())
+}
+
+/// 为「运行用户脚本」组装断网版 extra_envs：复制原 env → 注入代理阻断 + 守卫标记
+/// → PYTHONPATH 前置合并 guard 目录（Windows 分号分隔；不覆盖调用方已有的
+/// PYTHONPATH 修复 import 语义）。`WD_SANDBOX_NET=on` 时原样返回。
+fn with_net_block(
+    mamba_root: &Path,
+    extra_envs: &[(String, String)],
+) -> Result<Vec<(String, String)>, String> {
+    let mut envs: Vec<(String, String)> = extra_envs.to_vec();
+    if !net_block_enabled() {
+        return Ok(envs);
+    }
+    for (k, v) in net_block_envs() {
+        envs.push((k, v));
+    }
+    let guard = ensure_python_net_guard(mamba_root)?;
+    match envs.iter_mut().find(|(k, _)| k == "PYTHONPATH") {
+        Some((_, v)) if !v.is_empty() => *v = format!("{};{}", guard, v),
+        Some((_, v)) => *v = guard,
+        None => envs.push(("PYTHONPATH".to_string(), guard)),
+    }
+    envs.push(("WD_SANDBOX_NET_GUARD".to_string(), "1".to_string()));
+    Ok(envs)
+}
+
 /// 通用：spawn micromamba sidecar，异步收集 stdout / stderr，进程结束后返回三元组。
 ///
 /// 全程使用 `spawn()` + `CommandEvent` 异步流，不阻塞调用线程；中文路径经
@@ -135,11 +223,24 @@ ssl_verify: true
 /// micromamba 的 `cmd` 命令行，因此即使含中文也安全）。
 /// `extra_envs` 为附加环境变量（如 `PYTHONPATH`），透传给被执行的 python 进程，
 /// 用于修复「脚本被复制到临时目录后同目录 import 失效」等问题。
+///
+/// 网络策略默认 `Allow`（平台自身操作保持联网）；运行用户脚本请用
+/// `run_sidecar_policy(..., NetPolicy::Blocked)`。
 async fn run_sidecar(
     app: &AppHandle,
     args: Vec<String>,
     cwd: Option<&Path>,
     extra_envs: &[(String, String)],
+) -> Result<(String, String, Option<i32>), String> {
+    run_sidecar_policy(app, args, cwd, extra_envs, NetPolicy::Allow).await
+}
+
+async fn run_sidecar_policy(
+    app: &AppHandle,
+    args: Vec<String>,
+    cwd: Option<&Path>,
+    extra_envs: &[(String, String)],
+    net: NetPolicy,
 ) -> Result<(String, String, Option<i32>), String> {
     let mut cmd = app
         .shell()
@@ -151,6 +252,11 @@ async fn run_sidecar(
     }
     for (k, v) in extra_envs {
         cmd = cmd.env(k, v);
+    }
+    if net == NetPolicy::Blocked && net_block_enabled() {
+        for (k, v) in net_block_envs() {
+            cmd = cmd.env(k, v);
+        }
     }
     let (mut rx, child) = cmd
         .spawn()
@@ -609,7 +715,11 @@ async fn run_script_with_selfheal(
     extra_envs: &[(String, String)],
 ) -> Result<ScriptRunResult, String> {
     let args = build_run_args(mamba_root, rc, env, tmp_path);
-    let (stdout, stderr, code) = run_sidecar(app, args, cwd, extra_envs).await?;
+    // 网络默认关（2026-09-24）：运行用户脚本一律注入断网 env（依赖安装走
+    // install_packages_silent 的 Allow 通道，不受影响）；组装一次供首跑+自愈重试共用。
+    let net_envs = with_net_block(mamba_root, extra_envs)?;
+    let (stdout, stderr, code) =
+        run_sidecar_policy(app, args, cwd, &net_envs, NetPolicy::Blocked).await?;
     if code != Some(0) {
         if let Some(mods) = missing_modules(&stderr) {
             tracing::info!(
@@ -620,7 +730,8 @@ async fn run_script_with_selfheal(
                 Ok(specs) => {
                     tracing::info!("[agent] run_python: 已自动安装依赖（{}），重试执行", specs);
                     let args2 = build_run_args(mamba_root, rc, env, tmp_path);
-                    let (o2, e2, c2) = run_sidecar(app, args2, cwd, extra_envs).await?;
+                    let (o2, e2, c2) =
+                        run_sidecar_policy(app, args2, cwd, &net_envs, NetPolicy::Blocked).await?;
                     return match c2 {
                         Some(0) => Ok(ScriptRunResult { stdout: o2, exit_code: c2 }),
                         Some(c) => Err(format!("脚本执行失败（退出码 {c}）：\n{e2}")),
