@@ -66,6 +66,8 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { appDataDir, resourceDir } from '@tauri-apps/api/path'
 import { open } from '@tauri-apps/plugin-dialog'
 import { Button, Modal, Input } from '@/components/ui'
+import { getNotifyApi } from '@/components/ui/notifyBridge'
+import { notifyOSWhenHidden } from '@/utils/osNotify'
 import { useNotify } from '@/components/ui/notify'
 
 import { getAgent, listAgentMcpTools, listAgentSkills } from '@/core/mapper/agent-mapper'
@@ -92,6 +94,12 @@ import {
   toggleSessionTop,
   type SessionTreeGroup,
 } from '@/core/mapper/agent-session-mapper'
+import {
+  isSessionRunning,
+  isAgentRunning,
+  onRunTerminal,
+  type RunTerminalInfo,
+} from './session/runtimeStore'
 import {
   listProjects,
   getProject,
@@ -294,19 +302,135 @@ function ThoughtSegmentLine({ text, active = false }: { text?: string; active?: 
   )
 }
 
+/** 模块级：会话列表刷新回调（页面挂载时注入；未挂载则跳过，回来时从库重载即可）。 */
+let refreshSessionsRef: (() => void) | null = null
+
+/**
+ * 按智能体记住「最后查看的会话 id」。
+ * 对话页随路由切换会卸载，`activeSessionId` 是组件 state 会一起丢；但运行态已存在
+ * 模块级 store（按会话 id 隔离）。重挂时用它把会话 id 找回来绑定，运行态即可 1:1 还原
+ * ——需求②「切到任何页面再回来，没跑完的任务要恢复成正在进行的界面」。
+ */
+const lastSessionByAgent = new Map<string, string>()
+
+/**
+ * 对话页当前正在查看的会话 id（对话页卸载时为 null）。
+ * 终态到达时若「正在查看的不是该会话」（切到别的页面 / 在看别的会话），就弹通知提醒。
+ */
+let chatViewSessionRef: string | null = null
+
+/** 由对话页注册：若当前正停在该会话所属智能体的对话页，则直接切会话（返回 true）。 */
+let openSessionRef: ((sid: string, agentId: string) => boolean) | null = null
+
+/** 从任意页面跳回某个会话的对话页：已在该智能体对话页则直接切会话，否则走路由。 */
+function jumpToSession(agentId: string | null, sessionId: string) {
+  if (!agentId) return
+  lastSessionByAgent.set(agentId, sessionId)
+  if (openSessionRef?.(sessionId, agentId)) return
+  window.location.hash = `#/agent-studio/${agentId}/chat`
+}
+
+/**
+ * 终态落库（**模块级注册**，与组件生命周期解耦）：
+ * 此前轮次定稿 / 会话状态 / 未命名会话改名全挂在对话页的 useEffect 上，页面一切走
+ * 该 useEffect 就永不触发 →「跑完仍叫未命名会话」「历史会话被错排到首位」。
+ * 现在由全局事件桥在收到终态事件时直接落库，即便对话页已切走或卸载也照常执行。
+ */
+onRunTerminal((info: RunTerminalInfo) => {
+  void (async () => {
+    const { sessionId, roundId, lastPrompt, runtime, ok } = info
+    try {
+      const answer = runtime.streamingText
+      const raw = info.usage
+      const validUsage = raw && (raw.promptTokens > 0 || raw.completionTokens > 0) ? raw : null
+      const inputTokens = validUsage ? raw!.promptTokens : estimateTokens(lastPrompt)
+      const outputTokens = validUsage ? raw!.completionTokens : estimateTokens(answer)
+      if (roundId) {
+        await updateRound(roundId, {
+          assistantAnswer: answer,
+          thinkingContent: runtime.thoughts.join('\n'),
+          toolCallsSummary: runtime.toolSteps.map((s) => ({
+            name: s.toolName,
+            status: s.status,
+            args: s.args,
+            result: s.result,
+            step: s.step,
+          })),
+          planStepsSummary: runtime.planSteps.map((s) => ({
+            step: s.step,
+            title: s.title,
+            status: s.status,
+            summary: s.summary,
+          })),
+          // 交错时间线持久化（v26）；引用来源追加为 kb-sources 段。
+          segments:
+            runtime.kbSources.length > 0
+              ? [...runtime.segments, { kind: 'kb-sources' as const, hits: runtime.kbSources }]
+              : runtime.segments,
+          inputTokens,
+          outputTokens,
+          endTime: Date.now(),
+        })
+      }
+      await updateSession(sessionId, { status: ok ? 'COMPLETED' : 'ERROR', endTime: Date.now() })
+      // Tauri 路径后端已累计真实 usage；无 usage 时用本地估算兜底，避免出现「消耗 0 tokens」。
+      if (!validUsage) await addSessionTokens(sessionId, inputTokens, outputTokens)
+      // 未命名会话兜底改名（正常发问时已改名，这里防其它途径遗漏）。
+      const fresh = await getSession(sessionId)
+      const name = (fresh?.sessionName ?? '').trim()
+      if ((!name || name === '未命名会话') && lastPrompt) {
+        await renameSession(sessionId, lastPrompt.trim().slice(0, 40))
+      }
+      refreshSessionsRef?.()
+
+      // 用户此刻没在看这个会话（切到别的页面 / 在看别的会话）→ 弹提醒，并可一键跳回。
+      if (chatViewSessionRef !== sessionId) {
+        const finalName = name || lastPrompt.trim().slice(0, 40) || '未命名会话'
+        const summary = (runtime.streamingText || '').replace(/\s+/g, ' ').trim().slice(0, 60)
+        const api = getNotifyApi()
+        const cfg = {
+          message: ok ? '任务已完成' : '任务异常结束',
+          description: `${finalName}${summary ? `：${summary}${summary.length >= 60 ? '…' : ''}` : ''}`,
+          placement: 'bottomRight' as const,
+          duration: 8,
+          btn: (
+            <Button size="sm" onClick={() => jumpToSession(info.agentId, sessionId)}>
+              查看
+            </Button>
+          ),
+        }
+        if (ok) api?.notification?.success(cfg)
+        else api?.notification?.error(cfg)
+        // 窗口不在最前时再补一条系统原生通知（聚焦时该函数内部会静默跳过）。
+        void notifyOSWhenHidden(ok ? '任务已完成' : '任务异常结束', finalName)
+      }
+    } catch (e) {
+      console.error('[chat] 终态落库失败', e)
+    }
+  })()
+})
+
 export default function AgentChatPage() {
   const { id = '' } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const { message, modal } = useNotify()
 
+  // 当前会话 id 必须先于状态机声明：状态机按会话 id 绑定该会话自己的运行态（TDZ）。
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
   // 会话状态机（必须早于任何引用 session.* 的回调/依赖数组，否则 TDZ）。
-  const session = useAgentSession()
+  const session = useAgentSession(activeSessionId)
   const { toolSteps, segments, lastLlmUsage, streamingText, isStreaming, statusText, thoughts, planSteps, isRunning, pendingApproval, run, submitDecision, reset, cancel, lastTaskUsage, liveTokenUsage, taskError, artifacts, recovery, resolveRecovery, pendingChoice, submitChoice, planApproval, resolvePlanApproval, kbSources } =
     session
 
   const [agent, setAgent] = useState<AgentInfo | undefined>()
+  // 本智能体是否有任务在跑（含当前查看会话）。切到历史会话时输入框 / 发送按钮仍应保持
+  // 「任务进行中」的禁用态——否则按钮会被解锁，点下去要被后端「已有任务正在运行」闸门锁掉。
+  const agentBusy = isRunning || isAgentRunning(agent?.id)
   const [loading, setLoading] = useState(true)
   const [messages, setMessages] = useState<ChatMessage[]>([])
+  // 每次从 DB 重载消息（切会话/切页回来）时自增，用于强制「流式回填」effect 重新把
+  // 运行态正文写进最后一条 agent 气泡（否则回到运行中会话时气泡会停在空的 DB 内容）。
+  const [msgEpoch, setMsgEpoch] = useState(0)
   const [input, setInput] = useState('')
   // 输入框高度（px）：默认 48，用户可从顶部拖拽手柄向上扩展，发送后复位。
   const [inputHeight, setInputHeight] = useState(48)
@@ -369,7 +493,7 @@ export default function AgentChatPage() {
 
   // 会话列表 + 工程列表 + 当前会话
   const [sessions, setSessions] = useState<AgentConversationSession[]>([])
-  const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
+  // （activeSessionId 已在状态机之前声明，此处不再重复）
   const [sessionSearch, setSessionSearch] = useState('')
   // 归档项默认收起；开启后已归档会话 / 工程重新出现在列表（#20260915004 B2）。
   const [showArchived, setShowArchived] = useState(false)
@@ -762,7 +886,8 @@ export default function AgentChatPage() {
   // 切换智能体时清空会话状态
   useEffect(() => {
     void cleanupPendingEmptySession()
-    reset()
+    // 旧会话若正在跑任务则不清它的运行态（让它后台继续）。
+    if (!isSessionRunning(activeSessionId)) reset()
     setMessages([])
     setActiveSessionId(null)
     setRemovedSkillIds(new Set()) // 临时移除的技能随智能体切换复位
@@ -821,6 +946,19 @@ export default function AgentChatPage() {
         await updateSession(sess.id, { toolsTokens })
         const list = await listSessions(agent.identifier)
         setSessions(list.map((s) => (s.id === sess.id ? { ...s, toolsTokens } : s)))
+      } else {
+        // 需求①：首问即用「问题」给会话命名并落库。
+        // 覆盖「新增子对话」等其它途径建出来的「未命名会话」——此前只在任务跑完时
+        // 才改名（且切页/中断就永不触发），导致列表里长期挂着「未命名会话」。
+        const cur = await getSession(sessionId)
+        const name = (cur?.sessionName ?? '').trim()
+        if (!name || name === '未命名会话') {
+          const next = prompt.trim().slice(0, 40)
+          await renameSession(sessionId, next)
+          setSessions((prev) =>
+            prev.map((s) => (s.id === sessionId ? { ...s, sessionName: next } : s)),
+          )
+        }
       }
       const round = await appendRound({
         sessionId: sessionId!,
@@ -992,6 +1130,17 @@ export default function AgentChatPage() {
 
   // 将 session 的流式文本/思考/工具步骤同步进「最后一条助手气泡」
   useEffect(() => {
+    // 关键守卫：运行态为空且任务没在跑时**绝不回填**。
+    // 否则打开一个已完成的历史会话（或运行态已被清空的会话）时，会用空运行态覆盖
+    // 刚从数据库加载出来的正文 / 思考过程，导致「完成的正文和思考全没了」。
+    const hasLive =
+      isRunning ||
+      !!streamingText ||
+      thoughts.length > 0 ||
+      toolSteps.length > 0 ||
+      segments.length > 0 ||
+      kbSources.length > 0
+    if (!hasLive) return
     setMessages((prev) => {
       const last = prev[prev.length - 1]
       // 欢迎语是静态提示，不参与流式回填：避免 reset() 清空 streamingText 后
@@ -999,7 +1148,8 @@ export default function AgentChatPage() {
       if (!last || last.role !== 'agent' || last.id === 'welcome') return prev
       return [...prev.slice(0, -1), { ...last, content: streamingText, thought: thoughts, toolSteps, segments, kbSources }]
     })
-  }, [streamingText, thoughts, toolSteps, segments, kbSources])
+    // msgEpoch：DB 重载消息后强制重新回填一次（回到运行中会话时正文可见）。
+  }, [streamingText, thoughts, toolSteps, segments, kbSources, isRunning, msgEpoch])
 
   // 任务结束（完成/异常/取消）时，补全耗时、token 与历史持久化
   useEffect(() => {
@@ -1019,89 +1169,12 @@ export default function AgentChatPage() {
       const outputTokens = realUsage ? realUsage.completionTokens : estimateTokens(answer)
       lastTokensRef.current = { input: inputTokens, output: outputTokens }
 
-      // 回填历史轮次
-      if (roundIdRef.current && activeSessionId) {
-        void updateRound(roundIdRef.current, {
-          assistantAnswer: answer,
-          thinkingContent: thoughts.join('\n'),
-          toolCallsSummary: toolSteps.map((s) => ({
-            name: s.toolName,
-            status: s.status,
-            args: s.args,
-            result: s.result,
-            step: s.step,
-          })),
-          planStepsSummary: planSteps.map((s) => ({
-            step: s.step,
-            title: s.title,
-            status: s.status,
-            summary: s.summary,
-          })),
-          // 交错时间线持久化（v26）：刷新/历史加载后按原时序重建穿插渲染。
-          // K3-2：任务级引用来源追加为 kb-sources 段（仅作持久化载体——历史加载时
-          // session-helpers 提取回消息字段 kbSources，不进时间线渲染）。
-          segments: kbSources.length > 0 ? [...segments, { kind: 'kb-sources' as const, hits: kbSources }] : segments,
-          inputTokens,
-          outputTokens,
-          endTime: completedAt,
-        })
-        roundIdRef.current = null
-      }
-
-      // 累计 token（提示词 + 对话）并回填会话状态
-      if (activeSessionId) {
-        const sid = activeSessionId
-        void (async () => {
-          await updateSession(sid, {
-            status: statusText ? 'ERROR' : 'COMPLETED',
-            endTime: completedAt,
-          })
-          // 累计 token 并回填会话表：
-          // - dev/mock 始终按本地估算累加；
-          // - Tauri 路径：后端已在 run_task 累计真实 prompt/completion 到会话表，直接读回（realUsage 有效时）；
-          //   若网关未在流中返回 usage（realUsage 为 null，后端带回 0/0），则本地用估算兜底补写，
-          //   避免出现「消耗 0 tokens」导致环形图（上下文总数）恒为 0。
-          const needLocalEstimate = !isTauri || !realUsage
-          if (needLocalEstimate) {
-            await addSessionTokens(sid, inputTokens, outputTokens)
-          }
-          let fresh = await getSession(sid)
-          let toolsTokens: number | undefined
-          if (!isTauri) {
-            toolsTokens = Math.round(
-              (toolCount -
-                boundMcps
-                  .filter((m) => removedMcpIds.has(m.mcpId))
-                  .reduce((sum, m) => sum + m.tools.length, 0) -
-                disabledMcpToolIds.size +
-                (skillCount - removedSkillIds.size)) *
-                AVG_TOOL_TOKENS,
-            )
-          }
-          // 未命名会话（多为「工程 / 项目目录」下新建的子对话）：首轮完成后用第一个问题命名
-          const wasUnnamed = !fresh?.sessionName || fresh.sessionName.trim() === ''
-          setSessions((prev) =>
-            prev.map((s) => {
-              if (s.id !== sid) return s
-              const b = fresh ?? s
-              let name = b.sessionName
-              if (wasUnnamed && lastPromptRef.current) {
-                name = lastPromptRef.current.trim().slice(0, 40)
-              }
-              return {
-                ...b,
-                sessionName: name || b.sessionName,
-                // Tauri 路径 tools_tokens 由后端动态重算；dev 路径本地估算
-                toolsTokens: isTauri ? b.toolsTokens : (toolsTokens ?? b.toolsTokens),
-              }
-            }),
-          )
-          // 把首轮命名回写库（仅当原本未命名）
-          if (wasUnnamed && lastPromptRef.current) {
-            await renameSession(sid, lastPromptRef.current.trim().slice(0, 40))
-          }
-        })()
-      }
+      // 轮次定稿 / 会话状态 / 未命名会话改名的**落库已移到模块级 onRunTerminal**（文件顶部），
+      // 与组件生命周期解耦：切页期间任务跑完也照常落库。此处不再重复写库，
+      // 否则 addSessionTokens 会被调用两次导致 token 双倍累加。
+      roundIdRef.current = null
+      // 左侧列表刷新由模块级 handler 经 refreshSessionsRef 回调完成（见下方注入），
+      // 此处不直接调用，避免引用尚未声明的 refreshSessions。
 
       setMessages((prev) => {
         const last = prev[prev.length - 1]
@@ -1131,7 +1204,7 @@ export default function AgentChatPage() {
       })
     }
     prevIsRunningRef.current = isRunning
-  }, [isRunning, streamingText, thoughts, toolSteps, planSteps, segments, kbSources, lastAgentContent, statusText, activeSessionId, removedSkillIds, removedMcpIds, disabledMcpToolIds, boundMcps, toolCount, skillCount, isTauri, lastTaskUsage])
+  }, [isRunning, streamingText, thoughts, toolSteps, segments, kbSources, lastAgentContent, isTauri, lastTaskUsage])
 
   // 输入框顶部拖拽手柄：向上拖动增大高度（底部锚定，自然向上扩展），而非原生 resize 只能向下拉。
   const startInputResize = useCallback((e: React.MouseEvent) => {
@@ -1276,7 +1349,9 @@ export default function AgentChatPage() {
   const openSession = useCallback(
     async (sessionId: string) => {
       if (sessionId === activeSessionId) return
-      reset()
+      // 【不再清空目标会话的运行态】运行态已按会话隔离，各会话互不影响；保留运行态才能
+      // 留住「刚跑完的正文 / 思考 / 图」，切走再回来仍在（此前一清就只剩 DB 快照、
+      // 未落库的部分直接消失）。新一轮发送时 run() → beginRun() 本来就会清空，不会残留。
       setActiveSessionId(sessionId)
       setRemovedSkillIds(new Set()) // 切换会话即复位临时移除（重新打开会话恢复全部技能）
       setRemovedMcpIds(new Set()) // 临时移除的 MCP 服务复位
@@ -1287,19 +1362,21 @@ export default function AgentChatPage() {
         setPendingProjectId(sess?.projectId ?? null)
         const rounds = await listRounds(sessionId)
         setMessages(roundsToMessages(rounds))
+        setMsgEpoch((e) => e + 1) // 触发流式回填：运行中会话回来即显示已累计正文
         setMentionTags([]) // 切换会话清空 @提及 标签
         roundIndexRef.current = rounds.length
       } catch (e) {
         message.error(`加载会话失败：${e instanceof Error ? e.message : String(e)}`)
       }
     },
-    [activeSessionId, reset, message],
+    [activeSessionId, message],
   )
 
   /** 新建对话：清空当前会话，回到欢迎语。 */
   const newChat = useCallback(() => {
     void cleanupPendingEmptySession()
-    reset()
+    // 当前会话若正在跑任务，不清它的运行态（让它在后台继续），仅切到全新会话。
+    if (!isSessionRunning(activeSessionId)) reset()
     setActiveSessionId(null)
     setPendingProjectId(null) // 新建对话解绑工程（自由对话）
     setRemovedSkillIds(new Set()) // 新建对话复位临时移除
@@ -1541,6 +1618,69 @@ export default function AgentChatPage() {
     await Promise.all([refreshSessions(), refreshProjects()])
   }, [refreshSessions, refreshProjects])
 
+  // 把会话列表刷新能力注入模块级终态落库流程：任务在后台跑完并改名/定稿后，
+  // 由模块级 handler 回调这里刷新左侧列表（未挂载时跳过，回来时会从库重载）。
+  useEffect(() => {
+    refreshSessionsRef = () => {
+      void refreshSessions()
+    }
+    return () => {
+      refreshSessionsRef = null
+    }
+  }, [refreshSessions])
+
+  // 记住当前智能体最后查看的会话（供切页回来恢复）。
+  useEffect(() => {
+    if (agent?.id && activeSessionId) lastSessionByAgent.set(agent.id, activeSessionId)
+  }, [agent?.id, activeSessionId])
+
+  // 供模块级终态逻辑判断「用户此刻是否在看这个会话」（决定是否弹完成提醒）。
+  useEffect(() => {
+    chatViewSessionRef = activeSessionId
+  }, [activeSessionId])
+  useEffect(() => {
+    return () => {
+      chatViewSessionRef = null
+    }
+  }, [])
+
+  // 供通知上「查看」按钮直接切会话（仅当当前就停在该智能体的对话页时生效）。
+  useEffect(() => {
+    openSessionRef = (sid: string, aid: string) => {
+      if (agent?.id !== aid) return false
+      void openSession(sid)
+      return true
+    }
+    return () => {
+      openSessionRef = null
+    }
+  }, [agent?.id, openSession])
+
+  // 切页回来（对话页重挂）：恢复上次查看的会话。
+  // **刻意不走 openSession**——它会 resetRuntime 清掉该会话的运行态，把正在跑的任务
+  // 的进度抹掉；这里只加载历史轮次并绑定会话 id，运行态由模块级 store 原样带出。
+  const restoredSessionRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (!agent?.id || activeSessionId) return
+    if (restoredSessionRef.current === agent.id) return
+    const prev = lastSessionByAgent.get(agent.id)
+    if (!prev) return
+    restoredSessionRef.current = agent.id
+    void (async () => {
+      try {
+        const sess = await getSession(prev)
+        setPendingProjectId(sess?.projectId ?? null)
+        const rounds = await listRounds(prev)
+        setMessages(roundsToMessages(rounds))
+        setMsgEpoch((e) => e + 1) // 触发流式回填：运行中会话回来即显示已累计正文
+        roundIndexRef.current = rounds.length
+        setActiveSessionId(prev)
+      } catch {
+        // 会话可能已被删除：忽略，停留在「新建对话」
+      }
+    })()
+  }, [agent?.id, activeSessionId])
+
   // 方案B：监听会话压缩完成事件，重读会话表使顶栏环形图随压缩回落。
   // 后端压缩时已把估算节省量从累计 prompt token 回退（持久化），这里仅重读最新值，
   // 保证「上下文占比」在压缩后下降、不再只增不减。
@@ -1600,7 +1740,8 @@ export default function AgentChatPage() {
       }
       // 若上一次「新增子对话」后没发消息就又点了新增，先清掉那个空会话
       await cleanupPendingEmptySession()
-      reset()
+      // 当前会话若正在跑任务，不清它的运行态（让它后台继续），仅新建并切到新会话。
+      if (!isSessionRunning(activeSessionId)) reset()
       setActiveSessionId(null)
       setRemovedSkillIds(new Set())
       setRemovedMcpIds(new Set())
@@ -2218,7 +2359,10 @@ export default function AgentChatPage() {
                         待确认
                       </span>
                     )}
-                    {s.id === activeSessionId && isRunning && !(pendingApproval || pendingChoice || planApproval) && (
+                    {/* loading 指示按【会话自身】是否在跑来判断：切到历史会话时不会跟着
+                        当前会话跑过来（运行态已按会话隔离）；仅当正查看该会话且处于挂起
+                        决策时才让位给「待确认」徽标。 */}
+                    {isSessionRunning(s.id) && !(s.id === activeSessionId && (pendingApproval || pendingChoice || planApproval)) && (
                       <Loader2 size={13} className="agent-chat__session-spin" />
                     )}
                   </div>
@@ -2606,7 +2750,7 @@ export default function AgentChatPage() {
               placeholder={mentionTags.length ? '' : '输入消息，Enter 发送，Shift+Enter 换行；输入 @ 提及技能/MCP，/ 唤起快捷指令'}
               autoComplete="off"
               rows={2}
-              disabled={isRunning}
+              disabled={agentBusy}
               style={{ height: inputHeight }}
               onChange={handleInputChange}
               onPaste={onPaste}
@@ -2852,8 +2996,8 @@ export default function AgentChatPage() {
                   <Button
                     variant="solid"
                     size="sm"
-                    title="发送"
-                    disabled={!input.trim()}
+                    title={agentBusy ? '已有任务在运行' : '发送'}
+                    disabled={!input.trim() || agentBusy}
                     onClick={send}
                   >
                     <Send size={16} />
