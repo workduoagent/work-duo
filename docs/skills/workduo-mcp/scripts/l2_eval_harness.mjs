@@ -886,7 +886,13 @@ export function filesIn(dir) {
 
 export function checkArtifacts(ws, artifacts = []) {
   const have = new Set(filesIn(ws).map((f) => f.rel))
-  return artifacts.map((a) => ({ artifact: a, ok: have.has(a) || have.has(a.replace(/^\.\//, '')) }))
+  // 兜底：裸文件名按「任意目录下同名尾段」匹配（2026-09-24 16 轮实验实证：agent 把产物
+  // 规范写进 targetDir/ 子目录时，裸名 artifacts 误判 miss——crlf_fix.md 在 crlf-proj/ 下）。
+  return artifacts.map((a) => {
+    const norm = a.replace(/^\.\//, '')
+    const ok = have.has(norm) || [...have].some((h) => h === norm || h.endsWith('/' + norm))
+    return { artifact: a, ok }
+  })
 }
 
 // ---------- .wd_mem 严谨性检查（2026-09-24 全量扩展轮，用户重点考核项）----------

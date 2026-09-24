@@ -3,6 +3,6 @@
   "tier": "security",
   "targetDir": "urlfix-proj",
   "testCmd": "pytest test_urlparse_compat.py -v",
-  "artifacts": ["urlparse_fix.md"],
+  "artifacts": ["urlfix-proj/urlparse_fix.md"],
   "prompt": "工作空间子目录 urlfix-proj/ 的 urlparse_compat.parse 存在 CVE-2023-24329 同型缺陷：URL 前导空白（空格等）未被剥离，导致 scheme 解析为空、白名单校验可被绕过。请修复（对齐 CPython 3.11.4 语义：解析前剥离前导空白），其他行为保持不变；test_urlparse_compat.py 为验收标准。\n完成后写 urlparse_fix.md：缺陷描述 + 修复方案 + 测试结果。\n⚠️ 最终交付物核对（收尾前逐项核对，缺一不可）：\n- urlfix-proj/urlparse_fix.md（相对 urlfix-proj/，文件名逐字一致）\n- 收尾规则：先落盘全部产物，再输出文字总结。"
 }
