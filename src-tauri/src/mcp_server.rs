@@ -677,6 +677,12 @@ async fn call_tool(app: &AppHandle, name: &str, args: &Value) -> Value {
             let id = args.get("agentIdentifier").and_then(|v| v.as_str()).unwrap_or("").to_string();
             dispatch_ui(app, "agent:session_list", json!({ "agentIdentifier": id })).await
         }
+        // —— 工程模块：绑定工程是 sessions 文件轨（.wd_mem/sessions 摘要落盘）的前提 ——
+        "agent_project_ensure" => {
+            let root = args.get("rootPath").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            dispatch_ui(app, "agent:project_ensure", json!({ "rootPath": root })).await
+        }
+        "agent_project_list" => dispatch_ui(app, "agent:project_list", Value::Null).await,
         "agent_session_get" => {
             let id = args.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
             dispatch_ui(app, "agent:session_get", json!({ "id": id })).await
@@ -988,6 +994,18 @@ step/totalSteps 来自规划事件（未规划或 SIMPLE_CHAT 为 0/0）；lastT
             json!({ "type": "object", "properties": {} }),
         ),
         // —— 会话 / 轮次：与 Agent 对话页「发送」同款真实链路（createSession→appendRound→run→updateRound）——
+        tool(
+            "agent_project_ensure",
+            "确保工程档案存在（幂等，与工程页同款真实 handler）：按规范化 root_path 单例——命中复用，否则自动建档（默认取叶目录名）。\n\
+返回工程记录（id/name/rootPath...）。\n\
+用途：**创建会话前先建工程，再把 projectId 传给 agent_session_create**——绑定工程后，会话滚动压缩摘要才会落盘到 `.wd_mem/sessions/{id}.summary.md`（文件轨），否则仅存 DB 轨。",
+            json!({ "type": "object", "properties": { "rootPath": { "type": "string", "description": "工程根目录的绝对路径" } }, "required": ["rootPath"] }),
+        ),
+        tool(
+            "agent_project_list",
+            "列出全部工程档案（id/name/rootPath/isPinned/isArchived/lastActiveAt）。",
+            json!({ "type": "object", "properties": {} }),
+        ),
         tool(
             "agent_session_create",
             "经前端真实 handler 创建智能体会话（与对话页「新建对话」同款）：createSession(agentIdentifier, sessionName?, {projectId?})。\n\

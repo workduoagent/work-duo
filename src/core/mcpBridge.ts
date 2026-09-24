@@ -34,6 +34,8 @@ import {
   getSession,
   listRounds,
 } from '@/core/mapper/agent-session-mapper'
+// —— 工程模块：与工程页同款真实 handler（ensureProjectByPath 幂等按 root_path 单例）——
+import { ensureProjectByPath, listProjects } from '@/core/mapper/agent-project-mapper'
 import type { AgentUpsertInput, AgentInfo } from '@/types/core'
 
 // —— 插件模块（百宝箱 → 插件）：与 PluginFormModal / index 同款真实 handler ——
@@ -213,6 +215,16 @@ async function dispatch(intent: string, payload: unknown): Promise<unknown> {
       const p = payload as Parameters<typeof appendRound>[0]
       if (!p?.sessionId) throw new Error('agent:round_create 缺少 sessionId')
       return appendRound(p)
+    }
+    // —— 工程模块：绑定工程是 sessions 文件轨（.wd_mem/sessions 摘要落盘）的前提 ——
+    case 'agent:project_ensure': {
+      const p = payload as { rootPath?: string }
+      if (!p?.rootPath) throw new Error('agent:project_ensure 缺少 rootPath')
+      // ensureProjectByPath 幂等：命中已有工程则复用，否则按叶目录名自动建档
+      return ensureProjectByPath(p.rootPath)
+    }
+    case 'agent:project_list': {
+      return listProjects()
     }
     case 'agent:round_update': {
       const p = payload as { roundId?: string; patch?: Record<string, unknown> }
