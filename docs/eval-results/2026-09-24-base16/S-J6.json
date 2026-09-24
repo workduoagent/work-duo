@@ -1,0 +1,266 @@
+{
+  "caseId": "S-J6",
+  "slot": 0,
+  "scene": "S",
+  "kind": "M",
+  "title": "真实CVE修复：跨文件CRLF注入",
+  "model": "96af449e-dfc0-48ec-b077-aa9f02b43d64",
+  "workspace": "E:/Codes/ABC/work-duo/eval-workspace/eval-S-J6",
+  "startedAt": "2026-09-24T08:28:32.629Z",
+  "status": "done",
+  "runId": "run-1790238513062-1",
+  "durationMs": 503273,
+  "artifacts": [],
+  "artifactCheck": [
+    {
+      "artifact": "crlf-proj/crlf_fix.md",
+      "ok": true
+    }
+  ],
+  "traceCounts": {
+    "completion_tokens": 10476,
+    "events": 145,
+    "prompt_tokens": 395730,
+    "reply_chars": 262,
+    "thinking_chars": 2607
+  },
+  "replyLen": 262,
+  "kbHits": 0,
+  "recoveries": 0,
+  "error": null,
+  "metrics": {
+    "ha": {
+      "terminal": true,
+      "status": "done"
+    },
+    "perf": {
+      "durationMs": 503273
+    },
+    "heal": {
+      "replyLen": 262
+    }
+  },
+  "files": [
+    {
+      "rel": ".wd_mem/.gitignore",
+      "size": 310,
+      "mtime": 1790237165372.307
+    },
+    {
+      "rel": ".wd_mem/graph/edges.jsonl",
+      "size": 3162,
+      "mtime": 1790239013104.0303
+    },
+    {
+      "rel": ".wd_mem/graph/nodes.jsonl",
+      "size": 36178,
+      "mtime": 1790239013103.0283
+    },
+    {
+      "rel": ".wd_mem/graph/sessions/23f77a0d-371f-4614-bda2-2aa3f25e6314.json",
+      "size": 4587,
+      "mtime": 1790239013106.1904
+    },
+    {
+      "rel": ".wd_mem/graph/sessions/b803659d-dd08-4a03-8131-1e29ac0cb6e2.json",
+      "size": 5112,
+      "mtime": 1790237514061.4558
+    },
+    {
+      "rel": ".wd_mem/graph/_index.json",
+      "size": 3091,
+      "mtime": 1790239013103.0283
+    },
+    {
+      "rel": ".wd_mem/knowledge/MEMORY.md",
+      "size": 133,
+      "mtime": 1790237165371.1892
+    },
+    {
+      "rel": ".wd_mem/README.md",
+      "size": 1378,
+      "mtime": 1790237165372.307
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/injected_injected_run_crlf_tests.py",
+      "size": 309,
+      "mtime": 1790238699348.4304
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/injected_injected_verify_crlf_fix.py",
+      "size": 1331,
+      "mtime": 1790238985105.3872
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/injected_inspect_crlf_project.py",
+      "size": 402,
+      "mtime": 1790238758324.0454
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/injected_run_crlf_tests.py",
+      "size": 247,
+      "mtime": 1790237491079.2625
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/injected_verify_crlf_fix.py",
+      "size": 1269,
+      "mtime": 1790237403048.7556
+    },
+    {
+      "rel": ".wd_mem/scripts/inspect_crlf_project.py",
+      "size": 340,
+      "mtime": 1790238754311.9607
+    },
+    {
+      "rel": ".wd_mem/scripts/run_crlf_tests.py",
+      "size": 185,
+      "mtime": 1790237486310.861
+    },
+    {
+      "rel": ".wd_mem/scripts/verify_crlf_fix.py",
+      "size": 1207,
+      "mtime": 1790237399121.693
+    },
+    {
+      "rel": "crlf-proj/.pytest_cache/.gitignore",
+      "size": 37,
+      "mtime": 1790238699876.033
+    },
+    {
+      "rel": "crlf-proj/.pytest_cache/CACHEDIR.TAG",
+      "size": 191,
+      "mtime": 1790238699877.0347
+    },
+    {
+      "rel": "crlf-proj/.pytest_cache/README.md",
+      "size": 302,
+      "mtime": 1790238699876.033
+    },
+    {
+      "rel": "crlf-proj/.pytest_cache/v/cache/lastfailed",
+      "size": 2,
+      "mtime": 1790238985548.6453
+    },
+    {
+      "rel": "crlf-proj/.pytest_cache/v/cache/nodeids",
+      "size": 193,
+      "mtime": 1790238985548.6453
+    },
+    {
+      "rel": "crlf-proj/client.py",
+      "size": 590,
+      "mtime": 1790238917307.563
+    },
+    {
+      "rel": "crlf-proj/crlf_fix.md",
+      "size": 1205,
+      "mtime": 1790239002418.3408
+    },
+    {
+      "rel": "crlf-proj/test_client.py",
+      "size": 1048,
+      "mtime": 1790217061814.468
+    },
+    {
+      "rel": "crlf-proj/validate.py",
+      "size": 884,
+      "mtime": 1790238917305.3308
+    },
+    {
+      "rel": "crlf-proj/__pycache__/client.cpython-311.pyc",
+      "size": 967,
+      "mtime": 1790238985539.3047
+    },
+    {
+      "rel": "crlf-proj/__pycache__/test_client.cpython-311-pytest-9.1.1.pyc",
+      "size": 5036,
+      "mtime": 1790238699833.2544
+    },
+    {
+      "rel": "crlf-proj/__pycache__/validate.cpython-311.pyc",
+      "size": 1429,
+      "mtime": 1790238985542.3843
+    }
+  ],
+  "agentId": "e502a013-bf48-46d8-8d96-62fc903ea325",
+  "agentIdentifier": "l2-s-j6-muf9sdbr-j4wszt",
+  "modelName": "AG:DeepSeek-V4.1-Flash",
+  "seedTier": "security",
+  "seedId": "py-security-crlf-injection",
+  "sessionId": "23f77a0d-371f-4614-bda2-2aa3f25e6314",
+  "reply": "（暂定完成：无客观依据，建议人工确认）\n「修复 CRLF 注入并运行验收测试」已生成/更新 inspect_crlf_project.py、validate.py、client.py（执行轮次达预算上限，产物初核通过但未经行为级验收，暂定完成，建议人工复核）\n\n已生成/更新 crlf_fix.md\n已生成并核对修复说明，包含缺陷描述、修复方案和测试结果（4 项通过）。\n\n文件路径：`E:/Codes/ABC/work-duo/eval-workspace/eval-S-J6/crlf-proj/crlf_fix.md`",
+  "thinkingLen": 2607,
+  "eventCount": 145,
+  "kbCalls": 0,
+  "signals": {
+    "hasPlanGenerated": true,
+    "planSteps": 2,
+    "toolCalls": [
+      "native__read_file",
+      "native__read_file",
+      "native__read_file",
+      "native__read_file",
+      "native__read_file",
+      "native__read_file",
+      "native__read_file",
+      "native__read_file",
+      "native__read_file",
+      "native__read_file",
+      "native__read_file",
+      "native__grep_files",
+      "native__path_exists",
+      "native__read_file",
+      "native__read_file",
+      "native__read_file",
+      "native__grep_files",
+      "native__grep_files",
+      "native__grep_files",
+      "native__grep_files",
+      "native__grep_files",
+      "native__read_file",
+      "native__run_python_sandbox",
+      "native__list_directory",
+      "native__write_file",
+      "native__run_python_sandbox",
+      "native__read_file",
+      "native__write_file",
+      "native__write_file",
+      "native__read_file",
+      "native__read_file",
+      "native__read_file",
+      "native__read_file",
+      "native__read_file",
+      "native__read_file",
+      "native__read_file",
+      "native__read_file",
+      "native__read_file",
+      "native__read_file",
+      "native__query_graph",
+      "native__list_directory",
+      "native__read_file",
+      "native__query_graph",
+      "native__query_graph",
+      "native__query_graph",
+      "native__query_graph",
+      "native__read_file",
+      "native__read_file",
+      "native__read_file",
+      "native__run_python_sandbox",
+      "native__write_file",
+      "native__read_file"
+    ],
+    "writeCount": 4,
+    "sensitiveCount": 7,
+    "errorCount": 3
+  },
+  "artifactScore": 1,
+  "judge": {
+    "cmd": "pytest test_client.py -v",
+    "passed": 4,
+    "failed": 0,
+    "errors": 0,
+    "resolved": true,
+    "execBy": "outer-bash"
+  },
+  "resolved": true
+}

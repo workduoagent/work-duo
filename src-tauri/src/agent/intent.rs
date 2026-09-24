@@ -18,11 +18,16 @@ use crate::agent::types::IntentProfile;
 
 /// 强工具信号关键词（中英对照）：命中即倾向 COMPOSITE_TASK，**直接规则短路**进入规划链，
 /// 不再走 LLM 分类——属于「明确要用电脑/工具干活」的语义（文件/脚本/抓取/部署/报错修复等）。
+/// 2026-09-24 capability D3-1 实证补扩展名组：短命令「创建 app.txt，内容 v1」不含「文件」二字
+/// 但带 .txt 扩展名，曾漏过短路 1（len≤20 无信号→SIMPLE_CHAT）口头完成不落盘。
+/// 提扩展名即文件操作意图，误伤面≈0；其余灰区仍由 LLM 分类兜底。
 const STRONG_TOOL_HINTS: &[&str] = &[
     "文件", "代码", "脚本", "python", "excel", "csv", "json", "抓取", "采集", "下载", "读取",
     "写入", "安装", "卸载", "格式化", "部署", "删除", "移除", "清空", "爬", "截图", "建模",
     "仿真", "file", "code", "script", "fetch", "download", "install", "uninstall", "format",
     "rm -rf", "报错", "修复", "bug", "error", "fix", "运行", "执行",
+    ".txt", ".md", ".py", ".js", ".ts", ".json", ".csv", ".xlsx", ".xls", ".html", ".css",
+    ".yaml", ".yml", ".sh", ".sql", ".toml", ".ini", ".log",
 ];
 
 /// 弱任务信号关键词（中英对照）：仅表示「生成/分析/整理」等任务**类型**，本身不必然需要工具，

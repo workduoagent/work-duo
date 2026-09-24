@@ -1,0 +1,25 @@
+{
+  "caseId": "D6-3",
+  "dim": "D6",
+  "title": "同因失败跳过",
+  "status": "done",
+  "autoPass": true,
+  "autoScore": 1,
+  "durationMs": 90495,
+  "asserts": [
+    {
+      "name": "terminal",
+      "ok": true,
+      "detail": "done"
+    },
+    {
+      "name": "ok_present",
+      "ok": true,
+      "detail": ""
+    }
+  ],
+  "counts": {},
+  "runId": null,
+  "notes": "",
+  "at": "2026-09-24T08:46:25.532Z"
+}

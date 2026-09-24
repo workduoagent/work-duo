@@ -286,7 +286,8 @@ const RUNNERS = {
         ag.id, '帮我分析一下这句话的语气：今天天气真不错。', sess.id, { workspace: ws }, { maxMs: WAIT_MS },
       )
       const tr = await getTrace(runId)
-      const files = filesIn(ws).filter((f) => !f.path.includes('.attachments'))
+      // .wd_mem/ 同上：引擎自动结构不算业务落盘（D1-3 首跑误伤归因纠正）
+      const files = filesIn(ws).filter((f) => !f.path.includes('.attachments') && !f.path.includes('.wd_mem'))
       return [
         A('status_done', status === 'done', status),
         A('reply_nonempty', !!(tr.reply || '').trim(), (tr.reply || '').slice(0, 80)),
@@ -378,7 +379,9 @@ const RUNNERS = {
         ag.id, '用三句话说明什么是 CSV 和 JSON 的区别，不要写任何文件。', sess.id, { workspace: ws }, { maxMs: WAIT_MS },
       )
       const tr = await getTrace(runId)
-      const files = filesIn(ws).filter((f) => !f.path.includes('.attachments'))
+      // .wd_mem/ 是引擎 memoryMode=active 自动建的内部结构，不算业务落盘
+      // （capability-20260924-162832 实证：D1-3 的 3 个文件全是 .wd_mem，agent 实际零业务写入）
+      const files = filesIn(ws).filter((f) => !f.path.includes('.attachments') && !f.path.includes('.wd_mem'))
       const tokens = (tr.counts?.prompt_tokens || 0) + (tr.counts?.completion_tokens || 0)
       return [
         A('status_done', status === 'done', status),
@@ -630,7 +633,9 @@ const RUNNERS = {
       const runId = rt?.run_id || rt?.runId
       let sawPlanGate = false
       let rejected = false
-      for (let i = 0; i < 25; i++) {
+      // 轮询窗 62s→150s（capability-20260924-162832 实证：planner 提示加长后门禁 66s+ 才出现，
+      // 首跑 62.5s 窗口险胜、复跑超时——门禁本身正常触发，是窗口太短）
+      for (let i = 0; i < 60; i++) {
         await sleep(2500)
         const st = unw(await callTool('agent_get_status', { run_id: runId }))
         const s = JSON.stringify(st || {})
