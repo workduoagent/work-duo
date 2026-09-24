@@ -186,7 +186,16 @@ if _os.environ.get("WD_SANDBOX_NET_GUARD") == "1":
 
     import socket as _socket
 
-    _socket.socket = _net_blocked
+    # 必须用「可继承的类」替换 socket.socket：ssl.py 等标准库会 `class SSLSocket(socket)`
+    # 继承——替换成普通函数会让 import 期直接 TypeError（G-M1 实证）。实例化时才 raise。
+    class _BlockedSocket:
+        def __init__(self, *args, **kwargs):
+            raise RuntimeError(
+                "沙箱默认离线：脚本网络访问已被禁用（平台侧 WD_SANDBOX_NET=on 可放行）。"
+                "需要外部数据请改用 http_request 工具（带 SSRF 防护）。"
+            )
+
+    _socket.socket = _BlockedSocket
     _socket.create_connection = _net_blocked
     _socket.getaddrinfo = _net_blocked
 
