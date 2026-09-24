@@ -1,46 +1,46 @@
 {
-  "at": "2026-09-24T14:02:47.108Z",
+  "at": "2026-09-24T11:22:20.876Z",
   "pass": true,
   "checks": [
     {
       "name": "证据存在",
       "ok": true,
-      "detail": "18 个用例（25 个 JSON 去重后）"
+      "detail": "32 个用例（37 个 JSON 去重后）"
     },
     {
       "name": "证据规模≥5 用例",
       "ok": true,
-      "detail": "18/5"
+      "detail": "32/5"
     },
     {
       "name": "终态率=100%",
       "ok": true,
-      "detail": "18/18"
+      "detail": "32/32"
     },
     {
       "name": "done率≥90%",
       "ok": true,
-      "detail": "94% (17/18)"
+      "detail": "100% (32/32)"
     },
     {
       "name": "产物达成≥90%（done 用例）",
       "ok": true,
-      "detail": "100% (32/32)"
+      "detail": "100% (44/44)"
     },
     {
       "name": "客观判分 resolved≥80%",
       "ok": true,
-      "detail": "100% (5/5)"
+      "detail": "100% (6/6)"
     },
     {
       "name": "种子用例全部已判分",
       "ok": true,
-      "detail": "5/5"
+      "detail": "6/6"
     },
     {
       "name": "非 done 终态 reply 非空",
       "ok": true,
-      "detail": "1/1"
+      "detail": "无非 done 终态"
     },
     {
       "name": "故障注入 F-1",
@@ -55,9 +55,9 @@
       "state": "ok"
     },
     {
-      "name": "MCP 契约（77 工具+关键工具）",
+      "name": "MCP 契约（75 工具+关键工具）",
       "ok": true,
-      "detail": "77 工具，关键工具齐"
+      "detail": "75 工具，关键工具齐"
     },
     {
       "name": "种子资产完整",

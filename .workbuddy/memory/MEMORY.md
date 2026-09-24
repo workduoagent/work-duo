@@ -29,3 +29,5 @@
 - **超时铁律**：判据用「无产出静默时长」非总耗时；慢≠死（模型间 15 倍差）；三层=调用级 180s+收尾 30s+run 级兜底；env 可调（WD_LLM_*/WD_RUN_MAX_SECS/WD_SUBTASK_*），改后重启。
 - **Skill 同步铁律**：docs/skills/<name>/ 单一事实源，客户端 ~/.workbuddy 同步一致（node cpdir+MD5 校验）；SKILL 禁第三方产品路径，资源只指 skill 内相对路径。
 
+- **🚫 Java 沙箱：用户拍板永久放弃（2026-09-24），以后任何待办清单/规划/讨论中不再提及此任务。**沙箱多语言止步于 Python+JS/Bun。
+- **沙箱守卫双层（2026-09-24 定型）**：默认离线（代理 env+sitecustomize 禁 socket）+ 文件系统有界（sitecustomize/guard.js patch 写删移，白名单=工作空间+%TEMP%）；运行用户脚本一律注入，install/环境管理走 Allow；逃生开关 WD_SANDBOX_NET=on / WD_SANDBOX_FS=off。
