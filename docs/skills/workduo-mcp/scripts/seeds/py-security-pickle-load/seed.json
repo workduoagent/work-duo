@@ -1,0 +1,10 @@
+{
+  "id": "py-security-pickle-load",
+  "tier": "security",
+  "lang": "python",
+  "targetDir": "pickfix-proj",
+  "title": "真实缺陷修复：pickle 反序列化任意代码执行",
+  "testCmd": "python -m pytest test_safe_load.py -v",
+  "prompt": "工作空间子目录 pickfix-proj/ 的会话存储测试全红，问题在**安全**（真实缺陷模式：pickle 反序列化任意代码执行——pickle.loads 对不可信字节流可触发 __reduce__ 任意调用，等效 CVE-2022-22817 等真实反序列化缺陷模式）：\n1) 跑 pytest 定位：恶意 payload 会执行攻击者函数（判分测试用哨兵探测执行痕迹）\n2) 【技术栈锁定】只修 session.py：实现受限反序列化——仅允许纯数据类型（dict/list/tuple/str/int/float/bool/None），任何全局对象/函数调用一律拒绝（抛 UnpicklingError 或 ValueError）；禁止改测试、禁止换序列化格式\n3) 修到 pytest 全绿（含正常会话 round-trip 仍工作的正向用例）\n4) SELFTEST.md：攻击向量说明（__reduce__ 如何被执行）+ 修复方案 + 最终 pytest 摘要；开修前先建骨架，修完回填\n完成后列出文件。\n⚠️ 最终交付物核对（收尾前逐项核对，缺一不可）：\n- pickfix-proj/SELFTEST.md（逐字一致；session.py 必须仍在且已修复）\n- 收尾规则：先落盘全部产物，再输出文字总结。",
+  "artifacts": ["pickfix-proj/SELFTEST.md"]
+}

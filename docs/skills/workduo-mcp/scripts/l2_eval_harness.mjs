@@ -655,6 +655,37 @@ KB 若不足则先 kb_add_file 补文档再检索。完成后列出文件。`,
     dims: ['heal', 'ha'],
     seedId: 'py-security-crlf-injection',
   },
+  // ===== 题库扩容（2026-09-24）：4 py + 2 js（bun），判分 py=venv pytest / js=sidecar bun test =====
+  'S-J7': {
+    scene: 'S', kind: 'M', title: '真实缺陷修复：SQL注入（参数化）',
+    dims: ['heal', 'ha'],
+    seedId: 'py-security-sqlite-injection',
+  },
+  'S-J8': {
+    scene: 'S', kind: 'M', title: '真实缺陷修复：pickle反序列化任意执行',
+    dims: ['heal', 'ha'],
+    seedId: 'py-security-pickle-load',
+  },
+  'S-K1': {
+    scene: 'S', kind: 'M', title: '真实缺陷修复：round银行家舍入账务不平',
+    dims: ['heal'],
+    seedId: 'py-logic-round-banker',
+  },
+  'S-K2': {
+    scene: 'S', kind: 'M', title: '真实缺陷修复：JSON重复键静默覆盖(gh-42532)',
+    dims: ['heal'],
+    seedId: 'py-logic-json-dup-keys',
+  },
+  'S-B1': {
+    scene: 'S', kind: 'M', title: '真实缺陷修复：Array.sort字典序（bun）',
+    dims: ['heal'],
+    seedId: 'js-logic-sort-lex',
+  },
+  'S-B2': {
+    scene: 'S', kind: 'M', title: '真实缺陷修复：Date月份0基（bun）',
+    dims: ['heal'],
+    seedId: 'js-logic-date-month0',
+  },
   'G-M1': {
     scene: 'G', kind: 'M', title: '沙箱隔离边界实测（授权评估）',
     dims: ['ha'],
@@ -935,19 +966,39 @@ export function seedRepo(ws, seedId) {
 // ---------- C2 客观判分器（2026-09-23）：run=done ≠ 任务完成，harness 自己跑测试 ----------
 // 判分环境 = 本机受管 venv（envs/default + pytest），与 agent 沙箱解耦——种子包是纯 Python+pytest，
 // 任何正确的解释器判分等价。resolved = failed==0 && errors==0。
+// 2026-09-24 题库扩容：testCmd 以 bun 开头 → sidecar bun test（语言维度扩 JS/Bun）。
 const JUDGE_PY = process.env.L2_JUDGE_PY || 'C:/Users/Administrator/.workbuddy/binaries/python/envs/default/Scripts/python.exe'
+const JUDGE_BUN = process.env.L2_JUDGE_BUN || 'E:/Codes/ABC/work-duo/src-tauri/binaries/bun-x86_64-pc-windows-msvc.exe'
 
-export function judgeTests(dir) {
-  const r = spawnSync(`"${JUDGE_PY}"`, ['-m', 'pytest', '-q', '--tb=line'], {
-    cwd: dir, encoding: 'utf8', timeout: 300000, shell: true,
-  })
+export function judgeTests(dir, testCmd = 'pytest -q') {
+  const isBun = /^bun\b/.test(testCmd)
+  let r
+  if (isBun) {
+    const args = testCmd.replace(/^bun\s+/, '').trim()
+    r = spawnSync(`"${JUDGE_BUN}"`, ['test', ...(args && args !== 'test' ? [args] : [])], {
+      cwd: dir, encoding: 'utf8', timeout: 300000, shell: true,
+    })
+  } else {
+    r = spawnSync(`"${JUDGE_PY}"`, ['-m', 'pytest', '-q', '--tb=line'], {
+      cwd: dir, encoding: 'utf8', timeout: 300000, shell: true,
+    })
+  }
   const out = String(r.stdout || '') + String(r.stderr || '')
-  const passed = +(out.match(/(\d+) passed/)?.[1] || 0)
-  const failed = +(out.match(/(\d+) failed/)?.[1] || 0)
-  const errors = +(out.match(/(\d+) error/)?.[1] || 0)
-  const noTests = out.includes('no tests ran')
+  let passed, failed, errors, noTests
+  if (isBun) {
+    // bun test 汇总行：` 2 pass` / ` 3 fail`（与 pytest 的 "N passed" 词汇不同，注意 \b）
+    passed = +(out.match(/(\d+)\s+pass\b/)?.[1] || 0)
+    failed = +(out.match(/(\d+)\s+fail\b/)?.[1] || 0)
+    errors = +(out.match(/(\d+)\s+error\b/)?.[1] || 0)
+    noTests = /Ran 0 tests/.test(out) || (passed === 0 && failed === 0)
+  } else {
+    passed = +(out.match(/(\d+) passed/)?.[1] || 0)
+    failed = +(out.match(/(\d+) failed/)?.[1] || 0)
+    errors = +(out.match(/(\d+) error/)?.[1] || 0)
+    noTests = out.includes('no tests ran')
+  }
   return {
-    cmd: 'pytest -q', exitCode: r.status ?? -1,
+    cmd: isBun ? 'bun test' : 'pytest -q', exitCode: r.status ?? -1,
     passed, failed, errors, noTests,
     resolved: !noTests && failed === 0 && errors === 0 && r.status === 0,
     raw: out.slice(-1000),
@@ -980,9 +1031,15 @@ export function judgeDump(idsCsv) {
   fs.writeFileSync(path.join(OUT, 'judge', 'plan.json'), JSON.stringify(plan, null, 2))
   console.log('-- 外层 bash 逐条执行：')
   for (const p of plan) {
-    // 规范化：剥掉 python/pytest 前缀，统一以受管 python -m pytest 执行（manifest 两种写法都兼容）
-    const norm = p.testCmd.replace(/^python\s+/, '').replace(/^pytest\s+/, '-m pytest ')
-    console.log(`cd "${p.wsDir}" && "${JUDGE_PY}" ${norm} > "${p.outFile}" 2>&1; echo "${p.caseId} exit=$?"`)
+    if (/^bun\b/.test(p.testCmd)) {
+      // bun 分支：sidecar bun test（args 可带文件名；"bun test" 裸命令也兼容）
+      const args = p.testCmd.replace(/^bun\s+/, '').trim()
+      console.log(`cd "${p.wsDir}" && "${JUDGE_BUN}" test ${args === 'test' ? '' : args} > "${p.outFile}" 2>&1; echo "${p.caseId} exit=$?"`)
+    } else {
+      // 规范化：剥掉 python/pytest 前缀，统一以受管 python -m pytest 执行（manifest 两种写法都兼容）
+      const norm = p.testCmd.replace(/^python\s+/, '').replace(/^pytest\s+/, '-m pytest ')
+      console.log(`cd "${p.wsDir}" && "${JUDGE_PY}" ${norm} > "${p.outFile}" 2>&1; echo "${p.caseId} exit=$?"`)
+    }
   }
   console.log(`-- 完成后执行: node l2_eval_harness.mjs judge-merge && node l2_eval_harness.mjs score`)
   return plan
@@ -994,10 +1051,19 @@ export function judgeMerge() {
   for (const p of plan) {
     if (!fs.existsSync(p.outFile)) { console.log(`跳过 ${p.caseId}（无判分输出）`); continue }
     const out = fs.readFileSync(p.outFile, 'utf8')
-    const passed = +(out.match(/(\d+) passed/)?.[1] || 0)
-    const failed = +(out.match(/(\d+) failed/)?.[1] || 0)
-    const errors = +(out.match(/(\d+) error/)?.[1] || 0)
-    const noTests = out.includes('no tests ran')
+    let passed, failed, errors, noTests
+    if (/^bun\b/.test(p.testCmd)) {
+      // bun test 汇总行：` 2 pass` / ` 3 fail`
+      passed = +(out.match(/(\d+)\s+pass\b/)?.[1] || 0)
+      failed = +(out.match(/(\d+)\s+fail\b/)?.[1] || 0)
+      errors = +(out.match(/(\d+)\s+error\b/)?.[1] || 0)
+      noTests = /Ran 0 tests/.test(out) || (passed === 0 && failed === 0)
+    } else {
+      passed = +(out.match(/(\d+) passed/)?.[1] || 0)
+      failed = +(out.match(/(\d+) failed/)?.[1] || 0)
+      errors = +(out.match(/(\d+) error/)?.[1] || 0)
+      noTests = out.includes('no tests ran')
+    }
     const resolved = !noTests && failed === 0 && errors === 0
     // 槽位感知：并发 run 产生 C-M2-1.json 等后缀文件，取该 caseId 最新的 JSON 合并（judge-dump 同理）。
     const cands = fs.readdirSync(OUT).filter((f) => (f === `${p.caseId}.json` || f.startsWith(`${p.caseId}-`)) && f.endsWith('.json'))
@@ -1290,7 +1356,7 @@ export async function runOneCase(caseId, {
       const judgeDir = path.join(ws, seedManifest.targetDir)
       if (fs.existsSync(judgeDir)) {
         try {
-          rec.judge = judgeTests(judgeDir)
+          rec.judge = judgeTests(judgeDir, seedManifest.testCmd)
           rec.resolved = rec.judge.resolved
           console.log(`  [judge] resolved=${rec.judge.resolved} passed=${rec.judge.passed} failed=${rec.judge.failed} errors=${rec.judge.errors}`)
         } catch (e) {

@@ -1,5 +1,5 @@
 {
-  "at": "2026-09-23T14:32:23.286Z",
+  "at": "2026-09-24T07:58:45.608Z",
   "pass": true,
   "checks": [
     {
@@ -45,22 +45,24 @@
     {
       "name": "故障注入 F-1",
       "ok": true,
-      "detail": "ok=true"
+      "detail": "ok=true (5/5 项观测)",
+      "state": "ok"
     },
     {
       "name": "故障注入 F-4",
       "ok": true,
-      "detail": "ok=true"
+      "detail": "ok=true (3/3 项观测)",
+      "state": "ok"
     },
     {
-      "name": "MCP 契约（72 工具+关键工具）",
+      "name": "MCP 契约（75 工具+关键工具）",
       "ok": true,
-      "detail": "72 工具，关键工具齐"
+      "detail": "75 工具，关键工具齐"
     },
     {
       "name": "种子资产完整",
       "ok": true,
-      "detail": "7 包 / 25 文件 / 损坏 0"
+      "detail": "19 包 / 50 文件 / 损坏 0"
     }
   ]
 }

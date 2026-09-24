@@ -236,3 +236,58 @@ agent 写的**验证缺陷存在**的检查脚本（inspect_crlf.py）正常退�
 - S-J5 判分测试 v1 把 40KB 恶意串内联进 python -c 命令行 → Windows 32K 限制 WinError 206 → 改 stdin 传入重判（agent 修复有效：5.64s 完成）。
 - judge-dump testCmd 未兼容「pytest」开头写法（漏 -m）→ 规范化统一受管 python -m pytest。
 
+
+---
+
+## 十一、capability SK/PL 套件补全 + 题库扩容（09-24 15:3x~16:0x）
+
+### SK 套件首跑：5/6（autoPass 83.3%），SK-3 挖出真缺口
+
+| 用例 | 结果 | 耗时 | 备注 |
+|---|---|---|---|
+| SK-1 发现 | ✅ 3/3 | 18ms | skill_list ↔ agent_list_skills 关联 |
+| SK-2 创建 | ✅ 3/3 | 99ms | 落盘+入库+scripts 树 |
+| SK-3 文件读写 | ❌ roundtrip | 21ms | **真缺口**（见下） |
+| SK-4 启停 | ✅ 1/1 | 30ms | disabled/active 双向可逆 |
+| SK-5 导出导入 | ✅ 3/3 | 128ms | zip round-trip 结构完整 |
+| SK-6 绑定 Agent e2e | ✅ 3/3 | 72.4s | 技能指引注入，产物落盘 |
+
+**SK-3 根因（三步取证）**：`skill_write_file` 写已存在目录（assets/）→ ok:true；写不存在子目录（notes/、deep/a/ 一级/多级）→ `{ok:false, 写入失败}`。**根因 = writeSkillFileContent 不自动创建父目录**，而 references/ 等新子目录是 SKILL 布局合法场景。
+修复（TS 层 skillFs.ts）：写入前 `mkdir(dirname(target), {recursive:true})`；**顺带补对称防护** `assertSafeRelPath`（read/write 均拒 `..` 穿越/绝对路径/盘符——UI 意图层工具此前零逃逸防护）。tsc CLEAN。用例侧同步加固：write 返回值显式断言（不再"写失败误报为读失败"）。
+
+### PL 套件首跑：7/8（autoPass 87.5%），PL-4 为断言形态错（功能正确）
+
+| 用例 | 结果 | 备注 |
+|---|---|---|
+| PL-1 Python 插件 | ✅ 3/3 | upsert+test+echo 回传 |
+| PL-2 Bun 插件 | ✅ 3/3 | 切勿 node |
+| PL-3 reject node | ✅ 1/1 | 结构化拒绝（此前修复的回归确认） |
+| PL-4 reject 缺字段 | ❌ ×2 | **断言形态错**（见下） |
+| PL-5 extract_meta | ✅ 2/2 | 不落库 |
+| PL-6 插件绑 Agent e2e | ✅ 3/3 | custom__ 工具真实调用，45.3s |
+| PL-7 启停 | ✅ 1/1 | 可逆 |
+| PL-8 执行日志 | ✅ 2/2 | exitCode/duration 可追溯 |
+
+**PL-4 归因**：引擎对缺 identifier/缺 scriptContent 返回结构化 `{ok:false, error:缺少必填字段}`——**拒绝行为正确**；用例断言写的是「callTool 抛异常」，与 H-M7/H-M8 同款教训（**先确认响应形态再写断言**）。已修断言：兼容 throw / ok:false 信封 / isError 三形态。
+
+**测试残留清理**：2 技能 + 3 插件（含 PL-3 修复前的 node 残留）全部删除，环境归零。
+
+### 题库扩容：13 → 19 包（+4 py / +2 js-bun），判分链路扩双语言
+
+| 新种子 | 溯源 | 层级 | 判分 |
+|---|---|---|---|
+| S-J7 py-security-sqlite-injection | OWASP A03 注入（真实工程模式） | security | venv pytest，5 用例 |
+| S-J8 py-security-pickle-load | pickle 反序列化任意执行（__reduce__ 哨兵探测） | security | venv pytest，3 用例 |
+| S-K1 py-logic-round-banker | CPython round 银行家舍入账务不平 | logic | venv pytest，12 断言 |
+| S-K2 py-logic-json-dup-keys | gh-42532 重复键静默覆盖 | logic | venv pytest，6 用例 |
+| S-B1 js-logic-sort-lex | ECMA-262 sort 默认字典序 | logic | **sidecar bun test**，5 用例 |
+| S-B2 js-logic-date-month0 | ECMA-262 Date 月份 0 基 | logic | **sidecar bun test**，5 用例 |
+
+**红得精准自验**（播种即跑，坏实现下）：sqlite 3F2P（正向绿）/ pickle 2F1P（roundtrip 绿）/ round 7F5P（整除组绿）/ json 4F2P（标准语义绿）/ sort 3F2P / date 4F1P——全部符合设计，正向用例无一误伤。
+
+**判分基建扩容**：`judgeTests/judgeDump/judge-merge` 三处支持 `bun test`（L2_JUDGE_BUN=sidecar bun，输出解析 `N pass`/`N fail` 与 pytest `N passed` 词汇分流）；门禁种子资产检查自动覆盖 → **19 包 / 50 文件 / 损坏 0，GATE 全绿**。
+
+### 待办（需重启）
+
+1. SK-3 复测（skillFs.ts 修复生效）
+2. S-J6 十六轮对照实验（`WD_SUBTASK_MAX_ITERATIONS=16`，P-5 遗留）：判定=轮数消耗/耗时/resolved/是否侦察拖延恶化
