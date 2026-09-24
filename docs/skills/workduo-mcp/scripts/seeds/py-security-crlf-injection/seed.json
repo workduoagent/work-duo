@@ -1,0 +1,8 @@
+{
+  "id": "py-security-crlf-injection",
+  "tier": "security",
+  "targetDir": "crlf-proj",
+  "testCmd": "pytest test_client.py -v",
+  "artifacts": ["crlf_fix.md"],
+  "prompt": "工作空间子目录 crlf-proj/ 的 validate.py + client.py 存在 CVE-2019-9740（http.client putrequest CRLF 注入）同型缺陷：URL 内嵌 \\r\\n 可绕过白名单并在请求行注入额外头/额外请求。请修复（构造层必须拒绝含 CR/LF 的 URL 或编码后的注入口），合法请求行为保持不变；test_client.py 为验收标准。\n完成后写 crlf_fix.md：缺陷描述 + 修复方案 + 测试结果。\n⚠️ 最终交付物核对（收尾前逐项核对，缺一不可）：\n- crlf-proj/crlf_fix.md（相对 crlf-proj/，文件名逐字一致）\n- 收尾规则：先落盘全部产物，再输出文字总结。"
+}
