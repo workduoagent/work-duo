@@ -34,6 +34,16 @@ async function fetchAuditLogs(): Promise<SandboxAuditEntry[]> {
   }
 }
 
+/** 单条审计 → 一行日志文本（日志形式纯文本，用户偏好）。 */
+function formatAuditLine(e: SandboxAuditEntry): string {
+  const ts = (e.ts || '').slice(0, 19)
+  if (e.type === 'dep_install') {
+    return `[${ts}] 依赖安装 · ${e.tool || '-'}/${e.env || '-'} · packages: ${(e.packages || []).join(', ') || '-'} · ok=${String(e.ok ?? '-')}`
+  }
+  const f = e.features
+  return `[${ts}] 脚本特征 · ${e.tool || '-'} · net: ${(f?.net || []).join(',') || '-'} · 外部路径: ${(f?.fs_out || []).join(',') || '-'} · 派生: ${(f?.proc || []).join(',') || '-'}`
+}
+
 /** 安全中心分区：本地数据存储位置说明 + 沙箱审计回显 + 重置所有设置为默认。 */
 export function SecurityPanel({ settings, onChange }: Props) {
   const [auditLogs, setAuditLogs] = useState<SandboxAuditEntry[]>([])
@@ -147,25 +157,22 @@ export function SecurityPanel({ settings, onChange }: Props) {
             <div className="set-mem-empty">暂无审计记录（沙箱脚本无可疑特征或尚未使用沙箱）</div>
           )}
           {!auditLoading && auditLogs.length > 0 && (
-            <div className="set-hosts">
-              {auditLogs.slice(0, 50).map((e, idx) => {
-                const isDep = e.type === 'dep_install'
-                return (
-                  <div className="set-hosts__row" key={idx} style={{ alignItems: 'flex-start' }}>
-                    <code style={{ fontSize: 12, lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
-                      {`[${(e.ts || '').slice(0, 19)}] ${isDep ? '依赖安装' : '脚本特征'} · ${e.tool || '-'}${isDep ? ` · ${e.env || '-'}` : ''}\n`}
-                      {isDep
-                        ? `  packages: ${(e.packages || []).join(', ') || '-'} · ok=${String(e.ok ?? '-')}`
-                        : (e.features
-                            ? `  net: ${(e.features.net || []).join(',') || '-'} | 外部路径: ${(e.features.fs_out || []).join(',') || '-'} | 派生: ${(e.features.proc || []).join(',') || '-'}`
-                            : '')}
-                    </code>
-                  </div>
-                )
-              })}
-              {auditLogs.length > 50 && (
-                <div className="set-mem-empty">仅展示最近 50 条（完整内容见 logs/ 下审计文件）</div>
-              )}
+            <div
+              style={{
+                maxHeight: 280,
+                overflowY: 'auto',
+                fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+                fontSize: 12,
+                lineHeight: 1.7,
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-all',
+                padding: '8px 10px',
+                borderRadius: 6,
+                background: 'var(--color-bg-muted, rgba(127,127,127,0.08))',
+              }}
+            >
+              {auditLogs.map(formatAuditLine).join('\n')}
+              {auditLogs.length > 50 ? '\n… 仅展示最近 50 条（完整内容见 logs/ 下审计文件）' : ''}
             </div>
           )}
         </div>
