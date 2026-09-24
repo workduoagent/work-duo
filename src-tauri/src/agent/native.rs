@@ -1422,6 +1422,17 @@ impl AgentTool for RunPythonSandboxTool {
                 "run_python_sandbox 需要提供 code（Python 源码，推荐）或 script_path（工作空间内脚本绝对路径）之一".into(),
             ));
         };
+        // 沙箱审计（2026-09-24 安全增强批次）：脚本静态特征扫描，只记录不拦截（用户决策）。
+        if let Ok(script_src) = std::fs::read_to_string(&resolved_script) {
+            let feats = crate::sandbox_audit::scan_script("python", &script_src);
+            crate::sandbox_audit::audit_script_features(
+                &self.app,
+                "python",
+                &resolved_script,
+                ctx.workspace.as_deref(),
+                &feats,
+            );
+        }
         let env_name = args
             .get("env_name")
             .and_then(|v| v.as_str())
@@ -1651,6 +1662,18 @@ impl AgentTool for RunNodeSandboxTool {
             .get("env_name")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
+
+        // 沙箱审计（2026-09-24 安全增强批次）：与 python 同款，只记录不拦截。
+        if let Ok(script_src) = std::fs::read_to_string(&resolved_script) {
+            let feats = crate::sandbox_audit::scan_script("bun", &script_src);
+            crate::sandbox_audit::audit_script_features(
+                &self.app,
+                "bun",
+                &resolved_script,
+                ctx.workspace.as_deref(),
+                &feats,
+            );
+        }
 
         tracing::info!(
             "[agent] native__run_node_sandbox: 开始 script={} env={}",

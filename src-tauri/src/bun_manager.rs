@@ -410,6 +410,8 @@ pub(crate) async fn install_packages_silent(
     }
     let (_stdout, stderr, code) =
         run_bun_sidecar(app, bun_root, args, Some(bun_root)).await?;
+    // 依赖安装审计（2026-09-24 安全增强批次）：与 python 同款，只记录不拦截。
+    crate::sandbox_audit::audit_dep_install(app, "bun", "default", packages, code == Some(0));
     match code {
         Some(0) => Ok(packages.join(", ")),
         Some(c) => Err(format!("依赖安装失败（退出码 {c}）：\n{stderr}")),
