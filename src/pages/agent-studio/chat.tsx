@@ -98,7 +98,7 @@ import {
 import {
   isSessionRunning,
   isAgentRunning,
-  onRunTerminal,
+  setTerminalHandler,
   type RunTerminalInfo,
 } from './session/runtimeStore'
 import {
@@ -345,7 +345,7 @@ function jumpToSession(agentId: string | null, sessionId: string) {
  * 该 useEffect 就永不触发 →「跑完仍叫未命名会话」「历史会话被错排到首位」。
  * 现在由全局事件桥在收到终态事件时直接落库，即便对话页已切走或卸载也照常执行。
  */
-onRunTerminal((info: RunTerminalInfo) => {
+setTerminalHandler('chat-terminal', (info: RunTerminalInfo) => {
   void (async () => {
     const { sessionId, roundId, lastPrompt, runtime, ok } = info
     try {
@@ -394,14 +394,17 @@ onRunTerminal((info: RunTerminalInfo) => {
 
       // 用户此刻没在看这个会话（切到别的页面 / 在看别的会话）→ 弹提醒，并可一键跳回。
       if (chatViewSessionRef !== sessionId) {
+        // 紧凑提示（对齐 WorkBuddy 风格）：只给「任务已完成 + 会话名」，不铺正文摘要，
+        // 通知高度压到最小；详细内容回到会话里看。
         const finalName = name || lastPrompt.trim().slice(0, 40) || '未命名会话'
-        const summary = (runtime.streamingText || '').replace(/\s+/g, ' ').trim().slice(0, 60)
+        const brief = finalName.length > 24 ? `${finalName.slice(0, 24)}…` : finalName
         const api = getNotifyApi()
         const cfg = {
           message: ok ? '任务已完成' : '任务异常结束',
-          description: `${finalName}${summary ? `：${summary}${summary.length >= 60 ? '…' : ''}` : ''}`,
+          description: brief,
           placement: 'bottomRight' as const,
-          duration: 8,
+          duration: 0, // 不自动消失，手动关闭（用户要求）
+          className: 'agent-task-notify',
           btn: (
             <Button size="sm" onClick={() => jumpToSession(info.agentId, sessionId)}>
               查看

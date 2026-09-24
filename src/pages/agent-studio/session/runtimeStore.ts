@@ -144,13 +144,18 @@ interface Entry {
 
 const entries = new Map<string, Entry>()
 const subscribers = new Set<() => void>()
-const terminalHandlers = new Set<TerminalHandler>()
+const terminalHandlers = new Map<string, TerminalHandler>()
 
 /** 正在运行任务的会话 / 智能体（事件路由依据：事件不带会话 id）。 */
 let runningSessionId: string | null = null
 let runningAgentId: string | null = null
 
-let bridgeStarted = false
+/**
+ * 事件桥是否已注册。用 **globalThis** 存而不是模块级变量：Vite HMR 热替换本模块时
+ * 模块作用域会重建，模块级标记会跟着复位 → 监听被重复注册 → 每个事件被处理多次
+ * （曾表现为「一次任务弹多条完成通知」）。挂到 globalThis 上跨热更新存活，保证只注册一次。
+ */
+const bridgeFlagHolder = globalThis as unknown as { __wdRuntimeBridgeStarted?: boolean }
 
 function notify() {
   for (const cb of subscribers) cb()
@@ -258,14 +263,19 @@ export function getRefs(sessionId: string): RuntimeRefs | undefined {
   return entries.get(sessionId)?.refs
 }
 
-/** 注册终态处理器（供页面做落库：轮次定稿 / 会话状态 / 改名 / 列表刷新）。 */
-export function onRunTerminal(cb: TerminalHandler): () => void {
-  terminalHandlers.add(cb)
-  return () => terminalHandlers.delete(cb)
+/**
+ * 注册终态处理器（**按 key 幂等替换**，供页面做落库 / 完成提醒）。
+ *
+ * 必须按 key 替换而非叠加：调用方（chat.tsx）是组件模块，其模块级注册语句在
+ * Vite HMR（react-refresh 热替换）下会随模块重执行而反复运行 —— 若用 Set 叠加，
+ * 开发时每改一次该文件就多一个处理器，**一次任务完成会弹出 N 条重复通知**（真机实锤）。
+ */
+export function setTerminalHandler(key: string, cb: TerminalHandler) {
+  terminalHandlers.set(key, cb)
 }
 
 function fireTerminal(info: RunTerminalInfo) {
-  for (const cb of terminalHandlers) {
+  for (const cb of terminalHandlers.values()) {
     try {
       cb(info)
     } catch (e) {
@@ -475,8 +485,10 @@ function applyAgentEvent(rt: RuntimeState, refs: RuntimeRefs, e: AgentEvent): Ru
 /* 监听在模块级只注册一次，页面卸载不注销——这是「切走再回来不丢事件」的关键。 */
 
 export function ensureRuntimeBridge() {
-  if (!isTauri || bridgeStarted) return
-  bridgeStarted = true
+  // 用 globalThis 标记而非模块级变量：HMR 热替换本模块时模块作用域重建、标记复位
+  // 会导致监听被重复注册（每个事件被处理多次）。挂 globalThis 跨热更新存活。
+  if (!isTauri || bridgeFlagHolder.__wdRuntimeBridgeStarted) return
+  bridgeFlagHolder.__wdRuntimeBridgeStarted = true
 
   /** 事件统一路由到「正在运行的会话」；没有运行中的任务则忽略（避免污染其它会话）。 */
   const route = (fn: (rt: RuntimeState, refs: RuntimeRefs) => RuntimeState) => {

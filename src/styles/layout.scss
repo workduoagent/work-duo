@@ -395,3 +395,17 @@
     animation: none;
   }
 }
+
+/* 任务完成/异常通知：紧凑化（单行标题 + 一行会话名 + 查看按钮；不自动消失，手动关闭） */
+.agent-task-notify.ant-notification-notice {
+  padding: 10px 16px;
+}
+.agent-task-notify .ant-notification-notice-message {
+  margin-bottom: 2px;
+  font-size: 14px;
+}
+.agent-task-notify .ant-notification-notice-description {
+  margin: 0;
+  font-size: 12px;
+  opacity: 0.75;
+}
