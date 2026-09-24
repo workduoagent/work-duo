@@ -1,0 +1,10 @@
+{
+  "id": "py-logic-parents-negindex",
+  "tier": "logic",
+  "lang": "python",
+  "targetDir": "pathfix-proj",
+  "title": "真实缺陷修复：pathlib.parents 负索引（gh-93156）",
+  "testCmd": "python -m pytest test_parents_compat.py -v",
+  "prompt": "工作空间子目录 pathfix-proj/ 的路径祖先序列工具测试全红。真实溯源：gh-93156——CPython 的 pathlib.PurePath.parents 序列在**绝对路径**上用**负索引**访问时产生错误结果，2022 年修复：\n1) 跑 pytest 定位：绝对路径的负索引访问返回错误祖先\n2) 【技术栈锁定】只修 parents_compat.py 的实现缺陷（负索引必须从尾部正确取：[-1] 恒为最顶层祖先——绝对路径时是根 /；正索引语义不变），禁止改测试\n3) 修到 pytest 全绿\n4) SELFTEST.md：缺陷说明（绝对路径 vs 相对路径的负索引差异）+ 修复说明 + 最终 pytest 输出摘要；开修前先建骨架\n完成后列出文件。\n⚠️ 最终交付物核对：pathfix-proj/SELFTEST.md（逐字一致；parents_compat.py 必须仍在且已修复）\n- 收尾规则：先落盘全部产物，再输出文字总结。",
+  "artifacts": ["pathfix-proj/SELFTEST.md"]
+}

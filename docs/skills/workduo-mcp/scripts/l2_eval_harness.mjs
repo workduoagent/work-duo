@@ -625,6 +625,21 @@ KB 若不足则先 kb_add_file 补文档再检索。完成后列出文件。`,
       `第 6 轮：①读取前 5 轮产物，在 sixround/final.md 写 300 字总结（必须包含五个阶段名称）；②把 r1~r5 与 final.md 的副本归档进 .wd_mem/runtime/outputs/ 目录；③在 sixround/archive_note.md 记录归档了哪些文件、以及 .wd_mem/sessions/ 下是否出现了会话摘要文件（有则写出文件名与前 3 行，无则写"未生成"）。不得编造。`,
     ],
   },
+  'S-J1': {
+    scene: 'S', kind: 'M', title: '真实CVE修复：tarfile路径穿越',
+    dims: ['heal', 'ha'],
+    seedId: 'py-security-tarfile-traversal',
+  },
+  'S-J2': {
+    scene: 'S', kind: 'M', title: '真实缺陷修复：fnmatch反转范围',
+    dims: ['heal', 'ha'],
+    seedId: 'py-logic-fnmatch-revrange',
+  },
+  'S-J3': {
+    scene: 'S', kind: 'M', title: '真实缺陷修复：parents负索引',
+    dims: ['heal', 'ha'],
+    seedId: 'py-logic-parents-negindex',
+  },
   'F-H1': {
     scene: 'F', kind: 'H', title: '工程全链路 .wd_mem 严谨性（大工程）',
     dims: ['ha', 'heal', 'perf'],
@@ -1682,6 +1697,7 @@ async function main() {
     if (!ids.length && phase === '2') ids = ['A-H1', 'A-H2', 'A-H3', 'A-H5', 'A-H6', 'A-H7', 'B-H1', 'B-H2', 'B-H4', 'B-H5', 'B-H6', 'B-H7']
     if (!ids.length && phase === '3') ids = ['C-M1', 'C-M2', 'C-H1', 'C-H2', 'C-H3']
     // phase 4（2026-09-24 全量扩展轮）：场景 D 能力面 + E 上下文/记忆 + F .wd_mem 严谨性
+    if (!ids.length && phase === '5') ids = ['S-J1', 'S-J2', 'S-J3']
     if (!ids.length && phase === '4') ids = ['D-M1', 'D-M2', 'D-M3', 'D-M4', 'D-M5', 'D-M6', 'D-H1', 'D-H2', 'E-M1', 'E-M2', 'E-M3', 'E-H1', 'F-M1', 'F-M2', 'F-M3', 'F-M4', 'F-M5', 'F-H1']
     if (!ids.length && phase === '0') ids = ['A-M1']
     if (conc > 1) {

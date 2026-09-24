@@ -1,0 +1,10 @@
+{
+  "id": "py-logic-fnmatch-revrange",
+  "tier": "logic",
+  "lang": "python",
+  "targetDir": "fnfix-proj",
+  "title": "真实缺陷修复：fnmatch 反转字符范围抛错（gh-89973）",
+  "testCmd": "python -m pytest test_fnmatch_compat.py -v",
+  "prompt": "工作空间子目录 fnfix-proj/ 的通配匹配器测试全红。真实溯源：gh-89973——CPython 的 fnmatch 在模式含**上界小于下界的字符范围**（如 [c-a]）时会抛 re.error（bad character range），2022 年修复为「这类范围解释为空集，不再抛错」：\n1) 跑 pytest 定位：[c-a] 类模式触发异常\n2) 【技术栈锁定】只修 fnmatch_compat.py（反转/非法范围解释为空集：[c-a] 不匹配任何字符、[!c-a] 匹配任意字符，且绝不抛错），禁止改测试\n3) 修到 pytest 全绿\n4) SELFTEST.md：缺陷说明 + 修复语义 + 最终 pytest 输出摘要；开修前先建骨架\n完成后列出文件。\n⚠️ 最终交付物核对：fnfix-proj/SELFTEST.md（逐字一致；fnmatch_compat.py 必须仍在且已修复）\n- 收尾规则：先落盘全部产物，再输出文字总结。",
+  "artifacts": ["fnfix-proj/SELFTEST.md"]
+}
