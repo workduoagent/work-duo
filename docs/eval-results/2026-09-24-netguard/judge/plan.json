@@ -1,0 +1,9 @@
+[
+  {
+    "caseId": "C-M2",
+    "seedId": "py-logic-cart",
+    "testCmd": "python -m pytest test_cart.py -v",
+    "wsDir": "E:/Codes/ABC/work-duo/eval-workspace/eval-C-M2/cart-proj",
+    "outFile": "E:/Codes/ABC/work-duo/docs/eval-results/2026-09-24-netguard/judge/C-M2.txt"
+  }
+]

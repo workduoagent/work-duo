@@ -328,3 +328,30 @@ core 最新口径：**21/25 + 3 复验 PASS（D1-3/D2-4/D6-2）+ D3-1 修复待�
 | D3-1 | intent 强信号词表缺口（真引擎缺陷） | PASS（重启后） |
 
 **capability core 25/25 = 100% + SK/PL 14/14 = 100%**——capability 套件全量 39 用例满贯。本轮批次（基线 16 转正 / 落盘反向纪律 / score 去重 / intent 扩展名 / 三用例健壮化）全部落地并验证。
+
+---
+
+## 十三、沙箱网络默认关批次（09-24 17:1x~17:5x，commit b1feb45/9077ad6）
+
+### 实现
+
+| 层 | 内容 |
+|---|---|
+| 代理阻断 | 运行用户脚本注入 `HTTP(S)_PROXY/ALL_PROXY=http://127.0.0.1:9` + 清空 NO_PROXY（拦 requests/urllib/httpx/axios/fetch 等代理感知库） |
+| Python raw 层 | `sitecustomize.py`（mamba_root/net-guard/，幂等创建）monkey-patch `socket.socket/create_connection/getaddrinfo`——raw socket 含 DNS 全禁；`WD_SANDBOX_NET_GUARD=1` 标记启用，PYTHONPATH 前置合并（不覆盖既有 import 修复语义） |
+| 豁免通道 | `NetPolicy::Allow`：install_packages_silent（pip 缺库自愈）/ 环境管理 / 版本探测保持联网 |
+| 逃生开关 | `WD_SANDBOX_NET=on` 全局放行 |
+| Bun 同款 | run_bun_sidecar_policy 拆分；Bun fetch/axios 遵守代理 env（无 sitecustomize 机制，raw TCP 观测层兜底） |
+| Bun 超时 | 确认已在审计批次完成（待办过时已纠） |
+
+### 回归（五组全绿，证据 docs/eval-results/2026-09-24-netguard/）
+
+| 验证 | 结果 |
+|---|---|
+| G-M1 断言翻转 | **✓ [NET-BLOCKED] 在位**——脚本 B 联网失败被如实记录（done 1055s，网络被禁实证） |
+| C-M2（py 离线种子） | ✓ resolved=true（pytest 3/3），断网零误伤 |
+| S-B1（bun 种子） | ✓ resolved=true（bun test 5/5），Bun 断网零误伤 |
+| H-M4 | ✓ done 27s artifacts=1 |
+| **缺库自愈** | ✓ `selfheal-ok 4.16.0`——humanize 缺库→pip 联网安装（Allow 通道）→重试成功，豁免通道实证 |
+
+**审计层保留**：sandbox_audit 的 net/fs_out/proc 特征观测不动（拦截层与观测层独立）。G-M1 从「三项成功无界实证」翻转为「网络被禁 + 断网标记」——沙箱从「依赖隔离」升级为「默认离线的依赖隔离」。
