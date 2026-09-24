@@ -845,11 +845,15 @@ const RUNNERS = {
     const fx = readFixture('skill-fixture')
     if (!fx) return [A('fixture', false, '先跑 SK-2')]
     const content = `cap-roundtrip-${Date.now()}\n`
-    await callTool('skill_write_file', { identifier: fx.identifier, relPath: 'notes/README.md', content }, { timeoutMs: 15000 })
+    const w = await callTool('skill_write_file', { identifier: fx.identifier, relPath: 'notes/README.md', content }, { timeoutMs: 15000 })
+      .catch((e) => ({ ok: false, error: e.message }))
+    const wrote = !!(w && w.ok !== false)
+    if (!wrote) return [A('write_ok', false, JSON.stringify(w).slice(0, 120))]
     const rd = unw(await callTool('skill_read_file', { identifier: fx.identifier, relPath: 'notes/README.md' }, { timeoutMs: 15000 }))
     const b64 = rd?.base64 || rd?.content || rd
     const decoded = typeof b64 === 'string' ? Buffer.from(b64, 'base64').toString('utf8') : ''
     return [
+      A('write_ok', true, 'notes/README.md'),
       A('roundtrip', decoded.includes('cap-roundtrip') || JSON.stringify(rd).includes('cap-roundtrip'), decoded.slice(0, 60) || JSON.stringify(rd).slice(0, 60)),
     ]
   },
@@ -1007,26 +1011,24 @@ export async function run(params) {
   },
 
   async 'PL-4'() {
+    // 拒绝形态：引擎用 {ok:false,error} 结构化信封（不抛异常）；兼容 throw / 信封 / isError 三种。
     const asserts = []
-    try {
-      await callTool('plugin_upsert', {
-        name: 'x', description: 'x', runtime: 'bun', scriptContent: 'export default {}',
-        // 缺 identifier
-      }, { timeoutMs: 15000 })
-      asserts.push(A('reject_missing_id', false, 'accepted'))
-    } catch (e) {
-      asserts.push(A('reject_missing_id', true, e.message.slice(0, 80)))
+    const rejected = (r) => {
+      if (r && r.ok === false) return true
+      if (r && typeof r.isError === 'boolean') return r.isError
+      return false
     }
-    try {
-      await callTool('plugin_upsert', {
-        name: 'x', identifier: `${PLUG_PREFIX}noid-${Date.now().toString(36)}`, description: 'x', runtime: 'bun',
-        parametersSchema: { type: 'object' },
-        // 缺 scriptContent
-      }, { timeoutMs: 15000 })
-      asserts.push(A('reject_missing_script', false, 'accepted'))
-    } catch (e) {
-      asserts.push(A('reject_missing_script', true, e.message.slice(0, 80)))
-    }
+    const r1 = await callTool('plugin_upsert', {
+      name: 'x', description: 'x', runtime: 'bun', scriptContent: 'export default {}',
+      // 缺 identifier
+    }, { timeoutMs: 15000 }).catch((e) => ({ ok: false, error: e.message }))
+    asserts.push(A('reject_missing_id', rejected(r1), JSON.stringify(r1).slice(0, 100)))
+    const r2 = await callTool('plugin_upsert', {
+      name: 'x', identifier: `${PLUG_PREFIX}noid-${Date.now().toString(36)}`, description: 'x', runtime: 'bun',
+      parametersSchema: { type: 'object' },
+      // 缺 scriptContent
+    }, { timeoutMs: 15000 }).catch((e) => ({ ok: false, error: e.message }))
+    asserts.push(A('reject_missing_script', rejected(r2), JSON.stringify(r2).slice(0, 100)))
     return asserts
   },
 

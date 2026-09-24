@@ -1,0 +1,30 @@
+{
+  "caseId": "PL-2",
+  "dim": "Plugin",
+  "title": "Bun 插件",
+  "status": "done",
+  "autoPass": true,
+  "autoScore": 1,
+  "durationMs": 197,
+  "asserts": [
+    {
+      "name": "upsert_ok",
+      "ok": true,
+      "detail": "{\"createdAt\":\"2026-09-24T07:42:03.452Z\",\"dependencies\":[],\"description\":\"cap sui"
+    },
+    {
+      "name": "test_ok",
+      "ok": true,
+      "detail": "{\"callId\":\"call_1790235723460\",\"depsInstalled\":[],\"durationMs\":182,\"errorMessage\":null,\"errorType\":n"
+    },
+    {
+      "name": "echo_match",
+      "ok": true,
+      "detail": "{\"count\":7,\"echo\":\"bun-cap\",\"ok\":true}"
+    }
+  ],
+  "counts": {},
+  "runId": null,
+  "notes": "",
+  "at": "2026-09-24T07:42:03.647Z"
+}

@@ -16,7 +16,7 @@
  *  - 非 Tauri 环境（浏览器 dev）不真实写盘，调用方据此跳过/给出提示。
  */
 import { isTauri } from '@/core/config'
-import { appDataDir, resourceDir, join } from '@tauri-apps/api/path'
+import { appDataDir, resourceDir, join, dirname } from '@tauri-apps/api/path'
 import { mkdir, writeTextFile, writeFile, remove, readFile, readDir } from '@tauri-apps/plugin-fs'
 import {
   SKILL_SUBDIRS,
@@ -324,6 +324,7 @@ export async function readSkillFileContent(
 ): Promise<SkillFileContent | null> {
   if (!isTauri) return null
   try {
+    assertSafeRelPath(relPath)
     const dir = await resolveSkillDir(identifier, skillPath)
     const target = await join(dir, relPath)
     const data = (await readFile(target)) as Uint8Array
@@ -334,7 +335,25 @@ export async function readSkillFileContent(
 }
 
 /**
+ * 校验 relPath 不逃逸技能根目录（SK-3 防护：禁 .. 穿越 / 绝对路径 / 盘符 / 反斜杠写法）。
+ * 非法直接抛错，由调用方转为失败提示；正常相对路径（scripts/x.py、notes/README.md）不受影响。
+ */
+function assertSafeRelPath(relPath: string): void {
+  const norm = relPath.replace(/\\/g, '/')
+  const segs = norm.split('/')
+  if (
+    !norm ||
+    norm.startsWith('/') ||
+    segs.some((s) => s === '..' || s === '') ||
+    segs.some((s) => /^[a-zA-Z]:/.test(s))
+  ) {
+    throw new Error(`skill: 非法相对路径 ${relPath}`)
+  }
+}
+
+/**
  * 覆盖写入技能目录下某个文件的文本内容（详情页「就地编辑文件」用）。
+ * 父目录不存在时递归创建（如 references/、notes/ 等新子目录——SKILL 布局允许）。
  * 成功返回 true；非 Tauri / 写入失败返回 false（由调用方提示）。
  */
 export async function writeSkillFileContent(
@@ -345,8 +364,10 @@ export async function writeSkillFileContent(
 ): Promise<boolean> {
   if (!isTauri) return false
   try {
+    assertSafeRelPath(relPath)
     const dir = await resolveSkillDir(identifier, skillPath)
     const target = await join(dir, relPath)
+    await mkdir(await dirname(target), { recursive: true })
     await writeTextFile(target, content)
     return true
   } catch {

@@ -1,0 +1,25 @@
+{
+  "caseId": "PL-8",
+  "dim": "Plugin",
+  "title": "插件日志",
+  "status": "done",
+  "autoPass": true,
+  "autoScore": 1,
+  "durationMs": 7,
+  "asserts": [
+    {
+      "name": "has_logs_or_clean",
+      "ok": true,
+      "detail": "n=2"
+    },
+    {
+      "name": "logs_shape",
+      "ok": true,
+      "detail": "agentId,createdAt,durationMs,errorType,exitCode,id,missingPackage,ok,params,pluginId,sessionId,source,stderr,stdout"
+    }
+  ],
+  "counts": {},
+  "runId": null,
+  "notes": "",
+  "at": "2026-09-24T07:42:48.992Z"
+}
