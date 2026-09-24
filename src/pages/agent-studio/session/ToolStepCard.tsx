@@ -14,6 +14,7 @@ import { useState } from 'react'
 import { Check, ChevronRight, Loader2, X, ShieldAlert } from 'lucide-react'
 import type { ToolStep } from './types'
 import { ToolResultView } from './ToolResultView'
+import { stripWinVerbatimInText } from '@/utils/pathDisplay'
 import './ToolStepCard.scss'
 
 interface ToolStepCardProps {
@@ -76,7 +77,7 @@ export function ToolStepCard({ step }: ToolStepCardProps) {
           {args && (
             <div className="tool-step__block">
               <div className="tool-step__block-title">调用参数</div>
-              <pre className="tool-step__code">{tryPretty(args)}</pre>
+              <pre className="tool-step__code">{tryPretty(stripWinVerbatimInText(args))}</pre>
             </div>
           )}
           {result && (

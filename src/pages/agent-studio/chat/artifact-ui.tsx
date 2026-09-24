@@ -9,6 +9,7 @@ import { openPath } from '@tauri-apps/plugin-opener'
 import { useNotify } from '@/components/ui/notify'
 import type { ArtifactRef } from '../session/types'
 import { formatSize } from './file-helpers'
+import { stripWinVerbatim } from '@/utils/pathDisplay'
 
 /** 产物画廊：把本次任务各子任务成功闭环登记的文件产物横向展示，支持打开/定位与复制路径（K3 §2.3）。 */
 export function ArtifactIcon({ type }: { type: string }) {
@@ -46,13 +47,16 @@ export function ArtifactGallery({ artifacts, isTauri }: { artifacts: ArtifactRef
     <div className="agent-chat__gallery">
       <div className="agent-chat__gallery-title">📦 本次产物（{artifacts.length}）</div>
       <div className="agent-chat__gallery-list">
-        {artifacts.map((a) => (
-          <div key={a.artifactId} className="agent-chat__gallery-item" title={a.path}>
+        {artifacts.map((a) => {
+          // 展示/复制一律去掉 Windows 逐字前缀 `\\?\`（Rust canonicalize 的产物）
+          const p = stripWinVerbatim(a.path)
+          return (
+          <div key={a.artifactId} className="agent-chat__gallery-item" title={p}>
             <span className="agent-chat__gallery-icon">
               <ArtifactIcon type={a.artifactType} />
             </span>
             <div className="agent-chat__gallery-meta">
-              <div className="agent-chat__gallery-name">{a.description || a.path}</div>
+              <div className="agent-chat__gallery-name">{a.description || p}</div>
               <div className="agent-chat__gallery-sub">{formatSize(a.size)}</div>
             </div>
             <button
@@ -60,7 +64,7 @@ export function ArtifactGallery({ artifacts, isTauri }: { artifacts: ArtifactRef
               className="agent-chat__gallery-open"
               title="在文件夹中打开"
               disabled={!isTauri}
-              onClick={() => open(a.path)}
+              onClick={() => open(p)}
             >
               打开
             </button>
@@ -68,12 +72,13 @@ export function ArtifactGallery({ artifacts, isTauri }: { artifacts: ArtifactRef
               type="button"
               className="agent-chat__gallery-copy"
               title="复制绝对路径"
-              onClick={() => copyPath(a.path)}
+              onClick={() => copyPath(p)}
             >
               <Copy size={13} />
             </button>
           </div>
-        ))}
+          )
+        })}
       </div>
     </div>
   )

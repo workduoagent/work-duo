@@ -11,6 +11,7 @@
  * 交互：默认单行；点击展开查看入参与结果摘要（长内容截断），再次点击折叠。
  */
 import { useState } from 'react'
+import { stripWinVerbatimInText } from '@/utils/pathDisplay'
 import {
   Archive,
   Brain,
@@ -161,7 +162,7 @@ export function ToolStepLine({
           {step.args && (
             <div className="tool-line__detail-block">
               <span className="tool-line__detail-label">参数</span>
-              <code className="tool-line__detail-value">{clip(step.args, 600)}</code>
+              <code className="tool-line__detail-value">{clip(stripWinVerbatimInText(step.args ?? ''), 600)}</code>
             </div>
           )}
           {step.result && (

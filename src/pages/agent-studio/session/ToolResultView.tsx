@@ -12,6 +12,7 @@
  *  - 'compact' 执行图节点详情（RunDagCanvas）：单行截断，避免大结果撑爆详情框
  */
 import { KbSearchCitations } from './KbSearchCitations'
+import { stripWinVerbatimInText } from '@/utils/pathDisplay'
 
 function clip(s: string, n: number): string {
   return s.length > n ? `${s.slice(0, n)}…` : s
@@ -24,6 +25,14 @@ function tryPretty(json?: string): string {
   } catch {
     return json
   }
+}
+
+/**
+ * 展示净化：工具结果里常带 Rust canonicalize 产生的 Windows 逐字前缀 `\\?\`
+ * （如「已写入 12 字节到 \\?\E:\a\b.py」），统一在此收口去掉，各渲染位无需各自处理。
+ */
+function clean(text: string): string {
+  return stripWinVerbatimInText(text)
 }
 
 export function ToolResultView({
@@ -44,13 +53,14 @@ export function ToolResultView({
 
   if (!result) return null
 
+  const text = clean(result)
   switch (variant) {
     case 'inline':
-      return <code className="tool-line__detail-value">{clip(result, 600)}</code>
+      return <code className="tool-line__detail-value">{clip(text, 600)}</code>
     case 'compact':
-      return <span className="agent-dag__detail-result">{clip(result.replace(/\s+/g, ' '), 160)}</span>
+      return <span className="agent-dag__detail-result">{clip(text.replace(/\s+/g, ' '), 160)}</span>
     case 'block':
     default:
-      return <pre className={`tool-step__code${failed ? ' is-error' : ''}`}>{tryPretty(result)}</pre>
+      return <pre className={`tool-step__code${failed ? ' is-error' : ''}`}>{tryPretty(text)}</pre>
   }
 }

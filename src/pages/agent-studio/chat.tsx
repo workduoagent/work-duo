@@ -68,6 +68,7 @@ import { open } from '@tauri-apps/plugin-dialog'
 import { Button, Modal, Input } from '@/components/ui'
 import { getNotifyApi } from '@/components/ui/notifyBridge'
 import { notifyOSWhenHidden } from '@/utils/osNotify'
+import { stripWinVerbatim, stripWinVerbatimInText } from '@/utils/pathDisplay'
 import { useNotify } from '@/components/ui/notify'
 
 import { getAgent, listAgentMcpTools, listAgentSkills } from '@/core/mapper/agent-mapper'
@@ -200,7 +201,15 @@ function CiteAwareMarkdown({ text, kbSources }: { text?: string; kbSources?: KbH
         : undefined,
     [kbSources],
   )
-  return <MarkdownRenderer content={text ?? ''} remarkPluginsExt={remarkExt} componentsExt={compsExt} />
+  // 展示净化：去掉 Rust canonicalize 带来的 Windows 逐字前缀 `\\?\`
+  // （模型会把工具返回的路径原样写进正文，不处理就显示成 `\\?\E:\xxx`）。
+  return (
+    <MarkdownRenderer
+      content={stripWinVerbatimInText(text ?? '')}
+      remarkPluginsExt={remarkExt}
+      componentsExt={compsExt}
+    />
+  )
 }
 
 /** 运行中正文段打字机（用户反馈：流式 chunk 整段刷出=「一句句往外刷」）：
@@ -256,7 +265,7 @@ function ProcessCollapse({
           {items.map((s, i) =>
             s.kind === 'text' ? (
               <div key={i} className="agent-chat__seg-text">
-                <MarkdownRenderer content={s.text ?? ''} />
+                <MarkdownRenderer content={stripWinVerbatimInText(s.text ?? '')} />
               </div>
             ) : s.kind === 'thought' ? (
               <div key={i} className="agent-chat__seg-thought">
@@ -2291,7 +2300,8 @@ export default function AgentChatPage() {
                   </button>
                   <Folder size={13} className="agent-chat__group-icon" />
                   <div className="agent-chat__group-info">
-                    <span className="agent-chat__group-name" title={group.rootPath ?? ''}>
+                    {/* tooltip 展示用干净路径（rootPath 本身可能带 `\\?\` 逐字前缀） */}
+                    <span className="agent-chat__group-name" title={stripWinVerbatim(group.rootPath ?? '')}>
                       {group.projectName}
                     </span>
                   </div>
@@ -2617,7 +2627,7 @@ export default function AgentChatPage() {
                   <div className="agent-chat__bubble">
                     {m.role === 'agent' ? (
                       content ? (
-                        <MarkdownRenderer content={content} />
+                        <MarkdownRenderer content={stripWinVerbatimInText(content)} />
                       ) : isLastAgent && (isStreaming || isRunning) ? (
                         // 「思考中…」只属于最后一条 agent 气泡（页面级 running 状态）：
                         // 历史轮正文为空（如 MCP 轮次未回填）时套用 running 会全部误显

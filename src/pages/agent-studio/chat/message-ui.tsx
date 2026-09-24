@@ -11,6 +11,7 @@ import { ClipboardList, Copy, File, FileArchive, FileCode, FileImage, FileSpread
 import { openPath } from '@tauri-apps/plugin-opener'
 import { useNotify } from '@/components/ui/notify'
 import { isTauri } from '@/core/config'
+import { stripWinVerbatim } from '@/utils/pathDisplay'
 import type { AgentInfo } from '@/types/core'
 import type { ChatMessage } from './types'
 import {
@@ -170,7 +171,8 @@ function FilePathCard({ path }: { path: string }) {
 
 /** 单条消息的文件卡片列表（仅在存在可识别路径时渲染）。 */
 export function FilePathCards({ content }: { content: string }) {
-  const paths = useMemo(() => extractFilePaths(content), [content])
+  // 去掉 Windows 逐字前缀 `\\?\`（Rust canonicalize 产物），卡片名称/标题/打开都用干净路径
+  const paths = useMemo(() => extractFilePaths(content).map(stripWinVerbatim), [content])
   if (paths.length === 0) return null
   return (
     <div className="agent-chat__file-cards">
