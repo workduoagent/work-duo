@@ -26,6 +26,11 @@ let focused = true
 let trackerInitialized = false
 let permissionAsked = false
 
+// 同内容节流：10s 内相同 标题+正文 只发一条。
+// 调用方可能因多路径重复触发（真机见过「任务暂停」系统通知连弹两次），在此兜底。
+const OS_NOTIFY_THROTTLE_MS = 10_000
+let lastSent: { key: string; at: number } | null = null
+
 /** 惰性初始化主窗口聚焦追踪；幂等。 */
 async function initWindowFocusTracker(): Promise<void> {
   if (!isTauri || trackerInitialized) return
@@ -85,6 +90,11 @@ export async function notifyOSWhenHidden(title: string, body?: string): Promise<
   } catch {
     /* 读失败默认开启，不阻断 */
   }
+  // 同内容节流：窗口期内重复触发直接跳过（不影响不同内容的正常提醒）。
+  const throttleKey = `${title}|${body ?? ''}`
+  const now = Date.now()
+  if (lastSent && lastSent.key === throttleKey && now - lastSent.at < OS_NOTIFY_THROTTLE_MS) return
+  lastSent = { key: throttleKey, at: now }
   if (!(await ensurePermission())) return
   try {
     sendNotification({ title, body: body ?? '' })

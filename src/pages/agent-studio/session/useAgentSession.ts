@@ -225,7 +225,9 @@ export function useAgentSession(sessionId: string | null): AgentSessionState {
   const resolvePlanApproval = useCallback(
     async (decision: 'approve' | 'reject' | 'revise', guidance?: string) => {
       const sid = sessionId
-      if (sid) mutateRuntime(sid, (s) => ({ ...s, planApproval: null }))
+      // 决策提交即收起：planApproval 清掉的同时必须清 statusText——
+      // 「⏸ 计划待确认…任务已暂停」那行就是 statusText 渲染的，不清会一直挂在输入框上方。
+      if (sid) mutateRuntime(sid, (s) => ({ ...s, planApproval: null, statusText: '' }))
       if (!isTauri) return
       try {
         await invoke('submit_plan_decision', { input: { decision, guidance: guidance ?? null } })
