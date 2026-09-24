@@ -1288,7 +1288,7 @@ impl AgentTool for RunPythonSandboxTool {
     fn tool_definition(&self) -> Value {
         def(
             "native__run_python_sandbox",
-            "在 Work Duo 内置的 micromamba 隔离 Python 沙箱中运行脚本（默认环境 default）。\n\
+            "在 Work Duo 内置的 micromamba 隔离 Python 环境（依赖隔离，非安全沙箱——文件/网络/进程无 OS 级限制）中运行脚本（默认环境 default），单次执行最长 600 秒（超时强杀）。\n\
              【运行 Python 的唯一正确方式】\n\
              1. 直接用 code 参数给 Python 源码（工具会自动落盘 .wd_mem/runtime/scripts/ 再执行，脚本内相对路径以工作空间根为基准），或先用 native__write_file 写脚本再传 script_path；\n\
              2. 脚本里直接 import 你需要的库（pandas / numpy / openpyxl / scipy / matplotlib 等），运行时若缺失会自动按需安装并重试，无需你手动安装，也不要浪费轮次逐个探测库是否存在。\n\
@@ -1506,7 +1506,7 @@ impl AgentTool for RunNodeSandboxTool {
     fn tool_definition(&self) -> Value {
         def(
             "native__run_node_sandbox",
-            "在 Work Duo 内置的 Bun 隔离 Node 沙箱中运行 JavaScript / TypeScript 脚本（默认环境 default）。\n\
+            "在 Work Duo 内置的 Bun 隔离 Node 环境（依赖隔离，非安全沙箱——文件/网络/进程无 OS 级限制）中运行 JavaScript / TypeScript 脚本（默认环境 default），单次执行最长 600 秒（超时强杀）。\n\
              【运行 Node 的唯一正确方式】\n\
              1. 直接用 code 参数给 JS/TS 源码（工具会自动落盘 .wd_mem/runtime/scripts/ 再执行，脚本内相对路径以工作空间根为基准），或先用 native__write_file 写脚本再传 script_path；\n\
              2. 脚本里直接 `import` / `require` 你需要的包（lodash / axios / zod / exceljs 等），运行时若缺失会自动按需安装并重试，无需你手动安装，也不要浪费轮次逐个探测包是否存在。\n\
