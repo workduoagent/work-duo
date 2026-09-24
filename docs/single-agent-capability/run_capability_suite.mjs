@@ -993,10 +993,15 @@ export async function run(params) {
         scriptContent: 'export default {}',
         parametersSchema: { type: 'object' },
       }, { timeoutMs: 15000 })
-      // 若居然成功，也记失败（契约应拒绝）
-      return [A('reject_node', false, `unexpected ok: ${JSON.stringify(r).slice(0, 80)}`)]
+      // 若居然成功，也记失败（契约应拒绝）。
+      // MCP 信封适配（2026-09-24）：UI 意图层的结构化拒绝不抛异常，走 {ok:false, data:{error}} 信封。
+      const body = JSON.stringify(r)
+      if (r?.ok === false || /不支持|runtime|非法|无效/.test(body)) {
+        return [A('reject_node', true, `结构化拒绝: ${body.slice(0, 120)}`)]
+      }
+      return [A('reject_node', false, `unexpected ok: ${body.slice(0, 80)}`)]
     } catch (e) {
-      const ok = /runtime|node|bun|python|非法|无效|不支持/i.test(e.message) || true
+      const ok = /runtime|node|bun|python|非法|无效|不支持/i.test(e.message)
       return [A('reject_node', ok, e.message.slice(0, 120))]
     }
   },
