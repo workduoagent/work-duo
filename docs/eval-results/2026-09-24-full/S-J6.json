@@ -1,0 +1,115 @@
+{
+  "caseId": "S-J6",
+  "slot": 0,
+  "scene": "S",
+  "kind": "M",
+  "title": "真实CVE修复：跨文件CRLF注入",
+  "model": "96af449e-dfc0-48ec-b077-aa9f02b43d64",
+  "workspace": "E:/Codes/ABC/work-duo/eval-workspace-full/eval-S-J6",
+  "startedAt": "2026-09-24T02:56:26.476Z",
+  "status": "done",
+  "runId": "run-1790218586572-6",
+  "durationMs": 262023,
+  "artifacts": [],
+  "artifactCheck": [
+    {
+      "artifact": "crlf_fix.md",
+      "ok": false
+    }
+  ],
+  "traceCounts": {
+    "completion_tokens": 2208,
+    "events": 44,
+    "prompt_tokens": 116986,
+    "reply_chars": 529,
+    "thinking_chars": 241
+  },
+  "replyLen": 529,
+  "kbHits": 0,
+  "recoveries": 0,
+  "error": null,
+  "metrics": {
+    "ha": {
+      "terminal": true,
+      "status": "done"
+    },
+    "perf": {
+      "durationMs": 262023
+    },
+    "heal": {
+      "replyLen": 529
+    }
+  },
+  "files": [
+    {
+      "rel": ".wd_mem/.gitignore",
+      "size": 310,
+      "mtime": 1790218586577.4941
+    },
+    {
+      "rel": ".wd_mem/graph/edges.jsonl",
+      "size": 498,
+      "mtime": 1790218843725.3408
+    },
+    {
+      "rel": ".wd_mem/graph/nodes.jsonl",
+      "size": 6739,
+      "mtime": 1790218843724.7607
+    },
+    {
+      "rel": ".wd_mem/graph/sessions/510dbf5d-82c5-4e18-ae3a-3306d50f43ca.json",
+      "size": 3376,
+      "mtime": 1790218843727.786
+    },
+    {
+      "rel": ".wd_mem/graph/_index.json",
+      "size": 1292,
+      "mtime": 1790218843725.3408
+    },
+    {
+      "rel": ".wd_mem/knowledge/MEMORY.md",
+      "size": 133,
+      "mtime": 1790218586576.355
+    },
+    {
+      "rel": ".wd_mem/README.md",
+      "size": 1378,
+      "mtime": 1790218586577.4941
+    },
+    {
+      "rel": "crlf-proj/client.py",
+      "size": 574,
+      "mtime": 1790217061814.468
+    },
+    {
+      "rel": "crlf-proj/test_client.py",
+      "size": 1048,
+      "mtime": 1790217061814.468
+    },
+    {
+      "rel": "crlf-proj/validate.py",
+      "size": 387,
+      "mtime": 1790217137991.76
+    }
+  ],
+  "agentId": "a3c74119-bdc3-475e-aa9b-388de84041f0",
+  "agentIdentifier": "l2-s-j6-muexx9xo-t8g3mu",
+  "modelName": "AG:DeepSeek-V4.1-Flash",
+  "seedTier": "security",
+  "seedId": "py-security-crlf-injection",
+  "sessionId": "510dbf5d-82c5-4e18-ae3a-3306d50f43ca",
+  "reply": "（暂定完成：无客观依据，建议人工确认）\n## 执行结果：未完成落盘\n\n由于工具调用预算已用尽，本次无法继续修改代码、运行测试或创建交付文件。**修复尚未应用，验收测试结果未确认。**\n\n### 已检查内容\n\n- `crlf-proj/validate.py`：已读取。当前实现先放行以 `/` 开头的 URL；对绝对 URL 仅检查 scheme 是否为 `http` 或 `https`，未检查原始 CR/LF 或百分号编码的 CR/LF。\n- `crlf-proj/client.py`：已读取。`build_request` 调用 `is_allowed_url(url)` 后直接将 URL 拼入 HTTP 请求行；因此需要在构造路径中拒绝危险输入。\n- `crlf-proj/test_client.py`：已读取，但工具返回内容被截断；无法确认全部测试用例或断言，也没有运行测试。\n\n### 建议修复\n\n在白名单校验放行相对路径或检查 scheme **之前**，拒绝 URL 中的原始 `\\r`、`\\n` 以及大小写不敏感的 `%0d`、`%0a` 编码。这样 `build_request` 通过现有白名单校验时即可在请求行…(共741字符)",
+  "thinkingLen": 241,
+  "eventCount": 44,
+  "kbCalls": 0,
+  "artifactScore": 0,
+  "judge": {
+    "cmd": "pytest test_client.py -v",
+    "passed": 2,
+    "failed": 2,
+    "errors": 0,
+    "resolved": false,
+    "execBy": "outer-bash"
+  },
+  "resolved": false
+}

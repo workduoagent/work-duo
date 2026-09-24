@@ -1,0 +1,59 @@
+{
+  "kind": "concurrency",
+  "n": 6,
+  "totalMs": 1217964,
+  "done": 6,
+  "terminal": 6,
+  "survivalRate": 1,
+  "terminalRate": 1,
+  "results": [
+    {
+      "caseId": "S-J1",
+      "slot": 0,
+      "status": "done",
+      "durationMs": 912988,
+      "artifactScore": 1,
+      "error": null
+    },
+    {
+      "caseId": "S-J2",
+      "slot": 1,
+      "status": "done",
+      "durationMs": 479135,
+      "artifactScore": 1,
+      "error": null
+    },
+    {
+      "caseId": "S-J3",
+      "slot": 2,
+      "status": "done",
+      "durationMs": 407073,
+      "artifactScore": 1,
+      "error": null
+    },
+    {
+      "caseId": "S-J4",
+      "slot": 3,
+      "status": "done",
+      "durationMs": 771326,
+      "artifactScore": 1,
+      "error": null
+    },
+    {
+      "caseId": "S-J5",
+      "slot": 4,
+      "status": "done",
+      "durationMs": 539668,
+      "artifactScore": 1,
+      "error": null
+    },
+    {
+      "caseId": "S-J6",
+      "slot": 5,
+      "status": "done",
+      "durationMs": 1216812,
+      "artifactScore": 0,
+      "error": null
+    }
+  ]
+}

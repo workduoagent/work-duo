@@ -1,17 +1,17 @@
 # WorkDuo L2 生态测评评分卡
 
-> 生成时间：2026-09-24T02:16:17.046Z · 样本：用例 26 / 故障 0 / 并发组 3
+> 生成时间：2026-09-24T03:03:23.894Z · 样本：用例 30 / 故障 0 / 并发组 4
 
 ## 三维总览
 
 | 维度 | 指标 | 值 |
 |---|---|---|
-| 高可用 | 终态率 | 92.3% (24/26) |
-| 高可用 | 成功率 done | 92.3% |
-| 高可用 | 产物达成均值 | 100% |
+| 高可用 | 终态率 | 93.3% (28/30) |
+| 高可用 | 成功率 done | 93.3% |
+| 高可用 | 产物达成均值 | 93% |
 | 高性能 | 时延 P50/P90/P99 | 430827 / 1007480 / 1296083 ms |
 | 自愈 | 故障注入通过 | 0% |
-| 自愈 | 并发组终态率 | 91.3% |
+| 自愈 | 并发组终态率 | 93.1% |
 
 ## 按难度/场景
 
@@ -23,27 +23,31 @@
 | E/M | 3 | 100% | 100% | 145569 |
 | F/H | 1 | 100% | 100% | 1296083 |
 | F/M | 8 | 100% | 100% | 364438 |
-| S/M | 3 | 100% | 100% | 737960 |
+| S/M | 7 | 100% | 71% | 539668 |
 
 ## 按模型
 
 | 模型 | n | done% | P50ms |
 |---|---|---|---|
-| AG:DeepSeek-V4.1-Flash | 26 | 92.3% | 430827 |
+| AG:DeepSeek-V4.1-Flash | 30 | 93.3% | 430827 |
 
 ## Batch C 种子修复 · 客观判分
 
 | 层级 | n | resolved% |
 |---|---|---|
-| security | 1 | 100% |
+| security | 5 | 60% |
 | logic | 2 | 100% |
-| **合计** | 3 | **100%** |
+| **合计** | 7 | **71.4%** |
 
 | ID | seed | tier | resolved | passed/failed/errors |
 |---|---|---|---|---|
 | S-J1 | py-security-tarfile-traversal | security | true | 2/0/0 |
 | S-J2#1 | py-logic-fnmatch-revrange | logic | true | 4/0/0 |
 | S-J3#2 | py-logic-parents-negindex | logic | true | 6/0/0 |
+| S-J4#3 | py-security-urlparse-leading-ws | security | true | 4/0/0 |
+| S-J5#4 | py-security-auth-regex-redos | security | true | 4/0/0 |
+| S-J6#5 | py-security-crlf-injection | security | false | 0/0/0 |
+| S-J6 | py-security-crlf-injection | security | false | 2/2/0 |
 
 ## 用例明细
 
@@ -72,9 +76,13 @@
 | F-M4#15 | knowledge/artifacts 沉淀与检索 | done | 313882 | 100% |  |
 | F-M5#16 | graph 实体图与 sessions 摘要 | done | 430827 | 100% |  |
 | F-M6 | sessions 摘要与 outputs 归档（两区能力验证） | done | 1007480 | 100% |  |
-| S-J1 | 真实CVE修复：tarfile路径穿越 | done | 460961 | 100% |  |
-| S-J2#1 | 真实缺陷修复：fnmatch反转范围 | done | 1138122 | 100% |  |
-| S-J3#2 | 真实缺陷修复：parents负索引 | done | 737960 | 100% |  |
+| S-J1 | 真实CVE修复：tarfile路径穿越 | done | 912988 | 100% |  |
+| S-J2#1 | 真实缺陷修复：fnmatch反转范围 | done | 479135 | 100% |  |
+| S-J3#2 | 真实缺陷修复：parents负索引 | done | 407073 | 100% |  |
+| S-J4#3 | 真实CVE修复：urlparse前导空白绕过 | done | 771326 | 100% |  |
+| S-J5#4 | 真实CVE修复：auth正则ReDoS | done | 539668 | 100% |  |
+| S-J6#5 | 真实CVE修复：跨文件CRLF注入 | done | 1216812 | 0% |  |
+| S-J6 | 真实CVE修复：跨文件CRLF注入 | done | 262023 | 0% |  |
 
 ## 故障注入
 
@@ -86,3 +94,4 @@
 - n=18 done=16/18 terminal=16/18 wall=1296371ms survival=89%
 - n=2 done=2/2 terminal=2/2 wall=651241ms survival=100%
 - n=3 done=3/3 terminal=3/3 wall=1138373ms survival=100%
+- n=6 done=6/6 terminal=6/6 wall=1217964ms survival=100%

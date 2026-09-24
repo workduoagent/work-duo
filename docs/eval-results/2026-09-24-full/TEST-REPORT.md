@@ -181,3 +181,32 @@
 | 插件创建/测试 | D-M3 原设计 | 平台 `plugin_list=0`（无插件）且管理类工具不对 Agent 暴露 | 是（改为考核「MCP+沙箱产出 xlsx」） |
 | KB 创建/写入/删除 | D-M4 原设计 | `kb_create/kb_add_file` 属 UI 意图层 | 部分（检索与引用可测，写入/删除不可测） |
 | 需要重启的验证 | 如 Rust 改动后验证 | 用户在休息，无法辅助重启 | ⏸ 记录待办，不重启 |
+
+---
+
+## 十、S 系列：真实溯源题库（C' 路线，09-24 上午两批）
+
+**题目来源**：真实开源缺陷的等效复刻（CVE/gh 编号公开可查，manifest 明确标注「真实 bug 模式复刻，非原仓库文件」）；判分=外层 pytest 客观裁决（agent 自述不作数）。
+
+| 题目 | 溯源 | 层级 | 耗时 | 外层 pytest | resolved |
+|---|---|---|---|---|---|
+| S-J1 tarfile 路径穿越 | CVE-2007-4559（3.12 filter=data 语义） | security | 913s | 2/0 | ✅ |
+| S-J2 fnmatch 反转范围 | gh-89973（[c-a] 抛 re.error→空集） | logic | 479s | 4/0 | ✅ |
+| S-J3 parents 负索引 | gh-93156 | logic | 407s | 6/0 | ✅ |
+| S-J4 urlparse 前导空白 | CVE-2023-24329（SSRF 白名单绕过） | security | 771s | 4/0 | ✅ |
+| S-J5 auth 正则 ReDoS | CVE-2020-8492（灾难回溯） | security | 540s | 4/0（重判） | ✅ |
+| S-J6 跨文件 CRLF 注入 | CVE-2019-9740（putrequest 注入） | security | 1217s / 262s | 2 failed | ❌ **两轮均未修** |
+
+**最终成绩：resolved 5/6 = 83.3%**（评分卡工具显示 71.4% 系 S-J6 两条历史槽位记录混算；严格按 caseId 最新口径为 83.3%）。
+
+### 🔴 P-5：S-J6 未修复的两条真缺口（如实归因，不自我放行）
+
+1. **零写入熔断盲区**：复跑 262s、13 次工具调用全部是读/检查（validate.py+client.py+test 重复读 3 遍、零 Edit），第 8 轮熔断时**零文件写入** → 走「暂定完成」语义直接 done。7a25a91 让位条件只覆盖「有写入」；零写入但任务明显未完成时修复机会被吞。候选修法：intent_classified=修复类任务熔断时无论有无写入都进修复轮。
+2. **单步规划 + 基线 8 轮对双文件修复不足**：plan 只有 1 步，8 轮全耗在侦察（含重复读），一次 Edit 都没发生。首跑虽有写入进了修复轮（+8→24 轮）仍未完成。候选修法：WD_SUBTASK_MAX_ITERATIONS 调 16 做对照实验（env 改动需重启，留待办）；或修复类任务的规划强制拆步。
+
+### 判分基建自身的两次纠错（工具也要过同一标准）
+
+- S-J2 判分测试 v1 断言 bug（match(zzz,[!c-a]) 忽略 glob 单字符类语义）→ 修种子测试源+工作空间重判（agent 修复代码未动）。
+- S-J5 判分测试 v1 把 40KB 恶意串内联进 python -c 命令行 → Windows 32K 限制 WinError 206 → 改 stdin 传入重判（agent 修复有效：5.64s 完成）。
+- judge-dump testCmd 未兼容「pytest」开头写法（漏 -m）→ 规范化统一受管 python -m pytest。
+
