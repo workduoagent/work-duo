@@ -1646,6 +1646,27 @@ export function buildScorecard() {
     md.push(`| ${k} | ${arr.length} | ${pct(arr.filter((c) => c.status === 'done').length, arr.length)}% | ${med(arr.map((c) => c.durationMs).filter(Boolean))} |`)
   }
   md.push(``)
+  // D' 成本观测（2026-09-24）：trace counts 的 token 计量（引擎 6eb5e82 起提供）。
+  // 仅统计带 token 的新版证据（旧 JSON 无该字段自动跳过），用于成本趋势与回滚对照。
+  const tokCases = cases.filter((c) => c.traceCounts && (c.traceCounts.prompt_tokens != null || c.traceCounts.completion_tokens != null))
+  if (tokCases.length) {
+    const sum = (f) => tokCases.reduce((n, c) => n + (c.traceCounts[f] || 0), 0)
+    const pt = sum('prompt_tokens')
+    const ct = sum('completion_tokens')
+    const byModel = by(tokCases, (c) => c.modelName || c.model || '?')
+    md.push(`## 成本观测（token，D'）`)
+    md.push(``)
+    md.push(`| 模型 | n | prompt tokens | completion tokens | 合计 | 均值/用例 |`)
+    md.push(`|---|---|---|---|---|---|`)
+    for (const [k, arr] of Object.entries(byModel)) {
+      const s = (f) => arr.reduce((n, c) => n + (c.traceCounts?.[f] || 0), 0)
+      const tp = s('prompt_tokens'); const tc = s('completion_tokens')
+      md.push(`| ${k} | ${arr.length} | ${tp} | ${tc} | ${tp + tc} | ${arr.length ? Math.round((tp + tc) / arr.length) : 0} |`)
+    }
+    md.push(``)
+    md.push(`合计：prompt ${pt} + completion ${ct} = **${pt + ct} tokens**（${tokCases.length} 用例含计量）`)
+    md.push(``)
+  }
   // Batch C（2026-09-23）：种子修复用例的客观判分（resolved%），与 agent 自述解耦
   const judged = cases.filter((c) => c.resolved === true || c.resolved === false)
   if (judged.length) {
