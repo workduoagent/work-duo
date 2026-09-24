@@ -61,6 +61,64 @@ fn next_req_id() -> String {
     format!("wd-{}-{}", chrono::Local::now().timestamp_millis(), n)
 }
 
+/// 会话滚动压缩状态 + 成本观测（全量扩展轮补口，2026-09-24）：
+/// 此前压缩只有日志/文件可看，MCP 层无查询口——上下文压缩测试不可观测。
+/// 数据源：agent_conversation_session 单行（total_turns/summary_round_count/summary/tokens/project_id）。
+async fn session_compact_status(app: &AppHandle, args: &Value) -> Value {
+    let sid = args
+        .get("sessionId")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    if sid.is_empty() {
+        return json!({ "ok": false, "error": "缺少 sessionId" });
+    }
+    let pool = match get_pool(app).await {
+        Ok(p) => p,
+        Err(e) => return json!({ "ok": false, "error": e }),
+    };
+    let row = sqlx::query(
+        "SELECT total_turns, summary_round_count, summary, total_prompt_tokens, total_completion_tokens, tools_tokens, project_id FROM agent_conversation_session WHERE id = ?",
+    )
+    .bind(&sid)
+    .fetch_optional(&pool)
+    .await;
+    let row = match row {
+        Ok(r) => r,
+        Err(e) => return json!({ "ok": false, "error": format!("查询会话失败: {e}") }),
+    };
+    let Some(r) = row else {
+        return json!({ "ok": false, "error": "会话不存在" });
+    };
+    let total_turns: i64 = r.try_get("total_turns").unwrap_or(0);
+    let summary_round_count: i64 = r.try_get("summary_round_count").unwrap_or(0);
+    let pending = (total_turns - summary_round_count).max(0);
+    let summary: Option<String> = r.try_get("summary").ok().flatten();
+    let prompt_tokens: i64 = r.try_get("total_prompt_tokens").unwrap_or(0);
+    let completion_tokens: i64 = r.try_get("total_completion_tokens").unwrap_or(0);
+    let tools_tokens: i64 = r.try_get("tools_tokens").unwrap_or(0);
+    let project_id: Option<String> = r.try_get("project_id").ok().flatten();
+    // 滚动压缩阈值与 round_compactor::CompactorConfig 默认一致（每 5 轮触发）
+    const TRIGGER_THRESHOLD: i64 = 5;
+    json!({
+        "ok": true,
+        "sessionId": sid,
+        "totalTurns": total_turns,
+        "summaryRoundCount": summary_round_count,
+        "pendingUncompacted": pending,
+        "triggerThreshold": TRIGGER_THRESHOLD,
+        "willTriggerNext": pending >= TRIGGER_THRESHOLD,
+        "summaryChars": summary.as_ref().map(|s| s.chars().count()).unwrap_or(0),
+        "tokens": {
+            "prompt": prompt_tokens,
+            "completion": completion_tokens,
+            "tools": tools_tokens,
+        },
+        "projectBound": project_id.as_deref().map(|s| !s.trim().is_empty()).unwrap_or(false),
+        "note": "pendingUncompacted 达到 triggerThreshold 时后台压缩触发；projectBound=false 时 .wd_mem/sessions 文件轨不落盘（仅 DB 轨）",
+    })
+}
+
 /// 从 app_config 读取数据库池（与 squad_api_server 同款）。
 async fn get_pool(app: &AppHandle) -> Result<sqlx::SqlitePool, String> {
     let instances = app.state::<DbInstances>();
@@ -494,6 +552,7 @@ async fn call_tool(app: &AppHandle, name: &str, args: &Value) -> Value {
             let run_id = args.get("run_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
             json!({ "run_id": run_id, "trace": events::get_trace(&run_id) })
         }
+        "agent_session_compact_status" => session_compact_status(app, &args).await,
         "agent_get_run_progress" => {
             // P2-1（2026-09-23）：长任务进度观测——外部驱动轮询这个而非干等。
             // 数据源：run_registry（status/started_at/agentId）+ per-run trace 事件流推导
@@ -943,6 +1002,13 @@ thinking（累计思考过程）、reply（累计正文回复）、counts（各�
 #8 per-run：必须传 run_id（由 run_task_ex 返回的 run_id），按 run 取独立桶，并发 run 互不串台；不传则取空桶。\
 须在 wait_task 返回 done 后调用，且须用启动该 run 的同一 run_id。",
             json!({ "type": "object", "properties": { "run_id": { "type": "string", "description": "run_task_ex 返回的运行 id；不传则返回空轨迹桶" } }, "required": ["run_id"] }),
+        ),
+        tool(
+            "agent_session_compact_status",
+            "会话滚动压缩状态 + 成本观测（全量扩展轮补口）：返回 {totalTurns, summaryRoundCount, pendingUncompacted, triggerThreshold(5), willTriggerNext, summaryChars, tokens{prompt,completion,tools}, projectBound}。\n\
+pendingUncompacted 达到 5 时后台压缩触发（滚动合并旧轮次进 summary）；projectBound=false 时 .wd_mem/sessions 文件轨不落盘（仅 DB 轨）。\n\
+用途：上下文压缩测试的可观测口；agent_get_run_trace.counts 亦新增 prompt_tokens/completion_tokens。",
+            json!({ "type": "object", "properties": { "sessionId": { "type": "string", "description": "会话 id（agent_session_create 返回）" } }, "required": ["sessionId"] }),
         ),
         tool(
             "agent_get_run_progress",

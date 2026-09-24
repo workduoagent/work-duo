@@ -20,7 +20,7 @@ import {
 export const ROOT = process.env.L2_WS_ROOT || 'E:/Codes/ABC/work-duo/eval-workspace'
 export const OUT = process.env.L2_OUT || 'E:/Codes/ABC/work-duo/docs/eval-results/2026-09-23'
 /** MCP 工具数基线（随版本演进；F-7 故障断言与 gate 探针共用同一期望值） */
-const EXPECTED_TOOLS = 74
+const EXPECTED_TOOLS = 75
 export const MODELS = {
   fast: '96af449e-dfc0-48ec-b077-aa9f02b43d64', // DeepSeek-V4.1-Flash
   slow: 'bb9ab960-6615-439a-b5bc-95d2a65173b3', // MiniMax-M3

@@ -52,6 +52,10 @@ struct RunTrace {
     thinking: String,
     reply: String,
     started_at: i64,
+    /// 本轮真实 token 用量（prompt/completion，由 emit_task_done 随收尾写入；
+    /// 供 MCP `agent_get_run_trace` 成本观测——此前 counts 只有字符数，成本观测断）。
+    prompt_tokens: u64,
+    completion_tokens: u64,
 }
 
 /// per-run 轨迹缓冲表：run_id → 缓冲。进程级，并发 run 各自独立桶。
@@ -219,11 +223,16 @@ fn collect_workspace_files(
 /// 自测闭环（#8 per-run）：取出指定 run 完整轨迹（事件列表 + 累计思考 + 累计正文 + 计数）。
 /// run_id 不存在时返回空结构（不报错，便于并发场景早查询）。
 pub fn get_trace(run_id: &str) -> serde_json::Value {
-    let (events, thinking, reply) = {
+    let (events, thinking, reply, buckets) = {
         let map = run_traces().lock().unwrap();
         match map.get(run_id) {
-            Some(b) => (b.events.clone(), b.thinking.clone(), b.reply.clone()),
-            None => (Vec::new(), String::new(), String::new()),
+            Some(b) => (
+                b.events.clone(),
+                b.thinking.clone(),
+                b.reply.clone(),
+                (b.prompt_tokens, b.completion_tokens),
+            ),
+            None => (Vec::new(), String::new(), String::new(), (0, 0)),
         }
     };
     serde_json::json!({
@@ -234,6 +243,8 @@ pub fn get_trace(run_id: &str) -> serde_json::Value {
             "events": events.len(),
             "thinking_chars": thinking.chars().count(),
             "reply_chars": reply.chars().count(),
+            "prompt_tokens": buckets.0,
+            "completion_tokens": buckets.1,
         },
     })
 }
@@ -525,8 +536,14 @@ pub struct TaskDonePayload {
     pub completion_tokens: u64,
 }
 
-/// 整轮任务结束。
+/// 整轮任务结束。同时把真实 token 用量写入 per-run 轨迹桶（成本观测；
+/// 各分支每次传入的均为该 run 的最终累计值，覆盖写入即可）。
 pub fn emit_task_done(app: &AppHandle, prompt_tokens: u64, completion_tokens: u64) {
+    let rid = current_run_id();
+    with_run_trace_mut(&rid, |b| {
+        b.prompt_tokens = prompt_tokens;
+        b.completion_tokens = completion_tokens;
+    });
     emit(
         app,
         EVT_TASK_DONE,

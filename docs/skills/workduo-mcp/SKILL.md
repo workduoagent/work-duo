@@ -95,7 +95,7 @@ curl -s -X POST http://127.0.0.1:18755/mcp \
 | `agent_get_run_trace` | 取**指定 run** 的轨迹缓冲；**返回外层是 `{"run_id":..., "trace":{...}}` 包裹**，取字段须先剥 `trace` 层：`r.trace.{events, thinking, reply, counts}`。#8 per-run：必须传 `run_id`（由 `agent_run_task` 返回的 `run_id`），按 run 取独立桶，**并发 run 互不串台**；不传则返回空桶 | `run_id`（必填，来自 `agent_run_task` 返回） |
 | `agent_get_run_progress` | **长任务进度观测（P2-1）**：轮询这个而非干等。返回 `{status, elapsedSec, budgetSec, step, totalSteps, stepTitle, lastTool}`——elapsedSec 逼近 budgetSec 即将进入预算软窗口（最后 30s 停止发起新步骤）。step/totalSteps 来自规划事件（SIMPLE_CHAT 为 0/0） | `run_id`（必填） |
 | `agent_sweep_orphan_rounds` | **孤儿轮次按需清扫**：并发/取消/崩溃遗留 end_time IS NULL 轮次，此前仅启动时清扫；返回 {ok, swept}。用途：并发/取消后调用并断言无残留「进行中」轮次 | 无入参 |
-### B. 模块发现层（Rust 直读 workduo.db，零业务副作用）
+| `agent_session_compact_status` | 会话滚动压缩状态+成本观测：{totalTurns,summaryRoundCount,pendingUncompacted,triggerThreshold(5),willTriggerNext,summaryChars,tokens{prompt,completion,tools},projectBound}；pendingUncompacted≥5 触发后台压缩；projectBound=false 时 .wd_mem/sessions 文件轨不落盘 | `sessionId` |### B. 模块发现层（Rust 直读 workduo.db，零业务副作用）
 | 工具 | 作用 |
 |---|---|
 | `agent_list_models` | 模型（含 `config`=默认参数副本；大脑须 `category∈{text,multimodal}` 且 `enabled=1`） |
