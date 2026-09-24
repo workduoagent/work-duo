@@ -1,0 +1,35 @@
+{
+  "kind": "concurrency",
+  "n": 3,
+  "totalMs": 1138373,
+  "done": 3,
+  "terminal": 3,
+  "survivalRate": 1,
+  "terminalRate": 1,
+  "results": [
+    {
+      "caseId": "S-J1",
+      "slot": 0,
+      "status": "done",
+      "durationMs": 460961,
+      "artifactScore": 1,
+      "error": null
+    },
+    {
+      "caseId": "S-J2",
+      "slot": 1,
+      "status": "done",
+      "durationMs": 1138122,
+      "artifactScore": 1,
+      "error": null
+    },
+    {
+      "caseId": "S-J3",
+      "slot": 2,
+      "status": "done",
+      "durationMs": 737960,
+      "artifactScore": 1,
+      "error": null
+    }
+  ]
+}

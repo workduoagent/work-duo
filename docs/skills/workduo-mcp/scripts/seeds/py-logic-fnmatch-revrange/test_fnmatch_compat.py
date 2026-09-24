@@ -32,15 +32,17 @@ def test_reversed_range_does_not_raise():
     assert r is False  # 空集：不匹配任何字符
 
 
-def test_reversed_range_negation_matches_anything():
+def test_reversed_range_negation_matches_any_single_char():
     import re
     try:
-        r = match("a", "[!c-a]")
-        r2 = match("zzz", "[!c-a]")
+        r = match("a", "[!c-a]")   # 'a' 不在空集 c-a 内 → 单字符匹配
+        r2 = match("z", "[!c-a]")  # 同上
+        r3 = match("zz", "[!c-a]") # 双字符不匹配单字符类（glob 语义）
     except re.error:
         pytest.fail("gh-89973 未修复：[!c-a] 仍抛 re.error")
-    assert r is True  # 非(c-a 空集) = 任意字符
+    assert r is True
     assert r2 is True
+    assert r3 is False
 
 
 def test_literal_bracket_still_works():

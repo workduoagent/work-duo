@@ -1,0 +1,23 @@
+[
+  {
+    "caseId": "S-J1",
+    "seedId": "py-security-tarfile-traversal",
+    "testCmd": "python -m pytest test_safe_extract.py -v",
+    "wsDir": "E:/Codes/ABC/work-duo/eval-workspace-full/eval-S-J1/tarfix-proj",
+    "outFile": "E:/Codes/ABC/work-duo/docs/eval-results/2026-09-24-full/judge/S-J1.txt"
+  },
+  {
+    "caseId": "S-J2",
+    "seedId": "py-logic-fnmatch-revrange",
+    "testCmd": "python -m pytest test_fnmatch_compat.py -v",
+    "wsDir": "E:/Codes/ABC/work-duo/eval-workspace-full/eval-S-J2-1/fnfix-proj",
+    "outFile": "E:/Codes/ABC/work-duo/docs/eval-results/2026-09-24-full/judge/S-J2.txt"
+  },
+  {
+    "caseId": "S-J3",
+    "seedId": "py-logic-parents-negindex",
+    "testCmd": "python -m pytest test_parents_compat.py -v",
+    "wsDir": "E:/Codes/ABC/work-duo/eval-workspace-full/eval-S-J3-2/pathfix-proj",
+    "outFile": "E:/Codes/ABC/work-duo/docs/eval-results/2026-09-24-full/judge/S-J3.txt"
+  }
+]
