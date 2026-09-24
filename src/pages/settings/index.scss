@@ -146,11 +146,16 @@
   box-sizing: border-box;
 }
 
+/* ---------------- 设置项区域：单列铺满 + 行内自动换行 ----------------
+ * 内容列占满右栏整宽（不留右侧空白，也不做多列挤压）；
+ * 每行「文案 + 控件」用 flex-wrap：空间不足时控件整体换到下一行，
+ * 文案块保底 280px，避免被挤成逐字换行。
+ */
 .set-section {
-  max-width: 760px;
+  width: 100%;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 0;
 }
 
 .set-section__title {
@@ -180,10 +185,13 @@
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 16px;
+  gap: 12px 24px;
+  /* 关键：窄屏时控件整体换到下一行，而不是把文案挤成逐字换行 */
+  flex-wrap: wrap;
 }
 
 .set-item__text {
+  flex: 1 1 280px;
   min-width: 0;
 }
 
@@ -218,9 +226,15 @@
 }
 
 .set-item__control {
-  flex: 0 0 auto;
+  flex: 0 1 auto;
+  max-width: 100%;
+  /* 换行到下一行时仍贴右对齐 */
+  margin-left: auto;
   display: inline-flex;
   align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .set-item__input {
@@ -234,9 +248,12 @@
   align-items: center;
   gap: 10px;
   max-width: 100%;
+  min-width: 0;
 }
 
 .set-dir__path {
+  flex: 1 1 auto;
+  min-width: 0;
   max-width: 340px;
   padding: 6px 10px;
   border-radius: 8px;
