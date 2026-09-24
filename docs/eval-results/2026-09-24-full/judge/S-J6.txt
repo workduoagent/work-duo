@@ -6,30 +6,7 @@ collecting ... collected 4 items
 
 test_client.py::test_normal_request PASSED                               [ 25%]
 test_client.py::test_whitelist_still_works PASSED                        [ 50%]
-test_client.py::test_rejects_crlf_injection FAILED                       [ 75%]
-test_client.py::test_rejects_bare_cr_or_lf FAILED                        [100%]
+test_client.py::test_rejects_crlf_injection PASSED                       [ 75%]
+test_client.py::test_rejects_bare_cr_or_lf PASSED                        [100%]
 
-================================== FAILURES ===================================
-_________________________ test_rejects_crlf_injection _________________________
-
-    def test_rejects_crlf_injection():
-        # 恶意 URL：白名单内 scheme，但内嵌 \r\n 注入额外头
-        evil = 'http://good.example/ HTTP/1.1\r\nHost: evil\r\nX-Inj: 1'
->       with pytest.raises(ValueError):
-             ^^^^^^^^^^^^^^^^^^^^^^^^^
-E       Failed: DID NOT RAISE ValueError
-
-test_client.py:22: Failed
-_________________________ test_rejects_bare_cr_or_lf __________________________
-
-    def test_rejects_bare_cr_or_lf():
-        # 单独的 \r 或 \n 同样必须拒绝
->       with pytest.raises(ValueError):
-             ^^^^^^^^^^^^^^^^^^^^^^^^^
-E       Failed: DID NOT RAISE ValueError
-
-test_client.py:28: Failed
-=========================== short test summary info ===========================
-FAILED test_client.py::test_rejects_crlf_injection - Failed: DID NOT RAISE Va...
-FAILED test_client.py::test_rejects_bare_cr_or_lf - Failed: DID NOT RAISE Val...
-========================= 2 failed, 2 passed in 0.07s =========================
+============================== 4 passed in 0.02s ==============================

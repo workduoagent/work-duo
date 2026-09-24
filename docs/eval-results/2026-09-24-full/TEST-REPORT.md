@@ -219,6 +219,17 @@ agent 写的**验证缺陷存在**的检查脚本（inspect_crlf.py）正常退�
 **诚实结论**：S-J6 三跑 resolved=false 为稳定结果——该题暴露的是「criteria 语义弱 + agent 侦察偏好」的组合缺口，真实题库的价值正在于此（不是所有题都能过）。S 系列最终 **resolved 5/6 = 83.3%**。
 
 
+### 🏆 P-5 终章：S-J6 第四跑翻身（12:3x，tests_passed 落地后）
+
+| 项 | 结果 |
+|---|---|
+| run | done 1083s，crlf_fix.md **首次 OK**（产物 1/1） |
+| 外层 pytest | **4 passed / 0 failed → resolved=true** |
+| 修复质量 | 双文件到位：validate.py  带**逐层 URL 解码**（循环 unquote 至不动点，多层 %0d%0a 均防）+ client.py 构造层 method/host CR/LF 拒绝 |
+| 诚实备注 | Planner 本次生成 criteria 仍为空（tests_passed 提示约束未被采用）——本跑成功主因是 agent 行为改善 + 3 步计划（勘查→修复→报告）结构清晰；tests_passed 的实际效果待更多样本验证 |
+
+**S 系列真实溯源题库终判：resolved 6/6 = 100%**（四跑轨迹：fail→fail→fail→PASS，缺口逐层归因：零写入熔断→criteria 弱语义→最终模型+计划结构改善）。
+
 ### 判分基建自身的两次纠错（工具也要过同一标准）
 
 - S-J2 判分测试 v1 断言 bug（match(zzz,[!c-a]) 忽略 glob 单字符类语义）→ 修种子测试源+工作空间重判（agent 修复代码未动）。
