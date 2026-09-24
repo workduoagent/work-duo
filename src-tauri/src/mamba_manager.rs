@@ -143,6 +143,14 @@ pub(crate) fn net_block_enabled() -> bool {
         .unwrap_or(true)
 }
 
+/// 逃生开关（文件系统有界）：`WD_SANDBOX_FS=off` 时全程不注入 fs-guard。
+/// 缺省启用 = 仅工作空间与系统临时目录可写。
+pub(crate) fn fs_block_enabled() -> bool {
+    std::env::var("WD_SANDBOX_FS")
+        .map(|v| !v.trim().eq_ignore_ascii_case("off"))
+        .unwrap_or(true)
+}
+
 /// 断网注入 env：代理指向 discard 端口 127.0.0.1:9——所有遵守代理环境变量的
 /// HTTP 库（requests/urllib/httpx/axios/fetch）连接立即失败。raw socket 由
 /// Python 侧 sitecustomize 守卫兜底（Bun 侧无同款机制，由观测层兜底）。
@@ -158,12 +166,17 @@ pub(crate) fn net_block_envs() -> Vec<(String, String)> {
         .collect()
 }
 
-/// Python 断网守卫：`sitecustomize.py` 由解释器启动时自动 import（早于一切用户 import），
-/// monkey-patch socket 层——raw socket / create_connection / getaddrinfo（含 DNS）全禁。
-/// 仅在 `WD_SANDBOX_NET_GUARD=1` 时生效，因此依赖安装通道（不注入该标记）不受影响。
-const NET_GUARD_SITECUSTOMIZE: &str = r#"# WorkDuo 沙箱默认离线守卫（mamba_manager 注入 PYTHONPATH + WD_SANDBOX_NET_GUARD=1 启用）
+/// Python 沙箱守卫：`sitecustomize.py` 由解释器启动时自动 import（早于一切用户 import）。
+/// 两段独立启用：
+/// - `WD_SANDBOX_NET_GUARD=1`：monkey-patch socket 层——raw socket / create_connection /
+///   getaddrinfo（含 DNS）全禁（网络默认关）。
+/// - `WD_SANDBOX_FS_GUARD=1`：patch builtins.open（写模式）/ os / shutil / pathlib /
+///   tarfile / zipfile 的写/删/移/解压入口——白名单（工作空间 + 系统临时目录）之外
+///   直接 PermissionError（文件系统有界）。运行时拦截，exec/eval 动态构造同样被覆盖。
+const SANDBOX_GUARD_SITECUSTOMIZE: &str = r#"# WorkDuo 沙箱守卫（mamba_manager 注入 PYTHONPATH + 标记 env 启用）
 import os as _os
 
+# ---- 网络默认关 ----
 if _os.environ.get("WD_SANDBOX_NET_GUARD") == "1":
     def _net_blocked(*_args, **_kwargs):
         raise RuntimeError(
@@ -176,41 +189,203 @@ if _os.environ.get("WD_SANDBOX_NET_GUARD") == "1":
     _socket.socket = _net_blocked
     _socket.create_connection = _net_blocked
     _socket.getaddrinfo = _net_blocked
+
+# ---- 文件系统有界 ----
+if _os.environ.get("WD_SANDBOX_FS_GUARD") == "1":
+    import builtins as _builtins
+    import tempfile as _tempfile
+
+    def _norm(p):
+        return _os.path.abspath(_os.fspath(p)).replace("/", "\\").rstrip("\\").lower()
+
+    _allows = []
+    for _p in (_os.environ.get("WD_SANDBOX_WS", ""), _tempfile.gettempdir()):
+        if _p:
+            try:
+                _allows.append(_norm(_p))
+            except Exception:
+                pass
+
+    def _fs_guarded(*paths):
+        for path in paths:
+            try:
+                p = _norm(path)
+            except Exception:
+                continue
+            if not any(p == a or p.startswith(a + "\\") for a in _allows):
+                raise PermissionError(
+                    "沙箱文件系统有界：写入/删除 %s 超出允许范围（仅工作空间与系统临时目录可写）。" % p
+                )
+
+    _WRITE_MODE = ("w", "a", "x", "+")
+
+    # builtins.open / Path.open：写模式才校验（读不限）
+    _orig_open = _builtins.open
+
+    def _guarded_open(file, mode="r", *a, **k):
+        if isinstance(file, (str, bytes)) or hasattr(file, "__fspath__"):
+            m = mode if isinstance(mode, str) else ""
+            if any(c in m for c in _WRITE_MODE):
+                _fs_guarded(file)
+        return _orig_open(file, mode, *a, **k)
+
+    _builtins.open = _guarded_open
+
+    # os：删除 / 建目录（单路径）+ 改名 / 替换（src+dst 双查）
+    for _name in ("remove", "unlink", "rmdir", "removedirs", "mkdir", "makedirs"):
+        _orig = getattr(_os, _name, None)
+        if _orig:
+            def _mk1(fn):
+                def _g(path, *a, **k):
+                    _fs_guarded(path)
+                    return fn(path, *a, **k)
+                return _g
+            setattr(_os, _name, _mk1(_orig))
+    for _name in ("rename", "replace"):
+        _orig = getattr(_os, _name, None)
+        if _orig:
+            def _mk2(fn):
+                def _g(src, dst, *a, **k):
+                    _fs_guarded(src, dst)
+                    return fn(src, dst, *a, **k)
+                return _g
+            setattr(_os, _name, _mk2(_orig))
+
+    # shutil：删除 / 移动 / 拷贝（写端校验）
+    try:
+        import shutil as _shutil
+        for _name in ("rmtree", "unlink", "copytree"):
+            _orig = getattr(_shutil, _name, None)
+            if _orig:
+                def _mk1s(fn):
+                    def _g(path, *a, **k):
+                        _fs_guarded(path)
+                        return fn(path, *a, **k)
+                    return _g
+                setattr(_shutil, _name, _mk1s(_orig))
+        for _name in ("copy", "copy2", "move"):
+            _orig = getattr(_shutil, _name, None)
+            if _orig:
+                def _mkd(fn):
+                    def _g(src, dst, *a, **k):
+                        _fs_guarded(src, dst)
+                        return fn(src, dst, *a, **k)
+                    return _g
+                setattr(_shutil, _name, _mkd(_orig))
+    except Exception:
+        pass
+
+    # pathlib.Path：写方法 + 写模式 open + 改名
+    try:
+        import pathlib as _pathlib
+        _P = _pathlib.Path
+        for _name in ("write_text", "write_bytes", "touch", "mkdir", "unlink", "rmdir"):
+            _orig = getattr(_P, _name, None)
+            if _orig:
+                def _mkp(fn):
+                    def _g(self, *a, **k):
+                        _fs_guarded(self)
+                        return fn(self, *a, **k)
+                    return _g
+                setattr(_P, _name, _mkp(_orig))
+        _orig_popen = _P.open
+
+        def _guarded_popen(self, mode="r", *a, **k):
+            m = mode if isinstance(mode, str) else ""
+            if any(c in m for c in _WRITE_MODE):
+                _fs_guarded(self)
+            return _orig_popen(self, mode, *a, **k)
+
+        _P.open = _guarded_popen
+        for _name in ("rename", "replace"):
+            _orig = getattr(_P, _name, None)
+            if _orig:
+                def _mkp2(fn):
+                    def _g(self, dst, *a, **k):
+                        _fs_guarded(self, dst)
+                        return fn(self, dst, *a, **k)
+                    return _g
+                setattr(_P, _name, _mkp2(_orig))
+    except Exception:
+        pass
+
+    # 解压类：tarfile / zipfile 的落盘目录校验
+    try:
+        import tarfile as _tarfile
+        _orig_tex = _tarfile.TarFile.extractall
+
+        def _tar_ex(self, path=".", *a, **k):
+            _fs_guarded(path)
+            return _orig_tex(self, path, *a, **k)
+
+        _tarfile.TarFile.extractall = _tar_ex
+        _tarfile.TarFile.extract = _tar_ex
+    except Exception:
+        pass
+    try:
+        import zipfile as _zipfile
+        _orig_zex = _zipfile.ZipFile.extractall
+
+        def _zip_ex(self, path=".", *a, **k):
+            _fs_guarded(path)
+            return _orig_zex(self, path, *a, **k)
+
+        _zipfile.ZipFile.extractall = _zip_ex
+        _zipfile.ZipFile.extract = _zip_ex
+    except Exception:
+        pass
 "#;
 
-/// 确保 net-guard 目录与 sitecustomize.py 在位（幂等），返回 guard 目录字符串。
-pub(crate) fn ensure_python_net_guard(mamba_root: &Path) -> Result<String, String> {
+/// 确保沙箱守卫目录与 sitecustomize.py 在位（幂等，内容漂移时重写），返回 guard 目录字符串。
+pub(crate) fn ensure_sandbox_guard(mamba_root: &Path) -> Result<String, String> {
     let dir = mamba_root.join("net-guard");
     let file = dir.join("sitecustomize.py");
-    if !file.exists() {
+    let stale = match std::fs::read_to_string(&file) {
+        Ok(cur) => cur != SANDBOX_GUARD_SITECUSTOMIZE,
+        Err(_) => true,
+    };
+    if stale {
         std::fs::create_dir_all(&dir).map_err(|e| format!("创建 net-guard 目录失败：{e}"))?;
-        std::fs::write(&file, NET_GUARD_SITECUSTOMIZE)
+        std::fs::write(&file, SANDBOX_GUARD_SITECUSTOMIZE)
             .map_err(|e| format!("写入 sitecustomize.py 失败：{e}"))?;
     }
     Ok(dir.to_string_lossy().to_string())
 }
 
-/// 为「运行用户脚本」组装断网版 extra_envs：复制原 env → 注入代理阻断 + 守卫标记
-/// → PYTHONPATH 前置合并 guard 目录（Windows 分号分隔；不覆盖调用方已有的
-/// PYTHONPATH 修复 import 语义）。`WD_SANDBOX_NET=on` 时原样返回。
-fn with_net_block(
+/// 为「运行用户脚本」组装沙箱守卫版 extra_envs：
+/// - 网络默认关：代理阻断 env + net-guard 标记（`WD_SANDBOX_NET=on` 放行）；
+/// - 文件系统有界：fs-guard 标记 + `WD_SANDBOX_WS=<cwd>` 白名单 + `PYTHONDONTWRITEBYTECODE=1`
+///   （防 run_tmp 下 pycache 写入被误拦；`WD_SANDBOX_FS=off` 放行）；
+/// - PYTHONPATH 前置合并 guard 目录（Windows 分号分隔；不覆盖调用方已有的
+///   PYTHONPATH 修复 import 语义）。
+fn with_sandbox_guards(
     mamba_root: &Path,
     extra_envs: &[(String, String)],
+    cwd: Option<&Path>,
 ) -> Result<Vec<(String, String)>, String> {
     let mut envs: Vec<(String, String)> = extra_envs.to_vec();
-    if !net_block_enabled() {
-        return Ok(envs);
+    let guard = ensure_sandbox_guard(mamba_root)?;
+    // net 段
+    if net_block_enabled() {
+        for (k, v) in net_block_envs() {
+            envs.push((k, v));
+        }
+        envs.push(("WD_SANDBOX_NET_GUARD".to_string(), "1".to_string()));
     }
-    for (k, v) in net_block_envs() {
-        envs.push((k, v));
+    // fs 段
+    if fs_block_enabled() {
+        envs.push(("WD_SANDBOX_FS_GUARD".to_string(), "1".to_string()));
+        if let Some(ws) = cwd {
+            envs.push(("WD_SANDBOX_WS".to_string(), ws.to_string_lossy().to_string()));
+        }
+        envs.push(("PYTHONDONTWRITEBYTECODE".to_string(), "1".to_string()));
     }
-    let guard = ensure_python_net_guard(mamba_root)?;
+    // PYTHONPATH 前置合并 guard 目录
     match envs.iter_mut().find(|(k, _)| k == "PYTHONPATH") {
         Some((_, v)) if !v.is_empty() => *v = format!("{};{}", guard, v),
         Some((_, v)) => *v = guard,
         None => envs.push(("PYTHONPATH".to_string(), guard)),
     }
-    envs.push(("WD_SANDBOX_NET_GUARD".to_string(), "1".to_string()));
     Ok(envs)
 }
 
@@ -715,9 +890,9 @@ async fn run_script_with_selfheal(
     extra_envs: &[(String, String)],
 ) -> Result<ScriptRunResult, String> {
     let args = build_run_args(mamba_root, rc, env, tmp_path);
-    // 网络默认关（2026-09-24）：运行用户脚本一律注入断网 env（依赖安装走
-    // install_packages_silent 的 Allow 通道，不受影响）；组装一次供首跑+自愈重试共用。
-    let net_envs = with_net_block(mamba_root, extra_envs)?;
+    // 沙箱双守卫（2026-09-24）：运行用户脚本一律注入网络默认关 + 文件系统有界
+    // （依赖安装走 install_packages_silent 的 Allow 通道，不受影响）；组装一次供首跑+自愈重试共用。
+    let net_envs = with_sandbox_guards(mamba_root, extra_envs, cwd)?;
     let (stdout, stderr, code) =
         run_sidecar_policy(app, args, cwd, &net_envs, NetPolicy::Blocked).await?;
     if code != Some(0) {

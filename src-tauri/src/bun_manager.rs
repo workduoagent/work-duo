@@ -124,6 +124,86 @@ impl BunManager {
     }
 }
 
+/// Bun 沙箱文件系统守卫（`bun --preload` 注入，`WD_SANDBOX_FS_GUARD=1` 启用）：
+/// patch node:fs 的写/删/移入口（同步 + 回调 + promises 三形态），白名单 =
+/// `WD_SANDBOX_WS`（工作空间）+ 系统临时目录，越界 throw。fd（数字）跳过。
+const SANDBOX_GUARD_JS: &str = r#"// WorkDuo 沙箱文件系统守卫（bun --preload）
+if (process.env.WD_SANDBOX_FS_GUARD === "1") {
+  const _path = require("path")
+  const _os = require("os")
+  const _fs = require("fs")
+
+  const allows = []
+  for (const p of [process.env.WD_SANDBOX_WS, _os.tmpdir()]) {
+    if (p) { try { allows.push(_path.resolve(p).toLowerCase()) } catch {} }
+  }
+
+  function guarded(...paths) {
+    for (let p of paths) {
+      if (p == null || typeof p === "number") continue
+      let r
+      try { r = _path.resolve(String(p)).toLowerCase() } catch { continue }
+      if (!allows.some(a => r === a || r.startsWith(a + _path.sep))) {
+        throw new Error(
+          `沙箱文件系统有界：写入/删除 ${r} 超出允许范围（仅工作空间与系统临时目录可写）。`
+        )
+      }
+    }
+  }
+
+  const oneArg = ["mkdir", "rmdir", "unlink", "rm", "appendFile", "appendFileSync", "mkdirSync", "rmdirSync", "unlinkSync", "rmSync"]
+  const twoArg = ["rename", "renameSync", "copyFile", "copyFileSync", "cp", "cpSync", "writeFile", "writeFileSync", "truncate", "truncateSync"]
+  function wrap(mod, name, mode) {
+    const orig = mod[name]
+    if (typeof orig !== "function") return
+    if (mode === 2) {
+      mod[name] = function (a, b, ...rest) { guarded(a, b); return orig.call(this, a, b, ...rest) }
+    } else {
+      mod[name] = function (a, ...rest) { guarded(a); return orig.call(this, a, ...rest) }
+    }
+  }
+  for (const n of oneArg) wrap(_fs, n, 1)
+  for (const n of twoArg) wrap(_fs, n, 2)
+  if (_fs.promises) {
+    for (const n of ["writeFile", "appendFile", "mkdir", "rmdir", "rm", "unlink", "rename", "copyFile", "cp"]) {
+      const orig = _fs.promises[n]
+      if (typeof orig !== "function") continue
+      if (n === "rename" || n === "cp" || n === "copyFile") {
+        _fs.promises[n] = async function (a, b, ...rest) { guarded(a, b); return orig.call(this, a, b, ...rest) }
+      } else {
+        _fs.promises[n] = async function (a, ...rest) { guarded(a); return orig.call(this, a, ...rest) }
+      }
+    }
+  }
+  for (const n of ["open", "openSync"]) {
+    const orig = _fs[n]
+    if (typeof orig === "function") {
+      _fs[n] = function (p, flags, ...rest) {
+        const f = String(flags || "r")
+        if (f[0] && "wax+".includes(f[0])) guarded(p)
+        return orig.call(this, p, flags, ...rest)
+      }
+    }
+  }
+}
+"#;
+
+/// 确保 Bun 守卫脚本在位（幂等，内容漂移时重写），返回 guard.js 路径字符串。
+fn ensure_bun_sandbox_guard(bun_root: &Path) -> Result<String, String> {
+    let dir = bun_root.join("net-guard");
+    let file = dir.join("guard.js");
+    let stale = match std::fs::read_to_string(&file) {
+        Ok(cur) => cur != SANDBOX_GUARD_JS,
+        Err(_) => true,
+    };
+    if stale {
+        std::fs::create_dir_all(&dir).map_err(|e| format!("创建 bun net-guard 目录失败：{e}"))?;
+        std::fs::write(&file, SANDBOX_GUARD_JS)
+            .map_err(|e| format!("写入 guard.js 失败：{e}"))?;
+    }
+    Ok(file.to_string_lossy().to_string())
+}
+
 /// 通用：spawn bun sidecar，异步收集 stdout / stderr，进程结束后返回三元组。
 ///
 /// 全程 `spawn()` + `CommandEvent` 异步流，不阻塞调用线程。
@@ -148,6 +228,14 @@ async fn run_bun_sidecar_policy(
     cwd: Option<&Path>,
     net: crate::mamba_manager::NetPolicy,
 ) -> Result<(String, String, Option<i32>), String> {
+    // 沙箱守卫（文件系统有界）：运行用户脚本时 --preload guard.js（依赖安装通道不注入）。
+    let mut args = args;
+    let mut preload_guard: Option<String> = None;
+    if net == crate::mamba_manager::NetPolicy::Blocked && crate::mamba_manager::fs_block_enabled() {
+        preload_guard = Some(ensure_bun_sandbox_guard(bun_root)?);
+        args.insert(0, preload_guard.clone().unwrap());
+        args.insert(0, "--preload".to_string());
+    }
     let mut cmd = app
         .shell()
         .sidecar("bun")
@@ -162,11 +250,15 @@ async fn run_bun_sidecar_policy(
     if let Some(dir) = cwd {
         cmd = cmd.current_dir(dir);
     }
-    if net == crate::mamba_manager::NetPolicy::Blocked
-        && crate::mamba_manager::net_block_enabled()
-    {
+    if net == crate::mamba_manager::NetPolicy::Blocked && crate::mamba_manager::net_block_enabled() {
         for (k, v) in crate::mamba_manager::net_block_envs() {
             cmd = cmd.env(k, v);
+        }
+    }
+    if preload_guard.is_some() {
+        cmd = cmd.env("WD_SANDBOX_FS_GUARD", "1");
+        if let Some(ws) = cwd {
+            cmd = cmd.env("WD_SANDBOX_WS", ws.to_string_lossy().to_string());
         }
     }
     let (mut rx, child) = cmd
