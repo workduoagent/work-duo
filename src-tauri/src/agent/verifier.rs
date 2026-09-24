@@ -371,6 +371,75 @@ fn check_command_succeeded(run_outcomes: &[RunOutcome]) -> (bool, String) {
     }
 }
 
+/// `tests_passed` 校验（P-5 真根因对策，2026-09-24）：解析运行类工具输出流中的
+/// pytest 汇总行，要求「存在 ≥1 passed 且 failed==0 且 errors==0 且非 no tests ran」。
+///
+/// 动机（S-J6 三跑实测）：修复类任务用 `command_succeeded`（退出码 0）做验收时，
+/// agent 写一个「验证缺陷存在」的检查脚本（退出码 0）即可闭环，无需改码——
+/// 「脚本跑通」≠「缺陷已修复」。本类型把验收锚定在**测试全绿**上。
+fn check_tests_passed(run_outcomes: &[RunOutcome]) -> (bool, String) {
+    if run_outcomes.is_empty() {
+        return degraded(
+            "tests_passed",
+            "本步未执行任何运行类工具（无 pytest 输出可解析），降级为以模型自报为准",
+        );
+    }
+    // 从输出流提取 pytest 风格汇总计数：token 以 passed/failed/error/errors 结尾且前缀为整数。
+    // pytest 汇总样例：「2 failed, 2 passed in 0.04s」「4 passed in 0.05s」「2 errors」。
+    let counts = |text: &str| -> (usize, usize, usize) {
+        let toks: Vec<&str> = text.split_whitespace().collect();
+        // word 之前紧邻的整数即该计数（「2 failed」「4 passed」「1 error」「3 errors」）
+        let get = |word: &str| -> usize {
+            for (i, t) in toks.iter().enumerate() {
+                let clean = t.trim_end_matches(|c: char| c == ',' || c == ':');
+                if clean.eq_ignore_ascii_case(word) && i > 0 {
+                    if let Ok(n) = toks[i - 1].trim().parse::<usize>() {
+                        return n;
+                    }
+                }
+            }
+            0
+        };
+        (get("passed"), get("failed"), get("error").max(get("errors")))
+    };
+    let mut best: Option<(usize, String)> = None;
+    let mut saw_pytest_output = false;
+    for o in run_outcomes {
+        let out = &o.output;
+        let has_summary = out.contains("passed")
+            || out.contains("failed")
+            || out.contains(" error")
+            || out.contains("errors")
+            || out.contains("no tests ran");
+        if !has_summary {
+            continue;
+        }
+        saw_pytest_output = true;
+        if out.contains("no tests ran") {
+            continue;
+        }
+        let (p, f, e) = counts(out);
+        let green = p >= 1 && f == 0 && e == 0;
+        let label = format!("pytest 汇总 passed={} failed={} errors={}", p, f, e);
+        if green {
+            return (true, format!("测试全绿（{}）", label));
+        }
+        let entry = format!("{}（非全绿）", label);
+        match &best {
+            Some((_, s)) if s.contains("非全绿") => {}
+            _ => best = Some((p, entry)),
+        }
+    }
+    if !saw_pytest_output {
+        return degraded(
+            "tests_passed",
+            "运行类工具输出流中未见 pytest 汇总（需在步骤内实际运行 pytest 且输出保留）",
+        );
+    }
+    let detail = best.map(|(_, s)| s).unwrap_or_else(|| "输出流含 pytest 汇总但未解析出计数".to_string());
+    (false, format!("tests_passed 未达标：{}", detail))
+}
+
 /// 校验「工具运行输出流」是否包含指定关键词（`stdout_contains` / `tool_output_contains`）。
 ///
 /// 与文件类检查不同：本类判定针对**工具 stdout 文本**，不读任何文件，`target` 字段被忽略。
@@ -460,6 +529,21 @@ pub fn verify_task(
                     degraded_notes.push(detail);
                 } else {
                     passed_notes.push(format!("[command_succeeded] {detail}"));
+                }
+                continue;
+            }
+            failed.push(detail);
+            continue;
+        }
+        // tests_passed（P-5 真根因对策，2026-09-24）：解析 pytest 汇总，锚定「测试全绿」。
+        // 修复类任务用本类型替代 command_succeeded——「脚本跑通」≠「缺陷已修复」。
+        if ct == "tests_passed" {
+            let (ok, detail) = check_tests_passed(run_outcomes);
+            if ok {
+                if detail.contains(DEGRADED_MARK) {
+                    degraded_notes.push(detail);
+                } else {
+                    passed_notes.push(format!("[tests_passed] {detail}"));
                 }
                 continue;
             }

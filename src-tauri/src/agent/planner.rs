@@ -60,8 +60,11 @@ file*/directory_exists/json_valid/excel_row_count 须带 target；stdout_contain
 ① 调用原生工具 `native__anchor_memory`（key 简短、content 完整、category 按规范）把要点逐条沉淀为结构化记忆——\
 记忆宫殿是独立于文件系统的语义召回库，只写 .wd_mem 文件不调 anchor 会导致记忆缺条目、语义召回失效；\
 ② 需要完整长文档时另写 .wd_mem/ 下的 md 文件，两轨并存。请在 description 里明确写出「调用 native__anchor_memory 沉淀以下要点：…」。\
-\n验收绑定行为（2026-09-18 外部评审）：**改代码 / 修复 / 对齐约定类步骤，success_criteria 必须含行为级断言**——\
-如 command_succeeded（跑 pytest / 目标命令退出码 0）、text_contains（目标文件包含新符号、常量或关键改动），\
+\n验收绑定行为（2026-09-18 外部评审；2026-09-24 P-5 强化）：**改代码 / 修复 / 对齐约定类步骤，success_criteria 必须含行为级断言**——\
+修复类步骤（标题/描述含 修复/fix/bug/CVE/报错 等）**必须用 tests_passed**（解析步骤内 pytest 输出，要求 ≥1 passed 且 failed=0 且 errors=0），\
+禁止对修复类步骤只声明 command_succeeded：退出码 0 无法区分「验证脚本跑通」与「缺陷已修复」（S-J6 实测：agent 写检查脚本即闭环，修复代码一行未动）；\
+tests_passed 无需额外字段，但该步骤 description 里必须明确「运行 pytest（验收测试文件）」以便执行器真的把 pytest 输出留在运行流里；\
+非修复类的运行验证可用 command_succeeded（跑 pytest / 目标命令退出码 0）、text_contains（目标文件包含新符号、常量或关键改动），\
 禁止只声明 file_exists / file_nonempty 这类「存在性验收」——文件存在不代表行为达标，弱验收会让未完成的步骤被误判成功。\
 侦察 / 勘查类步骤：必须产出唯一结论文件（如 .wd_mem/recon.md，target 指向它 + file_nonempty），\
 后续步骤的 description 里明确写「先读取 <recon 文件> 的结论，禁止重复全目录浏览 / 重复读取已分析文件」，\
