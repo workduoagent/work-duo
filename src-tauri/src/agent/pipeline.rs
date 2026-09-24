@@ -76,6 +76,18 @@ fn subtask_iteration_budget(repair: bool) -> usize {
     }
 }
 
+/// 修复类任务信号（P-5，2026-09-24）：子任务标题/描述命中修复语义关键词。
+/// 用于熔断强制总结的让位判定——修复类任务零写入即被「暂定完成」收尾毫无依据
+/// （S-J6 实测：13 次调用全读零写即 done）。误伤面：检索类标题偶含关键词时
+/// 多走一轮修复重试，终态仍由客观校验/熔断裁决，结果不会错。
+fn looks_like_repair_task(task: &PlanSubTask) -> bool {
+    const KEYWORDS: [&str; 10] = [
+        "修复", "fix", "bug", "报错", "error", "cve", "缺陷", "patch", "调试", "crash",
+    ];
+    let hay = format!("{} {}", task.title, task.description).to_lowercase();
+    KEYWORDS.iter().any(|k| hay.contains(k))
+}
+
 /// 流水线执行结果。
 pub struct PipelineResult {
     pub final_text: String,
@@ -1690,11 +1702,20 @@ async fn run_subtask(
                             // never 模式的自动诊断重试（C-H1 实测：只建骨架即被暂定完成收尾，
                             // 修复没动手）。语义修正：有文件写入 → 强制总结文本转为诊断上下文，
                             // 按失败进入修复型重试轮（预算 16）；零文件写入（纯检索/阅读）保持 K2 暂定完成语义。
-                            if !changed_files.is_empty() {
+                            // P-5（2026-09-24，S-J6 实测）：零写入但任务本身是修复类（标题/描述命中
+                            // 修复信号）→ 零写入的「暂定完成」同样毫无依据（修复任务烧满预算连一行
+                            // 都没改，必然未完成），同样让位。误伤面：检索类标题偶含关键词时多走
+                            // 一轮修复重试（多花几分钟，终态仍由客观校验/熔断裁决，结果不会错）。
+                            let repair_signal = looks_like_repair_task(&task);
+                            if !changed_files.is_empty() || repair_signal {
                                 tracing::warn!(
-                                    "[agent] pipeline: 子任务 step={} 熔断强制总结但已有 {} 个文件写入——暂定完成让位于修复型重试",
+                                    "[agent] pipeline: 子任务 step={} 熔断强制总结但{}——暂定完成让位于修复型重试",
                                     task.step,
-                                    changed_files.len()
+                                    if repair_signal && changed_files.is_empty() {
+                                        "任务为修复类且零写入（暂定完成毫无依据）".to_string()
+                                    } else {
+                                        format!("已有 {} 个文件写入", changed_files.len())
+                                    },
                                 );
                                 forced_diag = Some(summary);
                             } else {
