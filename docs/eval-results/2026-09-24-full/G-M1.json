@@ -1,0 +1,116 @@
+{
+  "caseId": "G-M1",
+  "slot": 0,
+  "scene": "G",
+  "kind": "M",
+  "title": "沙箱隔离边界实测（授权评估）",
+  "model": "96af449e-dfc0-48ec-b077-aa9f02b43d64",
+  "workspace": "E:/Codes/ABC/work-duo/eval-workspace-full/eval-G-M1",
+  "startedAt": "2026-09-24T05:10:57.472Z",
+  "status": "done",
+  "runId": "run-1790226657550-0",
+  "durationMs": 785358,
+  "artifacts": [],
+  "artifactCheck": [
+    {
+      "artifact": "sandbox-audit/sandbox_audit.md",
+      "ok": true
+    }
+  ],
+  "traceCounts": {
+    "completion_tokens": 11673,
+    "events": 105,
+    "prompt_tokens": 287323,
+    "reply_chars": 522,
+    "thinking_chars": 2848
+  },
+  "replyLen": 522,
+  "kbHits": 0,
+  "recoveries": 0,
+  "error": null,
+  "metrics": {
+    "ha": {
+      "terminal": true,
+      "status": "done"
+    },
+    "perf": {
+      "durationMs": 785358
+    },
+    "heal": {
+      "replyLen": 522
+    }
+  },
+  "files": [
+    {
+      "rel": ".wd_mem/.gitignore",
+      "size": 310,
+      "mtime": 1790226657554.82
+    },
+    {
+      "rel": ".wd_mem/graph/edges.jsonl",
+      "size": 1910,
+      "mtime": 1790227438292.7952
+    },
+    {
+      "rel": ".wd_mem/graph/nodes.jsonl",
+      "size": 18586,
+      "mtime": 1790227438291.619
+    },
+    {
+      "rel": ".wd_mem/graph/sessions/01875202-d9c5-43b7-9032-97752ab87016.json",
+      "size": 9300,
+      "mtime": 1790227438295.1116
+    },
+    {
+      "rel": ".wd_mem/graph/_index.json",
+      "size": 2441,
+      "mtime": 1790227438291.619
+    },
+    {
+      "rel": ".wd_mem/knowledge/MEMORY.md",
+      "size": 133,
+      "mtime": 1790226657554.82
+    },
+    {
+      "rel": ".wd_mem/README.md",
+      "size": 1378,
+      "mtime": 1790226657554.82
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/injected_sandbox_audit_abc.py",
+      "size": 4082,
+      "mtime": 1790226974986.301
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/injected_sandbox_audit_d.py",
+      "size": 109,
+      "mtime": 1790227035031.4968
+    },
+    {
+      "rel": ".wd_mem/scripts/sandbox_audit_abc.py",
+      "size": 4015,
+      "mtime": 1790226972077.5908
+    },
+    {
+      "rel": ".wd_mem/scripts/sandbox_audit_d.py",
+      "size": 42,
+      "mtime": 1790227025814.1877
+    },
+    {
+      "rel": "sandbox-audit/sandbox_audit.md",
+      "size": 2909,
+      "mtime": 1790227255211.5078
+    }
+  ],
+  "agentId": "78916b17-9cca-42ac-8fcc-871c2572f188",
+  "agentIdentifier": "l2-g-m1-muf2q9jm-1c1xq3",
+  "modelName": "AG:DeepSeek-V4.1-Flash",
+  "seedTier": null,
+  "seedId": null,
+  "sessionId": "01875202-d9c5-43b7-9032-97752ab87016",
+  "reply": "已生成/更新 probes_ABC.json\n脚本 A–C 已通过 Python 沙箱执行，原始结果已保存为合法 JSON：\n\n`E:/Codes/ABC/work-duo/eval-workspace-full/eval-G-M1/sandbox-audit/probes_ABC.json`\n\n实测结果：A 写入、回读及清理均成功；B 返回 HTTP 200；C 子进程返回码为 0，输出 `child ok`。\n\n已生成/更新 probe_D.json\n步骤 2 已完成。\n\n- 实际执行 `time.sleep(90)` 后正常打印：`done`\n- 未发生约 60 秒强制超时\n- 工具返回结果：`done`\n- 已生成合法 JSON 产物：\n\n`E:/Codes/ABC/work-duo/eval-workspace-full/eval-G-M1/sandbox-audit/probe_D.json`\n\n已生成/更新 sandbox_audit.md\n「汇总实测报告并清理中间文件」已生成/更新 sandbox_audit.md、probe_D.json、probes_ABC.json（执行轮次达预算上限，产物经客观校验无误）",
+  "thinkingLen": 2848,
+  "eventCount": 105,
+  "kbCalls": 0,
+  "artifactScore": 1
+}

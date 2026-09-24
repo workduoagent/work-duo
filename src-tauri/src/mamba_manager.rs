@@ -152,7 +152,7 @@ async fn run_sidecar(
     for (k, v) in extra_envs {
         cmd = cmd.env(k, v);
     }
-    let (mut rx, _child) = cmd
+    let (mut rx, child) = cmd
         .spawn()
         .map_err(|e| format!("启动 micromamba 进程失败：{e}"))?;
 
@@ -160,14 +160,35 @@ async fn run_sidecar(
     let mut stderr = String::new();
     let mut code: Option<i32> = None; // 未收到 Terminated 时记为 None（异常）
 
-    while let Some(event) = rx.recv().await {
-        match event {
-            CommandEvent::Stdout(bytes) => stdout.push_str(&String::from_utf8_lossy(&bytes)),
-            CommandEvent::Stderr(bytes) => stderr.push_str(&String::from_utf8_lossy(&bytes)),
-            CommandEvent::Error(err) => stderr.push_str(&err),
-            CommandEvent::Terminated(payload) => code = payload.code,
-            _ => {}
-        }
+    // 沙箱执行硬超时（2026-09-24 沙箱审计）：此前 while rx.recv() 永等且无 Kill 路径，
+    // `while True` 类脚本会挂死工具调用直至 run 级兜底（子进程成孤儿继续跑）。
+    // 可配 WD_SANDBOX_TIMEOUT_SECS（默认 600s，覆盖常见 ETL/测试场景）。
+    let sandbox_timeout: u64 = std::env::var("WD_SANDBOX_TIMEOUT_SECS")
+        .ok()
+        .and_then(|s| s.trim().parse::<u64>().ok())
+        .filter(|v| *v > 0)
+        .unwrap_or(600);
+    let waited = tokio::time::timeout(
+        std::time::Duration::from_secs(sandbox_timeout),
+        async {
+            while let Some(event) = rx.recv().await {
+                match event {
+                    CommandEvent::Stdout(bytes) => stdout.push_str(&String::from_utf8_lossy(&bytes)),
+                    CommandEvent::Stderr(bytes) => stderr.push_str(&String::from_utf8_lossy(&bytes)),
+                    CommandEvent::Error(err) => stderr.push_str(&err),
+                    CommandEvent::Terminated(payload) => code = payload.code,
+                    _ => {}
+                }
+            }
+        },
+    )
+    .await;
+    if waited.is_err() {
+        let _ = child.kill(); // 超时强杀，防孤儿进程
+        return Err(format!(
+            "沙箱脚本执行超时（{}s），已强制终止进程。长任务请拆分或分段落盘中间结果。",
+            sandbox_timeout
+        ));
     }
 
     Ok((stdout, stderr, code))
