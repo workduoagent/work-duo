@@ -355,3 +355,30 @@ core 最新口径：**21/25 + 3 复验 PASS（D1-3/D2-4/D6-2）+ D3-1 修复待�
 | **缺库自愈** | ✓ `selfheal-ok 4.16.0`——humanize 缺库→pip 联网安装（Allow 通道）→重试成功，豁免通道实证 |
 
 **审计层保留**：sandbox_audit 的 net/fs_out/proc 特征观测不动（拦截层与观测层独立）。G-M1 从「三项成功无界实证」翻转为「网络被禁 + 断网标记」——沙箱从「依赖隔离」升级为「默认离线的依赖隔离」。
+
+---
+
+## 十四、沙箱文件系统有界化批次（09-24 18:3x~19:2x，commit 1d76cab/8917098/006d0ee 后续）
+
+### 实现（复用 sitecustomize 注入链做运行时拦截，弃 AST 静态扫描——exec/eval 可绕）
+
+| 层 | 内容 |
+|---|---|
+| Python fs-guard | `sitecustomize.py` 双段扩展：patch `builtins.open`（写模式）/ `os.remove\|unlink\|rmdir\|mkdir\|makedirs\|rename\|replace`（rename src+dst 双查）/ `shutil.rmtree\|copy*\|move`（写端）/ `pathlib.write_*\|open\|mkdir\|unlink\|rename` / `tarfile\|zipfile extractall`——白名单（工作空间 + %TEMP%）外 `PermissionError` |
+| Bun fs-guard | `bun --preload` guard.js：patch node:fs 写/删/移三形态（同步/回调/promises）+ `open` 写模式 flags 判定；fd（数字）跳过 |
+| 白名单注入 | `WD_SANDBOX_WS=<cwd>` + 系统临时目录；`PYTHONDONTWRITEBYTECODE=1` 防 run_tmp pycache 误拦 |
+| 逃生开关 | `WD_SANDBOX_FS=off`（文件）/ `WD_SANDBOX_NET=on`（网络）独立 |
+| G-M1 二次翻转 | 脚本 A 逃逸路径改 `C:/Users/Public/`（白名单外）；断言升级 `[NET-BLOCKED]+[FS-BLOCKED]` 双标记 |
+
+### 回归（全绿，证据 docs/eval-results/2026-09-24-fsguard/）
+
+| 验证 | 结果 |
+|---|---|
+| G-M1 双拦截 | ✓ [FS-BLOCKED] 实证（PermissionError 文案精准命中 `c:/users/public/`）；NET 标记在位 |
+| **真 bug 抓获与修复** | net-guard 用普通函数替换 `socket.socket` → `ssl.py class SSLSocket(socket)` 继承挂（import ssl 全 TypeError）→ 改**可继承占位类**（实例化时 raise），`8917098` |
+| 守卫探针 7 项 | ✓ import urllib 成功 / 双拦截 / %TEMP% 放行 / ws 内 write+copy+remove 放行 / 当前链路 NET-BLOCKED-OK |
+| C-M2（py 离线种子） | ✓ resolved=true（pytest 3/3，488s，fs-guard 下零误伤） |
+| S-B1（bun 种子） | ✓ resolved=true（bun test 5/5，922s，--preload 注入下零误伤） |
+| 缺库自愈 | ✓ 上批次已验证（Allow 通道不注入，不受影响） |
+
+**沙箱最终语义**：「默认离线 + 文件有界的依赖隔离」——网络与文件双拦截、依赖安装豁免、双逃生开关、观测层保留。批次 B'（多语言+沙箱补强）就此终结：OS 级隔离验证完成，多语言止步 Python+JS/Bun。
