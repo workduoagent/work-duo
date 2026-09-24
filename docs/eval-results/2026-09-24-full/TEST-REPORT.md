@@ -156,15 +156,22 @@
 
 （全量 phase 4 运行中，结果出来后逐条补充）
 
-### 🔴 P-4：`.wd_mem/sessions/` 文件轨不生效（6 轮仍未生成）
+### 🔴 P-4：`.wd_mem/sessions/` 文件轨不生效（6 轮仍未生成）→ ✅ 已补口并闭环（09-24 晨）
 
 | 项 | 内容 |
 |---|---|
 | 现象 | F-M6 跑满 6 轮（>触发阈值 5），`.wd_mem/sessions/` 仍为空目录；`runtime/outputs/` 正常归档 6 个文件 |
 | 归因 | `round_compactor.rs:815 resolve_project_root` 要求 session 绑定 `project_id`（查 `agent_conversation_session.project_id` → `agent_project.root_path`）；测评 session 未绑工程 → 返回 None → 不写文件轨（仅 DB 轨摘要） |
 | 性质 | 设计双轨（DB 轨 always + 文件轨需工程绑定），非缺陷；但**文件轨在无工程绑定场景下永远不生效** |
-| 可否验证 | MCP 无 project/工程管理工具（72 工具中无 project 模块），工程绑定需 UI → **纯 MCP 驱动下不可测** |
-| 处置 | ⏭ 放弃该区的文件轨验证（附原因）；建议：若需覆盖，应补 MCP 工程管理或支持 workspace 模式落 sessions |
+| **补口（09-24 晨，用户重启后）** | 新增 MCP 工具 `agent_project_ensure`（幂等 root_path 单例）/ `agent_project_list`（74 号工具）；`agent_session_create` 的 `projectId` 入参接通 |
+| **闭环验证** | ensure 工程（proj_1e22d085231c）→ session 带 projectId → 5 轮任务 → Compactor 触发（日志：合并轮次 1..=2、新摘要 559 字符）→ **`.wd_mem/sessions/06b97461....summary.md` 落盘** ✅ |
+
+### 🔴 P-3 复验（09-24 晨，红线约束生效后）→ ✅ 泄漏归零
+
+| 项 | 内容 |
+|---|---|
+| 约束 | 引擎系统提示 `.wd_mem` 段加红线：路径绝不许出现在面向用户的产物与回复中 |
+| 复验 | F-M3 重跑（昨晚泄漏 1 处）：done 181s、产物 1/1、**泄漏 0** ✅ |
 
 ## 八、不可测项（已知限制导致同类无法测试，按用户规则 4 记录）
 
