@@ -204,6 +204,21 @@
 1. **零写入熔断盲区**：复跑 262s、13 次工具调用全部是读/检查（validate.py+client.py+test 重复读 3 遍、零 Edit），第 8 轮熔断时**零文件写入** → 走「暂定完成」语义直接 done。7a25a91 让位条件只覆盖「有写入」；零写入但任务明显未完成时修复机会被吞。候选修法：intent_classified=修复类任务熔断时无论有无写入都进修复轮。
 2. **单步规划 + 基线 8 轮对双文件修复不足**：plan 只有 1 步，8 轮全耗在侦察（含重复读），一次 Edit 都没发生。首跑虽有写入进了修复轮（+8→24 轮）仍未完成。候选修法：WD_SUBTASK_MAX_ITERATIONS 调 16 做对照实验（env 改动需重启，留待办）；或修复类任务的规划强制拆步。
 
+### 🔄 P-5 修正归因（第三跑 + 引擎日志取证，11:4x）
+
+**P-5 修复①（looks_like_repair_task 让位扩展）已落地但未被第三跑触达**：t1 的 success_criteria= **非空** → 熔断走「有客观依据→失败回灌」路径，不经过「暂定完成」分支。该修复保留（对零写入场景仍有效），但 S-J6 的真根因在更深一层：
+
+**🔴 P-5 真根因： criteria 语义过弱**。第三跑引擎日志原文：
+
+> 子任务 step=1 超轮熔断收尾（验收级别=行为级，已验证）evidence=客观校验通过 1 项：[command_succeeded] 运行命令退出码
+
+agent 写的**验证缺陷存在**的检查脚本（inspect_crlf.py）正常退出（退出码 0）即满足 t1 的 command_succeeded——「脚本跑通」≠「缺陷已修复」。agent 三跑的行为由此完全理性化：72 次调用写 4 个验证脚本 + 1 个 fix 文档，唯独不改 client.py/validate.py（改不改都能过 criteria）。t1 被判闭环后 t2（写文档）正常完成 → run=done。
+
+**候选修法**（Planner/criteria 层，Rust+重启）：①修复类任务 criteria 强制生成 pytest 断言型（text_contains "passed"）而非 command_succeeded；②新增 tests_passed 校验类型（直接判分 pytest 输出）。
+
+**诚实结论**：S-J6 三跑 resolved=false 为稳定结果——该题暴露的是「criteria 语义弱 + agent 侦察偏好」的组合缺口，真实题库的价值正在于此（不是所有题都能过）。S 系列最终 **resolved 5/6 = 83.3%**。
+
+
 ### 判分基建自身的两次纠错（工具也要过同一标准）
 
 - S-J2 判分测试 v1 断言 bug（match(zzz,[!c-a]) 忽略 glob 单字符类语义）→ 修种子测试源+工作空间重判（agent 修复代码未动）。

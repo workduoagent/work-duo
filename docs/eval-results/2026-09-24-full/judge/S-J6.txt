@@ -1,7 +1,7 @@
 ============================= test session starts =============================
 platform win32 -- Python 3.13.14, pytest-9.1.1, pluggy-1.6.0 -- C:\Users\Administrator\.workbuddy\binaries\python\envs\default\Scripts\python.exe
 cachedir: .pytest_cache
-rootdir: E:\Codes\ABC\work-duo\eval-workspace-full\eval-S-J6-5\crlf-proj
+rootdir: E:\Codes\ABC\work-duo\eval-workspace-full\eval-S-J6\crlf-proj
 collecting ... collected 4 items
 
 test_client.py::test_normal_request PASSED                               [ 25%]
@@ -32,4 +32,4 @@ test_client.py:28: Failed
 =========================== short test summary info ===========================
 FAILED test_client.py::test_rejects_crlf_injection - Failed: DID NOT RAISE Va...
 FAILED test_client.py::test_rejects_bare_cr_or_lf - Failed: DID NOT RAISE Val...
-========================= 2 failed, 2 passed in 0.04s =========================
+========================= 2 failed, 2 passed in 0.07s =========================
