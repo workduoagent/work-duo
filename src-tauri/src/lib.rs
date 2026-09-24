@@ -177,6 +177,7 @@ pub fn run() {
             agent::commands::kb_remove_kb_index,
             agent::commands::kb_rebuild_index,
             grant_fs_scope,
+            sandbox_audit::read_sandbox_audit_logs,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

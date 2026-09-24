@@ -153,3 +153,44 @@ pub fn audit_dep_install(app: &AppHandle, tool: &str, env: &str, packages: &[Str
         }),
     );
 }
+
+/// 安全中心回显：读取全部沙箱审计日志（`$RESOURCES/logs/sandbox-audit.*.log`），
+/// 按「最新在前」返回（最多 500 条，防大文件拖垮 UI）。解析失败的行跳过。
+#[tauri::command]
+pub fn read_sandbox_audit_logs(app: AppHandle) -> Result<Vec<serde_json::Value>, String> {
+    let dir = audit_dir(&app);
+    let mut files: Vec<PathBuf> = match std::fs::read_dir(&dir) {
+        Ok(rd) => rd
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .filter(|p| {
+                p.file_name()
+                    .and_then(|n| n.to_str())
+                    .map(|n| n.starts_with("sandbox-audit.") && n.ends_with(".log"))
+                    .unwrap_or(false)
+            })
+            .collect(),
+        Err(_) => Vec::new(),
+    };
+    // 文件名含日期，倒序 = 最新日期在前。
+    files.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
+    let mut entries: Vec<serde_json::Value> = Vec::new();
+    'outer: for f in files {
+        let content = std::fs::read_to_string(&f).map_err(|e| format!("读取审计日志失败：{e}"))?;
+        // 同一天内文件按行顺序即时间序；文件已倒序，故每天内部也倒序插入。
+        let day_lines: Vec<&str> = content.lines().filter(|l| !l.trim().is_empty()).collect();
+        for line in day_lines.iter().rev() {
+            match serde_json::from_str::<serde_json::Value>(line) {
+                Ok(mut v) => {
+                    v["ts"] = serde_json::json!(v["ts"].as_str().unwrap_or(""));
+                    entries.push(v);
+                    if entries.len() >= 500 {
+                        break 'outer;
+                    }
+                }
+                Err(_) => continue, // 解析失败行跳过
+            }
+        }
+    }
+    Ok(entries)
+}
