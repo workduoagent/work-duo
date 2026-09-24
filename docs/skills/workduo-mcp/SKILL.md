@@ -1,6 +1,6 @@
 ---
 name: workduo-mcp
-description: WorkDuo 桌面应用（Tauri2 + React19）内建 MCP Server 的集成指南。面向外部编程工具（AI IDE / Agent 框架等任意支持 MCP 的客户端），说明如何将 127.0.0.1:18755/mcp（Streamable HTTP）注册为标准 MCP Server，并以 UI 级真实链路驱动 WorkDuo 全模块（Agent 对话 / 本地插件 / 知识库 / 记忆宫殿 / 技能中心）。覆盖：65 个工具分层、UI 级各模块流程、插件脚本范式（scripts/）、已知坑与根因修复。
+description: WorkDuo 桌面应用（Tauri2 + React19）内建 MCP Server 的集成指南。面向外部编程工具（AI IDE / Agent 框架等任意支持 MCP 的客户端），说明如何将 127.0.0.1:18755/mcp（Streamable HTTP）注册为标准 MCP Server，并以 UI 级真实链路驱动 WorkDuo 全模块（Agent 对话 / 本地插件 / 知识库 / 记忆宫殿 / 技能中心）。覆盖：77 个工具分层、UI 级各模块流程、插件脚本范式（scripts/）、已知坑与根因修复。
 agent_created: true
 ---
 
@@ -72,14 +72,14 @@ curl -s -X POST http://127.0.0.1:18755/mcp \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
 ```
 
-应返回含 72 个工具的 `tools` 数组（P2 批次新增 agent_get_run_progress）。
+应返回含 77 个工具的 `tools` 数组（2026-09-24 起含快照回滚 agent_snapshot_list/rollback）。
 
 > 注意：部分客户端会缓存工具清单。若改过 Rust 后工具数/签名没刷新，**重新加载该 MCP Server 连接**即可；
 > 也可直接打上面的 `tools/list` 端点绕过缓存核对。
 
 ---
 
-## 工具清单（72 个，按层）
+## 工具清单（77 个，按层）
 
 ### A. 引擎层（Rust 直调，无需前端）
 | 工具 | 作用 | 关键入参 |
@@ -95,7 +95,13 @@ curl -s -X POST http://127.0.0.1:18755/mcp \
 | `agent_get_run_trace` | 取**指定 run** 的轨迹缓冲；**返回外层是 `{"run_id":..., "trace":{...}}` 包裹**，取字段须先剥 `trace` 层：`r.trace.{events, thinking, reply, counts}`。#8 per-run：必须传 `run_id`（由 `agent_run_task` 返回的 `run_id`），按 run 取独立桶，**并发 run 互不串台**；不传则返回空桶 | `run_id`（必填，来自 `agent_run_task` 返回） |
 | `agent_get_run_progress` | **长任务进度观测（P2-1）**：轮询这个而非干等。返回 `{status, elapsedSec, budgetSec, step, totalSteps, stepTitle, lastTool}`——elapsedSec 逼近 budgetSec 即将进入预算软窗口（最后 30s 停止发起新步骤）。step/totalSteps 来自规划事件（SIMPLE_CHAT 为 0/0） | `run_id`（必填） |
 | `agent_sweep_orphan_rounds` | **孤儿轮次按需清扫**：并发/取消/崩溃遗留 end_time IS NULL 轮次，此前仅启动时清扫；返回 {ok, swept}。用途：并发/取消后调用并断言无残留「进行中」轮次 | 无入参 |
-| `agent_session_compact_status` | 会话滚动压缩状态+成本观测：{totalTurns,summaryRoundCount,pendingUncompacted,triggerThreshold(5),willTriggerNext,summaryChars,tokens{prompt,completion,tools},projectBound}；pendingUncompacted≥5 触发后台压缩；projectBound=false 时 .wd_mem/sessions 文件轨不落盘 | `sessionId` |### B. 模块发现层（Rust 直读 workduo.db，零业务副作用）
+| `agent_session_compact_status` | 会话滚动压缩状态+成本观测：{totalTurns,summaryRoundCount,pendingUncompacted,triggerThreshold(5),willTriggerNext,summaryChars,tokens{prompt,completion,tools},projectBound}；pendingUncompacted≥5 触发后台压缩；projectBound=false 时 .wd_mem/sessions 文件轨不落盘 | `sessionId` |
+| `agent_project_ensure` | 项目绑定（P-4，sessions 文件轨前置）：为会话/agent 绑定工作空间项目，projectBound=true 后 sessions 轨才落盘 | 见 `agent_list_*` 装配指引 |
+| `agent_project_list` | 列出已绑定项目（P-4 配套查询口） | 无入参 |
+| `agent_snapshot_list` | **工作空间快照列举（D' 产物回滚，2026-09-24）**：每次 run_task 前引擎自动对工作空间业务文件做快照（排除 .wd_mem/node_modules 等），每 agent 保留最近 5 份。返回 {ok, count, snapshots:[{stamp, path, files}]} | `agentId` |
+| `agent_snapshot_rollback` | **工作空间回滚到指定快照（D'）**：清空业务文件并从快照恢复（内部结构保留），回滚前自动安全快照（可撤销）。⚠️ 覆盖当前业务文件——先确认无未保存改动。产物回滚正确场景：run1 产物 → run2 写坏 → 回滚到 run2 **前**的快照（= run1 完好状态） | `agentId` / `stamp`（list 返回）/ `workspace`（绝对路径） |
+
+### B. 模块发现层（Rust 直读 workduo.db，零业务副作用）
 | 工具 | 作用 |
 |---|---|
 | `agent_list_models` | 模型（含 `config`=默认参数副本；大脑须 `category∈{text,multimodal}` 且 `enabled=1`） |
@@ -329,6 +335,16 @@ node scripts/kb_driver.mjs
 
 > 注意：UI 级工具（如 `kb_*` / `plugin_*` / `memory_*` / `agent_ui_*`）经 `dispatch_ui` 统一回包 **`{ok,data}` 信封**，
 > 驱动解析时务必 `unwrap .data` 才是真实载荷（首版驱动曾因未拆 data 取不到 `kb_create` 的 `id`）。
+
+## 沙箱守卫与环境开关（2026-09-24）
+
+沙箱从「依赖隔离」升级为「**默认离线 + 文件有界的依赖隔离**」——运行用户脚本（run_python_sandbox / run_node_sandbox）时自动注入，依赖安装 / 环境管理通道不受影响：
+
+- **网络默认关**：代理 env 指向 127.0.0.1:9（拦 requests/urllib/httpx/axios/fetch）+ Python `sitecustomize` 禁 socket（raw 层含 DNS）。脚本联网报 `RuntimeError: 沙箱默认离线…`
+- **文件系统有界**：写/删/移/解压仅放行 **工作空间 + 系统临时目录**，越界 `PermissionError: 沙箱文件系统有界…`（Python sitecustomize / Bun --preload guard.js）
+- **逃生开关**：`WD_SANDBOX_NET=on`（放行联网）/ `WD_SANDBOX_FS=off`（放行文件写入）——App 启动 env，需重启生效
+- **LLM 限流**：`WD_LLM_RPM=<每分钟请求数>`（按模型计数，0/未设置=不限）
+- **产物回滚**：每次 run_task 前自动快照工作空间业务文件（每 agent 留 5 份），`agent_snapshot_list` / `agent_snapshot_rollback` 按需回滚（回滚前自动安全快照）
 
 ## 已知坑与根因修复（改完需 `npm run tauri` 重新构建才生效）
 
