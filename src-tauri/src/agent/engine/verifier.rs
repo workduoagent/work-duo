@@ -499,6 +499,25 @@ pub fn verify_task(
     actual_written: &[PathBuf],
     run_outcomes: &[RunOutcome],
 ) -> VerificationResult {
+    // 台账 S8：行为级门槛（tool_uses_min）单独判定——需要 run_outcomes 计数，
+    // 与文件谓词类（check_one）不同源。任一不满足即整体不通过。
+    for c in &task.success_criteria {
+        if c.check_type.to_lowercase() == "tool_uses_min" {
+            let need = c.threshold.unwrap_or(1);
+            if run_outcomes.len() < need {
+                return VerificationResult {
+                    met: false,
+                    details: format!(
+                        "行为级证据不足：工具调用轮 {} < 要求 {}（模型可能未实际执行任何操作）",
+                        run_outcomes.len(),
+                        need
+                    ),
+                    verified: false,
+                    evidence: String::new(),
+                };
+            }
+        }
+    }
     if task.success_criteria.is_empty() {
         return VerificationResult {
             met: true,

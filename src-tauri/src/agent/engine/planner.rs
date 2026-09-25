@@ -264,7 +264,15 @@ fn single_task_fallback(prompt: &str) -> PlanDAG {
             task_id: "t1".into(),
             title: "完成用户任务".into(),
             description: prompt.to_string(),
-            success_criteria: vec![],
+            // 台账 S8：降级单任务无法静态推断产物名，但至少要求「发起过一次工具调用」——
+            // 闭环不再完全退化为模型自报（纯问答类任务若零工具调用，会在校验时给出
+            // 「行为级证据不足」并进入恢复链路；可接受——降级本身即规划失败的信号）。
+            success_criteria: vec![crate::agent::types::SuccessCriterion {
+                check_type: "tool_uses_min".into(),
+                target: None,
+                value: None,
+                threshold: Some(1),
+            }],
             depends_on: vec![],
         }],
     }
