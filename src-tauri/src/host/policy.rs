@@ -1,6 +1,6 @@
 //! Host 路径与命令策略（HOST_RISKY_SIGNALS + 路径白/黑名单）。
 //!
-//! **与本地 `agent/policy.rs` 硬隔离**：本文件不得调用 `policy::evaluate_edge` /
+//! **与本地 `agent/engine/policy.rs` 硬隔离**：本文件不得调用 `policy::evaluate_edge` /
 //! 读写 local grants；同字面信号（如 `.env`）也以 `host:` 前缀独立声明。
 
 use crate::host::types::{HostAction, ServerBinding};
