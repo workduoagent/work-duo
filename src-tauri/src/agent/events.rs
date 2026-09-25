@@ -76,7 +76,7 @@ fn now_ms() -> i64 {
 
 /// 取（或建）指定 run_id 的缓冲桶；首次访问初始化并做容量 GC。
 fn with_run_trace_mut(rid: &str, f: impl FnOnce(&mut RunTrace)) {
-    let mut map = run_traces().lock().unwrap();
+    let mut map = run_traces().lock().unwrap_or_else(|e| e.into_inner());
     if !map.contains_key(rid) {
         map.insert(
             rid.to_string(),
@@ -103,7 +103,7 @@ fn with_run_trace_mut(rid: &str, f: impl FnOnce(&mut RunTrace)) {
 /// 自测闭环（#8 per-run）：为指定 run_id 新建/重置其轨迹缓冲桶，保证只反映当次 run。
 /// 不触碰其他 run 的桶（并发 run 互不干扰）。
 pub fn reset_trace(run_id: &str) {
-    let mut map = run_traces().lock().unwrap();
+    let mut map = run_traces().lock().unwrap_or_else(|e| e.into_inner());
     map.insert(
         run_id.to_string(),
         RunTrace {
@@ -224,7 +224,7 @@ fn collect_workspace_files(
 /// run_id 不存在时返回空结构（不报错，便于并发场景早查询）。
 pub fn get_trace(run_id: &str) -> serde_json::Value {
     let (events, thinking, reply, buckets) = {
-        let map = run_traces().lock().unwrap();
+        let map = run_traces().lock().unwrap_or_else(|e| e.into_inner());
         match map.get(run_id) {
             Some(b) => (
                 b.events.clone(),

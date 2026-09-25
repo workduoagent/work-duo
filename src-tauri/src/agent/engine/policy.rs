@@ -1,5 +1,8 @@
 //! 边审批策略引擎（15007）。
 //!
+//! **与 `host/policy.rs`（host 域）硬隔离**：本地信号表与 grants 不适用于 host__* 工具，
+//! host 侧同样独立声明 `host:` 前缀信号——两侧勿混用（调度层按 authz_domain 分流）。
+//!
 //! 在审批门禁处追加一道「操作 × 危险信号」外层风险校验，补静态按工具审批的权限盲区
 //! （如 auto 模式下静默写 `.env` / `.github/workflows` / 依赖锁）。
 //!
@@ -273,7 +276,7 @@ impl ApprovalGrants {
 
     /// 写入授权（计划批准批量写入 / 「记住」单条写入）。超上限丢弃最旧语义由容量兜底。
     pub fn grant(&self, key: &str) {
-        let mut g = self.inner.lock().unwrap();
+        let mut g = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         if g.len() >= GRANTS_MAX {
             return;
         }
@@ -281,11 +284,11 @@ impl ApprovalGrants {
     }
 
     pub fn contains(&self, key: &str) -> bool {
-        self.inner.lock().unwrap().contains(key)
+        self.inner.lock().unwrap_or_else(|e| e.into_inner()).contains(key)
     }
 
     pub fn reset(&self) {
-        self.inner.lock().unwrap().clear();
+        self.inner.lock().unwrap_or_else(|e| e.into_inner()).clear();
     }
 }
 

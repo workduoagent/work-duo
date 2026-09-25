@@ -160,7 +160,7 @@ pub fn stage_begin(name: String, mime: String) -> String {
 
 /// 追加一个分片（原始字节，来自前端 `Uint8Array`）。
 pub fn stage_append(stage_id: &str, data: &[u8]) -> Result<(), String> {
-    let mut m = staging_map().lock().unwrap();
+    let mut m = staging_map().lock().unwrap_or_else(|e| e.into_inner());
     match m.get_mut(stage_id) {
         Some(f) => {
             f.data.extend_from_slice(data);
@@ -191,7 +191,7 @@ pub fn stage_commit(stage_id: &str, workspace: &Option<String>) -> Result<String
 
 /// 取消分片暂存（失败 / 超时清理，避免缓冲泄漏）。
 pub fn stage_abort(stage_id: &str) {
-    staging_map().lock().unwrap().remove(stage_id);
+    staging_map().lock().unwrap_or_else(|e| e.into_inner()).remove(stage_id);
 }
 
 /// 把当前轮附件注入最后一条 user 消息，按三类路由：

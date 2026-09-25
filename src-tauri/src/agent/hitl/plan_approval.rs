@@ -62,20 +62,20 @@ impl PlanApprovalHub {
 
     /// 登记一个待确认计划，触发前端计划确认弹窗（同时唤醒可能的监听者，幂等）。
     pub fn request(&self, req: PlanApprovalRequest) {
-        *self.pending.lock().unwrap() = Some(req);
+        *self.pending.lock().unwrap_or_else(|e| e.into_inner()) = Some(req);
         self.notify.notify_one();
         tracing::info!("[agent] plan_approval: 进入等待计划审批（emit agent-plan-approval-needed）");
     }
 
     /// 当前是否有计划在等待审批（前端可用以禁用按钮 / 显示面板）。
     pub fn is_blocked(&self) -> bool {
-        self.pending.lock().unwrap().is_some()
+        self.pending.lock().unwrap_or_else(|e| e.into_inner()).is_some()
     }
 
     /// 取当前挂起计划的摘要（供 `agent_get_status` 暴露 `waiting_approval`）。
     /// 返回 `(goal_summary, step_count)`；无挂起计划时返回 None。
     pub fn snapshot(&self) -> Option<(String, usize)> {
-        let p = self.pending.lock().unwrap();
+        let p = self.pending.lock().unwrap_or_else(|e| e.into_inner());
         p.as_ref().map(|req| (req.goal_summary.clone(), req.plan.tasks.len()))
     }
 
@@ -88,31 +88,31 @@ impl PlanApprovalHub {
             PlanApprovalDecision::Cancel => "Cancel".into(),
         };
         tracing::info!("[agent] plan_approval: 收到审批决策 {}", label);
-        *self.decision.lock().unwrap() = Some(d);
+        *self.decision.lock().unwrap_or_else(|e| e.into_inner()) = Some(d);
         self.notify.notify_one();
     }
 
     /// 取消：标记决策为 Cancel 并唤醒（与 `wait` 同生命周期；取消标志优先）。
     pub fn cancel(&self) {
-        *self.decision.lock().unwrap() = Some(PlanApprovalDecision::Cancel);
+        *self.decision.lock().unwrap_or_else(|e| e.into_inner()) = Some(PlanApprovalDecision::Cancel);
         self.notify.notify_one();
     }
 
     /// 任务整体启动时清空前一轮残留（新一轮开始即重置）。
     pub fn reset(&self) {
-        *self.pending.lock().unwrap() = None;
-        *self.decision.lock().unwrap() = None;
+        *self.pending.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        *self.decision.lock().unwrap_or_else(|e| e.into_inner()) = None;
     }
 
     /// 挂起直到收到审批决策或用户取消。决策被消费时同步清除挂起态（前端面板收起）。
     pub async fn wait(&self, cancel: &AtomicBool) -> PlanApprovalDecision {
         loop {
             if cancel.load(Ordering::SeqCst) {
-                *self.pending.lock().unwrap() = None;
+                *self.pending.lock().unwrap_or_else(|e| e.into_inner()) = None;
                 return PlanApprovalDecision::Cancel;
             }
-            if let Some(d) = self.decision.lock().unwrap().take() {
-                *self.pending.lock().unwrap() = None;
+            if let Some(d) = self.decision.lock().unwrap_or_else(|e| e.into_inner()).take() {
+                *self.pending.lock().unwrap_or_else(|e| e.into_inner()) = None;
                 return d;
             }
             self.notify.notified().await;

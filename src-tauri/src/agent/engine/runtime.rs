@@ -151,7 +151,7 @@ impl AgentRuntime {
     /// 而非返回 `Ok(())` 后把任务静默忽略（UX 修复：连点「运行」可见「已有任务在运行」）。
     /// **不同 Agent 互不影响**：A 在跑不挡 B。
     pub fn try_acquire_run_lock(&self, agent_id: &str) -> Option<(AgentTaskState, RunningGuard)> {
-        let mut tasks = self.tasks.lock().unwrap();
+        let mut tasks = self.tasks.lock().unwrap_or_else(|e| e.into_inner());
         let state = tasks
             .entry(agent_id.to_string())
             .or_insert_with(|| AgentTaskState::new(agent_id));
@@ -176,7 +176,7 @@ impl AgentRuntime {
     /// 按需路由任务状态束：显式 agent_id 精确查找；缺省时取「唯一在跑」的任务
     /// （决策/取消命令的平滑兼容——单任务场景前端可不传 agent_id，多任务时必须显式传）。
     pub fn resolve_task_state(&self, agent_id: Option<&str>) -> Result<AgentTaskState, String> {
-        let tasks = self.tasks.lock().unwrap();
+        let tasks = self.tasks.lock().unwrap_or_else(|e| e.into_inner());
         match agent_id {
             Some(id) => tasks.get(id).cloned().ok_or_else(|| {
                 format!("智能体 {id} 当前没有运行中的任务（状态束已随上次任务回收）")
@@ -199,7 +199,7 @@ impl AgentRuntime {
     /// 按 agent_id 精确取任务状态束（任务内工具执行时使用，如 ask_user_choice 的
     /// choice 中枢路由）；该 Agent 无运行中任务返回 None。
     pub fn task_state(&self, agent_id: &str) -> Option<AgentTaskState> {
-        self.tasks.lock().unwrap().get(agent_id).cloned()
+        self.tasks.lock().unwrap_or_else(|e| e.into_inner()).get(agent_id).cloned()
     }
 
     /// 启动一轮任务（被 `run_agent_task` 命令调用，后台 spawn）。

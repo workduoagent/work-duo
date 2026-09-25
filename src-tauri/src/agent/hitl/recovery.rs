@@ -141,21 +141,21 @@ impl RecoveryHub {
 
     /// 登记一个受阻子任务，触发前端恢复面板（同时唤醒可能的监听者，幂等）。
     pub fn request(&self, req: RecoveryRequest) {
-        *self.pending.lock().unwrap() = Some(req);
+        *self.pending.lock().unwrap_or_else(|e| e.into_inner()) = Some(req);
         self.notify.notify_one();
         tracing::info!("[agent] recovery: 子任务 step 进入等待恢复（emit agent-recovery-needed）");
     }
 
     /// 当前是否有子任务在等待恢复（前端可用以禁用按钮 / 显示面板）。
     pub fn is_blocked(&self) -> bool {
-        self.pending.lock().unwrap().is_some()
+        self.pending.lock().unwrap_or_else(|e| e.into_inner()).is_some()
     }
 
     /// 当前挂起的恢复请求快照（供 `get_status_detail` 透出给外部 Agent；无挂起为 None）。
     /// 20260922：MCP 侧此前完全观测不到恢复等待（get_status 只透审批/计划），外部驱动
     /// 遇步骤失败重试耗尽即永久卡死——本快照 + `agent_submit_recovery_decision` 补齐闭环。
     pub fn snapshot(&self) -> Option<RecoveryRequest> {
-        self.pending.lock().unwrap().clone()
+        self.pending.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
     /// 回传恢复决策并唤醒挂起的流水线。
@@ -182,31 +182,31 @@ impl RecoveryHub {
             step,
             title,
         );
-        *self.decision.lock().unwrap() = Some(d);
+        *self.decision.lock().unwrap_or_else(|e| e.into_inner()) = Some(d);
         self.notify.notify_one();
     }
 
     /// 取消：标记决策为 Cancel 并唤醒（与 `wait` 同生命周期；取消标志优先）。
     pub fn cancel(&self) {
-        *self.decision.lock().unwrap() = Some(RecoveryDecision::Cancel);
+        *self.decision.lock().unwrap_or_else(|e| e.into_inner()) = Some(RecoveryDecision::Cancel);
         self.notify.notify_one();
     }
 
     /// 任务整体启动时清空前一轮残留（新一轮开始即重置）。
     pub fn reset(&self) {
-        *self.pending.lock().unwrap() = None;
-        *self.decision.lock().unwrap() = None;
+        *self.pending.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        *self.decision.lock().unwrap_or_else(|e| e.into_inner()) = None;
     }
 
     /// 挂起直到收到恢复决策或用户取消。决策被消费时同步清除挂起态（前端面板收起）。
     pub async fn wait(&self, cancel: &AtomicBool) -> RecoveryDecision {
         loop {
             if cancel.load(Ordering::SeqCst) {
-                *self.pending.lock().unwrap() = None;
+                *self.pending.lock().unwrap_or_else(|e| e.into_inner()) = None;
                 return RecoveryDecision::Cancel;
             }
-            if let Some(d) = self.decision.lock().unwrap().take() {
-                *self.pending.lock().unwrap() = None;
+            if let Some(d) = self.decision.lock().unwrap_or_else(|e| e.into_inner()).take() {
+                *self.pending.lock().unwrap_or_else(|e| e.into_inner()) = None;
                 return d;
             }
             self.notify.notified().await;

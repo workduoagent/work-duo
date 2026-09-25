@@ -409,7 +409,7 @@ async fn handle_jsonrpc(app: &AppHandle, req: &Value, session_id: Option<&str>) 
                 .unwrap_or("2024-11-05")
                 .to_string();
             let new_session = next_req_id();
-            sessions().lock().unwrap().insert(new_session.clone());
+            sessions().lock().unwrap_or_else(|e| e.into_inner()).insert(new_session.clone());
             Some((
                 json!({
                     "jsonrpc": "2.0",
@@ -980,7 +980,7 @@ async fn dispatch_ui_timeout(
 ) -> Value {
     let req_id = next_req_id();
     let (tx, rx) = tokio::sync::oneshot::channel::<Value>();
-    pending().lock().unwrap().insert(req_id.clone(), tx);
+    pending().lock().unwrap_or_else(|e| e.into_inner()).insert(req_id.clone(), tx);
     let _ = app.emit(
         "mcp:intent",
         json!({ "id": req_id, "intent": intent, "payload": payload }),
@@ -995,7 +995,7 @@ async fn dispatch_ui_timeout(
 /// 前端完成 UI 意图处理后回传结果（由 mcpBridge 通过 invoke 调用）。
 #[tauri::command]
 pub async fn mcp_resolve_result(id: String, ok: bool, data: Value) {
-    if let Some(tx) = pending().lock().unwrap().remove(&id) {
+    if let Some(tx) = pending().lock().unwrap_or_else(|e| e.into_inner()).remove(&id) {
         let _ = tx.send(json!({ "ok": ok, "data": data }));
     }
 }
