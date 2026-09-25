@@ -103,6 +103,12 @@ pub fn run() {
                 if let Err(e) = mamba_manager::ensure_default_env(&handle).await {
                     tracing::error!("[mamba] 默认环境初始化失败：{e}");
                 }
+                // 沙箱安全配置快照（台账 P0-3）：启动时留痕；逃生阀非默认态额外写审计事件。
+                sandbox_audit::audit_sandbox_config_snapshot(
+                    &handle,
+                    mamba_manager::fs_block_enabled(),
+                    mamba_manager::net_block_enabled(),
+                );
                 if let Err(e) = bun_manager::ensure_default_bun(&handle).await {
                     tracing::error!("[bun] 默认环境初始化失败：{e}");
                 }
@@ -180,6 +186,7 @@ pub fn run() {
             agent::commands::kb_rebuild_index,
             grant_fs_scope,
             sandbox_audit::read_sandbox_audit_logs,
+            agent::commands::sandbox_guard_status,
             host::commands::server_host_list,
             host::commands::server_host_get,
             host::commands::server_host_save,

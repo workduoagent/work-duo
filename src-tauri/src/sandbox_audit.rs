@@ -17,6 +17,7 @@ use tauri::Manager;
 
 /// 审计事件类型：脚本静态特征。
 pub const TYPE_SCRIPT_FEATURES: &str = "script_features";
+pub const TYPE_ESCAPE_VALVE: &str = "escape-valve";
 /// 审计事件类型：依赖安装。
 pub const TYPE_DEP_INSTALL: &str = "dep_install";
 
@@ -135,6 +136,33 @@ pub fn audit_script_features(
                 "proc": features.proc,
             },
             "policy": "observe-only",
+        }),
+    );
+}
+
+/// 沙箱安全配置快照（台账 P0-3）：启动时记录守卫生效状态。
+/// 恒打 INFO 一行快照；逃生阀处于**非默认态**（WD_SANDBOX_NET=on / WD_SANDBOX_FS=off）
+/// 时额外写审计事件——能改 App 环境的路径若静默摘除防线，此处必须留痕。
+pub fn audit_sandbox_config_snapshot(app: &AppHandle, fs_blocked: bool, net_blocked: bool) {
+    tracing::info!(
+        "[sandbox] 安全配置快照：fs_guard={} net_guard={} (WD_SANDBOX_FS=off 关闭文件有界 / WD_SANDBOX_NET=on 关闭断网)",
+        fs_blocked,
+        net_blocked
+    );
+    if fs_blocked && net_blocked {
+        return; // 默认态不产生审计噪音
+    }
+    write_event(
+        app,
+        serde_json::json!({
+            "type": TYPE_ESCAPE_VALVE,
+            "fs_guard": fs_blocked,
+            "net_guard": net_blocked,
+            "escape": {
+                "net_on": !net_blocked,
+                "fs_off": !fs_blocked,
+            },
+            "policy": "startup-snapshot",
         }),
     );
 }

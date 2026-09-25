@@ -44,10 +44,29 @@ function formatAuditLine(e: SandboxAuditEntry): string {
   return `[${ts}] 脚本特征 · ${e.tool || '-'} · net: ${(f?.net || []).join(',') || '-'} · 外部路径: ${(f?.fs_out || []).join(',') || '-'} · 派生: ${(f?.proc || []).join(',') || '-'}`
 }
 
+/** 沙箱守卫状态快照（对应 Rust sandbox_guard_status）。 */
+interface SandboxGuardStatus {
+  fsGuard: boolean
+  netGuard: boolean
+  escapeNetOn: boolean
+  escapeFsOff: boolean
+  /** Bun 侧网络隔离口径：false = 不承诺（观测层兜底） */
+  bunNetworkIsolated: boolean
+}
+
+async function fetchGuardStatus(): Promise<SandboxGuardStatus | null> {
+  try {
+    return await invoke<SandboxGuardStatus>('sandbox_guard_status')
+  } catch {
+    return null
+  }
+}
+
 /** 安全中心分区：本地数据存储位置说明 + 沙箱审计回显 + 重置所有设置为默认。 */
 export function SecurityPanel({ settings, onChange }: Props) {
   const [auditLogs, setAuditLogs] = useState<SandboxAuditEntry[]>([])
   const [auditLoading, setAuditLoading] = useState(false)
+  const [guardStatus, setGuardStatus] = useState<SandboxGuardStatus | null>(null)
 
   // 拉取审计日志（挂载时一次；刷新按钮手动触发——依赖数组必须为空，
   // 否则 setAuditLoading(true) → 依赖变化 → effect 重跑 → 死循环闪屏（实测踩坑）。
@@ -62,6 +81,10 @@ export function SecurityPanel({ settings, onChange }: Props) {
   useEffect(() => {
     loadAudit()
   }, [loadAudit])
+
+  useEffect(() => {
+    void fetchGuardStatus().then(setGuardStatus)
+  }, [])
 
   return (
     <div className="set-section">
@@ -84,6 +107,43 @@ export function SecurityPanel({ settings, onChange }: Props) {
         message="数据隔离"
         description="所有密钥（如模型 API Key、MCP 认证配置）仅以本地数据库存储，应用卸载或清除数据后将被一并删除。"
       />
+
+      <h3 className="set-section__title">沙箱安全</h3>
+
+      {guardStatus && (
+        <SettingItem
+          title={<span className="set-item__title-inline"><span className="set-item__title-icon"><ShieldAlert size={15} /></span>沙箱守卫状态（Python / Bun 运行时）</span>}
+          description="用户脚本运行时的隔离边界快照。逃生阀仅在启动前经环境变量设置，改动会在启动日志与沙箱审计中留痕。"
+        >
+          <div className="set-sec-path">
+            <code>
+              Python 文件守卫：{guardStatus.fsGuard ? '启用（仅工作空间与系统临时目录可写）' : '已关闭（WD_SANDBOX_FS=off）'}
+              <br />
+              Python 网络守卫：{guardStatus.netGuard ? '启用（默认离线）' : '已关闭（WD_SANDBOX_NET=on）'}
+              <br />
+              Bun 网络隔离：{guardStatus.bunNetworkIsolated ? '启用' : '不承诺（观测层兜底）'}
+            </code>
+            <span className="set-sec-path__note">
+              Bun 侧守卫仅覆盖文件系统入口，网络隔离暂不承诺——不受信任脚本请勿用 Bun 运行时执行。
+            </span>
+          </div>
+        </SettingItem>
+      )}
+
+      {guardStatus && (guardStatus.escapeNetOn || guardStatus.escapeFsOff) && (
+        <Alert
+          className="set-sec-alert"
+          type="warning"
+          showIcon
+          message="沙箱逃生阀处于开启状态"
+          description={`检测到 ${[
+            guardStatus.escapeNetOn ? 'WD_SANDBOX_NET=on（脚本联网放行）' : null,
+            guardStatus.escapeFsOff ? 'WD_SANDBOX_FS=off（文件系统有界关闭）' : null,
+          ]
+            .filter(Boolean)
+            .join('；')}。该状态会记入沙箱审计（escape-valve 事件）；仅在你完全信任将运行的脚本时使用。`}
+        />
+      )}
 
       <h3 className="set-section__title">对外网络请求</h3>
 

@@ -675,6 +675,12 @@ pub async fn submit_choice_decision(
 /// 取消当前任务（最佳努力）：置位该 Agent 的取消标志，后台 run_task 流水线与流式拉取循环
 /// 会在下一轮边界 / 下一个 SSE chunk 处感知并立即终止，无需额外的任务句柄。
 /// 20260919002：按 agent_id 路由（并行任务只停目标 Agent）；agent_id 缺省时取唯一在跑任务。
+/// 沙箱守卫状态快照（设置页「沙箱安全」区块读取；台账 P0-3）。
+#[tauri::command]
+pub fn sandbox_guard_status() -> Result<serde_json::Value, String> {
+    Ok(crate::mamba_manager::guard_status_snapshot())
+}
+
 #[tauri::command]
 pub async fn cancel_agent_task(
     runtime: State<'_, AgentRuntime>,

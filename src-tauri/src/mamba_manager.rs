@@ -346,6 +346,21 @@ if _os.environ.get("WD_SANDBOX_FS_GUARD") == "1":
 "#;
 
 /// 确保沙箱守卫目录与 sitecustomize.py 在位（幂等，内容漂移时重写），返回 guard 目录字符串。
+/// 沙箱守卫状态快照（供设置页展示；台账 P0-3）。
+/// `bun_network_isolated: false` 为**产品口径明示**：Bun 侧无 socket patch，
+/// 网络隔离不承诺（观测层 sandbox_audit 兜底），见 SANDBOX_GUARD_JS 头注。
+pub fn guard_status_snapshot() -> serde_json::Value {
+    let fs_blocked = fs_block_enabled();
+    let net_blocked = net_block_enabled();
+    serde_json::json!({
+        "fsGuard": fs_blocked,
+        "netGuard": net_blocked,
+        "escapeNetOn": !net_blocked,
+        "escapeFsOff": !fs_blocked,
+        "bunNetworkIsolated": false,
+    })
+}
+
 pub(crate) fn ensure_sandbox_guard(mamba_root: &Path) -> Result<String, String> {
     let dir = mamba_root.join("net-guard");
     let file = dir.join("sitecustomize.py");

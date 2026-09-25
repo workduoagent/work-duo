@@ -128,6 +128,9 @@ impl BunManager {
 /// patch node:fs 的写/删/移入口（同步 + 回调 + promises 三形态），白名单 =
 /// `WD_SANDBOX_WS`（工作空间）+ 系统临时目录，越界 throw。fd（数字）跳过。
 const SANDBOX_GUARD_JS: &str = r#"// WorkDuo 沙箱文件系统守卫（bun --preload）
+// ⚠️ 覆盖口径（2026-09-25 P0-3 明示）：本守卫仅 patch node:fs 的写/删/移入口；
+// **网络隔离不承诺**——Bun 侧无同款 socket patch，不遵守代理 env 的 fetch/连接可穿透，
+// 由观测层（sandbox_audit observe-only）兜底。完整网络守卫待后续版本提供。
 if (process.env.WD_SANDBOX_FS_GUARD === "1") {
   const _path = require("path")
   const _os = require("os")
