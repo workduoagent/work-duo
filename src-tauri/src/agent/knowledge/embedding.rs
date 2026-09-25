@@ -269,7 +269,7 @@ pub async fn probe_embedding_inner(
 /// Tauri 命令：探测嵌入连通性（设置页「测试连通」按钮 / Step1 验收）。
 #[tauri::command]
 pub async fn probe_embedding(app: AppHandle) -> Result<EmbeddingProbe, String> {
-    let pool = crate::agent::round_compactor::get_pool(&app).await?;
+    let pool = crate::agent::engine::round_compactor::get_pool(&app).await?;
     probe_embedding_inner(&app, &pool).await
 }
 

@@ -41,7 +41,7 @@ pub struct PlanApprovalRequest {
     /// DAG 计划（步骤清单）。
     pub plan: PlanDAG,
     /// 15007 边审批策略：计划内敏感操作清单（批准=一次授权整清单，写入 grants）。
-    pub sensitive_ops: Vec<crate::agent::policy::PlanSensitiveOp>,
+    pub sensitive_ops: Vec<crate::agent::engine::policy::PlanSensitiveOp>,
 }
 
 /// 计划审批挂起中枢（托管于 `AgentRuntime` 共享状态，后端任务与命令跨任务访问）。

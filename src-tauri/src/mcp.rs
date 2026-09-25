@@ -355,7 +355,7 @@ pub async fn call_mcp_tool(request: McpCallRequest) -> McpCallResponse {
         redact_endpoint(&request.endpoint_url),
         request.protocol_type,
         request.auth_type.as_deref().unwrap_or("NONE"),
-        crate::agent::runtime::clip(
+        crate::agent::engine::runtime::clip(
             &request.arguments.as_ref().map(|v| v.to_string()).unwrap_or_else(|| "{}".into()),
             500,
         ),
@@ -545,7 +545,7 @@ pub async fn call_mcp_tool(request: McpCallRequest) -> McpCallResponse {
         ok,
         raw.chars().count(),
         start.elapsed().as_millis(),
-        crate::agent::runtime::clip(&raw, 500),
+        crate::agent::engine::runtime::clip(&raw, 500),
     );
 
     McpCallResponse {

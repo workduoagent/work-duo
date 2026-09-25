@@ -13,7 +13,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use tauri::AppHandle;
 
-use crate::agent::round_compactor;
+use crate::agent::engine::round_compactor;
 use crate::agent::types::AgentRuntimeConfig;
 use crate::agent::types::ArtifactRef;
 use crate::agent::types::PlanSubTask;

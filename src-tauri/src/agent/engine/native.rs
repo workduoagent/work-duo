@@ -28,13 +28,13 @@ use tokio::time::timeout;
 use tokio::time::Duration;
 
 use crate::agent::events;
-use crate::agent::graph::{KnowledgeGraph, NodeKind};
-use crate::agent::tools::AgentTool;
-use crate::agent::tools::PathGuard;
-use crate::agent::tools::PermissionLevel;
-use crate::agent::tools::ToolContext;
-use crate::agent::tools::ToolError;
-use crate::agent::tools::ToolRegistry;
+use crate::agent::engine::graph::{KnowledgeGraph, NodeKind};
+use crate::agent::engine::tools::AgentTool;
+use crate::agent::engine::tools::PathGuard;
+use crate::agent::engine::tools::PermissionLevel;
+use crate::agent::engine::tools::ToolContext;
+use crate::agent::engine::tools::ToolError;
+use crate::agent::engine::tools::ToolRegistry;
 use crate::agent::types::ChoiceOption;
 use crate::agent::types::ChoiceRequest;
 use crate::mamba_manager::MambaManager;
@@ -377,7 +377,7 @@ impl AgentTool for ReadFileTool {
                     content.len(),
                     content.chars().count(),
                     started.elapsed().as_millis(),
-                    crate::agent::runtime::clip(&content, 500),
+                    crate::agent::engine::runtime::clip(&content, 500),
                 );
                 Ok(content)
             }
@@ -460,7 +460,7 @@ impl AgentTool for WriteFileTool {
             path,
             abs.display(),
             content.len(),
-            crate::agent::runtime::clip(content, 500),
+            crate::agent::engine::runtime::clip(content, 500),
         );
         let started = Instant::now();
         // 问题 3 修复：打开时不截断（truncate(false)），待 TOCTOU 校验通过后再 set_len(0) 清空。
@@ -513,7 +513,7 @@ impl AgentTool for WriteFileTool {
                 if let Some(ws) = &ctx.workspace {
                     let ws_lossy = ws.to_string_lossy().to_string();
                     if is_artifacts_md_rel(path) {
-                        super::artifact_index::spawn_artifact_index_sync(
+                        crate::agent::artifact::artifact_index::spawn_artifact_index_sync(
                             self.app.clone(),
                             ws_lossy,
                             path.to_string(),
@@ -677,7 +677,7 @@ impl AgentTool for ArchiveArtifactTool {
                 // #20260918006：归档成功后异步索引进 LanceDB artifacts（分节切块 → embed →
                 // upsert；digest 未变跳过）。fire-and-forget，失败仅日志不影响归档结果。
                 if let Some(ws) = &ctx.workspace {
-                    super::artifact_index::spawn_artifact_index_sync(
+                    crate::agent::artifact::artifact_index::spawn_artifact_index_sync(
                         self.app.clone(),
                         ws.to_string_lossy().to_string(),
                         rel.clone(),
@@ -743,7 +743,7 @@ impl AgentTool for AnchorMemoryTool {
             .and_then(|v| v.as_str())
             .unwrap_or("other")
             .to_string();
-        match crate::agent::memory::anchor_memory(
+        match crate::agent::knowledge::memory::anchor_memory(
             &self.app,
             if ctx.agent_id.is_empty() {
                 None
@@ -810,8 +810,8 @@ impl AgentTool for EditFileTool {
             "[agent] native__edit_file: 开始 path={} resolved={} old_str={} new_str={}",
             path,
             abs.display(),
-            crate::agent::runtime::clip(old_str, 300),
-            crate::agent::runtime::clip(new_str, 300),
+            crate::agent::engine::runtime::clip(old_str, 300),
+            crate::agent::engine::runtime::clip(new_str, 300),
         );
         let started = Instant::now();
         // 闭环前置检查（统一复用 probe_path）：先确认路径存在且为文件，把裸 os error 翻译成
@@ -932,7 +932,7 @@ impl AgentTool for EditFileTool {
                 if let Some(ws) = &ctx.workspace {
                     let ws_lossy = ws.to_string_lossy().to_string();
                     if is_artifacts_md_rel(path) {
-                        super::artifact_index::spawn_artifact_index_sync(
+                        crate::agent::artifact::artifact_index::spawn_artifact_index_sync(
                             self.app.clone(),
                             ws_lossy,
                             path.to_string(),
@@ -1161,7 +1161,7 @@ impl AgentTool for ExecuteCommandTool {
         tracing::info!(
             "[agent] native__execute_command: 开始 cwd={} command={}",
             cwd.display(),
-            crate::agent::runtime::clip(command, 500),
+            crate::agent::engine::runtime::clip(command, 500),
         );
         let start = Instant::now();
         // 防僵死：使用异步 tokio::process::Command 替代阻塞型 std::process::Command，
@@ -1193,8 +1193,8 @@ impl AgentTool for ExecuteCommandTool {
                     stdout.chars().count(),
                     stderr.chars().count(),
                     start.elapsed().as_millis(),
-                    crate::agent::runtime::clip(&stdout, 500),
-                    crate::agent::runtime::clip(&stderr, 500),
+                    crate::agent::engine::runtime::clip(&stdout, 500),
+                    crate::agent::engine::runtime::clip(&stderr, 500),
                 );
                 let code = out.status.code();
                 // 缺口 A 修复：非零退出码按「执行失败」返回（对齐 P2a「命令非 0→档A」契约），
@@ -1204,8 +1204,8 @@ impl AgentTool for ExecuteCommandTool {
                     return Err(ToolError::ExecutionFailed(format!(
                         "命令非零退出（code={:?}）：stdout={} stderr={}",
                         code,
-                        crate::agent::runtime::clip(&stdout, 300),
-                        crate::agent::runtime::clip(&stderr, 300),
+                        crate::agent::engine::runtime::clip(&stdout, 300),
+                        crate::agent::engine::runtime::clip(&stderr, 300),
                     )));
                 }
                 Ok(serde_json::to_string_pretty(&json!({
@@ -1223,7 +1223,7 @@ impl AgentTool for ExecuteCommandTool {
                 tracing::info!(
                     "[agent] native__execute_command: 超时 {}s，已强制终止子进程 command={}",
                     COMMAND_TIMEOUT_SECS,
-                    crate::agent::runtime::clip(command, 300),
+                    crate::agent::engine::runtime::clip(command, 300),
                 );
                 Err(ToolError::ExecutionFailed(format!(
                     "{{\"error\": \"Command execution timed out after {}s. Process killed.\"}}",
@@ -1325,7 +1325,7 @@ impl AgentTool for RunPythonSandboxTool {
         tracing::info!(
             "[agent] native__run_python_sandbox: 请求 sandbox_enabled={} args={}",
             ctx.sandbox_enabled,
-            crate::agent::runtime::clip(&args.to_string(), 500),
+            crate::agent::engine::runtime::clip(&args.to_string(), 500),
         );
         if !ctx.sandbox_enabled {
             tracing::info!("[agent] native__run_python_sandbox: 拒绝，allow_sandbox=false");
@@ -1458,7 +1458,7 @@ impl AgentTool for RunPythonSandboxTool {
             Ok(out) => {
                 // 透传退出码给 verifier：command_succeeded 直接读 exit_code（通用判定，与输出措辞无关）。
                 if let Ok(mut g) = ctx.run_outcomes.lock() {
-                    g.push(crate::agent::tools::RunOutcome {
+                    g.push(crate::agent::engine::tools::RunOutcome {
                         output: out.stdout.clone(),
                         exit_code: out.exit_code,
                     });
@@ -1468,7 +1468,7 @@ impl AgentTool for RunPythonSandboxTool {
                     out.stdout.chars().count(),
                     started.elapsed().as_millis(),
                     out.exit_code,
-                    crate::agent::runtime::clip(&out.stdout, 500),
+                    crate::agent::engine::runtime::clip(&out.stdout, 500),
                 );
                 Ok(out.stdout)
             }
@@ -1553,7 +1553,7 @@ impl AgentTool for RunNodeSandboxTool {
         tracing::info!(
             "[agent] native__run_node_sandbox: 请求 sandbox_enabled={} args={}",
             ctx.sandbox_enabled,
-            crate::agent::runtime::clip(&args.to_string(), 500),
+            crate::agent::engine::runtime::clip(&args.to_string(), 500),
         );
         if !ctx.sandbox_enabled {
             tracing::info!("[agent] native__run_node_sandbox: 拒绝，allow_sandbox=false");
@@ -1686,7 +1686,7 @@ impl AgentTool for RunNodeSandboxTool {
             Ok(out) => {
                 // 透传退出码给 verifier：command_succeeded 直接读 exit_code（通用判定，与输出措辞无关）。
                 if let Ok(mut g) = ctx.run_outcomes.lock() {
-                    g.push(crate::agent::tools::RunOutcome {
+                    g.push(crate::agent::engine::tools::RunOutcome {
                         output: out.stdout.clone(),
                         exit_code: out.exit_code,
                     });
@@ -1696,7 +1696,7 @@ impl AgentTool for RunNodeSandboxTool {
                     out.stdout.chars().count(),
                     started.elapsed().as_millis(),
                     out.exit_code,
-                    crate::agent::runtime::clip(&out.stdout, 500),
+                    crate::agent::engine::runtime::clip(&out.stdout, 500),
                 );
                 Ok(out.stdout)
             }
@@ -2491,7 +2491,7 @@ impl AgentTool for RegexReplaceTool {
             "[agent] native__regex_replace: 开始 path={} resolved={} pattern={}",
             path,
             abs.display(),
-            crate::agent::runtime::clip(pattern, 300)
+            crate::agent::engine::runtime::clip(pattern, 300)
         );
         let started = Instant::now();
         // 闭环前置检查（统一复用 probe_path）。
@@ -2794,7 +2794,7 @@ impl AgentTool for HttpRequestTool {
             "[agent][{}] native__http_request: method={} url={} host_mode={}",
             call_id,
             method,
-            crate::agent::runtime::clip(url, 300),
+            crate::agent::engine::runtime::clip(url, 300),
             if allowed.is_empty() {
                 "任意(SSRF IP 拦截)"
             } else {
@@ -3111,7 +3111,7 @@ impl AgentTool for AskUserChoiceTool {
         // 20260919002 per-agent：经工具上下文的 agent_id 路由到本任务的状态束（choice 中枢随 agent 走）。
         let task_state = self
             .app
-            .state::<crate::agent::runtime::AgentRuntime>()
+            .state::<crate::agent::engine::runtime::AgentRuntime>()
             .task_state(&ctx.agent_id)
             .ok_or_else(|| ToolError::ExecutionFailed("任务状态已失效（任务可能已被回收）".into()))?;
         let rx = task_state.choice.suspend(req).await;
@@ -3328,7 +3328,7 @@ impl AgentTool for KbSearchTool {
         let mut scope: Option<Vec<String>> = None;
         if let Some(req) = kb_req.filter(|r| !r.is_empty()) {
             scope = Some(
-                crate::agent::knowledge::resolve_kb_scope(&self.app, &self.kb_ids, &req)
+                crate::agent::knowledge::knowledge::resolve_kb_scope(&self.app, &self.kb_ids, &req)
                     .await
                     .map_err(ToolError::InvalidArgs)?,
             );
@@ -3337,7 +3337,7 @@ impl AgentTool for KbSearchTool {
             // （真机 2026-09-22 实锤：模型把库名塞进 tags → 标签圈定 0 命中静默空）。
             let tags_v = tags.clone().unwrap();
             if let Ok(resolved) =
-                crate::agent::knowledge::resolve_kb_scope(&self.app, &self.kb_ids, &tags_v).await
+                crate::agent::knowledge::knowledge::resolve_kb_scope(&self.app, &self.kb_ids, &tags_v).await
             {
                 if !resolved.is_empty() {
                     tracing::warn!(
@@ -3350,7 +3350,7 @@ impl AgentTool for KbSearchTool {
                 }
             }
         }
-        let outcome = crate::agent::knowledge::kb_search(
+        let outcome = crate::agent::knowledge::knowledge::kb_search(
             &self.app,
             &self.kb_ids,
             &query,
@@ -3411,7 +3411,7 @@ impl AgentTool for KbSearchTool {
         if fresh_hits.is_empty() {
             // K3-4 修订（2026-09-20 轮 4 实锤）：全重复时重取完整原文——裁剪分级+去重叠加
             // 曾导致超长 chunk（调色板 ~700 字）被 600 上限腰斩且永远拿不回完整版。
-            let full_hits = crate::agent::knowledge::kb_search(
+            let full_hits = crate::agent::knowledge::knowledge::kb_search(
                 &self.app,
                 &self.kb_ids,
                 &query,
@@ -3439,7 +3439,7 @@ impl AgentTool for KbSearchTool {
         let mut out_hits = fresh_hits;
         let mut extra_notice = String::new();
         if !better_dup_ids.is_empty() {
-            let full_hits = crate::agent::knowledge::kb_search(
+            let full_hits = crate::agent::knowledge::knowledge::kb_search(
                 &self.app,
                 &self.kb_ids,
                 &query,
@@ -3510,7 +3510,7 @@ impl KbSearchTool {
     /// 序列化为 JSON Value 后逐条插入 cite 字段（编号属工具层会话态，不污染 KbSearchHit 结构）。
     fn with_cite(
         &self,
-        hits: Vec<crate::agent::knowledge::KbSearchHit>,
+        hits: Vec<crate::agent::knowledge::knowledge::KbSearchHit>,
     ) -> Result<Vec<Value>, ToolError> {
         let mut map = self
             .cite_by_id

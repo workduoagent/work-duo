@@ -25,11 +25,11 @@ use tauri::{AppHandle, Manager};
 use sqlx::Row;
 use sqlx::SqlitePool;
 
-use super::artifact_index::content_digest;
-use super::embedding;
-use super::events;
-use super::round_compactor::get_pool;
-use super::vector_store::{self, KbChunkVectorRow};
+use crate::agent::artifact::artifact_index::content_digest;
+use crate::agent::knowledge::embedding;
+use crate::agent::events;
+use crate::agent::engine::round_compactor::get_pool;
+use crate::agent::knowledge::vector_store::{self, KbChunkVectorRow};
 
 /* ---------------- 常量 ---------------- */
 

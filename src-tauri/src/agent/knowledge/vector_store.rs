@@ -947,7 +947,7 @@ static SHARED: tokio::sync::RwLock<Option<Arc<LanceDbVectorStore>>> =
 /// 解析 `vector_path`：读取 app_config 并解析 `$APPDATA` / `$RESOURCE` 占位符
 /// （与前端 storage-path.ts 同语义；已为真实路径时原样返回）。
 pub async fn resolve_vector_path(app: &AppHandle) -> Result<PathBuf, String> {
-    let pool = crate::agent::round_compactor::get_pool(app).await?;
+    let pool = crate::agent::engine::round_compactor::get_pool(app).await?;
     let raw: Option<String> =
         sqlx::query("SELECT value FROM app_config WHERE key = 'vector_path'")
             .fetch_optional(&pool)
@@ -1027,7 +1027,7 @@ pub struct VectorStatus {
     pub path: String,
     pub connected: bool,
     pub tables: Vec<String>,
-    pub embedding: Option<crate::agent::embedding::EmbeddingConfig>,
+    pub embedding: Option<crate::agent::knowledge::embedding::EmbeddingConfig>,
     /// 嵌入调用累计统计（#20260918004 设置页展示）。
     pub stats: EmbeddingStats,
 }
@@ -1050,13 +1050,13 @@ async fn read_stat(pool: &sqlx::SqlitePool, key: &str) -> u64 {
 
 #[tauri::command]
 pub async fn vector_status(app: AppHandle) -> Result<VectorStatus, String> {
-    let pool = crate::agent::round_compactor::get_pool(&app).await?;
+    let pool = crate::agent::engine::round_compactor::get_pool(&app).await?;
     let path = resolve_vector_path(&app).await?;
     let (connected, tables) = match get_shared(&app).await {
         Some(s) => (true, s.table_names().await.unwrap_or_default()),
         None => (false, Vec::new()),
     };
-    let embedding = crate::agent::embedding::load_default_embedding(&pool).await?;
+    let embedding = crate::agent::knowledge::embedding::load_default_embedding(&pool).await?;
     // 统计键 best-effort 读取（未埋点过=默认 0）
     let calls = read_stat(&pool, "embedding_call_count").await;
     let texts = read_stat(&pool, "embedding_text_count").await;
@@ -1086,7 +1086,7 @@ pub async fn set_vector_path(
         new_real.to_string_lossy().to_string(),
     )?;
     // 更新 app_config（存真实路径，与 Skill/KB 目录行的落库口径一致）
-    let pool = crate::agent::round_compactor::get_pool(&app).await?;
+    let pool = crate::agent::engine::round_compactor::get_pool(&app).await?;
     sqlx::query("INSERT INTO app_config (key, value) VALUES ('vector_path', ?) \
                  ON CONFLICT(key) DO UPDATE SET value = excluded.value")
         .bind(new_real.to_string_lossy().to_string())

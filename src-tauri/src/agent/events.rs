@@ -299,10 +299,10 @@ pub fn trace_tool_calls_summary_json(run_id: &str) -> String {
     serde_json::to_string(&out).unwrap_or_else(|_| "[]".into())
 }
 
-use crate::agent::memory::MemoryItem;
-use crate::agent::memory::SquadMemoryItem;
-use crate::agent::plan_approval::PlanApprovalRequest;
-use crate::agent::recovery::RecoveryRequest;
+use crate::agent::knowledge::memory::MemoryItem;
+use crate::agent::knowledge::memory::SquadMemoryItem;
+use crate::agent::hitl::plan_approval::PlanApprovalRequest;
+use crate::agent::hitl::recovery::RecoveryRequest;
 use crate::agent::types::ApprovalRequest;
 use crate::agent::types::ChoiceRequest;
 use crate::agent::types::ArtifactRef;
@@ -822,7 +822,7 @@ pub struct RecoveryNeededPayload {
     /// 已改动文件（接管面板展示用，2b-2 起真实采集）。
     pub changed_files: Option<Vec<String>>,
     /// 工具栈快照（接管面板展示用，2b-2 新增）。
-    pub tool_stack: Option<crate::agent::recovery::AgentToolStack>,
+    pub tool_stack: Option<crate::agent::hitl::recovery::AgentToolStack>,
 }
 
 /// 子任务自动重试耗尽仍失败：登记受阻步骤并推前端渲染恢复面板（重试/跳过/接管）。

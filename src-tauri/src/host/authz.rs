@@ -170,7 +170,7 @@ pub fn action_of_tool(tool_name: &str) -> Option<HostAction> {
 }
 
 fn build_request(input: &GateInput<'_>, meta: &HostApprovalMeta) -> ApprovalRequest {
-    let approval_id = format!("ap-host-{}-{}-{}", input.agent_id, input.server_id, crate::agent::runtime::now_ms());
+    let approval_id = format!("ap-host-{}-{}-{}", input.agent_id, input.server_id, crate::agent::engine::runtime::now_ms());
     ApprovalRequest {
         approval_id,
         tool_name: format!("host__{}", action_tool_slug(input.action)),
@@ -234,7 +234,7 @@ async fn lookup_grant(
     as_user: &str,
     risk_key: &str,
 ) -> Result<Option<String>, String> {
-    let pool = crate::agent::round_compactor::get_pool(app).await?;
+    let pool = crate::agent::engine::round_compactor::get_pool(app).await?;
     let rows = sqlx::query(
         "SELECT grant_id FROM host_grant WHERE domain='host' AND run_id=? AND agent_id=? \
          AND server_id=? AND action=? AND as_user=? AND risk_key=? AND expires_at > ? \
@@ -246,7 +246,7 @@ async fn lookup_grant(
     .bind(action)
     .bind(as_user)
     .bind(risk_key)
-    .bind(crate::agent::runtime::now_ms())
+    .bind(crate::agent::engine::runtime::now_ms())
     .fetch_all(&pool)
     .await
     .map_err(|e| format!("host_grant 查询失败：{e}"))?;
@@ -254,7 +254,7 @@ async fn lookup_grant(
 }
 
 async fn bump_grant_uses(app: &AppHandle, grant_id: &str) {
-    if let Ok(pool) = crate::agent::round_compactor::get_pool(app).await {
+    if let Ok(pool) = crate::agent::engine::round_compactor::get_pool(app).await {
         let _ = sqlx::query("UPDATE host_grant SET uses = uses + 1 WHERE grant_id = ?")
             .bind(grant_id)
             .execute(&pool)
@@ -330,9 +330,9 @@ pub async fn remember_grant(
     agent_id: &str,
     meta: &HostApprovalMeta,
 ) -> Result<String, String> {
-    let pool = crate::agent::round_compactor::get_pool(app).await?;
-    let now = crate::agent::runtime::now_ms();
-    let grant_id = format!("hg_{}", &crate::agent::runtime::now_ms().to_string()[..13]);
+    let pool = crate::agent::engine::round_compactor::get_pool(app).await?;
+    let now = crate::agent::engine::runtime::now_ms();
+    let grant_id = format!("hg_{}", &crate::agent::engine::runtime::now_ms().to_string()[..13]);
     // 生命周期：6h 硬上限 + run 结束强制清理（authorize 查询恒带 run_id，跨 run 天然不互认）
     sqlx::query(
         "INSERT INTO host_grant (grant_id, domain, run_id, agent_id, server_id, action, as_user, \
@@ -359,7 +359,7 @@ pub async fn remember_grant(
 
 /// 清理某 run 的全部 host_grant（run 结束调用；跨 run 不互认，残留仅占位）。
 pub async fn cleanup_run_grants(app: &AppHandle, run_id: &str) {
-    if let Ok(pool) = crate::agent::round_compactor::get_pool(app).await {
+    if let Ok(pool) = crate::agent::engine::round_compactor::get_pool(app).await {
         let _ = sqlx::query("DELETE FROM host_grant WHERE run_id = ?")
             .bind(run_id)
             .execute(&pool)
@@ -369,9 +369,9 @@ pub async fn cleanup_run_grants(app: &AppHandle, run_id: &str) {
 
 /// 过期 GC（每次 run 装配时顺手清理，保持 host_grant 表干净）。
 pub async fn gc_expired(app: &AppHandle) {
-    if let Ok(pool) = crate::agent::round_compactor::get_pool(app).await {
+    if let Ok(pool) = crate::agent::engine::round_compactor::get_pool(app).await {
         let _ = sqlx::query("DELETE FROM host_grant WHERE expires_at < ?")
-            .bind(crate::agent::runtime::now_ms())
+            .bind(crate::agent::engine::runtime::now_ms())
             .execute(&pool)
             .await;
     }
@@ -388,7 +388,7 @@ async fn write_authz_log(
     decision: &str,
     grant_id: Option<&str>,
 ) {
-    let pool = match crate::agent::round_compactor::get_pool(app).await {
+    let pool = match crate::agent::engine::round_compactor::get_pool(app).await {
         Ok(p) => p,
         Err(_) => return,
     };
@@ -404,7 +404,7 @@ async fn write_authz_log(
          risk_level, risk_key, signals_json, decision, grant_id, request_digest, created_at) \
          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
     )
-    .bind(format!("hal_{}_{}", crate::agent::runtime::now_ms(), crate::agent::runtime::now_ms() % 1000))
+    .bind(format!("hal_{}_{}", crate::agent::engine::runtime::now_ms(), crate::agent::engine::runtime::now_ms() % 1000))
     .bind(input.run_id)
     .bind(input.session_id.unwrap_or(""))
     .bind(input.agent_id)
@@ -417,7 +417,7 @@ async fn write_authz_log(
     .bind(decision)
     .bind(grant_id)
     .bind(scope_digest(input))
-    .bind(crate::agent::runtime::now_ms())
+    .bind(crate::agent::engine::runtime::now_ms())
     .execute(&pool)
     .await;
     let _ = binding;

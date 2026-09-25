@@ -9,11 +9,11 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use serde_json::json;
 
-use crate::agent::tools::AgentTool;
-use crate::agent::tools::PermissionLevel;
-use crate::agent::tools::ToolContext;
-use crate::agent::tools::ToolError;
-use crate::agent::tools::ToolRegistry;
+use crate::agent::engine::tools::AgentTool;
+use crate::agent::engine::tools::PermissionLevel;
+use crate::agent::engine::tools::ToolContext;
+use crate::agent::engine::tools::ToolError;
+use crate::agent::engine::tools::ToolRegistry;
 
 /// 单个 Skill 包装成的 AgentTool。
 #[derive(Debug, Clone)]
@@ -75,7 +75,7 @@ impl AgentTool for SkillToolWrapper {
             "[agent] skill__{}: 调用 skill_name={} task={}",
             self.skill_id,
             self.skill_name,
-            crate::agent::runtime::clip(task, 500),
+            crate::agent::engine::runtime::clip(task, 500),
         );
 
         // 真实返回 SKILL.md 正文（落库于 skill_info.skill_markdown），使模型真正遵循

@@ -25,17 +25,17 @@ use tauri::AppHandle;
 use tokio::sync::Mutex;
 use tokio::time::timeout;
 
-use crate::agent::approval::ApprovalManager;
-use crate::agent::approval::ApprovalOutcome;
-use crate::agent::choice::ChoiceHub;
-use crate::agent::tools::AgentTool;
+use crate::agent::hitl::approval::ApprovalManager;
+use crate::agent::hitl::approval::ApprovalOutcome;
+use crate::agent::hitl::choice::ChoiceHub;
+use crate::agent::engine::tools::AgentTool;
 use crate::agent::events;
-use crate::agent::graph::KnowledgeGraph;
-use crate::agent::native;
-use crate::agent::tools::PermissionLevel;
-use crate::agent::tools::ToolContext;
-use crate::agent::tools::ToolError;
-use crate::agent::tools::ToolRegistry;
+use crate::agent::engine::graph::KnowledgeGraph;
+use crate::agent::engine::native;
+use crate::agent::engine::tools::PermissionLevel;
+use crate::agent::engine::tools::ToolContext;
+use crate::agent::engine::tools::ToolError;
+use crate::agent::engine::tools::ToolRegistry;
 use crate::agent::types::AgentRuntimeConfig;
 use crate::agent::types::ApprovalRequest;
 use crate::agent::types::PlanDAG;
@@ -66,10 +66,10 @@ pub struct AgentTaskState {
     /// `cancelled` 而非 `done`（修复 F-1：取消后仍显示 done）；预算软收尾不置位本标志。
     pub cancel_requested: Arc<AtomicBool>,
     pub approval: Arc<ApprovalManager>,
-    pub recovery: Arc<crate::agent::recovery::RecoveryHub>,
+    pub recovery: Arc<crate::agent::hitl::recovery::RecoveryHub>,
     pub choice: Arc<ChoiceHub>,
-    pub plan_approval: Arc<crate::agent::plan_approval::PlanApprovalHub>,
-    pub approval_grants: Arc<crate::agent::policy::ApprovalGrants>,
+    pub plan_approval: Arc<crate::agent::hitl::plan_approval::PlanApprovalHub>,
+    pub approval_grants: Arc<crate::agent::engine::policy::ApprovalGrants>,
     /// 本任务的工具注册表（基础原生 + KB/MCP/插件工具按绑定注册，任务结束随状态束回收）。
     pub native: Arc<Mutex<ToolRegistry>>,
 }
@@ -82,10 +82,10 @@ impl AgentTaskState {
             cancel_flag: Arc::new(AtomicBool::new(false)),
             cancel_requested: Arc::new(AtomicBool::new(false)),
             approval: Arc::new(ApprovalManager::new()),
-            recovery: crate::agent::recovery::RecoveryHub::new(),
+            recovery: crate::agent::hitl::recovery::RecoveryHub::new(),
             choice: Arc::new(ChoiceHub::new()),
-            plan_approval: crate::agent::plan_approval::PlanApprovalHub::new(),
-            approval_grants: Arc::new(crate::agent::policy::ApprovalGrants::new()),
+            plan_approval: crate::agent::hitl::plan_approval::PlanApprovalHub::new(),
+            approval_grants: Arc::new(crate::agent::engine::policy::ApprovalGrants::new()),
             native: Arc::new(Mutex::new(ToolRegistry::new())),
         }
     }
@@ -236,7 +236,7 @@ impl AgentRuntime {
         // 0.1) 动态重算并回写 tools_tokens：按当前已解析的 MCP/Skill 工具数覆盖写入会话表，
         //    中途移除 Skill / 停用（解绑）MCP 后，下一轮会自动下调；重新绑定则上调。
         if let Some(sid) = &cfg.session_id {
-            crate::agent::round_compactor::persist_tools_tokens(
+            crate::agent::engine::round_compactor::persist_tools_tokens(
                 app,
                 sid,
                 cfg.mcp_tools.len(),
@@ -255,17 +255,17 @@ impl AgentRuntime {
         // 知识库检索工具（K2）：仅在绑定了知识库时注册（提示与能力同源）
         native::register_kb_search_tool(&mut base, app, cfg.kb_ids.clone());
         // MCP：按 mcp_id 分组，逐 server 注册（复用现有 mcp::call_mcp_tool 透传）
-        let mut by_server: std::collections::BTreeMap<String, Vec<crate::agent::mcp_adapter::MountedMcpTool>> =
+        let mut by_server: std::collections::BTreeMap<String, Vec<crate::agent::plugins::mcp_adapter::MountedMcpTool>> =
             Default::default();
         for t in &cfg.mcp_tools {
             by_server.entry(t.mcp_id.clone()).or_default().push(t.clone());
         }
         for (server, tools) in by_server {
-            crate::agent::mcp_adapter::register_mcp_into(&mut base, &server, tools);
+            crate::agent::plugins::mcp_adapter::register_mcp_into(&mut base, &server, tools);
         }
         // 本地插件（P2 纯增量）：cfg.plugin_tools 非空时注册为 custom__<identifier> 工具；
         // 为空时零影响（register_plugins_into 对空切片不做事），不触碰既有注册逻辑。
-        crate::agent::plugin_adapter::register_plugins_into(&mut base, app, &cfg.plugin_tools);
+        crate::agent::plugins::plugin_adapter::register_plugins_into(&mut base, app, &cfg.plugin_tools);
         // 服务器托管（Host）：绑定非空时注册 host__* 工具族（12 个，HostAuthz 独立授权域）。
         crate::host::register_host_tools(&mut base, app, Arc::new(cfg.server_bindings.clone()));
         // 工具已全部直接注册进 base（原生 + Skill + MCP + 插件 + Host），base 即完整注册表。
@@ -293,13 +293,13 @@ impl AgentRuntime {
         // ────────────────────────────────────────────────────────────────────
 
         // 阶段一：意图分流（规则短路优先，灰色地带走轻量 LLM 分类）。
-        let mut intent = crate::agent::intent::classify_intent(&cfg, &prompt).await;
+        let mut intent = crate::agent::engine::intent::classify_intent(&cfg, &prompt).await;
         // KB 已绑定 + SIMPLE_CHAT → 简单对话快路径（20260922 #1）：run_simple_chat 现已携带
         // native__kb_search 工具（kb_ids 非空时构造实例），纯 KB 问答跳过规划直接「检索→综合」，
         // 不再强制转 COMPOSITE（旧设计因空工具集导致 KB 不可检索而强制转换；网关慢时规划调用
         // 纯属开销，实测可达 1~3 分钟）。requires_tool 保留为语义标记，requires_planning=false。
         let kb_tool = if !cfg.kb_ids.is_empty() {
-            Some(crate::agent::native::KbSearchTool::new_arc(app.clone(), cfg.kb_ids.clone()))
+            Some(crate::agent::engine::native::KbSearchTool::new_arc(app.clone(), cfg.kb_ids.clone()))
         } else {
             None
         };
@@ -371,7 +371,7 @@ impl AgentRuntime {
             );
             (po, (0u64, 0u64), String::new())
         } else {
-            crate::agent::planner::build_plan(&cfg, &prompt, cfg.workspace.as_deref()).await
+            crate::agent::engine::planner::build_plan(&cfg, &prompt, cfg.workspace.as_deref()).await
         };
 
         // 规划期间用户可能已点击取消：规划完成后立即检查，避免拉起无意义的流水线。
@@ -395,7 +395,7 @@ impl AgentRuntime {
         } else {
             match auto_approve_mode.as_str() {
                 "never" => true,
-                "sensitive" => !crate::agent::plan_approval::plan_requires_approval(&plan),
+                "sensitive" => !crate::agent::hitl::plan_approval::plan_requires_approval(&plan),
                 _ => false, // "always" 及其它未知值：保持最严格，走门禁
             }
         };
@@ -415,8 +415,8 @@ impl AgentRuntime {
                 }
                 // 15007 闸 1：计划门禁处对整个 DAG 做策略评估——敏感操作清单随审批卡下发，
                 // 用户「批准执行」即一次性授权整计划（清单写入 grants，执行期同信号不再弹卡）。
-                let sensitive_ops = crate::agent::policy::evaluate_plan(&plan);
-                let req = crate::agent::plan_approval::PlanApprovalRequest {
+                let sensitive_ops = crate::agent::engine::policy::evaluate_plan(&plan);
+                let req = crate::agent::hitl::plan_approval::PlanApprovalRequest {
                     goal_summary: plan.goal_summary.clone(),
                     plan: plan.clone(),
                     sensitive_ops: sensitive_ops.clone(),
@@ -425,7 +425,7 @@ impl AgentRuntime {
                 task.plan_approval.request(req);
                 let decision = task.plan_approval.wait(&task.cancel_flag).await;
                 match decision {
-                    crate::agent::plan_approval::PlanApprovalDecision::Approve => {
+                    crate::agent::hitl::plan_approval::PlanApprovalDecision::Approve => {
                         task.plan_approval.reset();
                         // 批准 = 授权整计划敏感清单（执行期同信号操作放行）
                         for op in &sensitive_ops {
@@ -434,14 +434,14 @@ impl AgentRuntime {
                         }
                         break;
                     }
-                    crate::agent::plan_approval::PlanApprovalDecision::Reject => {
+                    crate::agent::hitl::plan_approval::PlanApprovalDecision::Reject => {
                         task.plan_approval.reset();
                         tracing::info!("[agent] run_task: 计划被用户拒绝，整体终止任务");
                         events::emit_status(app, "✋ 任务计划已被用户拒绝，已终止");
                         events::emit_task_done(app, plan_usage.0, plan_usage.1);
                         return;
                     }
-                    crate::agent::plan_approval::PlanApprovalDecision::Revise(guidance) => {
+                    crate::agent::hitl::plan_approval::PlanApprovalDecision::Revise(guidance) => {
                         task.plan_approval.reset();
                         // 空指引等价于 Approve：直接放行，避免无意义死循环。
                         if guidance.trim().is_empty() {
@@ -452,7 +452,7 @@ impl AgentRuntime {
                         events::emit_status(app, "🔄 已收到修改意见，正在重新规划…");
                         let revised_prompt = format!("{}\n\n用户修改意见：{}", prompt, guidance);
                         let (np, nu, nr) =
-                            crate::agent::planner::build_plan(&cfg, &revised_prompt, cfg.workspace.as_deref()).await;
+                            crate::agent::engine::planner::build_plan(&cfg, &revised_prompt, cfg.workspace.as_deref()).await;
                         plan = np;
                         plan_usage.0 += nu.0;
                         plan_usage.1 += nu.1;
@@ -466,7 +466,7 @@ impl AgentRuntime {
                         }
                         continue;
                     }
-                    crate::agent::plan_approval::PlanApprovalDecision::Cancel => {
+                    crate::agent::hitl::plan_approval::PlanApprovalDecision::Cancel => {
                         task.plan_approval.reset();
                         tracing::info!("[agent] run_task: 计划审批等待期间用户取消，终止任务");
                         events::emit_status(app, "⛔ 任务已被用户取消");
@@ -534,7 +534,7 @@ impl AgentRuntime {
         if !initial_context.is_empty() {
             graph.set_session_initial_context(&session_id, &initial_context);
         }
-        let result = crate::agent::pipeline::run_pipeline(
+        let result = crate::agent::engine::pipeline::run_pipeline(
             app,
             &cfg,
             &registry,
@@ -572,11 +572,11 @@ impl AgentRuntime {
             // summary 被去 AI 味规则丢弃），提炼器无米下锅 → 追加各步 summary 作提炼素材。
             // 烧钱护栏（2026-09-18 审计）：长任务步骤多/摘要长时全量拼接会顶高这次单发调用的
             // input——提炼记忆不需要逐字全文，各段裁剪到够提炼即可。
-            let mut settle_input = crate::agent::runtime::clip(result.final_text.trim(), 4000);
+            let mut settle_input = crate::agent::engine::runtime::clip(result.final_text.trim(), 4000);
             if !result.step_summaries.is_empty() {
                 settle_input.push_str("\n\n各步骤产出详情：\n");
                 for (i, s) in result.step_summaries.iter().enumerate() {
-                    settle_input.push_str(&format!("{}. {}\n", i + 1, crate::agent::runtime::clip(s.trim(), 600)));
+                    settle_input.push_str(&format!("{}. {}\n", i + 1, crate::agent::engine::runtime::clip(s.trim(), 600)));
                 }
             }
             // 补料（2026-09-18 实测）：模型常把长期约定写进 .wd_mem/ 文件而不调 anchor_memory，
@@ -586,7 +586,7 @@ impl AgentRuntime {
                 settle_input.push_str("\n\n本轮写入记忆区（.wd_mem/）的文件内容摘录：\n");
                 for (path, content) in result.wd_mem_notes.iter() {
                     settle_input
-                        .push_str(&format!("【{}】\n{}\n", path, crate::agent::runtime::clip(content, 1200)));
+                        .push_str(&format!("【{}】\n{}\n", path, crate::agent::engine::runtime::clip(content, 1200)));
                 }
             }
             Self::forced_memory_settle(app, &cfg, &plan.goal_summary, &settle_input).await;
@@ -601,7 +601,7 @@ impl AgentRuntime {
         let task_usage = (plan_usage.0 + result.usage.0, plan_usage.1 + result.usage.1);
         events::emit_task_done(app, task_usage.0, task_usage.1);
         if let Some(sid) = &cfg.session_id {
-            crate::agent::round_compactor::persist_session_tokens(app, sid, task_usage.0, task_usage.1).await;
+            crate::agent::engine::round_compactor::persist_session_tokens(app, sid, task_usage.0, task_usage.1).await;
         }
 
         // 持久化精简协议日志（宏观意图 + 步骤规划 + 最终交付），入库前自检防孤儿消息。
@@ -627,19 +627,19 @@ impl AgentRuntime {
                         round_id,
                         raw_json.chars().count(),
                     );
-                    crate::agent::round_compactor::persist_round_raw(app, round_id, &raw_json).await;
-                    crate::agent::round_compactor::persist_round_answer_if_empty(app, round_id, &result.final_text).await;
+                    crate::agent::engine::round_compactor::persist_round_raw(app, round_id, &raw_json).await;
+                    crate::agent::engine::round_compactor::persist_round_answer_if_empty(app, round_id, &result.final_text).await;
                     // #8 per-run：取当前 run 的桶（task_local 注入的 run_id）。
                     let rid = crate::agent::events::current_run_id();
                     let trace_thinking = crate::agent::events::trace_thinking_snapshot(&rid);
                     let trace_tools = crate::agent::events::trace_tool_calls_summary_json(&rid);
-                    crate::agent::round_compactor::persist_round_process_if_empty(app, round_id, &trace_thinking, &trace_tools).await;
+                    crate::agent::engine::round_compactor::persist_round_process_if_empty(app, round_id, &trace_thinking, &trace_tools).await;
                 }
                 Err(e) => tracing::error!("[agent] run_task: 序列化精简 raw_messages_json 失败：{e}"),
             }
             if let Some(sid) = &cfg.session_id {
-                crate::agent::round_compactor::bump_session_turns(app, sid).await;
-                crate::agent::round_compactor::trigger_background_compaction(app, &cfg, sid).await;
+                crate::agent::engine::round_compactor::bump_session_turns(app, sid).await;
+                crate::agent::engine::round_compactor::trigger_background_compaction(app, &cfg, sid).await;
             }
         } else {
             tracing::info!("[agent] run_task: 无 round_id，跳过精简 raw_messages_json 回填");
@@ -739,7 +739,7 @@ impl AgentRuntime {
                     let body = parts[2];
                     // M0 质量护栏：短 key / 短 content / 模板复述句 / 非法分类直接丢弃，不落库。
                     if let Err(reason) =
-                        crate::agent::memory::validate_forced_entry(key, category, body)
+                        crate::agent::knowledge::memory::validate_forced_entry(key, category, body)
                     {
                         tracing::debug!(
                             "[agent] forced_memory_settle: 跳过低质量条目（{}，key={}）",
@@ -749,7 +749,7 @@ impl AgentRuntime {
                         skipped += 1;
                         continue;
                     }
-                    match crate::agent::memory::anchor_memory(
+                    match crate::agent::knowledge::memory::anchor_memory(
                         app,
                         Some(&cfg.agent_id),
                         cfg.session_id.as_deref(),
@@ -789,9 +789,9 @@ impl AgentRuntime {
         cfg: &AgentRuntimeConfig,
         prompt: &str,
         cancel: &Arc<AtomicBool>,
-        kb_tool: Option<std::sync::Arc<crate::agent::native::KbSearchTool>>,
+        kb_tool: Option<std::sync::Arc<crate::agent::engine::native::KbSearchTool>>,
     ) {
-        let mut messages = match crate::agent::context::build_context_messages(app, cfg, prompt).await {
+        let mut messages = match crate::agent::engine::context::build_context_messages(app, cfg, prompt).await {
             Ok(m) => m,
             Err(e) => {
                 tracing::error!("[agent] run_simple_chat: 上下文组装失败：{e}");
@@ -894,12 +894,12 @@ impl AgentRuntime {
                         };
                         events::emit_tool_started(app, &mk_step("running", None, None));
                         let result = if name == "native__kb_search" {
-                            let ctx = crate::agent::tools::ToolContext {
+                            let ctx = crate::agent::engine::tools::ToolContext {
                                 agent_id: cfg.agent_id.clone(),
                                 session_id: cfg.session_id.clone(),
                                 ..Default::default()
                             };
-                            match crate::agent::tools::AgentTool::execute(kb_tool.as_deref().unwrap(), args, &ctx).await {
+                            match crate::agent::engine::tools::AgentTool::execute(kb_tool.as_deref().unwrap(), args, &ctx).await {
                                 Ok(r) => r,
                                 Err(e) => format!("kb_search 执行失败：{e:?}"),
                             }
@@ -924,25 +924,25 @@ impl AgentRuntime {
         };
         events::emit_task_done(app, task_usage.0, task_usage.1);
         if let Some(sid) = &cfg.session_id {
-            crate::agent::round_compactor::persist_session_tokens(app, sid, task_usage.0, task_usage.1).await;
+            crate::agent::engine::round_compactor::persist_session_tokens(app, sid, task_usage.0, task_usage.1).await;
         }
         if let Some(round_id) = &cfg.round_id {
             let round_messages = &messages[round_base..];
             match serde_json::to_string(round_messages) {
                 Ok(raw_json) => {
-                    crate::agent::round_compactor::persist_round_raw(app, round_id, &raw_json).await;
-                    crate::agent::round_compactor::persist_round_answer_if_empty(app, round_id, &simple_final_text).await;
+                    crate::agent::engine::round_compactor::persist_round_raw(app, round_id, &raw_json).await;
+                    crate::agent::engine::round_compactor::persist_round_answer_if_empty(app, round_id, &simple_final_text).await;
                     // #8 per-run：取当前 run 的桶（task_local 注入的 run_id）。
                     let rid = crate::agent::events::current_run_id();
                     let trace_thinking = crate::agent::events::trace_thinking_snapshot(&rid);
                     let trace_tools = crate::agent::events::trace_tool_calls_summary_json(&rid);
-                    crate::agent::round_compactor::persist_round_process_if_empty(app, round_id, &trace_thinking, &trace_tools).await;
+                    crate::agent::engine::round_compactor::persist_round_process_if_empty(app, round_id, &trace_thinking, &trace_tools).await;
                 }
                 Err(e) => tracing::error!("[agent] run_simple_chat: 序列化 raw_messages_json 失败：{e}"),
             }
             if let Some(sid) = &cfg.session_id {
-                crate::agent::round_compactor::bump_session_turns(app, sid).await;
-                crate::agent::round_compactor::trigger_background_compaction(app, cfg, sid).await;
+                crate::agent::engine::round_compactor::bump_session_turns(app, sid).await;
+                crate::agent::engine::round_compactor::trigger_background_compaction(app, cfg, sid).await;
             }
         }
     }
@@ -1085,7 +1085,7 @@ pub(crate) async fn run_tool_calls_round(
     ctx: &ToolContext,
     approval: &ApprovalManager,
     cfg: &AgentRuntimeConfig,
-    grants: Option<&crate::agent::policy::ApprovalGrants>,
+    grants: Option<&crate::agent::engine::policy::ApprovalGrants>,
     messages: &mut Vec<Value>,
     outcome: &StreamOutcome,
     // 当前子任务步骤序号：用于把工具调用精确归属到对应步骤卡片（前端按 step 展示工具调用列表）。
@@ -1155,7 +1155,7 @@ pub(crate) async fn run_tool_calls_round(
         let mut host_denied: Option<String> = None;
         let mut host_sensitive = false;
         let mut host_approval_req: Option<ApprovalRequest> = None;
-        if tool.authz_domain() == crate::agent::tools::AuthzDomain::Host {
+        if tool.authz_domain() == crate::agent::engine::tools::AuthzDomain::Host {
             match crate::host::authz::gate_tool_call(
                 app,
                 &cfg.agent_id,
@@ -1191,11 +1191,11 @@ pub(crate) async fn run_tool_calls_round(
         if host_denied.is_none() && host_approval_req.is_none() {
         {
             if let Some(op_str) = tool_op(&tool_name) {
-                if let Some(edge) = crate::agent::policy::EdgeOp::from_op_str(op_str) {
-                    let targets = crate::agent::policy::edge_targets(edge, &args);
+                if let Some(edge) = crate::agent::engine::policy::EdgeOp::from_op_str(op_str) {
+                    let targets = crate::agent::engine::policy::edge_targets(edge, &args);
                     // grants=None（小分队等无授权集场景）→ 策略不适用，维持旧行为
                     if let Some(grants) = grants {
-                        if let Some(hit) = crate::agent::policy::evaluate_edge(
+                        if let Some(hit) = crate::agent::engine::policy::evaluate_edge(
                             edge,
                             &targets,
                             cfg.workspace.as_deref(),
@@ -1484,7 +1484,7 @@ pub(crate) async fn run_tool_calls_round(
         let before_snapshot: Option<String> = if is_file_mutating(&tool_name) {
             path_arg
                 .as_deref()
-                .and_then(|p| crate::agent::tools::PathGuard::check(p, ctx).ok())
+                .and_then(|p| crate::agent::engine::tools::PathGuard::check(p, ctx).ok())
                 .and_then(|abs| std::fs::read_to_string(abs).ok())
         } else {
             None
@@ -1519,7 +1519,7 @@ pub(crate) async fn run_tool_calls_round(
         let (lines_added, lines_removed) = if is_file_mutating(&tool_name) {
             let after_snapshot = path_arg
                 .as_deref()
-                .and_then(|p| crate::agent::tools::PathGuard::check(p, ctx).ok())
+                .and_then(|p| crate::agent::engine::tools::PathGuard::check(p, ctx).ok())
                 .and_then(|abs| std::fs::read_to_string(abs).ok());
             let (a, r) = diff_line_counts(before_snapshot.as_deref(), after_snapshot.as_deref());
             (Some(a), Some(r))

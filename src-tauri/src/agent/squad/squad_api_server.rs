@@ -22,7 +22,7 @@ use tauri_plugin_sql::DbInstances;
 use tauri_plugin_sql::DbPool;
 
 use crate::agent::commands::load_squad;
-use crate::agent::squad_orchestrator::run_squad_task;
+use crate::agent::squad::squad_orchestrator::run_squad_task;
 
 async fn get_pool(app: &AppHandle) -> Result<sqlx::SqlitePool, String> {
     let instances = app.state::<DbInstances>();

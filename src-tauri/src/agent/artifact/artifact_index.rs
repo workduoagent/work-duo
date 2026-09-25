@@ -17,8 +17,8 @@ use tauri::AppHandle;
 
 use sqlx::SqlitePool;
 
-use super::embedding;
-use super::vector_store::{self, ArtifactVectorRow};
+use crate::agent::knowledge::embedding;
+use crate::agent::knowledge::vector_store::{self, ArtifactVectorRow};
 
 /// 注入片段数（top-k；分节片段信息密度高于记忆条目，少而精）。
 pub(crate) const RECALL_SNIPPET_TOP_K: usize = 3;
@@ -191,7 +191,7 @@ pub(crate) fn spawn_artifact_index_sync(
 ) {
     tauri::async_runtime::spawn(async move {
         let result = async {
-            let pool = super::round_compactor::get_pool(&app).await?;
+            let pool = crate::agent::engine::round_compactor::get_pool(&app).await?;
             sync_artifact_file(&app, &pool, &workspace, &rel_path, &content).await
         }
         .await;

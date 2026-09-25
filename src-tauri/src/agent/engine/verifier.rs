@@ -20,7 +20,7 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::agent::tools::RunOutcome;
+use crate::agent::engine::tools::RunOutcome;
 use crate::agent::types::PlanSubTask;
 use crate::agent::types::SuccessCriterion;
 
@@ -626,7 +626,7 @@ pub fn verify_task(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agent::tools::RunOutcome;
+    use crate::agent::engine::tools::RunOutcome;
     use crate::agent::types::{PlanSubTask, SuccessCriterion};
 
     /// 方案 A 确定性验证（Q8）：planner 把 `success_criteria.target` 填成垃圾占位名

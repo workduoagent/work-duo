@@ -77,7 +77,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .manage(mamba)
         .manage(bun)
-        .manage(agent::runtime::AgentRuntime::new())
+        .manage(agent::engine::runtime::AgentRuntime::new())
         .setup(|app| -> Result<(), Box<dyn std::error::Error>> {
             // 统一日志初始化（必须在任何 tracing 宏调用之前）。
             crate::logging::init_logging(app.handle());
@@ -85,20 +85,20 @@ pub fn run() {
             // 严格延后：先 await DB 连接池就绪闸门，杜绝启动早期组件未就绪导致的空指针 / 连接断裂。
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
-                if let Err(e) = agent::round_compactor::wait_db_ready(&handle).await {
+                if let Err(e) = agent::engine::round_compactor::wait_db_ready(&handle).await {
                     tracing::error!("[startup] DB 就绪等待失败，后台初始化跳过：{e}");
                     return;
                 }
                 // 孤儿轮次清扫（#4）：上次进程退出遗留的 end_time IS NULL 轮次统一标记终态
                 //（此刻必然无在跑任务，置 end_time 即可；只补时间列，内容列诚实保留缺失）。
-                match agent::round_compactor::sweep_orphan_rounds(&handle).await {
+                match agent::engine::round_compactor::sweep_orphan_rounds(&handle).await {
                     Ok(n) if n > 0 => tracing::info!("[startup] 孤儿轮次清扫：已将 {n} 条 end_time 为空的轮次标记终态"),
                     Ok(_) => {}
                     Err(e) => tracing::warn!("[startup] 孤儿轮次清扫失败：{e}"),
                 }
                 // 拉起小分队定时调度器与 API 触发服务（二者均依赖数据库就绪）。
-                agent::squad_scheduler::start_scheduler(handle.clone());
-                agent::squad_api_server::start_api_server(handle.clone());
+                agent::squad::squad_scheduler::start_scheduler(handle.clone());
+                agent::squad::squad_api_server::start_api_server(handle.clone());
                 mcp_server::start_mcp_server(handle.clone());
                 if let Err(e) = mamba_manager::ensure_default_env(&handle).await {
                     tracing::error!("[mamba] 默认环境初始化失败：{e}");
@@ -142,8 +142,8 @@ pub fn run() {
             agent::commands::submit_choice_decision,
             agent::commands::submit_plan_decision,
             agent::commands::cancel_agent_task,
-            agent::plugin_commands::extract_plugin_meta,
-            agent::plugin_commands::test_user_plugin,
+            agent::plugins::plugin_commands::extract_plugin_meta,
+            agent::plugins::plugin_commands::test_user_plugin,
             net::http_probe,
             agent::commands::retry_subtask,
             agent::commands::skip_subtask,
@@ -163,17 +163,17 @@ pub fn run() {
             agent::commands::update_memory,
             agent::commands::delete_memory,
             agent::commands::recall_memory,
-            agent::wd_mem::wd_mem_read_project_memory,
-            agent::wd_mem::wd_mem_write_project_memory,
+            agent::knowledge::wd_mem::wd_mem_read_project_memory,
+            agent::knowledge::wd_mem::wd_mem_write_project_memory,
             fs_helper::canonicalize_path,
             fs_helper::migrate_storage_dir,
             logging::get_run_logs,
             logging::log_frontend,
             mcp_server::mcp_resolve_result,
-            agent::embedding::probe_embedding,
-            agent::memory::backfill_memory_vectors,
-            agent::vector_store::vector_status,
-            agent::vector_store::set_vector_path,
+            agent::knowledge::embedding::probe_embedding,
+            agent::knowledge::memory::backfill_memory_vectors,
+            agent::knowledge::vector_store::vector_status,
+            agent::knowledge::vector_store::set_vector_path,
             agent::commands::kb_sync_asset,
             agent::commands::kb_remove_asset,
             agent::commands::kb_remove_kb_index,

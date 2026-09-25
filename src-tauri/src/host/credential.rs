@@ -165,6 +165,6 @@ pub fn new_credential_id(secret_type: &str, secret: &str) -> String {
     let mut h = Md5::new();
     h.update(secret_type.as_bytes());
     h.update(secret.as_bytes());
-    h.update(crate::agent::runtime::now_ms().to_string().as_bytes());
+    h.update(crate::agent::engine::runtime::now_ms().to_string().as_bytes());
     format!("cred_{}", &hex::encode(h.finalize())[..16])
 }

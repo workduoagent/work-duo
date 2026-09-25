@@ -5,7 +5,7 @@
 //! 各自 `reqwest::Client::new()`——后者会沿用 reqwest 默认行为（读取系统代理），导致开
 //! VPN 时私网 / 本机模型（如 192.168.x.x 的 Ollama）被系统代理劫持而返回 502。
 
-use crate::agent::round_compactor::get_pool;
+use crate::agent::engine::round_compactor::get_pool;
 use crate::agent::types::NetworkProxy;
 use serde::Serialize;
 use std::collections::HashMap;

@@ -16,7 +16,7 @@ use super::exec as exec_impl;
 use super::pool;
 use super::sftp as sftp_impl;
 use super::types::ServerBinding;
-use crate::agent::tools::{
+use crate::agent::engine::tools::{
     AuthzDomain, PermissionLevel, ToolContext, ToolError, ToolRegistry,
 };
 
@@ -112,7 +112,7 @@ async fn write_exec_log(
     bytes_in: Option<i64>,
     bytes_out: Option<i64>,
 ) {
-    let pool = match crate::agent::round_compactor::get_pool(app).await {
+    let pool = match crate::agent::engine::round_compactor::get_pool(app).await {
         Ok(p) => p,
         Err(_) => return,
     };
@@ -121,7 +121,7 @@ async fn write_exec_log(
          argv, as_user, cwd, started_at, duration_ms, exit_code, bytes_in, bytes_out, approved, error, created_at) \
          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
     )
-    .bind(format!("sel_{}_{}", crate::agent::runtime::now_ms(), tool_name))
+    .bind(format!("sel_{}_{}", crate::agent::engine::runtime::now_ms(), tool_name))
     .bind(server_id)
     .bind(&ctx.agent_id)
     .bind(ctx.session_id.clone().unwrap_or_default())
@@ -130,14 +130,14 @@ async fn write_exec_log(
     .bind(argv)
     .bind(as_user)
     .bind(cwd.unwrap_or(""))
-    .bind(crate::agent::runtime::now_ms() as i64 - started.elapsed().as_millis() as i64)
+    .bind(crate::agent::engine::runtime::now_ms() as i64 - started.elapsed().as_millis() as i64)
     .bind(started.elapsed().as_millis() as i64)
     .bind(if ok { Some(0i64) } else { None })
     .bind(bytes_in)
     .bind(bytes_out)
     .bind("approved")
     .bind(error)
-    .bind(crate::agent::runtime::now_ms())
+    .bind(crate::agent::engine::runtime::now_ms())
     .execute(&pool)
     .await;
 }
@@ -160,12 +160,12 @@ struct HostListServersTool {
 }
 
 #[async_trait]
-impl crate::agent::tools::AgentTool for HostListServersTool {
+impl crate::agent::engine::tools::AgentTool for HostListServersTool {
     host_tool_common!("host__list_servers", "list_servers", AuthzDomain::Host);
 
     fn tool_definition(&self) -> serde_json::Value {
         // 规范 function-calling 形状（复用 native::def；扁平结构会被网关丢弃 → 模型看不到工具）
-        crate::agent::native::def(
+        crate::agent::engine::native::def(
             "host__list_servers",
             "列出当前智能体已绑定的服务器档案（名称 / 地址 / 登录用户 / 路径白名单 / 提权策略）。",
             json!({}),
@@ -206,12 +206,12 @@ struct HostConnectTool {
 }
 
 #[async_trait]
-impl crate::agent::tools::AgentTool for HostConnectTool {
+impl crate::agent::engine::tools::AgentTool for HostConnectTool {
     host_tool_common!("host__connect", "connect", AuthzDomain::Host);
 
     fn tool_definition(&self) -> serde_json::Value {
         // 规范 function-calling 形状（复用 native::def；扁平结构会被网关丢弃 → 模型看不到工具）
-        crate::agent::native::def(
+        crate::agent::engine::native::def(
             "host__connect",
             "连接 / 重连指定服务器（通常自动触发，无需主动调用）。返回登录用户、默认目录与路径白名单。",
             json!({"server_id": {"type": "string"}}),
@@ -242,12 +242,12 @@ struct HostStatusTool {
 }
 
 #[async_trait]
-impl crate::agent::tools::AgentTool for HostStatusTool {
+impl crate::agent::engine::tools::AgentTool for HostStatusTool {
     host_tool_common!("host__status", "status", AuthzDomain::Host);
 
     fn tool_definition(&self) -> serde_json::Value {
         // 规范 function-calling 形状（复用 native::def；扁平结构会被网关丢弃 → 模型看不到工具）
-        crate::agent::native::def(
+        crate::agent::engine::native::def(
             "host__status",
             "查询指定服务器的连接状态与最近错误。",
             json!({"server_id": {"type": "string"}}),
@@ -275,12 +275,12 @@ struct HostExecTool {
 }
 
 #[async_trait]
-impl crate::agent::tools::AgentTool for HostExecTool {
+impl crate::agent::engine::tools::AgentTool for HostExecTool {
     host_tool_common!("host__exec", "exec", AuthzDomain::Host);
 
     fn tool_definition(&self) -> serde_json::Value {
         // 规范 function-calling 形状（复用 native::def；扁平结构会被网关丢弃 → 模型看不到工具）
-        crate::agent::native::def(
+        crate::agent::engine::native::def(
             "host__exec",
             "在已连接服务器上执行非交互 shell 命令（Xshell 终端）。需审批。cwd 须在白名单；默认 60s 超时强杀（上限 300s）。禁止交互式 TTY 命令。禁止手拼 sudo/su，请用 as_user。",
             json!({"server_id": {"type": "string"}, "command": {"type": "string"}, "cwd": {"type": "string"}, "timeout_sec": {"type": "number"}, "as_user": {"type": "string", "description": "login（默认）| root | 其他用户；非 login 走 sudo 策略包装并强制 HostAuthz"}, "fail_on_nonzero": {"type": "boolean", "description": "默认 true"}}),
@@ -336,12 +336,12 @@ struct HostListTool {
 }
 
 #[async_trait]
-impl crate::agent::tools::AgentTool for HostListTool {
+impl crate::agent::engine::tools::AgentTool for HostListTool {
     host_tool_common!("host__list", "list", AuthzDomain::Host);
 
     fn tool_definition(&self) -> serde_json::Value {
         // 规范 function-calling 形状（复用 native::def；扁平结构会被网关丢弃 → 模型看不到工具）
-        crate::agent::native::def(
+        crate::agent::engine::native::def(
             "host__list",
             "列出远程目录内容（名称 / 类型 / 大小）。",
             json!({"server_id": {"type": "string"}, "path": {"type": "string"}}),
@@ -376,12 +376,12 @@ struct HostUploadTool {
 }
 
 #[async_trait]
-impl crate::agent::tools::AgentTool for HostUploadTool {
+impl crate::agent::engine::tools::AgentTool for HostUploadTool {
     host_tool_common!("host__upload", "upload", AuthzDomain::Host);
 
     fn tool_definition(&self) -> serde_json::Value {
         // 规范 function-calling 形状（复用 native::def；扁平结构会被网关丢弃 → 模型看不到工具）
-        crate::agent::native::def(
+        crate::agent::engine::native::def(
             "host__upload",
             "上传本地文件 / 目录到远程服务器（可递归）。本地路径须在工作空间或 local_path_allow 内。",
             json!({"server_id": {"type": "string"}, "local_path": {"type": "string"}, "remote_path": {"type": "string"}, "recursive": {"type": "boolean"}}),
@@ -420,12 +420,12 @@ struct HostDownloadTool {
 }
 
 #[async_trait]
-impl crate::agent::tools::AgentTool for HostDownloadTool {
+impl crate::agent::engine::tools::AgentTool for HostDownloadTool {
     host_tool_common!("host__download", "download", AuthzDomain::Host);
 
     fn tool_definition(&self) -> serde_json::Value {
         // 规范 function-calling 形状（复用 native::def；扁平结构会被网关丢弃 → 模型看不到工具）
-        crate::agent::native::def(
+        crate::agent::engine::native::def(
             "host__download",
             "从远程服务器下载文件 / 目录到本地（可递归）。本地落点须在工作空间内。",
             json!({"server_id": {"type": "string"}, "remote_path": {"type": "string"}, "local_path": {"type": "string"}, "recursive": {"type": "boolean"}}),
@@ -464,12 +464,12 @@ struct HostSyncTool {
 }
 
 #[async_trait]
-impl crate::agent::tools::AgentTool for HostSyncTool {
+impl crate::agent::engine::tools::AgentTool for HostSyncTool {
     host_tool_common!("host__sync", "sync", AuthzDomain::Host);
 
     fn tool_definition(&self) -> serde_json::Value {
         // 规范 function-calling 形状（复用 native::def；扁平结构会被网关丢弃 → 模型看不到工具）
-        crate::agent::native::def(
+        crate::agent::engine::native::def(
             "host__sync",
             "双向同步本地与远端目录（按相对路径 + 大小判异）。direction: upload/download/both；delete_extraneous=true 会删除对侧多余文件（升 L2 审批）。",
             json!({"server_id": {"type": "string"}, "local_dir": {"type": "string"}, "remote_dir": {"type": "string"}, "direction": {"type": "string", "enum": ["upload", "download", "both"]}, "delete_extraneous": {"type": "boolean"}, "exclude": {"type": "array", "items": {"type": "string"}}}),
@@ -595,12 +595,12 @@ struct HostMkdirTool {
 }
 
 #[async_trait]
-impl crate::agent::tools::AgentTool for HostMkdirTool {
+impl crate::agent::engine::tools::AgentTool for HostMkdirTool {
     host_tool_common!("host__mkdir", "mkdir", AuthzDomain::Host);
 
     fn tool_definition(&self) -> serde_json::Value {
         // 规范 function-calling 形状（复用 native::def；扁平结构会被网关丢弃 → 模型看不到工具）
-        crate::agent::native::def(
+        crate::agent::engine::native::def(
             "host__mkdir",
             "在远程服务器递归创建目录（已存在跳过）。",
             json!({"server_id": {"type": "string"}, "path": {"type": "string"}}),
@@ -634,12 +634,12 @@ struct HostRemoveTool {
 }
 
 #[async_trait]
-impl crate::agent::tools::AgentTool for HostRemoveTool {
+impl crate::agent::engine::tools::AgentTool for HostRemoveTool {
     host_tool_common!("host__remove", "remove", AuthzDomain::Host);
 
     fn tool_definition(&self) -> serde_json::Value {
         // 规范 function-calling 形状（复用 native::def；扁平结构会被网关丢弃 → 模型看不到工具）
-        crate::agent::native::def(
+        crate::agent::engine::native::def(
             "host__remove",
             "删除远程文件 / 目录（recursive=true 递归删除，属 L2 高危操作）。",
             json!({"server_id": {"type": "string"}, "path": {"type": "string"}, "recursive": {"type": "boolean"}}),
@@ -673,12 +673,12 @@ impl crate::agent::tools::AgentTool for HostRemoveTool {
 struct HostDisconnectTool;
 
 #[async_trait]
-impl crate::agent::tools::AgentTool for HostDisconnectTool {
+impl crate::agent::engine::tools::AgentTool for HostDisconnectTool {
     host_tool_common!("host__disconnect", "disconnect", AuthzDomain::Host);
 
     fn tool_definition(&self) -> serde_json::Value {
         // 规范 function-calling 形状（复用 native::def；扁平结构会被网关丢弃 → 模型看不到工具）
-        crate::agent::native::def(
+        crate::agent::engine::native::def(
             "host__disconnect",
             "断开指定服务器的连接（幂等）。",
             json!({"server_id": {"type": "string"}}),
@@ -700,12 +700,12 @@ impl crate::agent::tools::AgentTool for HostDisconnectTool {
 struct HostDisconnectAllTool;
 
 #[async_trait]
-impl crate::agent::tools::AgentTool for HostDisconnectAllTool {
+impl crate::agent::engine::tools::AgentTool for HostDisconnectAllTool {
     host_tool_common!("host__disconnect_all", "disconnect_all", AuthzDomain::Host);
 
     fn tool_definition(&self) -> serde_json::Value {
         // 规范 function-calling 形状（复用 native::def；扁平结构会被网关丢弃 → 模型看不到工具）
-        crate::agent::native::def(
+        crate::agent::engine::native::def(
             "host__disconnect_all",
             "断开全部服务器连接。",
             json!({}),
@@ -725,7 +725,7 @@ impl crate::agent::tools::AgentTool for HostDisconnectAllTool {
 
 /* ----------------------------- 装配 ----------------------------- */
 
-pub fn all_tools(app: AppHandle, bindings: Bindings) -> Vec<Box<dyn crate::agent::tools::AgentTool>> {
+pub fn all_tools(app: AppHandle, bindings: Bindings) -> Vec<Box<dyn crate::agent::engine::tools::AgentTool>> {
     vec![
         Box::new(HostListServersTool { app: app.clone() }),
         Box::new(HostConnectTool { app: app.clone(), bindings: bindings.clone() }),

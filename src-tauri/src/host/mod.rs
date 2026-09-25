@@ -20,7 +20,7 @@ pub mod types;
 
 use std::sync::Arc;
 use tauri::AppHandle;
-use crate::agent::tools::ToolRegistry;
+use crate::agent::engine::tools::ToolRegistry;
 
 /// 注册 `host__*` 工具族（12 个）：仅当智能体绑定了服务器时调用（提示与能力同源）。
 /// 内部持有 Arc<HostPool>（连接池托管）并统一走 HostAuthz 独立授权域。零改动 native.rs。

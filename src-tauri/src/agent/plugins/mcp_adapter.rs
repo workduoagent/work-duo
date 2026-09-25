@@ -15,11 +15,11 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use serde_json::json;
 
-use crate::agent::tools::AgentTool;
-use crate::agent::tools::PermissionLevel;
-use crate::agent::tools::ToolContext;
-use crate::agent::tools::ToolError;
-use crate::agent::tools::ToolRegistry;
+use crate::agent::engine::tools::AgentTool;
+use crate::agent::engine::tools::PermissionLevel;
+use crate::agent::engine::tools::ToolContext;
+use crate::agent::engine::tools::ToolError;
+use crate::agent::engine::tools::ToolRegistry;
 
 /// 已挂载的 MCP 工具元信息（由 RuntimeConfig.mcp_tools 传入）。
 ///
@@ -98,7 +98,7 @@ impl AgentTool for McpRemoteTool {
             crate::mcp::redact_endpoint(&self.endpoint_url),
             self.protocol_type,
             self.auth_type.as_deref().unwrap_or("NONE") == "API_KEY",
-            crate::agent::runtime::clip(
+            crate::agent::engine::runtime::clip(
                 &serde_json::to_string(&arguments).unwrap_or_default(),
                 300
             ),
@@ -122,7 +122,7 @@ impl AgentTool for McpRemoteTool {
                 "[agent] MCP 工具 {} 返回 ok（{}字符）：{}",
                 self.original_name,
                 resp.raw.chars().count(),
-                crate::agent::runtime::clip(&resp.raw, 400),
+                crate::agent::engine::runtime::clip(&resp.raw, 400),
             );
             Ok(resp.raw)
         } else {

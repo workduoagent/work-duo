@@ -23,17 +23,17 @@ use std::time::{Duration, Instant};
 use tauri::AppHandle;
 use futures_util::future::join_all;
 
-use crate::agent::approval::ApprovalManager;
-use crate::agent::context;
+use crate::agent::hitl::approval::ApprovalManager;
+use crate::agent::engine::context;
 use crate::agent::events;
-use crate::agent::graph::KnowledgeGraph;
-use crate::agent::recovery::RecoveryDecision;
-use crate::agent::recovery::RecoveryHub;
-use crate::agent::recovery::RecoveryRequest;
-use crate::agent::runtime;
-use crate::agent::tools::RunOutcome;
-use crate::agent::tools::ToolContext;
-use crate::agent::tools::ToolRegistry;
+use crate::agent::engine::graph::KnowledgeGraph;
+use crate::agent::hitl::recovery::RecoveryDecision;
+use crate::agent::hitl::recovery::RecoveryHub;
+use crate::agent::hitl::recovery::RecoveryRequest;
+use crate::agent::engine::runtime;
+use crate::agent::engine::tools::RunOutcome;
+use crate::agent::engine::tools::ToolContext;
+use crate::agent::engine::tools::ToolRegistry;
 use crate::agent::types::AgentRuntimeConfig;
 use crate::agent::types::PlanSubTask;
 use crate::agent::types::SubTaskOutput;
@@ -138,7 +138,7 @@ const GLOBAL_AGENT_RULES: &str = "【交互准则 · 全局】\n\
 - 思考过程（reasoning/思考链）一律用**简体中文**书写（用户会在界面直接阅读思考流，英文思考不可接受）；\
 最终回复同样使用简体中文。";
 
-fn build_skill_guidance(skills: &[crate::agent::skill_adapter::SkillToolWrapper]) -> String {
+fn build_skill_guidance(skills: &[crate::agent::plugins::skill_adapter::SkillToolWrapper]) -> String {
     if skills.is_empty() {
         return String::new();
     }
@@ -182,7 +182,7 @@ pub async fn run_pipeline(
     // 防止无人值守死锁；手动模式（manual）恒为 false，恢复等待保持永久阻塞（行为完全不变）。
     unattended: bool,
     // 15007 边审批策略授权集（主 Agent 传入；小分队等无授权集场景传 None → 策略不适用，维持旧行为）。
-    grants: Option<&crate::agent::policy::ApprovalGrants>,
+    grants: Option<&crate::agent::engine::policy::ApprovalGrants>,
 ) -> PipelineResult {
     // D' 产物回滚（2026-09-24）：run 前对工作空间业务文件做快照（尽力而为，失败仅告警）。
     // 回滚入口：MCP `agent:snapshot_list` / `agent:snapshot_rollback`。
@@ -510,7 +510,7 @@ pub async fn run_pipeline(
                     continue;
                 }
                 // 接管面板工具栈快照（2b-2）：原生工具 + MCP 工具 + 技能 + 沙箱开关。
-                let tool_stack = crate::agent::recovery::AgentToolStack {
+                let tool_stack = crate::agent::hitl::recovery::AgentToolStack {
                     native_tools: registry.tool_names(),
                     mcp_tools: cfg
                         .mcp_tools
@@ -526,7 +526,7 @@ pub async fn run_pipeline(
                     title: title.clone(),
                     reason: out.summary.clone(),
                     summary: String::new(),
-                    tier: crate::agent::recovery::classify_tier(attempts, &out.summary, &out.failed_command).to_string(),
+                    tier: crate::agent::hitl::recovery::classify_tier(attempts, &out.summary, &out.failed_command).to_string(),
                     failed_command: out.failed_command.clone(),
                     changed_files: out.changed_files.clone(),
                     tool_stack: Some(tool_stack),
@@ -932,7 +932,7 @@ async fn run_subtask(
     // 与当前步骤自身结果合并传入校验器，使更早步骤已跑出的测试通过证据（退出码/输出）可被后续步骤复用。
     session_tool_outputs: &Arc<Mutex<Vec<RunOutcome>>>,
     // 15007 边审批策略授权集（None=策略不适用，如小分队）。
-    grants: Option<&crate::agent::policy::ApprovalGrants>,
+    grants: Option<&crate::agent::engine::policy::ApprovalGrants>,
 ) -> (SubTaskOutput, (u64, u64)) {
     // 认知上下文绝对隔离：崭新的 messages，0 历史包袱。
     let t0 = Instant::now(); // 子任务级耗时基准（闭环日志用）
@@ -1438,7 +1438,7 @@ async fn run_subtask(
                         }
                     }
                 }
-                let result = crate::agent::verifier::verify_task(
+                let result = crate::agent::engine::verifier::verify_task(
                     &task,
                     ctx.workspace.as_deref(),
                     &actual_written,
@@ -1481,11 +1481,11 @@ async fn run_subtask(
                     .filter_map(|c| c.target.clone())
                     .filter(|t| !t.is_empty())
                     .collect();
-                let sources = crate::agent::artifacts::ArtifactSources {
+                let sources = crate::agent::artifact::artifacts::ArtifactSources {
                     changed_files: &changed_files,
                     success_targets,
                 };
-                crate::agent::artifacts::register_artifacts(app, cfg, &task, &summary, &sources).await
+                crate::agent::artifact::artifacts::register_artifacts(app, cfg, &task, &summary, &sources).await
             } else {
                 Vec::new()
             };
@@ -1575,7 +1575,7 @@ async fn run_subtask(
                         }
                     }
                 }
-                let result = crate::agent::verifier::verify_task(
+                let result = crate::agent::engine::verifier::verify_task(
                     &task,
                     ctx.workspace.as_deref(),
                     &actual_written,
@@ -1598,7 +1598,7 @@ async fn run_subtask(
                         if existence_only { "存在性初核，暂定" } else { "行为级，已验证" },
                         runtime::clip(&result.evidence, 160),
                     );
-                    let sources = crate::agent::artifacts::ArtifactSources {
+                    let sources = crate::agent::artifact::artifacts::ArtifactSources {
                         changed_files: &changed_files,
                         success_targets: task
                             .success_criteria
@@ -1607,7 +1607,7 @@ async fn run_subtask(
                             .filter(|t| !t.is_empty())
                             .collect(),
                     };
-                    let artifacts = crate::agent::artifacts::register_artifacts(
+                    let artifacts = crate::agent::artifact::artifacts::register_artifacts(
                         app, cfg, &task,
                         "（超轮熔断，客观校验通过）模型未发终态汇报，按产物客观校验闭环",
                         &sources,

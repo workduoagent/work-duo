@@ -30,11 +30,11 @@ use tokio::time::timeout;
 use tokio::time::Duration;
 
 use crate::agent::events;
-use crate::agent::runtime::call_llm;
-use crate::agent::runtime::now_ms;
+use crate::agent::engine::runtime::call_llm;
+use crate::agent::engine::runtime::now_ms;
 use crate::agent::types::AgentRuntimeConfig;
 use crate::agent::types::ArtifactRef;
-use crate::agent::wd_mem;
+use crate::agent::knowledge::wd_mem;
 
 /// 单个工具 / Skill 定义占用的上下文 token 估算（与前端 `AVG_TOOL_TOKENS` 保持一致）。
 /// 工具/Skill 定义理论固定不变，仅当用户中途移除 Skill 或停用（解绑）MCP 时总占用才会下降。
@@ -736,7 +736,7 @@ pub(crate) async fn trigger_background_compaction(
                     let mut pending = 0usize;
                     for (key, category, content) in &distill_candidates {
                         if cfg_bg.memory_mode == "forced" {
-                            match crate::agent::memory::anchor_memory(
+                            match crate::agent::knowledge::memory::anchor_memory(
                                 &app_bg,
                                 Some(&cfg_bg.agent_id),
                                 Some(&sid),
@@ -930,7 +930,7 @@ Your job is to merge the Existing Summary and the Target Conversation Rounds int
     }
     tracing::info!(
         "[Compactor] 摘要内容预览（前500字符）：{}",
-        crate::agent::runtime::clip(&summary, 500)
+        crate::agent::engine::runtime::clip(&summary, 500)
     );
     Ok(summary)
 }
@@ -980,7 +980,7 @@ concurrent-refresh-pitfall | fix | 并发刷新令牌会互踢，客户端需 si
     tracing::info!(
         "[Compactor] 蒸馏调用完成：提炼候选 {} 条（原始输出预览：{}）",
         candidates.len(),
-        crate::agent::runtime::clip(&raw, 200)
+        crate::agent::engine::runtime::clip(&raw, 200)
     );
     Ok(candidates)
 }

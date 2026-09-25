@@ -11,7 +11,7 @@ use sqlx::Row;
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_sql::{DbInstances, DbPool};
 
-use crate::agent::plugin_runner::{run_plugin, PluginExecSpec, PluginRunResult};
+use crate::agent::plugins::plugin_runner::{run_plugin, PluginExecSpec, PluginRunResult};
 use crate::bun_manager::BunManager;
 use crate::mamba_manager::MambaManager;
 
@@ -91,7 +91,7 @@ pub async fn test_user_plugin(
         dependencies,
     };
 
-    let call_id = format!("call_{}", crate::agent::runtime::now_ms());
+    let call_id = format!("call_{}", crate::agent::engine::runtime::now_ms());
     let result =
         run_plugin(&app, &mamba, &bun, &spec, &params_val, &call_id, None, None, "test").await;
     Ok(result)

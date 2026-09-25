@@ -69,7 +69,7 @@ async fn connect_binding(app: &tauri::AppHandle, binding: &ServerBinding) -> Res
         .credential_id
         .as_deref()
         .ok_or_else(|| format!("服务器 {} 未配置凭证", binding.name))?;
-    let pool = crate::agent::round_compactor::get_pool(app).await?;
+    let pool = crate::agent::engine::round_compactor::get_pool(app).await?;
     let rows = sqlx::query("SELECT secret_type, secret_enc FROM server_credential WHERE id = ?")
         .bind(credential_id)
         .fetch_all(&pool)

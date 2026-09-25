@@ -33,7 +33,7 @@ use tauri::Manager;
 use tauri::State;
 use tauri_plugin_shell::process::CommandEvent;
 use tauri_plugin_shell::ShellExt;
-use crate::agent::tools::ScriptRunResult;
+use crate::agent::engine::tools::ScriptRunResult;
 
 /// 默认受管环境名：调用方未指定 `env_name` 时使用。
 const DEFAULT_ENV: &str = "default";

@@ -4,8 +4,8 @@
 
 use serde::Serialize;
 
-use crate::agent::mcp_adapter::MountedMcpTool;
-use crate::agent::skill_adapter::SkillToolWrapper;
+use crate::agent::plugins::mcp_adapter::MountedMcpTool;
+use crate::agent::plugins::skill_adapter::SkillToolWrapper;
 
 /// 工具调用步骤的实时状态（对应前端 ToolStep）。
 #[derive(Debug, Clone, Serialize)]

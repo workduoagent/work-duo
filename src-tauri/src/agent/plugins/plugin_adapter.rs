@@ -13,8 +13,8 @@ use async_trait::async_trait;
 use serde_json::{json, Value as JsonValue};
 use tauri::{AppHandle, Manager};
 
-use crate::agent::plugin_runner::{run_plugin, PluginExecSpec};
-use crate::agent::tools::{AgentTool, PermissionLevel, ToolContext, ToolError, ToolRegistry};
+use crate::agent::plugins::plugin_runner::{run_plugin, PluginExecSpec};
+use crate::agent::engine::tools::{AgentTool, PermissionLevel, ToolContext, ToolError, ToolRegistry};
 use crate::agent::types::MountedUserPlugin;
 use crate::bun_manager::BunManager;
 use crate::mamba_manager::MambaManager;
@@ -56,7 +56,7 @@ impl AgentTool for PluginTool {
     }
 
     async fn execute(&self, args: JsonValue, ctx: &ToolContext) -> Result<String, ToolError> {
-        let call_id = format!("call_{}", crate::agent::runtime::now_ms());
+        let call_id = format!("call_{}", crate::agent::engine::runtime::now_ms());
         let mamba = self.app.state::<MambaManager>();
         let bun = self.app.state::<BunManager>();
         let result = run_plugin(

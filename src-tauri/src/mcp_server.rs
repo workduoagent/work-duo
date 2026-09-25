@@ -37,7 +37,7 @@ use tauri_plugin_sql::DbPool;
 
 use crate::agent::commands;
 use crate::agent::events;
-use crate::agent::runtime::AgentRuntime;
+use crate::agent::engine::runtime::AgentRuntime;
 use crate::logging;
 
 /// 待前端回传的 UI 意图请求：`request_id -> oneshot sender`。
@@ -494,7 +494,7 @@ async fn call_tool(app: &AppHandle, name: &str, args: &Value) -> Value {
         "agent_submit_approval" => {
             let rt = app.state::<AgentRuntime>();
             let agent_id = args.get("agentId").and_then(|v| v.as_str()).map(|s| s.to_string());
-            let decision: crate::agent::approval::ApprovalDecisionInput = match serde_json::from_value(args.clone()) {
+            let decision: crate::agent::hitl::approval::ApprovalDecisionInput = match serde_json::from_value(args.clone()) {
                 Ok(i) => i,
                 Err(e) => return json!({ "error": format!("参数错误: {e}") }),
             };
@@ -580,7 +580,7 @@ async fn call_tool(app: &AppHandle, name: &str, args: &Value) -> Value {
             } else {
                 0
             };
-            let budget_sec = crate::agent::runtime::run_wall_clock_limit().as_secs();
+            let budget_sec = crate::agent::engine::runtime::run_wall_clock_limit().as_secs();
             let mut step = 0usize;
             let mut total = 0usize;
             let mut title = String::new();
@@ -638,7 +638,7 @@ async fn call_tool(app: &AppHandle, name: &str, args: &Value) -> Value {
         "agent_sweep_orphan_rounds" => {
             // L2 pillar①（2026-09-23）：孤儿轮次按需清扫——此前仅 App 启动时触发（round_compactor），
             // 外部自测无法在并发/取消后即时断言「无孤儿」。本工具补按需入口，返回本轮清扫的轮次数。
-            match crate::agent::round_compactor::sweep_orphan_rounds(app).await {
+            match crate::agent::engine::round_compactor::sweep_orphan_rounds(app).await {
                 Ok(n) => json!({ "ok": true, "swept": n }),
                 Err(e) => json!({ "ok": false, "error": e }),
             }

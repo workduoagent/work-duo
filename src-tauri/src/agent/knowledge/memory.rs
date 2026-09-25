@@ -16,10 +16,10 @@ use sqlx::Row;
 use sqlx::sqlite::SqlitePool;
 use tauri::AppHandle;
 
-use crate::agent::embedding;
+use crate::agent::knowledge::embedding;
 use crate::agent::events;
-use crate::agent::round_compactor;
-use crate::agent::vector_store;
+use crate::agent::engine::round_compactor;
+use crate::agent::knowledge::vector_store;
 
 /// 自动召回注入的 top-K 记忆条数（运行时注入系统提示的记忆上限）。
 const MEMORY_RECALL_TOP: usize = 5;
@@ -863,7 +863,7 @@ pub async fn recall_top_memories(
                             let before: Vec<String> = items
                                 .iter()
                                 .take(k)
-                                .map(|i| crate::agent::runtime::clip(&i.key, 24))
+                                .map(|i| crate::agent::engine::runtime::clip(&i.key, 24))
                                 .collect();
                             items = pairs
                                 .iter()
@@ -871,7 +871,7 @@ pub async fn recall_top_memories(
                                 .collect();
                             let after: Vec<String> = items
                                 .iter()
-                                .map(|i| crate::agent::runtime::clip(&i.key, 24))
+                                .map(|i| crate::agent::engine::runtime::clip(&i.key, 24))
                                 .collect();
                             if before != after {
                                 tracing::info!(

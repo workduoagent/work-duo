@@ -63,7 +63,7 @@ impl HostAction {
 
 /// 读取某智能体绑定的全部服务器档案（agent_server_ref JOIN server_host）。
 pub async fn load_bindings(app: &AppHandle, agent_id: &str) -> Result<Vec<ServerBinding>, String> {
-    let pool = crate::agent::round_compactor::get_pool(app).await?;
+    let pool = crate::agent::engine::round_compactor::get_pool(app).await?;
     let rows = sqlx::query(
         "SELECT s.id, s.name, s.host, s.port, s.user, s.credential_id, \
          s.path_allow, s.path_deny, s.local_path_allow, s.default_cwd, s.sudo_mode, s.sudo_user, \

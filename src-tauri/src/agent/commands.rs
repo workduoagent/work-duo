@@ -48,23 +48,23 @@ fn now_ms() -> i64 {
         .unwrap_or(0)
 }
 
-use crate::agent::approval::ApprovalDecisionInput;
+use crate::agent::hitl::approval::ApprovalDecisionInput;
 use crate::agent::events;
-use crate::agent::mcp_adapter::MountedMcpTool;
-use crate::agent::recovery::RecoveryDecision;
-use crate::agent::runtime::AgentRuntime;
-use crate::agent::runtime::RunRecord;
-use crate::agent::skill_adapter::SkillToolWrapper;
-use crate::agent::tools::{PathGuard, ToolContext};
-use crate::agent::native::parse_host_allowlist;
+use crate::agent::plugins::mcp_adapter::MountedMcpTool;
+use crate::agent::hitl::recovery::RecoveryDecision;
+use crate::agent::engine::runtime::AgentRuntime;
+use crate::agent::engine::runtime::RunRecord;
+use crate::agent::plugins::skill_adapter::SkillToolWrapper;
+use crate::agent::engine::tools::{PathGuard, ToolContext};
+use crate::agent::engine::native::parse_host_allowlist;
 use crate::agent::types::MountedUserPlugin;
 use crate::agent::types::AgentRuntimeConfig;
 use crate::agent::types::BranchStep;
 use crate::agent::types::PlanBranchGenerated;
 use crate::agent::types::PlanDAG;
 use crate::agent::types::ReadArtifactResult;
-use crate::agent::knowledge;
-use crate::agent::memory::{self, HeatmapPoint, MemoryItem};
+use crate::agent::knowledge::knowledge;
+use crate::agent::knowledge::memory::{self, HeatmapPoint, MemoryItem};
 use crate::agent::types::{
     SquadChatConfig, SquadMemberConfig, SquadRunStrategy, SquadRuntimeConfig,
 };
@@ -136,7 +136,7 @@ fn spawn_budget_watchdog(
     fired: std::sync::Arc<AtomicBool>,
     run_limit: std::time::Duration,
 ) -> Option<tauri::async_runtime::JoinHandle<()>> {
-    let soft = run_limit.saturating_sub(crate::agent::runtime::RUN_SOFT_WINDOW);
+    let soft = run_limit.saturating_sub(crate::agent::engine::runtime::RUN_SOFT_WINDOW);
     if soft.is_zero() {
         return None;
     }
@@ -217,7 +217,7 @@ pub async fn run_agent_task(
             // cancel_flag——流水线在既有边界检查点停止发起新步骤、在途调用自然收尾（timeout
             // 到点硬 drop 内层 future 无法「等收尾」）；watchdog 在 run 结束后 abort，
             // 防止取消信号泄漏到该 Agent 的下一个任务。
-            let run_limit = crate::agent::runtime::run_wall_clock_limit();
+            let run_limit = crate::agent::engine::runtime::run_wall_clock_limit();
             let cfg_workspace = cfg.workspace.clone();
             let budget_soft = std::sync::Arc::new(AtomicBool::new(false));
             let watchdog = spawn_budget_watchdog(
@@ -374,7 +374,7 @@ pub async fn run_task_ex(
         // #8 per-run：当前任务的所有 emit 点经 task_local 落到 rid 桶，并发 run 互不串台。
         let _scope = crate::agent::events::with_run_id_scope(rid.clone(), async move {
             // 支柱① 终态铁律：run 级总墙钟兜底（同 run_agent_task，含预算软窗口两阶段收尾）。
-            let run_limit = crate::agent::runtime::run_wall_clock_limit();
+            let run_limit = crate::agent::engine::runtime::run_wall_clock_limit();
             let watchdog = spawn_budget_watchdog(
                 task_state.cancel_flag.clone(),
                 budget_soft.clone(),
@@ -808,9 +808,9 @@ pub async fn submit_plan_decision(
         return Ok(false);
     }
     let decision = match input.decision.to_lowercase().as_str() {
-        "approve" => crate::agent::plan_approval::PlanApprovalDecision::Approve,
-        "reject" => crate::agent::plan_approval::PlanApprovalDecision::Reject,
-        "revise" => crate::agent::plan_approval::PlanApprovalDecision::Revise(input.guidance.unwrap_or_default()),
+        "approve" => crate::agent::hitl::plan_approval::PlanApprovalDecision::Approve,
+        "reject" => crate::agent::hitl::plan_approval::PlanApprovalDecision::Reject,
+        "revise" => crate::agent::hitl::plan_approval::PlanApprovalDecision::Revise(input.guidance.unwrap_or_default()),
         other => {
             return Err(format!(
                 "未知计划审批决策：{other}（应为 approve/reject/revise）"
@@ -824,13 +824,13 @@ pub async fn submit_plan_decision(
 /// 开始附件分片暂存会话（前端分块上传超大文件，避免在 `run_agent_task` IPC 中内联 base64）。
 #[tauri::command]
 pub async fn begin_stage_attachment(name: String, mime: String) -> Result<String, String> {
-    Ok(crate::agent::context::stage_begin(name, mime))
+    Ok(crate::agent::engine::context::stage_begin(name, mime))
 }
 
 /// 追加一个分片（来自前端 `Uint8Array`，经 Tauri 二进制 IPC 传输）。
 #[tauri::command]
 pub async fn append_stage_chunk(stage_id: String, data: Vec<u8>) -> Result<(), String> {
-    crate::agent::context::stage_append(&stage_id, &data)
+    crate::agent::engine::context::stage_append(&stage_id, &data)
 }
 
 /// 提交分片暂存：落盘到 `workspace/.attachments/` 并返回最终路径，清理缓冲。
@@ -839,13 +839,13 @@ pub async fn commit_stage_attachment(
     stage_id: String,
     workspace: Option<String>,
 ) -> Result<String, String> {
-    crate::agent::context::stage_commit(&stage_id, &workspace)
+    crate::agent::engine::context::stage_commit(&stage_id, &workspace)
 }
 
 /// 取消分片暂存（前端上传失败 / 超时清理）。
 #[tauri::command]
 pub async fn abort_stage_attachment(stage_id: String) -> Result<(), String> {
-    crate::agent::context::stage_abort(&stage_id);
+    crate::agent::engine::context::stage_abort(&stage_id);
     Ok(())
 }
 
@@ -1104,7 +1104,7 @@ pub async fn branch_from_step(app: AppHandle, input: BranchFromStepInput) -> Res
     );
 
     let (plan, _, _) =
-        crate::agent::planner::build_plan(&cfg, &prompt, cfg.workspace.as_deref()).await;
+        crate::agent::engine::planner::build_plan(&cfg, &prompt, cfg.workspace.as_deref()).await;
 
     // 重编号新分支步骤，续接原步骤序号（from_step+1 起）。
     let base = input.from_step;
@@ -1901,7 +1901,7 @@ pub async fn load_config(
                 );
             }
             // .wd_mem 记忆与素材区：确保结构就绪，并注入复用清单与约定。
-            match crate::agent::wd_mem::ensure_wd_mem(ws_trim) {
+            match crate::agent::knowledge::wd_mem::ensure_wd_mem(ws_trim) {
                 Ok(_) => {
                     system_prompt.push_str(&format!(
                         "\n\n### 工作空间记忆区 `.wd_mem/`（已就绪，位于 {}/.wd_mem）\n\
@@ -1916,14 +1916,14 @@ pub async fn load_config(
                         ws_trim
                     ));
                     // [双轨记忆 Slot 0] 树状索引（artifacts/sessions/scripts/data，仅首行标题，绝不读正文）+ 自主发现指令。
-                    if let Some(index) = crate::agent::wd_mem::build_tree_index(ws_trim) {
+                    if let Some(index) = crate::agent::knowledge::wd_mem::build_tree_index(ws_trim) {
                         system_prompt.push_str(&format!(
                             "\n\n{}\n\n> The `artifacts/`, `sessions/` and `scripts/` directories under `.wd_mem/` contain historical designs and bug-fixing records. You MUST use the `native__read_file` tool to inspect specific files before proceeding if the user's request relates to these modules.",
                             index
                         ));
                     }
                     // [双轨记忆 Slot 0] 长期全局记忆 MEMORY.md（规范命名；兼容旧 project_memory.md 回退）。
-                    if let Some(mem) = crate::agent::wd_mem::read_project_memory(ws_trim) {
+                    if let Some(mem) = crate::agent::knowledge::wd_mem::read_project_memory(ws_trim) {
                         if !mem.trim().is_empty() {
                             system_prompt.push_str(&format!(
                                 "\n\n### 项目长期记忆（.wd_mem/MEMORY.md）\n{}",
@@ -1998,8 +1998,8 @@ category 取值：decision（决策）/ code_pattern（代码模式）/ user_pre
         if let Some(ws) = workspace.as_deref() {
             if let Some(pr) = prompt.as_deref() {
                 if !pr.trim().is_empty() {
-                    match crate::agent::artifact_index::recall_artifact_snippets(
-                        app, &pool, ws, pr, crate::agent::artifact_index::RECALL_SNIPPET_TOP_K,
+                    match crate::agent::artifact::artifact_index::recall_artifact_snippets(
+                        app, &pool, ws, pr, crate::agent::artifact::artifact_index::RECALL_SNIPPET_TOP_K,
                     )
                     .await
                     {
@@ -2362,7 +2362,7 @@ pub async fn run_squad_task(app: AppHandle, input: RunSquadTaskInput) -> Result<
     let app_clone = app.clone();
     let prompt = input.prompt.clone();
     tauri::async_runtime::spawn(async move {
-        crate::agent::squad_orchestrator::run_squad_task(&app_clone, squad, prompt).await;
+        crate::agent::squad::squad_orchestrator::run_squad_task(&app_clone, squad, prompt).await;
     });
     Ok(())
 }
@@ -2476,8 +2476,8 @@ pub struct AnchorSquadMemoryInput {
 /// 锚定一条小分队记忆（团队黑板写入路径）。命中同 squad_id+agent_id+key 则强化计数，否则新建。
 /// 详见 `memory::anchor_squad_memory`。
 #[tauri::command]
-pub async fn anchor_squad_memory(app: AppHandle, input: AnchorSquadMemoryInput) -> Result<crate::agent::memory::SquadMemoryItem, String> {
-    crate::agent::memory::anchor_squad_memory(
+pub async fn anchor_squad_memory(app: AppHandle, input: AnchorSquadMemoryInput) -> Result<crate::agent::knowledge::memory::SquadMemoryItem, String> {
+    crate::agent::knowledge::memory::anchor_squad_memory(
         &app,
         &input.squad_id,
         input.agent_id.as_deref(),
@@ -2495,14 +2495,14 @@ pub async fn anchor_squad_memory(app: AppHandle, input: AnchorSquadMemoryInput) 
 pub async fn list_squad_memories(
     app: AppHandle,
     squad_id: String,
-) -> Result<Vec<crate::agent::memory::SquadMemoryItem>, String> {
-    crate::agent::memory::list_squad_memories(&app, &squad_id).await
+) -> Result<Vec<crate::agent::knowledge::memory::SquadMemoryItem>, String> {
+    crate::agent::knowledge::memory::list_squad_memories(&app, &squad_id).await
 }
 
 /// 删除一条小分队记忆。
 #[tauri::command]
 pub async fn delete_squad_memory(app: AppHandle, id: String) -> Result<(), String> {
-    crate::agent::memory::delete_squad_memory(&app, &id).await
+    crate::agent::knowledge::memory::delete_squad_memory(&app, &id).await
 }
 // ============================ 知识库 RAG 索引（K1 第四期，设计稿 docs/knowledge-rag-design.md） ============================
 

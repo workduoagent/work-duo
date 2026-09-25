@@ -148,7 +148,7 @@ const SELECT_HOST: &str = "SELECT h.*, c.hint AS hint FROM server_host h \
 
 #[tauri::command]
 pub async fn server_host_list(app: AppHandle) -> Result<Vec<ServerHostDto>, String> {
-    let pool = crate::agent::round_compactor::get_pool(&app).await?;
+    let pool = crate::agent::engine::round_compactor::get_pool(&app).await?;
     let rows = sqlx::query(&format!("{SELECT_HOST} ORDER BY h.updated_at DESC"))
         .fetch_all(&pool)
         .await
@@ -158,7 +158,7 @@ pub async fn server_host_list(app: AppHandle) -> Result<Vec<ServerHostDto>, Stri
 
 #[tauri::command]
 pub async fn server_host_get(app: AppHandle, id: String) -> Result<Option<ServerHostDto>, String> {
-    let pool = crate::agent::round_compactor::get_pool(&app).await?;
+    let pool = crate::agent::engine::round_compactor::get_pool(&app).await?;
     let rows = sqlx::query(&format!("{SELECT_HOST} WHERE h.id = ?"))
         .bind(&id)
         .fetch_all(&pool)
@@ -169,8 +169,8 @@ pub async fn server_host_get(app: AppHandle, id: String) -> Result<Option<Server
 
 #[tauri::command]
 pub async fn server_host_save(app: AppHandle, input: ServerHostInput) -> Result<ServerHostDto, String> {
-    let pool = crate::agent::round_compactor::get_pool(&app).await?;
-    let now = crate::agent::runtime::now_ms();
+    let pool = crate::agent::engine::round_compactor::get_pool(&app).await?;
+    let now = crate::agent::engine::runtime::now_ms();
     let kind = SecretKind::parse(input.auth_type.as_deref().unwrap_or("password"));
 
     // 凭证：传了明文 secret → 加密 upsert；未传 → 保留既有 credential_id
@@ -306,7 +306,7 @@ pub async fn server_host_save(app: AppHandle, input: ServerHostInput) -> Result<
 
 #[tauri::command]
 pub async fn server_host_delete(app: AppHandle, id: String) -> Result<(), String> {
-    let pool = crate::agent::round_compactor::get_pool(&app).await?;
+    let pool = crate::agent::engine::round_compactor::get_pool(&app).await?;
     // 级联：凭证 + 绑定引用一并清理（host_grant / 日志按 run 生命周期，保留审计）
     sqlx::query("DELETE FROM agent_server_ref WHERE server_id = ?")
         .bind(&id)
@@ -357,7 +357,7 @@ async fn resolve_secret(
     if id.is_empty() {
         return Err("缺少凭证：请填写密码或私钥".into());
     }
-    let pool = crate::agent::round_compactor::get_pool(app).await?;
+    let pool = crate::agent::engine::round_compactor::get_pool(app).await?;
     let rows = sqlx::query(
         "SELECT c.secret_type, c.secret_enc FROM server_host h \
          JOIN server_credential c ON c.id = h.credential_id WHERE h.id = ?",
@@ -411,10 +411,10 @@ pub async fn server_host_test_connection(
     match crate::host::transport::probe(&host, port, &user, &secret, 15).await {
         Ok((login_user, os_hint, home)) => {
             // 成功测试刷新 last_used_at（尽力而为，失败不阻断）
-            if let Ok(pool) = crate::agent::round_compactor::get_pool(&app).await {
+            if let Ok(pool) = crate::agent::engine::round_compactor::get_pool(&app).await {
                 if !input.id.trim().is_empty() {
                     let _ = sqlx::query("UPDATE server_host SET last_used_at = ? WHERE id = ?")
-                        .bind(crate::agent::runtime::now_ms())
+                        .bind(crate::agent::engine::runtime::now_ms())
                         .bind(&input.id)
                         .execute(&pool)
                         .await;
@@ -448,7 +448,7 @@ pub async fn agent_server_bind(
     server_ids: Vec<String>,
 ) -> Result<Vec<serde_json::Value>, String> {
     use sqlx::Row;
-    let pool = crate::agent::round_compactor::get_pool(&app).await?;
+    let pool = crate::agent::engine::round_compactor::get_pool(&app).await?;
     // 存在性校验：agent 与 server 必须真实存在（防 MCP 侧写脏关联）
     let agent_ok: Option<String> = sqlx::query_scalar("SELECT id FROM agent_info WHERE id = ?")
         .bind(&agent_id)
@@ -468,7 +468,7 @@ pub async fn agent_server_bind(
             return Err(format!("服务器不存在：{sid}（请先 server_host_save）"));
         }
     }
-    let now = crate::agent::runtime::now_ms();
+    let now = crate::agent::engine::runtime::now_ms();
     let mut tx = pool.begin().await.map_err(|e| format!("开启事务失败：{e}"))?;
     sqlx::query("DELETE FROM agent_server_ref WHERE agent_id = ?")
         .bind(&agent_id)

@@ -16,16 +16,16 @@ use tauri::Manager;
 use tauri_plugin_sql::DbInstances;
 use tauri_plugin_sql::DbPool;
 
-use crate::agent::approval::ApprovalManager;
+use crate::agent::hitl::approval::ApprovalManager;
 use crate::agent::events;
-use crate::agent::mcp_adapter;
-use crate::agent::native;
-use crate::agent::planner;
-use crate::agent::pipeline;
-use crate::agent::graph::KnowledgeGraph;
-use crate::agent::recovery::RecoveryHub;
-use crate::agent::tools::ToolContext;
-use crate::agent::tools::ToolRegistry;
+use crate::agent::plugins::mcp_adapter;
+use crate::agent::engine::native;
+use crate::agent::engine::planner;
+use crate::agent::engine::pipeline;
+use crate::agent::engine::graph::KnowledgeGraph;
+use crate::agent::hitl::recovery::RecoveryHub;
+use crate::agent::engine::tools::ToolContext;
+use crate::agent::engine::tools::ToolRegistry;
 use crate::agent::types::AgentRuntimeConfig;
 use crate::agent::types::SquadMemberConfig;
 use crate::agent::types::SquadRuntimeConfig;
@@ -331,7 +331,7 @@ async fn plan_squad_delegation(
         json!({ "role": "system", "content": sys }),
         json!({ "role": "user", "content": user }),
     ];
-    match crate::agent::runtime::call_llm(leader_cfg, &messages, &[]).await {
+    match crate::agent::engine::runtime::call_llm(leader_cfg, &messages, &[]).await {
         Ok((resp, _)) => {
             let content = resp
                 .get("choices")
@@ -404,7 +404,7 @@ async fn summarize(leader_cfg: &AgentRuntimeConfig, prompt: &str, context: &str)
         json!({ "role": "system", "content": sys }),
         json!({ "role": "user", "content": user }),
     ];
-    match crate::agent::runtime::call_llm(leader_cfg, &messages, &[]).await {
+    match crate::agent::engine::runtime::call_llm(leader_cfg, &messages, &[]).await {
         Ok((resp, _)) => {
             let c = resp
                 .get("choices")
@@ -857,7 +857,7 @@ async fn run_squad_chat(
                 json!({ "role": "system", "content": sys }),
                 json!({ "role": "user", "content": user }),
             ];
-            let content = match crate::agent::runtime::call_llm(&member.agent, &messages, &[]).await {
+            let content = match crate::agent::engine::runtime::call_llm(&member.agent, &messages, &[]).await {
                 Ok((resp, _)) => extract_llm_text(&resp),
                 Err(e) => {
                     tracing::warn!("[squad] chat 成员 {} 第 {} 轮发言失败：{e}", member.agent.agent_id, r + 1);
@@ -925,7 +925,7 @@ async fn run_squad_chat(
         json!({ "role": "system", "content": sys }),
         json!({ "role": "user", "content": user }),
     ];
-    let summary = match crate::agent::runtime::call_llm(sum_cfg, &messages, &[]).await {
+    let summary = match crate::agent::engine::runtime::call_llm(sum_cfg, &messages, &[]).await {
         Ok((resp, _)) => {
             let s = extract_llm_text(&resp);
             if s.is_empty() {

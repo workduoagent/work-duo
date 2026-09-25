@@ -27,13 +27,13 @@ use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::AppHandle;
 
-use crate::agent::round_compactor::build_request_messages;
-use crate::agent::round_compactor::get_pool;
-use crate::agent::round_compactor::ConversationRoundRecord;
-use crate::agent::graph::KnowledgeGraph;
+use crate::agent::engine::round_compactor::build_request_messages;
+use crate::agent::engine::round_compactor::get_pool;
+use crate::agent::engine::round_compactor::ConversationRoundRecord;
+use crate::agent::engine::graph::KnowledgeGraph;
 use crate::agent::types::AgentRuntimeConfig;
 use crate::agent::types::AttachmentInput;
-use crate::agent::wd_mem;
+use crate::agent::knowledge::wd_mem;
 
 /// 统计消息序列的总字符数（日志用，粗估上下文体量）。
 fn messages_chars(messages: &[Value]) -> usize {

@@ -552,8 +552,8 @@ async fn write_plugin_run_log(
             return;
         }
     };
-    let id = format!("plr_{}", crate::agent::runtime::now_ms());
-    let created = crate::agent::runtime::now_ms();
+    let id = format!("plr_{}", crate::agent::engine::runtime::now_ms());
+    let created = crate::agent::engine::runtime::now_ms();
     let stdout = truncate(&result.stdout, 64 * 1024);
     let stderr = truncate(&result.stderr, 64 * 1024);
     let params_str = serde_json::to_string(params).unwrap_or_else(|_| "{}".to_string());
@@ -593,7 +593,7 @@ async fn update_last_run(app: &tauri::AppHandle, spec: &PluginExecSpec, ok: bool
             return;
         }
     };
-    let ts = crate::agent::runtime::now_ms();
+    let ts = crate::agent::engine::runtime::now_ms();
     let status = if ok { 1i64 } else { 2i64 };
     if let Err(e) = sqlx::query(
         "UPDATE user_plugin_tool SET last_run_at = ?, last_run_status = ? WHERE id = ?",
