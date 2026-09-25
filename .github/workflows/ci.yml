@@ -1,0 +1,67 @@
+# 最小 CI（台账 P0-6，2026-09-25）
+# 三步：typecheck → cargo test → release gate（离线静态层）。
+#
+# ⚠️ 本仓库 remote 为 Gitee：Gitee 不自动执行 GitHub Actions。
+#    本文件作为标准 CI 定义：①推送到 GitHub 镜像即生效；②可迁移为 Gitee Go 流水线蓝本；
+#    ③本地等效命令（推送前自检）：`pnpm typecheck && cd src-tauri && cargo test && node docs/skills/workduo-mcp/scripts/release_gate.mjs --offline --version local`
+
+name: ci
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  typecheck:
+    name: typecheck (tsc --noEmit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+
+  rust-test:
+    name: cargo test (windows, msvc)
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: src-tauri
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - name: cargo test
+        run: cargo test --locked
+        env:
+          # Tauri/WebView2 相关构建在 CI 无窗口环境的标准开关
+          CARGO_INCREMENTAL: 0
+
+  release-gate-offline:
+    name: release gate (offline static layer)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: release gate --offline
+        run: node docs/skills/workduo-mcp/scripts/release_gate.mjs --offline --version ci-${{ github.sha }}
