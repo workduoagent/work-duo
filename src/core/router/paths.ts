@@ -7,6 +7,7 @@ export const ROUTES = {
   skillHub: '/skill-hub',
   mcpHub: '/mcp-hub',
   pluginHub: '/plugin-hub',
+  serverHub: '/server-hub',
   sandbox: '/sandbox',
   sandboxPython: '/sandbox/python',
   settings: '/settings',

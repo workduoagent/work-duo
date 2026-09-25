@@ -60,6 +60,7 @@ export interface AgentDraft {
   pluginIds: string[]
   /** 已绑定的知识库 id（第四期 K2，保存写入 agent_kb_ref） */
   kbIds: string[]
+  serverIds: string[]
 }
 
 /** 新建时的空草稿（identifier 由调用方预先随机生成，便于用户直接看到可改） */
@@ -76,6 +77,7 @@ export function createEmptyDraft(identifier: string): AgentDraft {
     skillIds: [],
     pluginIds: [],
     kbIds: [],
+    serverIds: [],
   }
 }
 
@@ -86,6 +88,7 @@ export function draftFromAgent(
   skillRefs: AgentSkillRef[],
   pluginIds: string[] = [],
   kbIds: string[] = [],
+  serverIds: string[] = [],
 ): AgentDraft {
   return {
     name: agent.name,
@@ -111,6 +114,7 @@ export function draftFromAgent(
     skillIds: skillRefs.map((r) => r.skillId),
     pluginIds,
     kbIds,
+    serverIds,
   }
 }
 
@@ -143,5 +147,6 @@ export function draftToInput(draft: AgentDraft, id?: string): AgentUpsertInput {
     skillIds: draft.skillIds,
     pluginIds: draft.pluginIds,
     kbIds: draft.kbIds,
+    serverIds: draft.serverIds,
   }
 }

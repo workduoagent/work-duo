@@ -74,6 +74,31 @@ export interface ApprovalRequest {
   reason?: string
   /** 策略授权 key（勾选「本任务内记住」时随决策回传，写入 grants）。 */
   grantKey?: string
+  /** 授权域："host" = HostAuthz 卡片；缺省 = 本地域 */
+  domain?: string
+  /** domain=host 时的审批上下文（服务器 / 身份 / 风险 / 命令等） */
+  hostMeta?: {
+    serverId: string
+    serverName: string
+    serverLabel: string
+    loginUser: string
+    asUser: string
+    action: string
+    riskLevel: string
+    riskKeys: string[]
+    command?: string
+    cwd?: string
+    remotePath?: string
+    localPath?: string
+    pathAllow: string[]
+    grantKey: string
+    scopeDigest: string
+    runId: string
+    allowGrantMemory: boolean
+    l3: boolean
+  }
+  /** 本轮 run id */
+  runId?: string
 }
 
 /** 方案推荐：单个选项（Agent 调 `native__ask_user_choice` 时给出；前端渲染为 chip）。 */

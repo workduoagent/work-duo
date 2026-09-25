@@ -14,6 +14,7 @@ import McpHubPage from '@/pages/mcp'
 import McpDetailPage from '@/pages/mcp/detail'
 import PluginHubPage from '@/pages/plugins'
 import PluginDetailPage from '@/pages/plugins/detail'
+import ServerHubPage from '@/pages/server-hub'
 import SettingsPage from '@/pages/settings'
 import SandboxPythonPage from '@/pages/sandbox/python'
 
@@ -41,6 +42,7 @@ export const router = createHashRouter([
       { path: 'mcp-hub/:id', element: <McpDetailPage /> },
       { path: 'plugin-hub', element: <PluginHubPage /> },
       { path: 'plugin-hub/:id', element: <PluginDetailPage /> },
+      { path: 'server-hub', element: <ServerHubPage /> },
       { path: 'sandbox/python', element: <SandboxPythonPage /> },
       { path: 'settings', element: <SettingsPage /> },
     ],

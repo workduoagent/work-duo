@@ -169,12 +169,15 @@ export function ApprovalContent({
 }) {
   const [guidance, setGuidance] = useState('')
   const [remember, setRemember] = useState(true)
+  const [prodAck, setProdAck] = useState(false)
+  const hostMeta = approval.domain === 'host' ? (approval.hostMeta ?? null) : null
   const lines = contentLines(approval)
   const allow = () => {
     // 补充说明非空时，授权执行等价于「接管并继续」：把补充指示一并注入下一轮，
     // 否则后端按 Approve 处理会静默丢弃 guidance（用户备注不生效）。
     const g = guidance.trim()
-    onResolve(g ? 'takeover' : 'approve', g || undefined, remember)
+    const rememberEffective = !!hostMeta && hostMeta.riskLevel === 'L2' ? remember && prodAck : remember
+    onResolve(g ? 'takeover' : 'approve', g || undefined, rememberEffective)
   }
   return (
     <div className="agent-approval-note">
@@ -187,6 +190,50 @@ export function ApprovalContent({
           <ShieldAlert size={13} />
           <span>{approval.reason}</span>
         </p>
+      )}
+      {hostMeta && (
+        <ul className="agent-approval-note__args">
+          <li>
+            <span className="agent-approval-note__label">主机：</span>
+            <code className="agent-approval-note__value">
+              {hostMeta.serverLabel}（{hostMeta.serverName}）
+            </code>
+          </li>
+          <li>
+            <span className="agent-approval-note__label">身份：</span>
+            <code className="agent-approval-note__value">
+              login={hostMeta.loginUser} → as_user={hostMeta.asUser}
+            </code>
+          </li>
+          <li>
+            <span className="agent-approval-note__label">操作：</span>
+            <code className="agent-approval-note__value">
+              {hostMeta.action} · {hostMeta.riskLevel}
+            </code>
+          </li>
+          {hostMeta.cwd && (
+            <li>
+              <span className="agent-approval-note__label">CWD：</span>
+              <code className="agent-approval-note__value">{hostMeta.cwd}</code>
+            </li>
+          )}
+          {hostMeta.remotePath && (
+            <li>
+              <span className="agent-approval-note__label">远端路径：</span>
+              <code className="agent-approval-note__value">{hostMeta.remotePath}</code>
+            </li>
+          )}
+          {hostMeta.localPath && (
+            <li>
+              <span className="agent-approval-note__label">本地路径：</span>
+              <code className="agent-approval-note__value">{hostMeta.localPath}</code>
+            </li>
+          )}
+          <li>
+            <span className="agent-approval-note__label">路径白名单：</span>
+            <code className="agent-approval-note__value">{hostMeta.pathAllow.join('、') || '未限制'}</code>
+          </li>
+        </ul>
       )}
       <HitlClamp collapsedHeight={120} expandable expandLabel="展开描述">
         <div className="agent-approval-note__desc agent-approval-note__desc--md">
@@ -210,14 +257,25 @@ export function ApprovalContent({
         value={guidance}
         onChange={(e) => setGuidance((e.target as HTMLInputElement).value)}
       />
-      {/* 「记住」依赖策略授权 key（同信号放行）：静态门禁卡没有 grantKey，勾选无从生效，不渲染 */}
-      {approval.grantKey && (
+      {/* 「记住」依赖策略授权 key（同信号放行）：静态门禁卡没有 grantKey，勾选无从生效，不渲染；
+          host 域：L3 禁止记住（设计稿 §7.3）；L2 记住需勾选「确认知悉生产影响」二级确认 */}
+      {approval.grantKey && (!hostMeta || !hostMeta.l3) && (
         <Checkbox
           className="agent-approval-note__remember"
           checked={remember}
+          disabled={!!hostMeta && hostMeta.riskLevel === 'L2' && !prodAck}
           onChange={(e) => setRemember(e.target.checked)}
         >
           本任务内记住该授权（同信号操作不再询问）
+        </Checkbox>
+      )}
+      {hostMeta && hostMeta.riskLevel === 'L2' && (
+        <Checkbox
+          className="agent-approval-note__remember"
+          checked={prodAck}
+          onChange={(e) => setProdAck(e.target.checked)}
+        >
+          我确认知悉：该操作作用于生产服务器，可能产生不可逆影响（L2 记住需二次确认）
         </Checkbox>
       )}
       <div className="agent-approval-note__actions">
@@ -234,7 +292,7 @@ export function ApprovalContent({
           variant="outline"
           size="sm"
           className="agent-approval-note__takeover"
-          onClick={() => onResolve('takeover', guidance, remember)}
+          onClick={() => onResolve('takeover', guidance, !!hostMeta && hostMeta.riskLevel === 'L2' ? remember && prodAck : remember)}
         >
           <Hand size={14} />
           接管并继续

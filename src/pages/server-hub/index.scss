@@ -1,0 +1,193 @@
+/* 服务器托管（Server Hub）：卡片风格对齐 skill-hub / mcp-hub。颜色只走 var(--color-*)。 */
+.server-hub {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+
+  &__header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    gap: 16px;
+
+    h2 {
+      margin: 0 0 4px;
+      font-size: 18px;
+      color: var(--color-foreground);
+    }
+  }
+
+  &__sub {
+    margin: 0;
+    font-size: 12px;
+    color: var(--color-foreground-muted);
+  }
+
+  &__actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  &__loading {
+    display: flex;
+    justify-content: center;
+    padding: 60px 0;
+  }
+
+  &__grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 14px;
+  }
+
+  &__card-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  &__card-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+    background: var(--color-background-subtle);
+    color: var(--color-brand-600);
+    flex: none;
+  }
+
+  &__card-title {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    flex: 1;
+  }
+
+  &__card-name {
+    font-weight: 600;
+    color: var(--color-foreground);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &__card-addr {
+    font-size: 12px;
+    color: var(--color-foreground-muted);
+    font-family: monospace;
+  }
+
+  &__card-ops {
+    display: flex;
+    gap: 4px;
+    flex: none;
+  }
+
+  &__card-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin: 12px 0 8px;
+  }
+
+  &__card-paths {
+    font-size: 12px;
+    color: var(--color-foreground-muted);
+    margin-bottom: 8px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &__card-foot {
+    display: flex;
+    justify-content: space-between;
+    font-size: 11px;
+    color: var(--color-foreground-muted);
+    border-top: 1px solid var(--color-border);
+    padding-top: 8px;
+
+    .server-hub__card-id {
+      font-family: monospace;
+    }
+  }
+
+  &__form {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    max-height: 60vh;
+    overflow-y: auto;
+    padding-right: 4px;
+
+    section {
+      h4 {
+        margin: 0 0 10px;
+        font-size: 13px;
+        color: var(--color-foreground);
+      }
+    }
+  }
+
+  &__form-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px 14px;
+
+    label {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      font-size: 12px;
+      color: var(--color-foreground-muted);
+    }
+  }
+
+  &__form-wide {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-top: 10px;
+    font-size: 12px;
+    color: var(--color-foreground-muted);
+  }
+
+  &__form-switch {
+    flex-direction: row !important;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px !important;
+    padding-top: 18px;
+  }
+
+  &__form-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+
+    > div {
+      display: flex;
+      gap: 8px;
+    }
+  }
+
+  &__test-report {
+    padding: 8px 12px;
+    border-radius: 8px;
+    font-size: 12px;
+
+    &.is-ok {
+      background: var(--color-success-bg, rgba(34, 197, 94, 0.12));
+      color: var(--color-success, #16a34a);
+    }
+
+    &.is-err {
+      background: var(--color-danger-bg, rgba(239, 68, 68, 0.12));
+      color: var(--color-danger, #dc2626);
+    }
+  }
+}

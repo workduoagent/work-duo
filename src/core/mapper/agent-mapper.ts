@@ -148,6 +148,16 @@ function lsWrite<T>(key: string, list: T[]): void {
  * ------------------------------------------------------------------ */
 
 /** 列表（按创建时间倒序）。scenarioFilter 非空时按场景分类过滤。 */
+/** 读取某智能体的服务器绑定（agent_server_ref）。 */
+export async function listServerRefsByAgent(agentId: string): Promise<{ serverId: string; role: string }[]> {
+  const db = await getDb()
+  const rows = await db.select<{ server_id: string; role: string }[]>(
+    'SELECT server_id, role FROM agent_server_ref WHERE agent_id = ? ORDER BY created_at ASC',
+    [agentId],
+  )
+  return (rows ?? []).map((r) => ({ serverId: r.server_id, role: r.role }))
+}
+
 export async function listAgents(scenarioFilter?: string): Promise<AgentInfo[]> {
   if (!isTauri) {
     return lsRead<AgentInfo>(LS_AGENT).filter(
@@ -270,7 +280,6 @@ export async function upsertAgent(input: AgentUpsertInput): Promise<AgentInfo[]>
   const mcpTools = Array.isArray(input.mcpTools) ? input.mcpTools : []
   const skillIds = Array.isArray(input.skillIds) ? input.skillIds : []
   const pluginIds = Array.isArray(input.pluginIds) ? input.pluginIds : []
-  const kbIds = Array.isArray(input.kbIds) ? input.kbIds : []
 
   if (!isTauri) {
     const list = lsRead<AgentInfo>(LS_AGENT)
@@ -432,14 +441,32 @@ export async function upsertAgent(input: AgentUpsertInput): Promise<AgentInfo[]>
     )
   }
 
-  // 知识库绑定（K2 第四期）：先删后插，与向导勾选结果一致
-  await db.execute('DELETE FROM agent_kb_ref WHERE agent_id = ?', [id])
-  for (const kbId of kbIds) {
-    await db.execute(
-      `INSERT INTO agent_kb_ref (id, agent_id, kb_id, is_active, created_at, updated_at)
-       VALUES (?, ?, ?, 1, ?, ?)`,
-      [crypto.randomUUID(), id, kbId, now, now],
-    )
+  // 知识库绑定（K2 第四期）：先删后插，与向导勾选结果一致。
+  // ⚠️ 仅当调用方显式携带 kbIds 时才重写：外部工具（MCP agent_ui_update）不传该字段时
+  // 保留现有绑定——否则一次外部更新会把 UI/MCP 侧配置的绑定静默清空（2026-09-25 实锤：
+  // agent_server_bind 绑定后被一次换模型的 agent_ui_update 清掉，host__* 工具随之消失）。
+  if (Array.isArray(input.kbIds)) {
+    await db.execute('DELETE FROM agent_kb_ref WHERE agent_id = ?', [id])
+    for (const kbId of input.kbIds) {
+      await db.execute(
+        `INSERT INTO agent_kb_ref (id, agent_id, kb_id, is_active, created_at, updated_at)
+         VALUES (?, ?, ?, 1, ?, ?)`,
+        [crypto.randomUUID(), id, kbId, now, now],
+      )
+    }
+  }
+
+  // 服务器绑定（服务器托管）：先删后插；第一个选中的为 primary（默认 Host）。
+  // 同上：未显式携带 serverIds 时保留现有绑定（防外部更新静默清空）。
+  if (Array.isArray(input.serverIds)) {
+    await db.execute('DELETE FROM agent_server_ref WHERE agent_id = ?', [id])
+    for (const [idx, serverId] of input.serverIds.entries()) {
+      await db.execute(
+        `INSERT INTO agent_server_ref (id, agent_id, server_id, role, cwd_override, created_at, updated_at)
+         VALUES (?, ?, ?, ?, NULL, ?, ?)`,
+        [crypto.randomUUID(), id, serverId, idx === 0 ? 'primary' : 'secondary', now, now],
+      )
+    }
   }
 
   return listAgents()

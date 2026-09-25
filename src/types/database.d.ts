@@ -505,3 +505,30 @@ export interface PluginRunLogRow {
   missing_package: string | null
   created_at: number
 }
+
+/** 服务器托管主表（server_host）行映射。字段语义见 docs/server-hosting-design.md §4.1。 */
+export interface ServerHostRow {
+  id: string
+  name: string
+  host: string
+  port: number
+  user: string
+  auth_type: string
+  credential_id: string | null
+  path_allow: string | null
+  path_deny: string | null
+  local_path_allow: string | null
+  default_cwd: string | null
+  login_note: string | null
+  sudo_mode: string
+  sudo_user: string
+  host_auto_mode: string
+  allow_grant_memory: number
+  l3_policy: string
+  grant_bind_as_user: number
+  tags: string | null
+  note: string | null
+  last_used_at: number | null
+  created_at: number
+  updated_at: number
+}

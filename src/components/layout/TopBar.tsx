@@ -10,6 +10,7 @@ import {
     Plug,
     Wand2,
     Puzzle,
+    Server,
     ChevronDown,
 } from 'lucide-react'
 import {WindowControls} from './WindowControls'
@@ -38,6 +39,7 @@ const MENUS: MenuNode[] = [
             {key: 'mcp', label: 'MCP', icon: Plug, path: ROUTES.mcpHub},
             {key: 'skill', label: 'Skill', icon: Wand2, path: ROUTES.skillHub},
             {key: 'plugin', label: '插件', icon: Puzzle, path: ROUTES.pluginHub},
+            {key: 'server', label: '服务器', icon: Server, path: ROUTES.serverHub},
         ],
     },
     {key: 'kb', label: '知识库', icon: BookOpen, path: ROUTES.knowledge},

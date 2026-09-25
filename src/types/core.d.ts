@@ -315,6 +315,8 @@ export interface AgentUpsertInput {
   pluginIds?: string[]
   /** 绑定的知识库 id（第四期 K2；写入 agent_kb_ref，决定 native__kb_search 检索范围） */
   kbIds?: string[]
+  /** 绑定的服务器（agent_server_ref；第一个为 primary/默认 Host） */
+  serverIds?: string[]
 }
 
 /**
@@ -588,4 +590,77 @@ export interface SquadMemory {
   lastRecalledAt?: number | null
   createdAt: number
   updatedAt: number
+}
+
+/**
+ * 服务器档案（server_host）领域模型（服务器托管，设计稿 docs/server-hosting-design.md）。
+ * 凭证只读出指纹 hint，任何接口不含明文。
+ */
+export interface ServerHost {
+  id: string
+  name: string
+  host: string
+  port: number
+  /** SSH 登录用户（不必是 root） */
+  user: string
+  authType: 'password' | 'private_key' | 'private_key_passphrase'
+  credentialId: string | null
+  /** 凭证指纹（密码 ****xx / 密钥 MD5 前 8 位） */
+  credentialHint: string | null
+  /** 远端路径白名单；空 = 不限制（不推荐） */
+  pathAllow: string[]
+  /** 远端路径黑名单，优先于白名单 */
+  pathDeny: string[]
+  /** 本地侧路径白名单；空 = 绑定工作空间 */
+  localPathAllow: string[]
+  defaultCwd?: string
+  loginNote?: string
+  sudoMode: 'none' | 'sudo_cmd' | 'sudo_full'
+  sudoUser: string
+  hostAutoMode: 'strict' | 'balanced' | 'auto'
+  allowGrantMemory: boolean
+  l3Policy: 'reject' | 'single_shot'
+  grantBindAsUser: boolean
+  tags: string[]
+  note?: string
+  lastUsedAt?: number
+  createdAt: number
+  updatedAt: number
+}
+
+/** 保存/测试连接入参（secret 明文仅写入瞬间经内存传入，永不回传）。 */
+export interface ServerHostInput {
+  id: string
+  name: string
+  host: string
+  port?: number
+  user: string
+  authType?: ServerHost['authType']
+  /** 为空 = 编辑时不改动已存凭证 */
+  secret?: string
+  /** private_key_passphrase 时的密钥口令 */
+  keyPassphrase?: string
+  pathAllow?: string[]
+  pathDeny?: string[]
+  localPathAllow?: string[]
+  defaultCwd?: string
+  loginNote?: string
+  sudoMode?: ServerHost['sudoMode']
+  sudoUser?: string
+  hostAutoMode?: ServerHost['hostAutoMode']
+  allowGrantMemory?: boolean
+  l3Policy?: ServerHost['l3Policy']
+  grantBindAsUser?: boolean
+  tags?: string[]
+  note?: string
+}
+
+/** 测试连接报告。 */
+export interface ServerTestReport {
+  ok: boolean
+  loginUser?: string
+  osHint?: string
+  home?: string
+  latencyMs: number
+  error?: string
 }
