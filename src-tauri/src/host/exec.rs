@@ -100,3 +100,56 @@ pub async fn exec_command(
         elapsed_ms: started.elapsed().as_millis() as i64,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn wraps_command_in_bash_lc() {
+        assert_eq!(build_remote_command("ls -la", None, "login", "root"), "bash -lc 'ls -la'");
+    }
+
+    #[test]
+    fn prefixes_cwd_with_safe_quoting() {
+        let cmd = build_remote_command("ls", Some("/var/www"), "login", "root");
+        // body（cd '/var/www' && ls）整体再被 sq 包裹 → cwd 引号双重转义，属正确行为
+        assert!(cmd.starts_with("bash -lc 'cd "), "{}", cmd);
+        assert!(cmd.contains("'\\''"), "cwd 引号应被 POSIX 转义：{}", cmd);
+        assert!(cmd.ends_with(" && ls'"), "{}", cmd);
+        // 未双重转义的形态（裸 cd '/var/www'）不得出现
+        assert!(!cmd.contains("cd '/var/www'"), "{}", cmd);
+    }
+
+    #[test]
+    fn escapes_single_quote_in_command() {
+        // 单引号注入防护：`'` → `'\''`
+        let cmd = build_remote_command("echo 'a b'", None, "login", "root");
+        assert!(cmd.contains("'\\''"), "应含 POSIX 单引号转义：{}", cmd);
+        assert!(!cmd.contains("''a b''"), "{}", cmd);
+    }
+
+    #[test]
+    fn escapes_single_quote_in_cwd() {
+        let cmd = build_remote_command("ls", Some("/o'flag"), "login", "root");
+        // 裸 cwd 不得出现（未转义的 ' 会破坏外层包裹）
+        assert!(!cmd.contains("/o'flag"), "{}", cmd);
+        // 且含 POSIX 转义序列
+        assert!(cmd.contains("'\\''"), "{}", cmd);
+    }
+
+    #[test]
+    fn prepends_sudo_for_other_user() {
+        let cmd = build_remote_command("ls", None, "deploy", "root");
+        assert!(cmd.starts_with("sudo -n -u deploy -- "), "{}", cmd);
+    }
+
+    #[test]
+    fn no_sudo_when_as_user_equals_login() {
+        assert!(!build_remote_command("ls", None, "root", "root").starts_with("sudo"));
+        // "login" 语义 = 登录用户本身
+        assert!(!build_remote_command("ls", None, "login", "root").starts_with("sudo"));
+        // 空串按 login 处理
+        assert!(!build_remote_command("ls", None, "", "root").starts_with("sudo"));
+    }
+}

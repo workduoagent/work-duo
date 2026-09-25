@@ -162,9 +162,101 @@ pub fn secret_hint(secret_type: &str, secret: &str) -> String {
 /// 凭证记录 id：`cred_` + MD5(种类 + 明文 + 毫秒时间戳) 前 16 位。
 /// 同一毫秒内同内容同 id（幂等）；不同内容必不同。
 pub fn new_credential_id(secret_type: &str, secret: &str) -> String {
+    // 纯函数派生（P0-2 测试抓出的 bug）：同 type+secret 必须派生同 id——
+    // save 侧依赖 ON CONFLICT(id) upsert 复用凭证行；掺时间戳会让每次重填同一密码
+    // 都生成新 id，server_credential 孤儿密文行无限堆积。
     let mut h = Md5::new();
     h.update(secret_type.as_bytes());
     h.update(secret.as_bytes());
-    h.update(crate::agent::engine::runtime::now_ms().to_string().as_bytes());
     format!("cred_{}", &hex::encode(h.finalize())[..16])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 加解密往返（台账 P0-2 指定用例）：密文可还原明文，且密文不泄漏明文。
+    /// 注意：依赖 OS 凭据管理器提供主密钥（首次调用会自动生成并写入）。
+    #[test]
+    fn encrypt_decrypt_round_trip() {
+        let long = "长文本：x".repeat(500);
+        let cases = [
+            "simple-password-123",
+            "中文密码＆特殊字符！@#￥%……&*（）",
+            "-----BEGIN OPENSSH PRIVATE KEY-----\nabc def ghi\n-----END OPENSSH PRIVATE KEY-----",
+            long.as_str(),
+        ];
+        for plain in cases {
+            let enc = encrypt_payload(plain).unwrap();
+            assert_ne!(enc, plain, "密文不得等于明文");
+            assert!(!enc.contains(plain), "密文不得包含完整明文子串");
+            let dec = decrypt_payload(&enc).unwrap();
+            assert_eq!(dec, plain);
+        }
+    }
+
+    /// 不同明文产生不同密文（nonce 随机性）。
+    #[test]
+    fn same_plaintext_yields_different_ciphertexts() {
+        let a = encrypt_payload("same-input").unwrap();
+        let b = encrypt_payload("same-input").unwrap();
+        assert_ne!(a, b, "nonce 应随机，同明文两次加密密文不同");
+        assert_eq!(decrypt_payload(&a).unwrap(), decrypt_payload(&b).unwrap());
+    }
+
+    /// 损坏密文必须报错（不得返回垃圾明文）。
+    #[test]
+    fn decrypt_rejects_corrupted_payload() {
+        assert!(decrypt_payload("not-base64!!").is_err());
+        // 合法 base64 但结构损坏（nonce/ciphertext 被截断）
+        assert!(decrypt_payload("AAAA").is_err());
+    }
+
+    /// build_payload → parse_payload 往返（三种凭证形态）。
+    #[test]
+    fn build_parse_payload_round_trip() {
+        // password
+        let payload = build_payload("password", "p@ss", None).unwrap();
+        match parse_payload("password", &payload).unwrap() {
+            SecretPayload::Password(p) => assert_eq!(p, "p@ss"),
+            other => panic!("应为 Password：{:?}", other),
+        }
+        // private_key
+        let payload = build_payload("private_key", "KEYDATA", None).unwrap();
+        match parse_payload("private_key", &payload).unwrap() {
+            SecretPayload::Pem { pem, passphrase } => {
+                assert_eq!(pem, "KEYDATA");
+                assert!(passphrase.is_none());
+            }
+            other => panic!("应为 Pem：{:?}", other),
+        }
+        // private_key_passphrase：单密文装 {pem, passphrase}
+        let payload = build_payload("private_key_passphrase", "KEYDATA", Some("phrase123".into())).unwrap();
+        match parse_payload("private_key_passphrase", &payload).unwrap() {
+            SecretPayload::Pem { pem, passphrase } => {
+                assert_eq!(pem, "KEYDATA");
+                assert_eq!(passphrase.as_deref(), Some("phrase123"));
+            }
+            other => panic!("应为 Pem：{:?}", other),
+        }
+    }
+
+    /// 指纹 hint：密码打码只露末 2 位，密钥回 MD5 前 8 位；永不回全文。
+    #[test]
+    fn secret_hint_masks_plaintext() {
+        let h = secret_hint("password", "my-secret-pw");
+        assert!(!h.contains("my-secret"), "hint 不得含明文主体：{}", h);
+        let k = secret_hint("private_key", "KEYBODY");
+        assert!(!k.contains("KEYBODY"), "hint 不得含明文主体：{}", k);
+        assert!(!k.is_empty());
+    }
+
+    /// new_credential_id 同输入稳定（工程去重键语义）。
+    #[test]
+    fn new_credential_id_is_deterministic() {
+        let a = new_credential_id("password", "stable-secret");
+        let b = new_credential_id("password", "stable-secret");
+        assert_eq!(a, b);
+        assert_ne!(new_credential_id("password", "other"), a);
+    }
 }

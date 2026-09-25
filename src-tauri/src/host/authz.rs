@@ -422,3 +422,41 @@ async fn write_authz_log(
     .await;
     let _ = binding;
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 全 12 个 host__* 工具的 action 映射必须一一对应（P0-4 E2E 曾因单双下划线错位全拒）。
+    #[test]
+    fn action_of_tool_maps_all_double_underscore_names() {
+        use HostAction::*;
+        let cases = [
+            ("host__list_servers", RemoteRead),
+            ("host__status", RemoteRead),
+            ("host__list", RemoteRead),
+            ("host__download", RemoteRead),
+            ("host__connect", Connect),
+            ("host__disconnect", Disconnect),
+            ("host__disconnect_all", Disconnect),
+            ("host__exec", RemoteExec),
+            ("host__upload", RemoteWrite),
+            ("host__sync", RemoteWrite),
+            ("host__mkdir", RemoteWrite),
+            ("host__remove", RemoteDelete),
+        ];
+        for (name, want) in cases {
+            assert_eq!(action_of_tool(name), Some(want), "工具 {} 映射错误", name);
+        }
+    }
+
+    #[test]
+    fn action_of_tool_rejects_unknown_and_legacy_names() {
+        assert_eq!(action_of_tool("host__unknown"), None);
+        // 旧单下划线名（E2E 实锤的错位形态）必须不匹配，防止残留调用绕过新映射
+        assert_eq!(action_of_tool("host_exec"), None);
+        assert_eq!(action_of_tool("host_connect"), None);
+        // 非 host 工具一律 None
+        assert_eq!(action_of_tool("native__read_file"), None);
+    }
+}
