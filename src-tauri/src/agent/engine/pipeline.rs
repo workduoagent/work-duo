@@ -965,6 +965,13 @@ async fn run_subtask(
         for c in &task.success_criteria {
             let ct = c.check_type.to_lowercase();
             match ct.as_str() {
+                "tool_uses_min" => {
+                    let need = c.threshold.unwrap_or(1);
+                    lines.push(format!(
+                        "- 至少发起 {} 次工具调用（先检索/执行，再总结；不得零操作直接作答）",
+                        need
+                    ));
+                }
                 "file_nonempty" | "file_exists" | "directory_exists" | "excel_row_count" => {
                     if let Some(t) = &c.target {
                         lines.push(format!(
@@ -1129,26 +1136,9 @@ async fn run_subtask(
             );
             return (
                 SubTaskOutput {
-                    step: task.step,
-                    title: task.title.clone(),
-                    summary: "任务已被用户取消".to_string(),
-                    success: false,
                     cancelled: true,
-                    skipped: false,
                     failed_command: last_failed_command.clone(),
-                    verified: false,
-                    evidence: String::new(),
-                    changed_files: if changed_files.is_empty() {
-                        None
-                    } else {
-                        Some(changed_files.clone())
-                    },
-                    read_files: if read_files.is_empty() {
-                        None
-                    } else {
-                        Some(read_files.clone())
-                    },
-                    artifacts: vec![],
+                    ..SubTaskOutput::base(&task, "任务已被用户取消".to_string(), false, &changed_files, &read_files)
                 },
                 usage,
             );
@@ -1192,26 +1182,9 @@ async fn run_subtask(
                     if cancel.load(std::sync::atomic::Ordering::SeqCst) {
                         return (
                             SubTaskOutput {
-                                step: task.step,
-                                title: task.title.clone(),
-                                summary: "任务已被用户取消".to_string(),
-                                success: false,
                                 cancelled: true,
-                                skipped: false,
                                 failed_command: last_failed_command.clone(),
-                    verified: false,
-                    evidence: String::new(),
-                    changed_files: if changed_files.is_empty() {
-                        None
-                    } else {
-                        Some(changed_files.clone())
-                    },
-                    read_files: if read_files.is_empty() {
-                        None
-                    } else {
-                        Some(read_files.clone())
-                    },
-                                artifacts: vec![],
+                                ..SubTaskOutput::base(&task, "任务已被用户取消".to_string(), false, &changed_files, &read_files)
                             },
                             usage,
                         );
@@ -1232,26 +1205,8 @@ async fn run_subtask(
                             );
                             return (
                                 SubTaskOutput {
-                                    step: task.step,
-                                    title: task.title.clone(),
-                                    summary: format!("LLM 调用失败（HTTP {code}，不可恢复）：{llm_err}"),
-                                    success: false,
-                                    cancelled: false,
-                                    skipped: false,
                                     failed_command: last_failed_command.clone(),
-                                    verified: false,
-                                    evidence: String::new(),
-                                    changed_files: if changed_files.is_empty() {
-                                        None
-                                    } else {
-                                        Some(changed_files.clone())
-                                    },
-                                    read_files: if read_files.is_empty() {
-                                        None
-                                    } else {
-                                        Some(read_files.clone())
-                                    },
-                                    artifacts: vec![],
+                                    ..SubTaskOutput::base(&task, format!("LLM 调用失败（HTTP {code}，不可恢复）：{llm_err}"), false, &changed_files, &read_files)
                                 },
                                 usage,
                             );
@@ -1265,26 +1220,8 @@ async fn run_subtask(
                         );
                         return (
                             SubTaskOutput {
-                                step: task.step,
-                                title: task.title.clone(),
-                                summary: format!("LLM 调用失败：{llm_err}"),
-                                success: false,
-                                cancelled: false,
-                                skipped: false,
                                 failed_command: last_failed_command.clone(),
-                    verified: false,
-                    evidence: String::new(),
-                    changed_files: if changed_files.is_empty() {
-                        None
-                    } else {
-                        Some(changed_files.clone())
-                    },
-                    read_files: if read_files.is_empty() {
-                        None
-                    } else {
-                        Some(read_files.clone())
-                    },
-                                artifacts: vec![],
+                                ..SubTaskOutput::base(&task, format!("LLM 调用失败：{llm_err}"), false, &changed_files, &read_files)
                             },
                             usage,
                         );
@@ -1309,26 +1246,9 @@ async fn run_subtask(
             );
             return (
                 SubTaskOutput {
-                    step: task.step,
-                    title: task.title.clone(),
-                    summary: "任务已被用户取消".to_string(),
-                    success: false,
                     cancelled: true,
-                    skipped: false,
                     failed_command: last_failed_command.clone(),
-                    verified: false,
-                    evidence: String::new(),
-                    changed_files: if changed_files.is_empty() {
-                        None
-                    } else {
-                        Some(changed_files.clone())
-                    },
-                    read_files: if read_files.is_empty() {
-                        None
-                    } else {
-                        Some(read_files.clone())
-                    },
-                    artifacts: vec![],
+                    ..SubTaskOutput::base(&task, "任务已被用户取消".to_string(), false, &changed_files, &read_files)
                 },
                 usage,
             );
@@ -1360,26 +1280,8 @@ async fn run_subtask(
                 Err(e) => {
                     return (
                         SubTaskOutput {
-                            step: task.step,
-                            title: task.title.clone(),
-                            summary: format!("LLM 兜底调用失败：{e}"),
-                            success: false,
-                            cancelled: false,
-                            skipped: false,
                             failed_command: last_failed_command.clone(),
-                    verified: false,
-                    evidence: String::new(),
-                    changed_files: if changed_files.is_empty() {
-                        None
-                    } else {
-                        Some(changed_files.clone())
-                    },
-                    read_files: if read_files.is_empty() {
-                        None
-                    } else {
-                        Some(read_files.clone())
-                    },
-                            artifacts: vec![],
+                            ..SubTaskOutput::base(&task, format!("LLM 兜底调用失败：{e}"), false, &changed_files, &read_files)
                         },
                         usage,
                     );
@@ -1511,26 +1413,11 @@ async fn run_subtask(
             };
             return (
                 SubTaskOutput {
-                    step: task.step,
-                    title: task.title.clone(),
-                    summary: final_summary,
-                    success,
-                    cancelled: false,
-                    skipped: false,
+                    artifacts,
                     failed_command: last_failed_command.clone(),
                     verified: step_verified,
                     evidence: step_evidence,
-                    changed_files: if changed_files.is_empty() {
-                        None
-                    } else {
-                        Some(changed_files.clone())
-                    },
-                    read_files: if read_files.is_empty() {
-                        None
-                    } else {
-                        Some(read_files.clone())
-                    },
-                    artifacts,
+                    ..SubTaskOutput::base(&task, final_summary, success, &changed_files, &read_files)
                 },
                 usage,
             );
@@ -1655,12 +1542,7 @@ async fn run_subtask(
                     };
                     return (
                         SubTaskOutput {
-                            step: task.step,
-                            title: task.title.clone(),
-                            summary: friendly,
-                            success: true,
-                            cancelled: false,
-                            skipped: false,
+                            artifacts,
                             failed_command: last_failed_command.clone(),
                             verified: verified_flag,
                             evidence: if verified_flag {
@@ -1671,17 +1553,7 @@ async fn run_subtask(
                                     result.evidence
                                 )
                             },
-                            changed_files: if changed_files.is_empty() {
-                                None
-                            } else {
-                                Some(changed_files.clone())
-                            },
-                            read_files: if read_files.is_empty() {
-                                None
-                            } else {
-                                Some(read_files.clone())
-                            },
-                            artifacts,
+                            ..SubTaskOutput::base(&task, friendly, true, &changed_files, &read_files)
                         },
                         usage,
                     );
@@ -1736,26 +1608,9 @@ async fn run_subtask(
                                 );
                                 return (
                                 SubTaskOutput {
-                                    step: task.step,
-                                    title: task.title.clone(),
-                                    summary,
-                                    success: true,
-                                    cancelled: false,
-                                    skipped: false,
                                     failed_command: last_failed_command.clone(),
-                                    verified: false,
                                     evidence: "预算耗尽强制总结：模型基于已检索资料自主输出（暂定完成，建议人工复核）".into(),
-                                    changed_files: if changed_files.is_empty() {
-                                        None
-                                    } else {
-                                        Some(changed_files.clone())
-                                    },
-                                    read_files: if read_files.is_empty() {
-                                        None
-                                    } else {
-                                        Some(read_files.clone())
-                                    },
-                                    artifacts: vec![],
+                                    ..SubTaskOutput::base(&task, summary, true, &changed_files, &read_files)
                                 },
                                 usage,
                             );
@@ -1769,9 +1624,8 @@ async fn run_subtask(
             }
             return (
                 SubTaskOutput {
-                    step: task.step,
-                    title: task.title.clone(),
-                    summary: format!(
+                    failed_command: last_failed_command.clone(),
+                    ..SubTaskOutput::base(&task, format!(
                         "子任务超过 {} 轮工具调用仍未闭环{}{}",
                         iter_budget,
                         last_tool_error
@@ -1782,24 +1636,7 @@ async fn run_subtask(
                             .as_ref()
                             .map(|s| format!("；强制总结诊断（作为修复方向，勿重蹈覆辙）：{}", s))
                             .unwrap_or_default(),
-                    ),
-                    success: false,
-                    cancelled: false,
-                    skipped: false,
-                    failed_command: last_failed_command.clone(),
-                    verified: false,
-                    evidence: String::new(),
-                    changed_files: if changed_files.is_empty() {
-                        None
-                    } else {
-                        Some(changed_files.clone())
-                    },
-                    read_files: if read_files.is_empty() {
-                        None
-                    } else {
-                        Some(read_files.clone())
-                    },
-                    artifacts: vec![],
+                    ), false, &changed_files, &read_files)
                 },
                 usage,
             );
@@ -1885,33 +1722,15 @@ async fn run_subtask(
             );
             return (
                 SubTaskOutput {
-                    step: task.step,
-                    title: task.title.clone(),
-                    summary: format!(
+                    failed_command: last_failed_command.clone(),
+                    ..SubTaskOutput::base(&task, format!(
                         "连续 {} 轮工具调用全部失败，子任务受阻{}",
                         consecutive_errors,
                         last_tool_error
                             .as_ref()
                             .map(|e| format!("；最近错误：{}", e.chars().take(300).collect::<String>()))
                             .unwrap_or_default(),
-                    ),
-                    success: false,
-                    cancelled: false,
-                    skipped: false,
-                    failed_command: last_failed_command.clone(),
-                    verified: false,
-                    evidence: String::new(),
-                    changed_files: if changed_files.is_empty() {
-                        None
-                    } else {
-                        Some(changed_files.clone())
-                    },
-                    read_files: if read_files.is_empty() {
-                        None
-                    } else {
-                        Some(read_files.clone())
-                    },
-                    artifacts: vec![],
+                    ), false, &changed_files, &read_files)
                 },
                 usage,
             );

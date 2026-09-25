@@ -463,6 +463,36 @@ pub struct SubTaskOutput {
     pub evidence: String,
 }
 
+impl SubTaskOutput {
+    /// 统一构造基座（台账 S2）：此前 10 处字段级复制块——改字段漏一处=编译过但行为分叉。
+    /// step/title 从任务派生，skipped/cancelled/failed_command/verified/evidence/artifacts/
+    /// changed/read_files 取保守默认；各构造点用 struct update（`..Self::base(..)`）只写差异字段。
+    /// `changed`/`read` 统一 empty→None 归一化（消灭 8 份 if/else 各写各的）。
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn base(
+        task: &PlanSubTask,
+        summary: impl Into<String>,
+        success: bool,
+        changed_files: &[String],
+        read_files: &[String],
+    ) -> Self {
+        Self {
+            step: task.step,
+            title: task.title.clone(),
+            summary: summary.into(),
+            success,
+            cancelled: false,
+            skipped: false,
+            artifacts: vec![],
+            failed_command: None,
+            changed_files: if changed_files.is_empty() { None } else { Some(changed_files.to_vec()) },
+            read_files: if read_files.is_empty() { None } else { Some(read_files.to_vec()) },
+            verified: false,
+            evidence: String::new(),
+        }
+    }
+}
+
 /* ================= 小分队（Squad）协作引擎类型 ================= */
 
 /// 小分队运行策略（三模式通用；JSON 存于 agent_squad.run_strategy）。
