@@ -439,7 +439,11 @@ async fn handle_jsonrpc(app: &AppHandle, req: &Value, session_id: Option<&str>) 
                     "id": id,
                     "result": {
                         "content": [ { "type": "text", "text": serde_json::to_string(&result).unwrap_or_default() } ],
-                        "isError": result.get("error").is_some()
+                        "isError": result
+                            .get("error")
+                            .and_then(|v| v.as_str())
+                            .map(|e| !e.is_empty())
+                            .unwrap_or(false)
                     }
                 }),
                 session_id.map(|s| s.to_string()),
@@ -494,7 +498,7 @@ async fn call_tool(app: &AppHandle, name: &str, args: &Value) -> Value {
                 Ok(i) => i,
                 Err(e) => return json!({ "error": format!("参数错误: {e}") }),
             };
-            match commands::submit_approval_decision(rt, agent_id, decision).await {
+            match commands::submit_approval_decision(app.clone(), rt, agent_id, decision).await {
                 Ok(ok) => json!({ "ok": ok }),
                 Err(e) => json!({ "error": e }),
             }
@@ -823,6 +827,82 @@ async fn call_tool(app: &AppHandle, name: &str, args: &Value) -> Value {
         "skill_write_file" => dispatch_ui(app, "skill:write_file", args.clone()).await,
         "skill_export" => dispatch_ui(app, "skill:export", args.clone()).await,
         "skill_import" => dispatch_ui(app, "skill:import", args.clone()).await,
+        // ---------------- 服务器托管层（Rust 直调 host::commands，Rust 直写 agent_server_ref） ----------------
+        "server_host_list" => match crate::host::commands::server_host_list(app.clone()).await {
+            Ok(list) => json!(list),
+            Err(e) => json!({ "error": e }),
+        },
+        "server_host_get" => {
+            let id = args.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            match crate::host::commands::server_host_get(app.clone(), id).await {
+                Ok(Some(dto)) => json!(dto),
+                Ok(None) => json!({ "error": "服务器不存在" }),
+                Err(e) => json!({ "error": e }),
+            }
+        }
+        "server_host_save" => {
+            // 凭证红线（2026-09-25 加固）：MCP 通道不接收凭证明文——录入/改密只能在
+            // App「百宝箱 → 服务器」UI 进行，防止明文经外部 Agent 会话记录泄露。
+            // 编辑服务器时省略 secret = 保留原凭证（该语义不变，仅 UI 可写凭证）。
+            for k in ["secret", "keyPassphrase"] {
+                if args.get(k).and_then(|v| v.as_str()).map(|s| !s.is_empty()).unwrap_or(false) {
+                    return json!({
+                        "error": format!(
+                            "MCP 通道不接收凭证明文（{k}）：录入或修改密码/私钥请在 App「百宝箱 → 服务器」UI 中进行；编辑时省略 secret 即保留原凭证。"
+                        )
+                    });
+                }
+            }
+            let input: crate::host::commands::ServerHostInput = match serde_json::from_value(args.clone()) {
+                Ok(i) => i,
+                Err(e) => return json!({ "error": format!("参数错误: {e}") }),
+            };
+            match crate::host::commands::server_host_save(app.clone(), input).await {
+                Ok(dto) => json!(dto),
+                Err(e) => json!({ "error": e }),
+            }
+        }
+        "server_host_delete" => {
+            let id = args.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            match crate::host::commands::server_host_delete(app.clone(), id).await {
+                Ok(()) => json!({ "ok": true }),
+                Err(e) => json!({ "error": e }),
+            }
+        }
+        "server_host_test_connection" => {
+            // 凭证红线（2026-09-25 加固）：MCP 通道不接收凭证明文——录入/改密只能在
+            // App「百宝箱 → 服务器」UI 进行，防止明文经外部 Agent 会话记录泄露。
+            // 编辑服务器时省略 secret = 保留原凭证（该语义不变，仅 UI 可写凭证）。
+            for k in ["secret", "keyPassphrase"] {
+                if args.get(k).and_then(|v| v.as_str()).map(|s| !s.is_empty()).unwrap_or(false) {
+                    return json!({
+                        "error": format!(
+                            "MCP 通道不接收凭证明文（{k}）：录入或修改密码/私钥请在 App「百宝箱 → 服务器」UI 中进行；编辑时省略 secret 即保留原凭证。"
+                        )
+                    });
+                }
+            }
+            let input: crate::host::commands::ServerHostInput = match serde_json::from_value(args.clone()) {
+                Ok(i) => i,
+                Err(e) => return json!({ "error": format!("参数错误: {e}") }),
+            };
+            match crate::host::commands::server_host_test_connection(app.clone(), input).await {
+                Ok(r) => json!(r),
+                Err(e) => json!({ "error": e }),
+            }
+        }
+        "agent_server_bind" => {
+            let agent_id = args.get("agentId").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let server_ids: Vec<String> = args
+                .get("serverIds")
+                .and_then(|v| v.as_array())
+                .map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect())
+                .unwrap_or_default();
+            match crate::host::commands::agent_server_bind(app.clone(), agent_id, server_ids).await {
+                Ok(r) => json!(r),
+                Err(e) => json!({ "error": e }),
+            }
+        }
         _ => json!({ "error": format!("unknown tool: {name}") }),
     }
 }
@@ -1498,6 +1578,59 @@ step/totalSteps 来自规划事件（未规划或 SIMPLE_CHAT 为 0/0）；lastT
                 "zipBase64": { "type": "string", "description": "ZIP 压缩包 base64（与 files 二选一）" },
                 "files": { "type": "array", "description": "扁平文件数组 [{relPath, base64}]" }
             }, "required": ["identifier", "name"] }),
+        ),
+        // ---------------- 服务器托管层（HostAuthz 独立授权域；凭证永不回传明文） ----------------
+        tool(
+            "server_host_list",
+            "【服务器·列表】列出全部已录入的服务器档案（名称/地址/端口/登录用户/认证指纹/路径白黑名单/提权策略/自动模式），含凭证指纹 hint 但永不回传明文。本模块枚举入口（每模块必有 *_list）。",
+            json!({ "type": "object", "properties": {} }),
+        ),
+        tool(
+            "server_host_get",
+            "【服务器·详情】按 id 查单个服务器档案（完整策略字段 + 凭证指纹）。",
+            json!({ "type": "object", "properties": { "id": { "type": "string" } }, "required": ["id"] }),
+        ),
+        tool(
+            "server_host_save",
+            "【服务器·保存】新增/编辑服务器档案（upsert）。字段 camelCase：id(必填,调用方生成 srv_ 前缀)/name/host/port/user 必填；authType(password|private_key|private_key_passphrase)；pathAllow/pathDeny(远端路径黑白名单 JSON 数组，deny 优先)；localPathAllow(本地侧白名单，空=绑定工作空间)；defaultCwd；sudoMode(none|sudo_cmd|sudo_full)/sudoUser；hostAutoMode(strict|balanced|auto)；l3Policy(reject|single_shot)；tags/note。\n⚠️ 凭证红线：本工具【不接收】secret/keyPassphrase——凭证录入或修改只能在 App「百宝箱 → 服务器」UI 进行（明文经外部 Agent 会话记录会泄露）。新建服务器请先让用户在 UI 录入凭证；编辑时省略 secret 即保留原凭证。",
+            json!({ "type": "object", "properties": {
+                "id": { "type": "string" }, "name": { "type": "string" }, "host": { "type": "string" },
+                "port": { "type": "number" }, "user": { "type": "string" },
+                "authType": { "type": "string", "description": "password|private_key|private_key_passphrase" },
+                "pathAllow": { "type": "array", "items": { "type": "string" } },
+                "pathDeny": { "type": "array", "items": { "type": "string" } },
+                "localPathAllow": { "type": "array", "items": { "type": "string" } },
+                "defaultCwd": { "type": "string" },
+                "sudoMode": { "type": "string", "description": "none|sudo_cmd|sudo_full" },
+                "sudoUser": { "type": "string" },
+                "hostAutoMode": { "type": "string", "description": "strict|balanced|auto" },
+                "allowGrantMemory": { "type": "boolean" },
+                "l3Policy": { "type": "string", "description": "reject|single_shot" },
+                "tags": { "type": "array", "items": { "type": "string" } },
+                "note": { "type": "string" }
+            }, "required": ["id", "name", "host", "user"] }),
+        ),
+        tool(
+            "server_host_delete",
+            "【服务器·删除】删除服务器档案 + 凭证密文 + agent_server_ref 绑定引用（级联）；host_grant/审计日志按 run 生命周期保留。不可逆。",
+            json!({ "type": "object", "properties": { "id": { "type": "string" } }, "required": ["id"] }),
+        ),
+        tool(
+            "server_host_test_connection",
+            "【服务器·测试连接】russh 真实 SSH 握手 + whoami/uname/$HOME 三连，返回 {ok, loginUser, osHint, home, latencyMs, error}。凭证【仅用已存密文】——本通道不接收凭证明文（secret/keyPassphrase 已禁用），新服务器请先在 UI 录入凭证。入参：id/name/host/user 必填。",
+            json!({ "type": "object", "properties": {
+                "id": { "type": "string" }, "name": { "type": "string" }, "host": { "type": "string" },
+                "port": { "type": "number" }, "user": { "type": "string" },
+                "authType": { "type": "string" }
+            }, "required": ["id", "name", "host", "user"] }),
+        ),
+        tool(
+            "agent_server_bind",
+            "【服务器·绑定】把服务器绑定到智能体（agent_server_ref 先删后插；serverIds 第一个为 primary/默认 Host；空数组=全部解绑）。绑定后该 Agent 注册 12 个 host__* 工具（终端命令/SFTP 文件同步，走 HostAuthz 独立授权域，与本机审批边界互不影响）；未绑定时工具不注册。返回该 Agent 当前绑定清单（serverId/role/name/host/port/loginUser）。",
+            json!({ "type": "object", "properties": {
+                "agentId": { "type": "string" },
+                "serverIds": { "type": "array", "items": { "type": "string" } }
+            }, "required": ["agentId", "serverIds"] }),
         ),
     ])
 }

@@ -1,6 +1,6 @@
 ---
 name: workduo-mcp
-description: WorkDuo 桌面应用（Tauri2 + React19）内建 MCP Server 的集成指南。面向外部编程工具（AI IDE / Agent 框架等任意支持 MCP 的客户端），说明如何将 127.0.0.1:18755/mcp（Streamable HTTP）注册为标准 MCP Server，并以 UI 级真实链路驱动 WorkDuo 全模块（Agent 对话 / 本地插件 / 知识库 / 记忆宫殿 / 技能中心）。覆盖：77 个工具分层、UI 级各模块流程、插件脚本范式（scripts/）、已知坑与根因修复。
+description: WorkDuo 桌面应用（Tauri2 + React19）内建 MCP Server 的集成指南。面向外部编程工具（AI IDE / Agent 框架等任意支持 MCP 的客户端），说明如何将 127.0.0.1:18755/mcp（Streamable HTTP）注册为标准 MCP Server，并以 UI 级真实链路驱动 WorkDuo 全模块（Agent 对话 / 本地插件 / 知识库 / 记忆宫殿 / 技能中心）。覆盖：83 个工具分层、UI 级各模块流程、插件脚本范式（scripts/）、已知坑与根因修复。
 agent_created: true
 ---
 
@@ -34,7 +34,7 @@ MCP 客户端 **UI 级**驱动 WorkDuo 全模块。
 - 端点：`POST http://127.0.0.1:18755/mcp`（Streamable HTTP；可选 `GET /mcp` SSE）。
 - 开关：`app_config.mcp_server_enabled`（默认启用）、`mcp_server_port`（默认 18755）。改端口/开关需重启 WorkDuo。
 - 启动位置：`src-tauri/src/mcp_server.rs::start_mcp_server`，在 app setup 中以独立 std 线程监听。
-- 工具分层，共 **77** 个：引擎层(16，含 P2 新增 `agent_get_run_progress`、孤儿清扫 `agent_sweep_orphan_rounds`、压缩状态 `agent_session_compact_status`、P-4 `agent_project_ensure`/`agent_project_list`、D' `agent_snapshot_list`/`agent_snapshot_rollback`) + 模块发现层(7) + UI 意图层(54，含 Agent/会话 12 + 插件 8 + 知识库 15 + 记忆 9 + 技能 10)。
+- 工具分层，共 **83** 个：引擎层(16，含 P2 新增 `agent_get_run_progress`、孤儿清扫 `agent_sweep_orphan_rounds`、压缩状态 `agent_session_compact_status`、P-4 `agent_project_ensure`/`agent_project_list`、D' `agent_snapshot_list`/`agent_snapshot_rollback`) + 模块发现层(7) + UI 意图层(54，含 Agent/会话 12 + 插件 8 + 知识库 15 + 记忆 9 + 技能 10) + 服务器托管层(6，Rust 直调 host::commands)。
 - **并发语义（P2-5，2026-09-23 明确）**：同一 Agent 同一时刻只有一个 run（per-agent 运行锁，第二个 `agent_run_task` 直接 Err「已有任务正在运行」）；**并行 = 多个 Agent 各自跑**（不同 Agent 互不影响）。需要并行跑多个任务时，为每个任务装配/复用一个独立 Agent（`agent_ui_create`）。
 - **工具轮分级（Batch C，2026-09-23）**：子任务工具轮预算基线 8（env `WD_SUBTASK_MAX_ITERATIONS`），带诊断回灌的修复型轮 +8（`WD_SUBTASK_REPAIR_EXTRA_ITERATIONS`）——修复型任务「跑测试→读码→改码→再跑测试」天然多轮，基线对其过紧（C-H1 实测）。
 - 引擎层 + 模块发现层由 Rust 直调；UI 意图层经 `mcp:intent` 派发到 `src/core/mcpBridge.ts` 真实 handler，
@@ -72,14 +72,14 @@ curl -s -X POST http://127.0.0.1:18755/mcp \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
 ```
 
-应返回含 77 个工具的 `tools` 数组（2026-09-24 起含快照回滚 agent_snapshot_list/rollback）。
+应返回含 83 个工具的 `tools` 数组（2026-09-25 起含服务器托管层 server_host_* / agent_server_bind）。
 
 > 注意：部分客户端会缓存工具清单。若改过 Rust 后工具数/签名没刷新，**重新加载该 MCP Server 连接**即可；
 > 也可直接打上面的 `tools/list` 端点绕过缓存核对。
 
 ---
 
-## 工具清单（77 个，按层）
+## 工具清单（83 个，按层）
 
 ### A. 引擎层（Rust 直调，无需前端）
 | 工具 | 作用 | 关键入参 |
@@ -197,6 +197,19 @@ curl -s -X POST http://127.0.0.1:18755/mcp \
 > ⚠️ 本模块与插件/KB/记忆同源走「UI 意图层」：`skill_*` 经 `mcp:intent` 派发到 `mcpBridge` 的 `skill:*` 分支，
 > 复用 `src/core/mapper/skill-mapper.ts` + `src/core/file/skillFs.ts` 真实 handler，副作用与在 skill-hub 界面操作完全一致、可抽查。
 
+### H. 服务器托管层（Rust 直调 host::commands，Rust 直写 agent_server_ref）
+| 工具 | 作用 | 关键入参 |
+|---|---|---|
+| `server_host_list` | **枚举全部服务器档案**（本模块枚举入口），返回名称/地址/端口/登录用户/认证指纹/路径白黑名单/提权策略/自动模式；凭证只回 `hint` 永不回明文 | 无 |
+| `server_host_get` | 按 id 查单个档案 | `id` |
+| `server_host_save` | **新增/编辑**档案（upsert）：`id`(srv_ 前缀)/`name`/`host`/`user` 必填；`pathAllow`/`pathDeny` 远端黑白名单；`sudoMode(none|sudo_cmd|sudo_full)`/`sudoUser`；`hostAutoMode(strict|balanced|auto)`；`l3Policy(reject|single_shot)`。⚠️ **凭证红线：本通道不收 `secret`/`keyPassphrase`**（传入即报错）——凭证录入/改密只能在 App「百宝箱→服务器」UI 进行；编辑省略 secret=保留原凭证 | `id` / `name` / `host` / `user` / 其余可选（无凭证字段） |
+| `server_host_delete` | **真实删除**档案 + 凭证密文 + 绑定引用（级联），不可逆 | `id` |
+| `server_host_test_connection` | russh 真实 SSH 握手 + 认证 + `whoami/uname/$HOME` 三连，返回 `{ok, loginUser, osHint, home, latencyMs, error}`。凭证仅用已存密文（不收凭证明文） | 同 save 结构（无凭证字段） |
+| `agent_server_bind` | **绑定**服务器到智能体（agent_server_ref 先删后插，`serverIds[0]` = primary/默认 Host；空数组=全部解绑）。绑定后该 Agent 注册 12 个 `host__*` 工具（走 HostAuthz 独立授权域） | `agentId` / `serverIds[]` |
+
+> ⚠️ 本层是 **Rust 直调**（非 UI 意图）：直接复用 Tauri 命令层 `host::commands` 与 DB 写入，副作用与 ServerHub 界面操作同源。
+> Agent 侧的 `host__*` 工具（12 个）是 **Agent 注册表工具**（同 `native__*`），不在 MCP 契约面——通过 `agent_run_task` 驱动 Agent 实跑验证（见流程 6）。
+
 ---
 
 ## 各模块 UI 级流程
@@ -269,6 +282,14 @@ curl -s -X POST http://127.0.0.1:18755/mcp \
 4. 启停：`skill_set_status` `{id, status:0|1}`（禁用后该技能不进引擎工具集）。
 5. 导入/导出：`skill_import` `{identifier, name, zipBase64|files}` 从包导入；`skill_export` `{identifier}` 取 ZIP base64 备份。
 6. 删除（红线，真实不可逆）：`skill_delete` `{id}`（删库行 + 删磁盘目录）；必须显式传 `id`，不批量/静默删。
+
+### 流程 6：服务器托管验证（录机 → 绑定 → 实跑 host__* → 审批自答）
+0. **先发现**：`server_host_list` 看已有档案；没有则请**用户在 UI「百宝箱→服务器」录入**（MCP 通道不收凭证明文，`server_host_save` 传 secret 即报错）→ `server_host_test_connection` 确认 `{ok:true}`（loginUser/osHint/home/latencyMs，仅用已存凭证）。
+1. **绑定**：`agent_list` 选目标 Agent（或 `agent_ui_create` 自助建无人值守测试 Agent：isActive/autoToolExecMode 宽松 + planAutoApproveMode=never）→ `agent_server_bind` `{agentId, serverIds:[...]}`（第一个为默认 Host）。
+2. **实跑**：`agent_run_task` `{agentId, prompt}`（明确指示远程操作，如「连接服务器查看 /var/www 目录并上传 xxx」）→ `agent_wait_task` 等终态；`agent_get_run_trace` 核对 `host__*` 工具调用链与 HostAuthz 决策。
+3. **审批自答（HITL）**：`agent_wait_task` 带 `interrupted=true` 返回时，`agent_get_status` 取 `pending.request`（host 域含 `hostMeta`：主机/身份/操作/风险级别）→ `agent_submit_approval` `{approvalId, decision:'approve'|'skip', remember}` 提交（host 域 remember 写 host_grant 分表，仅本任务内有效，run 结束强制过期）。
+4. **验证清单**：①连接/状态 ②exec（含 as_user 提权与超时）③SFTP 上传/下载/目录树 ④同信号「记住」后免弹 ⑤run 结束后 host_grant 清空（再次同操作重新弹卡）⑥L3 命令按 `l3Policy` 拒绝或单次批准 ⑦`server_host_delete` 后绑定与工具注销。
+5. **红线**：生产服务器操作一律先与用户确认范围；`pathAllow` 建议白名单最小化；**凭证不落聊天记录**——MCP 通道已硬性不收 `secret`/`keyPassphrase`（save/test_connection 传入即报错），录入/改密唯一入口是 App UI。
 
 ---
 
