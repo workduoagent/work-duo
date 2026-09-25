@@ -13,6 +13,7 @@
 //!  - 客户端一律走云端 API（与项目架构定调一致）。
 
 use std::collections::HashMap;
+use std::future::Future;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
@@ -219,10 +220,21 @@ impl AgentRuntime {
         initial_context: String,
         task: &AgentTaskState,
     ) {
-        // 0) 新一轮任务开始：清除上一轮可能残留的取消标志（cancel_agent_task 已无副作用），
-        //    同时保证"上一次取消未生效就立刻发起新任务"不会误杀新任务。
-        task.cancel_flag.store(false, Ordering::SeqCst);
-        task.cancel_requested.store(false, Ordering::SeqCst);
+        // 0) 新一轮任务开始：清除上一轮可能残留的取消标志。
+        // P0-4 洞二修复：抢锁成功到真正执行之间隔着异步 load_config（commands.rs），该窗口内的
+        // 「停止」会置位 cancel_flag/cancel_requested——无条件复位会把它静默吞掉。改为：
+        // cancel_requested 已置位（窗口内取消；上轮残留已由 spawn 包装收尾复位，见 commands.rs）
+        // 则保留置位，下方既有取消检查点（规划完成后等）将立即触发取消终态。
+        // 「上一次取消未生效就立刻发起新任务」的误杀防护由运行锁承接：上轮未收尾时新任务
+        // 抢不到运行锁，能进到这里的本轮必然始于收尾复位之后。
+        if task.cancel_requested.load(Ordering::SeqCst) {
+            tracing::warn!(
+                "[agent] run_task: 检测到启动窗口内的取消置位（load_config 期间点停止），本轮直接按取消处理"
+            );
+        } else {
+            task.cancel_flag.store(false, Ordering::SeqCst);
+            task.cancel_requested.store(false, Ordering::SeqCst);
+        }
         // 新一轮开始：清空前一轮可能残留的恢复挂起态（避免上轮 cancel 残留误导前端面板）。
         task.recovery.reset();
         // 同步清空计划审批 hub：cancel() 会无条件把 decision 置为 Cancel，若当时没有
@@ -293,7 +305,7 @@ impl AgentRuntime {
         // ────────────────────────────────────────────────────────────────────
 
         // 阶段一：意图分流（规则短路优先，灰色地带走轻量 LLM 分类）。
-        let mut intent = crate::agent::engine::intent::classify_intent(&cfg, &prompt).await;
+        let mut intent = crate::agent::engine::intent::classify_intent(&cfg, &prompt, Some(&task.cancel_flag)).await;
         // KB 已绑定 + SIMPLE_CHAT → 简单对话快路径（20260922 #1）：run_simple_chat 现已携带
         // native__kb_search 工具（kb_ids 非空时构造实例），纯 KB 问答跳过规划直接「检索→综合」，
         // 不再强制转 COMPOSITE（旧设计因空工具集导致 KB 不可检索而强制转换；网关慢时规划调用
@@ -371,7 +383,7 @@ impl AgentRuntime {
             );
             (po, (0u64, 0u64), String::new())
         } else {
-            crate::agent::engine::planner::build_plan(&cfg, &prompt, cfg.workspace.as_deref()).await
+            crate::agent::engine::planner::build_plan(&cfg, &prompt, cfg.workspace.as_deref(), Some(&task.cancel_flag)).await
         };
 
         // 规划期间用户可能已点击取消：规划完成后立即检查，避免拉起无意义的流水线。
@@ -452,7 +464,7 @@ impl AgentRuntime {
                         events::emit_status(app, "🔄 已收到修改意见，正在重新规划…");
                         let revised_prompt = format!("{}\n\n用户修改意见：{}", prompt, guidance);
                         let (np, nu, nr) =
-                            crate::agent::engine::planner::build_plan(&cfg, &revised_prompt, cfg.workspace.as_deref()).await;
+                            crate::agent::engine::planner::build_plan(&cfg, &revised_prompt, cfg.workspace.as_deref(), Some(&task.cancel_flag)).await;
                         plan = np;
                         plan_usage.0 += nu.0;
                         plan_usage.1 += nu.1;
@@ -708,7 +720,7 @@ impl AgentRuntime {
         if let Some(obj) = settle_cfg.llm_config.as_object_mut() {
             obj.insert("temperature".into(), serde_json::json!(0));
         }
-        match call_llm(&settle_cfg, &messages, &[]).await {
+        match call_llm(&settle_cfg, &messages, &[], None).await {
             Ok((resp, _usage)) => {
                 let content = resp
                     .get("choices")
@@ -1769,15 +1781,52 @@ async fn llm_rate_limit_wait(model: &str) {
     }
 }
 
+/// 用户取消哨兵错误（P0-4 洞一）：与流式侧 `call_llm_stream_once` 同串（含「取消」），
+/// 上层重试逻辑 `e.contains("取消")` 可识别为不可重试、直接透传。
+fn user_cancelled_err() -> String {
+    "任务已被用户取消".to_string()
+}
+
+/// 与取消标志竞争执行 future（P0-4 洞一）：取消置位即短路返回，不再等待底层 I/O。
+/// 轮询粒度 200ms——LLM 调用为秒级时长，粒度足够且开销可忽略；`None` 语义直接 await（零开销），
+/// 兼容无取消语义的调用方（squad / 后台提炼）。
+async fn race_cancel<F, T>(cancel: Option<&Arc<AtomicBool>>, fut: F) -> Result<T, ()>
+where
+    F: Future<Output = T>,
+{
+    match cancel {
+        None => Ok(fut.await),
+        Some(flag) => {
+            tokio::pin!(fut);
+            loop {
+                if flag.load(Ordering::SeqCst) {
+                    return Err(());
+                }
+                tokio::select! {
+                    _ = tokio::time::sleep(Duration::from_millis(200)) => continue,
+                    out = &mut fut => return Ok(out),
+                }
+            }
+        }
+    }
+}
+
 pub(crate) async fn call_llm(
     cfg: &AgentRuntimeConfig,
     messages: &[Value],
     tools: &[Value],
+    cancel: Option<&Arc<AtomicBool>>,
 ) -> Result<(Value, (u64, u64)), String> {
     if cfg.llm_base_url.is_empty() || cfg.llm_model_name.is_empty() {
         return Err("智能体未绑定有效的 LLM（base_url / model_name 为空）".into());
     }
-    llm_rate_limit_wait(&cfg.llm_model_name).await;
+    // 限流等待可取消：限流窗最长 60s/rpm，取消时立即短路（此前白等且占用等待窗）。
+    race_cancel(cancel, llm_rate_limit_wait(&cfg.llm_model_name))
+        .await
+        .map_err(|_| {
+            tracing::info!("[agent] call_llm: 用户取消（限流等待中）——立即终止");
+            user_cancelled_err()
+        })?;
 
     tracing::info!(
         "[agent] call_llm: 请求 URL={} model={} 是否带 Key={}",
@@ -1872,8 +1921,12 @@ pub(crate) async fn call_llm(
     // 超时兜底（支柱① 终态铁律）：模型/网关不返回时强制结束等待。
     // 无此超时时 future 永不 resolve → run_task 永不结束 → RunningGuard 永不 drop → 运行锁永占。
     // 加超时后返回 Err，上层 planner.rs / pipeline.rs 的既有 Err 容错（降级 / 标记失败）得以真正生效。
-    let resp = timeout(call_timeout, req.send())
+    let resp = race_cancel(cancel, timeout(call_timeout, req.send()))
         .await
+        .map_err(|_| {
+            tracing::info!("[agent] call_llm: 用户取消——终止等待响应（不产生计费尾单）");
+            user_cancelled_err()
+        })?
         .map_err(|_| {
             tracing::warn!(
                 "[agent] call_llm: 等待响应超时（{}s，model={}）——终止等待，防止任务永不结束",
@@ -1894,6 +1947,13 @@ pub(crate) async fn call_llm(
             );
             format!("请求失败：{e}")
         })?;
+    // send 完成后立即复查取消（竞态窗口）：响应已到但未读 body，取消则丢弃（不再产生读取计费）。
+    if let Some(f) = cancel {
+        if f.load(Ordering::SeqCst) {
+            tracing::info!("[agent] call_llm: 用户取消（响应已到、body 未读）——丢弃响应");
+            return Err(user_cancelled_err());
+        }
+    }
     let status = resp.status();
     tracing::info!(
         "[agent] call_llm: 收到 HTTP {}（耗时={}ms）",
@@ -1907,8 +1967,12 @@ pub(crate) async fn call_llm(
         return Err(format!("HTTP {}：{}", status, clip(&text, 2000)));
     }
     // 响应体读取同样需要超时：大响应或网关慢速吐流时，读 body 阶段也可能长时间挂起。
-    let data: Value = timeout(call_timeout, resp.json())
+    let data: Value = race_cancel(cancel, timeout(call_timeout, resp.json()))
         .await
+        .map_err(|_| {
+            tracing::info!("[agent] call_llm: 用户取消（读取响应体中）——终止");
+            user_cancelled_err()
+        })?
         .map_err(|_| {
             tracing::warn!(
                 "[agent] call_llm: 响应体读取超时（{}s，model={}）",
@@ -2848,6 +2912,61 @@ pub(crate) fn clip_plain(s: &str, max: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// P0-4 洞一：race_cancel 三态——None 直通 / Some 未取消放行 / Some 已取消短路。
+    #[tokio::test]
+    async fn race_cancel_semantics() {
+        // None：直通 await，不做取消检查
+        let out = race_cancel(None, async { 42 }).await;
+        assert!(out.is_ok());
+
+        // Some + 未取消：正常放行
+        let flag = Arc::new(AtomicBool::new(false));
+        let out = race_cancel(Some(&flag), async { 7 }).await;
+        assert_eq!(out.unwrap(), 7);
+
+        // Some + 已预先取消：立即 Err（不等待 future）
+        let flag = Arc::new(AtomicBool::new(true));
+        let started = std::time::Instant::now();
+        let out = race_cancel(
+            Some(&flag),
+            async {
+                tokio::time::sleep(Duration::from_secs(30)).await;
+                1
+            },
+        )
+        .await;
+        assert!(out.is_err());
+        assert!(started.elapsed().as_millis() < 3000, "已取消时不得等待 future");
+    }
+
+    /// P0-4 洞一：future 在途时取消置位，轮询应在短窗内发现并短路。
+    #[tokio::test]
+    async fn race_cancel_short_circuits_mid_flight() {
+        let flag = Arc::new(AtomicBool::new(false));
+        let f2 = flag.clone();
+        // 300ms 后置位取消（模拟用户点停止）
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            f2.store(true, Ordering::SeqCst);
+        });
+        let started = std::time::Instant::now();
+        let out = race_cancel(
+            Some(&flag),
+            async {
+                tokio::time::sleep(Duration::from_secs(30)).await;
+                1
+            },
+        )
+        .await;
+        assert!(out.is_err());
+        // 300ms 置位 + 最多一轮 200ms 轮询 → 远小于 30s 的 future 时长
+        assert!(
+            started.elapsed().as_millis() < 5000,
+            "取消置位后应在轮询粒度级延迟内短路"
+        );
+    }
+
 
     /// 20260919002 per-agent 锁语义：不同 Agent 互不阻塞；同一 Agent 互斥；
     /// RunningGuard Drop（含提前 return / panic 路径）后锁自动复位且回收状态束。

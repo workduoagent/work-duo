@@ -11,6 +11,8 @@
 
 use serde_json::json;
 use serde_json::Value;
+use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 
 use crate::agent::engine::runtime;
 use crate::agent::types::AgentRuntimeConfig;
@@ -50,7 +52,11 @@ const RISK_HINTS: &[&str] = &[
 ];
 
 /// 意图分类入口：规则短路优先，灰色地带走 LLM 轻量分类。
-pub async fn classify_intent(cfg: &AgentRuntimeConfig, prompt: &str) -> IntentProfile {
+pub async fn classify_intent(
+    cfg: &AgentRuntimeConfig,
+    prompt: &str,
+    cancel: Option<&Arc<AtomicBool>>,
+) -> IntentProfile {
     let trimmed = prompt.trim();
     let len = trimmed.chars().count();
     let lower = trimmed.to_lowercase();
@@ -97,7 +103,7 @@ risk_level（low/medium/high/critical，涉及删除/安装/执行/改系统/部
     // 20260918001B 修A原则本就不重试），双重失败后走信号定向降级。
     let mut parsed: Option<IntentProfile> = None;
     for attempt in 1..=2 {
-        match runtime::call_llm(cfg, &messages, &[]).await {
+        match runtime::call_llm(cfg, &messages, &[], cancel).await {
             Ok((resp, _usage)) => {
                 let content = extract_content(&resp);
                 match parse_intent_json(&content) {

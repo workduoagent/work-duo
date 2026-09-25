@@ -1103,8 +1103,15 @@ pub async fn branch_from_step(app: AppHandle, input: BranchFromStepInput) -> Res
         input.from_step + 1,
     );
 
-    let (plan, _, _) =
-        crate::agent::engine::planner::build_plan(&cfg, &prompt, cfg.workspace.as_deref()).await;
+    // 分支重跑规划：branch_from_step 是独立命令（无运行中 task_state 可达），无取消语义传 None；
+    // 规划产出的 DAG 随后经 agent_run_task(plan_override) 执行，彼时任务级取消链路正常生效。
+    let (plan, _, _) = crate::agent::engine::planner::build_plan(
+        &cfg,
+        &prompt,
+        cfg.workspace.as_deref(),
+        None,
+    )
+    .await;
 
     // 重编号新分支步骤，续接原步骤序号（from_step+1 起）。
     let base = input.from_step;

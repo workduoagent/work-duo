@@ -331,7 +331,7 @@ async fn plan_squad_delegation(
         json!({ "role": "system", "content": sys }),
         json!({ "role": "user", "content": user }),
     ];
-    match crate::agent::engine::runtime::call_llm(leader_cfg, &messages, &[]).await {
+    match crate::agent::engine::runtime::call_llm(leader_cfg, &messages, &[], None).await {
         Ok((resp, _)) => {
             let content = resp
                 .get("choices")
@@ -404,7 +404,7 @@ async fn summarize(leader_cfg: &AgentRuntimeConfig, prompt: &str, context: &str)
         json!({ "role": "system", "content": sys }),
         json!({ "role": "user", "content": user }),
     ];
-    match crate::agent::engine::runtime::call_llm(leader_cfg, &messages, &[]).await {
+    match crate::agent::engine::runtime::call_llm(leader_cfg, &messages, &[], None).await {
         Ok((resp, _)) => {
             let c = resp
                 .get("choices")
@@ -443,7 +443,7 @@ async fn run_member_subtask(
     cfg.session_id = None;
     cfg.round_id = None;
 
-    let (plan, _, _) = planner::build_plan(&cfg, prompt, Some(workspace)).await;
+    let (plan, _, _) = planner::build_plan(&cfg, prompt, Some(workspace), None).await;
 
     // 图驱动：为每个成员子任务打开独立实体图（按 workspace + 成员 id 区分会话），
     // 规划写入图，运行时状态由图承载，与单 Agent 路径一致。
@@ -857,7 +857,7 @@ async fn run_squad_chat(
                 json!({ "role": "system", "content": sys }),
                 json!({ "role": "user", "content": user }),
             ];
-            let content = match crate::agent::engine::runtime::call_llm(&member.agent, &messages, &[]).await {
+            let content = match crate::agent::engine::runtime::call_llm(&member.agent, &messages, &[], None).await {
                 Ok((resp, _)) => extract_llm_text(&resp),
                 Err(e) => {
                     tracing::warn!("[squad] chat 成员 {} 第 {} 轮发言失败：{e}", member.agent.agent_id, r + 1);
@@ -925,7 +925,7 @@ async fn run_squad_chat(
         json!({ "role": "system", "content": sys }),
         json!({ "role": "user", "content": user }),
     ];
-    let summary = match crate::agent::engine::runtime::call_llm(sum_cfg, &messages, &[]).await {
+    let summary = match crate::agent::engine::runtime::call_llm(sum_cfg, &messages, &[], None).await {
         Ok((resp, _)) => {
             let s = extract_llm_text(&resp);
             if s.is_empty() {

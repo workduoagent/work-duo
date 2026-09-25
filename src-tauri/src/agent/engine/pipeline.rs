@@ -1340,7 +1340,7 @@ async fn run_subtask(
                 "[agent] pipeline: 子任务 step={} 第 {} 轮流式空响应，回退非流式兜底",
                 task.step, round
             );
-            match runtime::call_llm(cfg, &messages, &tools).await {
+            match runtime::call_llm(cfg, &messages, &tools, Some(cancel)).await {
                 Ok((choice, u)) => {
                     outcome = runtime::StreamOutcome {
                         content: choice

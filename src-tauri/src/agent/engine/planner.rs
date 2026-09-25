@@ -9,6 +9,8 @@
 
 use serde_json::json;
 use serde_json::Value;
+use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 
 use crate::agent::engine::runtime;
 use crate::agent::types::AgentRuntimeConfig;
@@ -24,7 +26,7 @@ pub async fn build_plan(
     cfg: &AgentRuntimeConfig,
     prompt: &str,
     workspace: Option<&str>,
-) -> (PlanDAG, (u64, u64), String) {
+    cancel: Option<&Arc<AtomicBool>>,) -> (PlanDAG, (u64, u64), String) {
     let outline = capability_outline(cfg);
     let ws_line = workspace
         .map(|w| format!("\n当前工作空间目录：{w}（所有文件产物都必须落在该目录内）"))
@@ -104,7 +106,7 @@ tests_passed 无需额外字段，但该步骤 description 里必须明确「运
     }
 
     let started = std::time::Instant::now();
-    match runtime::call_llm(&plan_cfg, &messages, &[]).await {
+    match runtime::call_llm(&plan_cfg, &messages, &[], cancel).await {
         Ok((resp, usage)) => {
             let content = extract_content(&resp);
             match parse_plan_json(&content) {

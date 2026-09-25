@@ -917,7 +917,7 @@ Your job is to merge the Existing Summary and the Target Conversation Rounds int
     );
 
     // 复用智能体绑定的 LLM（客户端一律走云端 API；如需更轻量模型可后续配置 summary_model）。
-    let (choice, _usage) = call_llm(cfg, &messages, &[]).await?;
+    let (choice, _usage) = call_llm(cfg, &messages, &[], None).await?; // 后台压缩：无用户取消语义
     let summary = choice
         .get("content")
         .and_then(|v| v.as_str())
@@ -966,7 +966,7 @@ concurrent-refresh-pitfall | fix | 并发刷新令牌会互踢，客户端需 si
         json!({ "role": "system", "content": system_rule }),
         json!({ "role": "user", "content": format!("会话状态摘要：\n{summary}") }),
     ];
-    let (choice, _usage) = call_llm(cfg, &messages, &[]).await?;
+    let (choice, _usage) = call_llm(cfg, &messages, &[], None).await?; // 后台压缩：无用户取消语义
     let raw = choice
         .get("content")
         .and_then(|v| v.as_str())
