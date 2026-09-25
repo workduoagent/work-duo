@@ -83,6 +83,11 @@ fn cipher() -> Result<Aes256Gcm, String> {
 }
 
 /// 加密明文负载（JSON 序列化后 AES-256-GCM），返回 base64(nonce || ciphertext)。
+/// 密文版本前缀（台账 S10）：`v1:` = 当前世代（主密钥 v1 + nonce||ct）。
+/// 为将来轮换留缝——v2 世代可换主密钥/算法，decrypt 按 version 分派；
+/// **已知限制（产品口径）**：主密钥存本机凭据管理器，换机不迁移凭证（需重新录入）。
+pub const CIPHER_VERSION_PREFIX: &str = "v1:";
+
 pub fn encrypt_payload(payload: &str) -> Result<String, String> {
     let cipher = cipher()?;
     let nonce = Aes256Gcm::generate_nonce(&mut OsRng); // 12 字节
@@ -91,13 +96,15 @@ pub fn encrypt_payload(payload: &str) -> Result<String, String> {
         .map_err(|e| format!("凭证加密失败：{e}"))?;
     let mut out = nonce.to_vec();
     out.extend_from_slice(&ct);
-    Ok(B64.encode(out))
+    Ok(format!("{}{}", CIPHER_VERSION_PREFIX, B64.encode(out)))
 }
 
 /// 解密密文，返回明文负载 JSON 字符串。
+/// 兼容两种形态：`v1:base64(nonce||ct)`（当前写入格式）与裸 base64（历史存量，自动识别）。
 pub fn decrypt_payload(enc: &str) -> Result<String, String> {
     let cipher = cipher()?;
-    let data = B64.decode(enc).map_err(|e| format!("凭证密文格式异常：{e}"))?;
+    let b64 = enc.strip_prefix(CIPHER_VERSION_PREFIX).unwrap_or(enc);
+    let data = B64.decode(b64).map_err(|e| format!("凭证密文格式异常：{e}"))?;
     if data.len() < 13 {
         return Err("凭证密文长度异常".into());
     }
@@ -188,6 +195,8 @@ mod tests {
         ];
         for plain in cases {
             let enc = encrypt_payload(plain).unwrap();
+            // 台账 S10：新写入密文必须带 v1: 版本前缀（轮换留缝）
+            assert!(enc.starts_with(super::CIPHER_VERSION_PREFIX), "密文应带 v1: 前缀：{}", &enc[..12.min(enc.len())]);
             assert_ne!(enc, plain, "密文不得等于明文");
             assert!(!enc.contains(plain), "密文不得包含完整明文子串");
             let dec = decrypt_payload(&enc).unwrap();
