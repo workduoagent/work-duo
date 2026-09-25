@@ -474,6 +474,7 @@ async fn run_member_subtask(
         sandbox_enabled: cfg.allow_sandbox,
         agent_id: cfg.agent_id.clone(),
         session_id: None,
+        run_id: None,
         http_allowed_hosts: cfg.http_allowed_hosts.clone(),
         run_outcomes: Default::default(),
     };

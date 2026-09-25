@@ -729,3 +729,124 @@ CREATE TABLE IF NOT EXISTS plugin_run_log
 );
 CREATE INDEX IF NOT EXISTS idx_plugin_run_log_plugin ON plugin_run_log (plugin_id, created_at DESC);
 
+
+-- ============================================================
+-- ---------- 服务器托管（Host）管理面（设计稿 docs/server-hosting-design.md） ----------
+-- 独立授权域（domain=host），与本地审批硬隔离；Agent 只见 server_id，凭证永不入授权链。
+
+-- 服务器主表（管理面录入；user=SSH 登录用户，不必是 root）
+CREATE TABLE IF NOT EXISTS server_host
+(
+    id                  TEXT    PRIMARY KEY,
+    name                TEXT    NOT NULL,
+    host                TEXT    NOT NULL,
+    port                INTEGER NOT NULL DEFAULT 22,
+    user                TEXT    NOT NULL,
+    auth_type           TEXT    NOT NULL DEFAULT 'password',   -- password | private_key | private_key_passphrase
+    credential_id       TEXT,                                  -- 指向 server_credential（密文，不落明文）
+    path_allow          TEXT,                                  -- JSON 数组，如 ["/var/www"]
+    path_deny           TEXT,                                  -- JSON 数组，优先于白名单
+    local_path_allow    TEXT,                                  -- JSON 数组；空=绑定工作空间
+    default_cwd         TEXT,                                  -- 须落在 path_allow
+    login_note          TEXT,
+    sudo_mode           TEXT    NOT NULL DEFAULT 'none',       -- none | sudo_cmd | sudo_full
+    sudo_user           TEXT    NOT NULL DEFAULT 'root',
+    host_auto_mode      TEXT    NOT NULL DEFAULT 'strict',     -- strict | balanced | auto
+    allow_grant_memory  INTEGER NOT NULL DEFAULT 0,            -- false=永远只允许单次批准
+    l3_policy           TEXT    NOT NULL DEFAULT 'single_shot',-- reject | single_shot
+    grant_bind_as_user  INTEGER NOT NULL DEFAULT 1,            -- grant 精确匹配 as_user
+    tags                TEXT,                                  -- JSON 数组
+    note                TEXT,
+    last_used_at        INTEGER,
+    created_at          INTEGER NOT NULL,
+    updated_at          INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_server_host_updated ON server_host (updated_at DESC);
+
+-- 凭证密文（AES-256-GCM；主密钥在 OS 凭据管理器，UI/Agent 均不可读出明文）
+CREATE TABLE IF NOT EXISTS server_credential
+(
+    id          TEXT    PRIMARY KEY,
+    secret_type TEXT    NOT NULL,   -- password | private_key | private_key_passphrase
+    secret_enc  TEXT    NOT NULL,   -- base64(nonce || ciphertext)
+    hint        TEXT    NOT NULL,   -- 指纹展示（密钥 MD5 后 8 位 / 密码 ****+末 2 位）
+    created_at  INTEGER NOT NULL,
+    updated_at  INTEGER NOT NULL
+);
+
+-- 智能体 × 服务器绑定（装配向导多选；primary=默认 Host）
+CREATE TABLE IF NOT EXISTS agent_server_ref
+(
+    id           TEXT    PRIMARY KEY,
+    agent_id     TEXT    NOT NULL,
+    server_id    TEXT    NOT NULL,
+    role         TEXT    NOT NULL DEFAULT 'secondary', -- primary | secondary
+    cwd_override TEXT,
+    created_at   INTEGER NOT NULL,
+    updated_at   INTEGER NOT NULL,
+    CONSTRAINT uk_agent_server UNIQUE (agent_id, server_id)
+);
+CREATE INDEX IF NOT EXISTS idx_agent_server_agent ON agent_server_ref (agent_id);
+
+-- 执行审计（只记做了什么、结果如何；不含凭证）
+CREATE TABLE IF NOT EXISTS server_exec_log
+(
+    id          TEXT    PRIMARY KEY,
+    server_id   TEXT    NOT NULL,
+    agent_id    TEXT,
+    session_id  TEXT,
+    run_id      TEXT,
+    tool_name   TEXT    NOT NULL,
+    argv        TEXT,
+    as_user     TEXT,
+    cwd         TEXT,
+    started_at  INTEGER NOT NULL,
+    duration_ms INTEGER,
+    exit_code   INTEGER,
+    bytes_in    INTEGER,
+    bytes_out   INTEGER,
+    approved    TEXT,               -- allow_auto | allow_grant | allow_user | allow_single | deny
+    error       TEXT,
+    created_at  INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_server_exec_log_server ON server_exec_log (server_id, created_at DESC);
+
+-- Host 专用免弹授权（与本地 grants 物理分表；domain 写死 host 防串域；run 结束强制过期）
+CREATE TABLE IF NOT EXISTS host_grant
+(
+    grant_id     TEXT    PRIMARY KEY,
+    domain       TEXT    NOT NULL DEFAULT 'host',
+    run_id       TEXT    NOT NULL,
+    agent_id     TEXT    NOT NULL,
+    server_id    TEXT    NOT NULL,
+    action       TEXT    NOT NULL,   -- Connect | RemoteRead | RemoteWrite | RemoteDelete | RemoteExec | Disconnect
+    as_user      TEXT    NOT NULL,
+    risk_key     TEXT    NOT NULL,   -- 如 host:rm_rf
+    scope_digest TEXT,
+    granted_by   TEXT    NOT NULL,   -- user | plan
+    granted_at   INTEGER NOT NULL,
+    expires_at   INTEGER NOT NULL,
+    max_uses     INTEGER NOT NULL DEFAULT 1,
+    uses         INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_host_grant_lookup ON host_grant (run_id, agent_id, server_id, action, as_user, risk_key);
+
+-- 授权审计（与执行日志分表，可追责「这条生产变更谁批的、范围是什么」）
+CREATE TABLE IF NOT EXISTS host_authz_log
+(
+    id             TEXT    PRIMARY KEY,
+    run_id         TEXT,
+    session_id     TEXT,
+    agent_id       TEXT,
+    server_id      TEXT,
+    action         TEXT,
+    as_user        TEXT,
+    risk_level     TEXT,            -- L0 | L1 | L2 | L3
+    risk_key       TEXT,
+    signals_json   TEXT,
+    decision       TEXT,            -- allow_auto | allow_grant | allow_user | allow_single | deny
+    grant_id       TEXT,
+    request_digest TEXT,
+    created_at     INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_host_authz_log_server ON host_authz_log (server_id, created_at DESC);

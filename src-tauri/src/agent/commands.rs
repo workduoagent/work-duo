@@ -225,6 +225,8 @@ pub async fn run_agent_task(
                 budget_soft.clone(),
                 run_limit,
             );
+            // cfg 被 run_task 消耗，先捕获 run id 供 host_grant 清理（与 gate/审批写入同源）。
+            let host_run_id = cfg.round_id.clone();
             let run_outcome = tokio::time::timeout(
                 run_limit,
                 rt.run_task(&app_clone, cfg, prompt, plan_override, pre_completed, initial_context, &task_state),
@@ -232,6 +234,13 @@ pub async fn run_agent_task(
             .await;
             if let Some(h) = watchdog {
                 let _ = h.abort();
+            }
+            // 服务器托管（Host）：run 结束强制过期该 run 的全部 host_grant（设计稿 §7.2，
+            // 「记住」仅限本任务内——正常/取消/超时任意出口都清理，跨 run 本就不互认）。
+            if let Some(rid) = host_run_id.as_deref() {
+                if !rid.is_empty() {
+                    crate::host::authz::cleanup_run_grants(&app_clone, rid).await;
+                }
             }
             match run_outcome {
                 Ok(()) => {}
@@ -600,6 +609,7 @@ pub async fn wait_task(
 /// 回传审批决策。20260919002：agent_id 缺省时路由到唯一在跑任务（多任务并行须显式传）。
 #[tauri::command]
 pub async fn submit_approval_decision(
+    app: AppHandle,
     runtime: State<'_, AgentRuntime>,
     agent_id: Option<String>,
     decision: ApprovalDecisionInput,
@@ -613,7 +623,22 @@ pub async fn submit_approval_decision(
     // 仅 approve/takeover 生效；skip 意味着拒绝，不该记住。
     if decision.remember && decision.decision != "skip" {
         if let Some(key) = &decision.grant_key {
-            task.approval_grants.grant(key);
+            if key.starts_with("host:") {
+                // Host 授权域：写 host_grant 独立表（与 local grants 物理分表，key 强制 host: 前缀）
+                if let Some(req) = task.approval.pending_request(&decision.approval_id).await {
+                    if let Some(meta) = &req.host_meta {
+                        // L3 一律不写 host_grant（设计稿 §7.3：仅单次批准或拒绝，禁止记住）
+                        let l3 = meta.get("l3").and_then(|v| v.as_bool()).unwrap_or(false);
+                        if l3 {
+                            tracing::info!("[agent] L3 风险不允许「本任务内记住」，按单次批准处理");
+                        } else if let Err(e) = crate::host::authz::remember_grant_from_meta(&app, &task.agent_id, meta).await {
+                            tracing::error!("[agent] host_grant 写入失败：{e}");
+                        }
+                    }
+                }
+            } else {
+                task.approval_grants.grant(key);
+            }
         }
     }
     Ok(task.approval.resolve(decision).await)
@@ -838,6 +863,7 @@ pub async fn read_artifact(
         sandbox_enabled: false,
         agent_id: String::new(),
         session_id: None,
+        run_id: None,
         http_allowed_hosts: Vec::new(),
         run_outcomes: Default::default(),
     };
@@ -2024,6 +2050,12 @@ category 取值：decision（决策）/ code_pattern（代码模式）/ user_pre
         .filter_map(|r| r.try_get::<Option<String>, _>("kb_id").ok().flatten())
         .collect();
 
+    // 服务器托管（Host）：绑定档案 + 过期 host_grant GC（设计稿 docs/server-hosting-design.md）
+    let server_bindings = crate::host::types::load_bindings(app, agent_id).await?;
+    if !server_bindings.is_empty() {
+        crate::host::authz::gc_expired(app).await;
+    }
+
     Ok(AgentRuntimeConfig {
         agent_id: agent_id.to_string(),
         system_prompt,
@@ -2045,6 +2077,7 @@ category 取值：decision（决策）/ code_pattern（代码模式）/ user_pre
         network_proxy: crate::net::load_network_proxy(&pool).await,
         plugin_tools,
         kb_ids,
+        server_bindings,
     })
 }
 

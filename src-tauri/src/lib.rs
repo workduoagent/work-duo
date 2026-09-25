@@ -6,6 +6,7 @@ mod bun_manager;
 mod sandbox_audit;
 mod ws_snapshot;
 mod fs_helper;
+mod host;
 mod logging;
 mod mcp_server;
 mod net;
@@ -179,6 +180,11 @@ pub fn run() {
             agent::commands::kb_rebuild_index,
             grant_fs_scope,
             sandbox_audit::read_sandbox_audit_logs,
+            host::commands::server_host_list,
+            host::commands::server_host_get,
+            host::commands::server_host_save,
+            host::commands::server_host_delete,
+            host::commands::server_host_test_connection,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

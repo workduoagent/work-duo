@@ -184,6 +184,34 @@ fn capability_outline(cfg: &AgentRuntimeConfig) -> String {
                 .to_string(),
         );
     }
+    // 服务器托管（Host）：仅在绑定了服务器时列入能力大纲（与工具注册同源，提示/能力一致；
+    // 2026-09-25 E2E 实锤：大纲缺失时规划器按「严禁编造不存在的能力」直接判 host 任务无法执行）。
+    if !cfg.server_bindings.is_empty() {
+        let hosts: Vec<String> = cfg
+            .server_bindings
+            .iter()
+            .map(|b| {
+                format!(
+                    "{}（{}@{}:{}，默认目录 {}）",
+                    b.name,
+                    b.login_user,
+                    b.host,
+                    b.port,
+                    b.default_cwd.as_deref().unwrap_or("/")
+                )
+            })
+            .collect();
+        caps.push(
+            format!(
+                "远程服务器运维（host__ 系列工具，统一走 HostAuthz 独立授权域，敏感操作会弹审批卡等用户确认，属正常流程而非故障）：                 已绑定服务器：{}；\
+                 连接管理：host__list_servers（列档案）/ host__connect(server_id?) / host__status(server_id) / host__disconnect(server_id) / host__disconnect_all；\
+                 远程命令：host__exec(server_id?, command, cwd?, as_user?, timeout_secs?)——只执行用户明确要求的命令，严禁 rm -rf/mkfs/dd/shutdown 等毁灭性命令；\
+                 文件传输（SFTP）：host__list_dir(server_id?, path) / host__upload(local_path, remote_path) / host__download(remote_path, local_path) / host__mkdir(remote_path) / host__sync(local_dir, remote_dir, delete_extraneous?——高危，删远端多余文件) / host__remove(remote_path, recursive?——高危)；\
+                 远端路径必须落在该服务器档案的 path_allow 白名单内；未配置白名单时也只操作用户明确指定的目录，系统默认黑名单（/etc、/root/.ssh 等）始终生效；",
+                hosts.join("、")
+            ),
+        );
+    }
     let mut lines: Vec<String> = Vec::with_capacity(caps.len() + 2);
     for (i, c) in caps.iter().enumerate() {
         lines.push(format!("{}. {}", i + 1, c));

@@ -60,6 +60,16 @@ pub struct ApprovalRequest {
     /// 策略授权 key（15007；「本任务内记住」勾选后由 submit_approval_decision 写入 grants）。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub grant_key: Option<String>,
+    /// 授权域（HostAuthz 独立授权域）："host" = 走 HostAuthz 卡片与 host_grant；
+    /// None/其它 = 本地域（local grants）。serde 向后兼容：旧载荷无此字段按 local。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub domain: Option<String>,
+    /// Host 审批卡片 / host_grant 写入所需的上下文（仅 domain=host 时携带）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub host_meta: Option<serde_json::Value>,
+    /// 本轮 run id（host_grant 生命周期与审计关联）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub run_id: Option<String>,
 }
 
 /// 方案推荐：单个可选项（Agent 调 `native__ask_user_choice` 时给出；前端渲染为 chip）。
@@ -218,6 +228,9 @@ pub struct AgentRuntimeConfig {
     /// 已绑定的知识库 id（K2，agent_kb_ref）：非空时注册 `native__kb_search` 工具并在
     /// planner 能力大纲中列出（提示与能力同源——未绑定时两者都不出现）。
     pub kb_ids: Vec<String>,
+    /// 已绑定的服务器档案（服务器托管，agent_server_ref JOIN server_host）：
+    /// 非空时注册 `host__*` 工具族并走 HostAuthz 独立授权域。
+    pub server_bindings: Vec<crate::host::types::ServerBinding>,
 }
 
 /* ================= 三层流水线架构（意图分流 → DAG 规划 → 微 ReAct 执行） ================= */

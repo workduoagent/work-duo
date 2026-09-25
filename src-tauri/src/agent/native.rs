@@ -75,7 +75,7 @@ const MAX_ZIP_ENTRIES: usize = 10_000;
 const MAX_ZIP_EXTRACT_BYTES: u64 = 500 * 1024 * 1024;
 
 /// 构造标准 function-calling 定义骨架。
-fn def(name: &str, description: &str, properties: Value, required: &[&str]) -> Value {
+pub(crate) fn def(name: &str, description: &str, properties: Value, required: &[&str]) -> Value {
     json!({
         "type": "function",
         "function": {

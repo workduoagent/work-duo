@@ -52,3 +52,13 @@ arrow-array = "58"
 arrow-schema = "58"
 arrow-buffer = "58"
 
+# ---------------- 服务器托管（Host，设计稿 docs/server-hosting-design.md） ----------------
+# SSH/SFTP 传输：russh 纯 Rust + tokio 原生（与 agent 异步运行时同构，无 C 编译风险）。
+russh = "0.46"
+russh-keys = "0.46"
+russh-sftp = "2"
+# 凭证加密：AES-256-GCM 密文；主密钥存 OS 凭据管理器（keyring）。
+aes-gcm = "0.10"
+keyring = { version = "3", features = ["windows-native", "apple-native"] }
+hex = "0.4"
+md-5 = "0.10"

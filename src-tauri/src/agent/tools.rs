@@ -32,6 +32,8 @@ pub struct ToolContext {
     pub agent_id: String,
     /// 当前会话 ID（原生工具据此把跨会话记忆归属到会话；空闲/非运行态为 None）。
     pub session_id: Option<String>,
+    /// 当前 run id（服务器托管审计 server_exec_log 关联；无 run 场景为 None）。
+    pub run_id: Option<String>,
     /// HTTP 请求主机白名单（由 app_config.http_allowed_hosts 解析后透传）：空 = 不限制；
     /// 非空 = native__http_request 仅放行命中列表中的主机（含其子域）。
     pub http_allowed_hosts: Vec<String>,
@@ -74,6 +76,15 @@ pub struct RunOutcome {
     pub exit_code: Option<i32>,
 }
 
+/// 授权域（HostAuthz 独立授权域分流，设计稿 docs/server-hosting-design.md §7.9）。
+/// 调度器按域分流：Local → ApprovalManager（policy.rs 信号/grants）；
+/// Host → HostAuthz（host_policy 信号 / host_grant 分表）。类型级杜绝串域。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AuthzDomain {
+    Local,
+    Host,
+}
+
 /// 统一工具契约。
 #[async_trait]
 pub trait AgentTool: Send + Sync {
@@ -85,6 +96,11 @@ pub trait AgentTool: Send + Sync {
 
     /// 敏感度分级（决定是否需要审批）。
     fn check_permission(&self, _args: &serde_json::Value) -> PermissionLevel;
+
+    /// 授权域（默认 Local=本地审批边界；`host__*` 工具返回 Host 走 HostAuthz）。
+    fn authz_domain(&self) -> AuthzDomain {
+        AuthzDomain::Local
+    }
 
     /// 执行工具（args 为 LLM 传入的 JSON 参数）。
     async fn execute(&self, args: serde_json::Value, ctx: &ToolContext)

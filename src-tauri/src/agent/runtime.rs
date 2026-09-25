@@ -266,7 +266,9 @@ impl AgentRuntime {
         // 本地插件（P2 纯增量）：cfg.plugin_tools 非空时注册为 custom__<identifier> 工具；
         // 为空时零影响（register_plugins_into 对空切片不做事），不触碰既有注册逻辑。
         crate::agent::plugin_adapter::register_plugins_into(&mut base, app, &cfg.plugin_tools);
-        // 工具已全部直接注册进 base（原生 + Skill + MCP + 插件），base 即完整注册表。
+        // 服务器托管（Host）：绑定非空时注册 host__* 工具族（12 个，HostAuthz 独立授权域）。
+        crate::host::register_host_tools(&mut base, app, Arc::new(cfg.server_bindings.clone()));
+        // 工具已全部直接注册进 base（原生 + Skill + MCP + 插件 + Host），base 即完整注册表。
         let registry = base;
         tracing::info!(
             "[agent] run_task: 工具注册完成，共 {} 个工具（原生 + Skill + MCP + 插件）",
@@ -280,6 +282,7 @@ impl AgentRuntime {
             sandbox_enabled: cfg.allow_sandbox,
             agent_id: cfg.agent_id.clone(),
             session_id: cfg.session_id.clone(),
+            run_id: cfg.round_id.clone(),
             http_allowed_hosts: cfg.http_allowed_hosts.clone(),
             run_outcomes: Default::default(),
         };
@@ -1147,6 +1150,31 @@ pub(crate) async fn run_tool_calls_round(
         );
 
         let step_id = call_id.clone();
+        // Host 授权域分流（设计稿 §7.9）：host__* 走 HostAuthz（独立授权域）——
+        // 绝不触碰本地 policy.rs 信号与 grants。三态：Proceed / Denied / NeedApproval。
+        let mut host_denied: Option<String> = None;
+        let mut host_sensitive = false;
+        let mut host_approval_req: Option<ApprovalRequest> = None;
+        if tool.authz_domain() == crate::agent::tools::AuthzDomain::Host {
+            match crate::host::authz::gate_tool_call(
+                app,
+                &cfg.agent_id,
+                cfg.session_id.as_deref(),
+                cfg.round_id.as_deref().unwrap_or(""),
+                &tool_name,
+                &args,
+            )
+            .await
+            {
+                crate::host::authz::GateOutcome::Proceed(_) => {}
+                crate::host::authz::GateOutcome::Denied(reason) => host_denied = Some(reason),
+                crate::host::authz::GateOutcome::NeedApproval(req) => {
+                    host_sensitive = true;
+                    host_approval_req = Some(req);
+                }
+            }
+        }
+
         let static_sensitive = tool.check_permission(&args) == PermissionLevel::RequireApproval;
         // 15007 边审批策略：对一切可提取「操作 × 目标」的工具评估（含静态敏感工具）。
         // 真机教训（2026-09-17 首轮验收）：write_file 属静态敏感工具，若仅「静态未拦」才评估，
@@ -1156,9 +1184,11 @@ pub(crate) async fn run_tool_calls_round(
         //  - never（全自动）模式 → 不弹卡，仅状态栏留痕（方案 A，零打断）；
         //  - 其余模式命中 → 硬门禁弹审批卡（无视 auto_tool_exec_mode，危险操作必须过目）。
         // 插件 custom__* 无边映射，天然不受策略影响（恒审批语义保留）。
-        let mut sensitive = static_sensitive;
+        let mut sensitive = static_sensitive || host_sensitive;
         let mut policy_approval: Option<(String, String)> = None; // (命中原因, grant_key)
         let mut policy_granted = false; // grants 命中：本信号已授权，静态敏感亦放行
+        // host__* 已走 HostAuthz（上方分流），跳过本地策略评估与本地审批分支。
+        if host_denied.is_none() && host_approval_req.is_none() {
         {
             if let Some(op_str) = tool_op(&tool_name) {
                 if let Some(edge) = crate::agent::policy::EdgeOp::from_op_str(op_str) {
@@ -1205,6 +1235,7 @@ pub(crate) async fn run_tool_calls_round(
                 }
             }
         }
+        } // host 分流守卫闭合
         // 一行式工具行元数据：操作类型 + 目标路径（执行前即可确定；行数在执行后 diff 得出）。
         let op = tool_op(&tool_name);
         let path_arg = tool_path(&args);
@@ -1230,6 +1261,82 @@ pub(crate) async fn run_tool_calls_round(
             "[agent] tool_round: 审批门禁检查 agent={} tool={} sensitive={} auto_exec={}",
             cfg.agent_id, tool_name, sensitive, cfg.auto_tool_exec_mode,
         );
+        // Host 拒绝：结构化原因直达 LLM（不计入熔断连续错误，属「用户/策略拒绝」语义）。
+        if let Some(reason) = host_denied {
+            events::emit_tool_finished(app, &ToolStep {
+                call_id: step_id.clone(),
+                tool_name: tool_name.clone(),
+                status: "failed".into(),
+                sensitive,
+                args: Some(serde_json::to_string(&args).unwrap_or_default()),
+                result: Some(reason.clone()),
+                duration_ms: None,
+                created_at: now_ms(),
+                step: Some(current_step),
+                op: op.map(|s| s.to_string()),
+                path: path_arg.clone(),
+                lines_added: None,
+                lines_removed: None,
+            });
+            messages.push(json!({
+                "role": "tool",
+                "tool_call_id": call_id,
+                "content": reason
+            }));
+            continue;
+        }
+
+        // Host 挂起：弹 host 审批卡（ApprovalManager 同通道，前端按 domain=host 分型渲染）。
+        if let Some(req) = host_approval_req.take() {
+            events::emit_awaiting_approval(app, &req);
+            let approval_id = req.approval_id.clone();
+            let rx = approval.suspend(req).await;
+            let host_outcome: ApprovalOutcome = match timeout(
+                Duration::from_secs(APPROVAL_TIMEOUT_SECS),
+                rx,
+            )
+            .await
+            {
+                Ok(Ok(o)) => o,
+                Ok(Err(_)) => {
+                    approval.cancel(&approval_id).await;
+                    ApprovalOutcome::Skip
+                }
+                Err(_) => {
+                    approval.cancel(&approval_id).await;
+                    ApprovalOutcome::Skip
+                }
+            };
+            tracing::info!("[agent] tool_round: Host 审批完成 approval_id={} outcome={:?}", approval_id, host_outcome);
+            match &host_outcome {
+                ApprovalOutcome::Approve => {}
+                ApprovalOutcome::Takeover(g) => takeover_guidance = Some(g.clone()),
+                ApprovalOutcome::Skip => {
+                    events::emit_tool_finished(app, &ToolStep {
+                        call_id: step_id.clone(),
+                        tool_name: tool_name.clone(),
+                        status: "failed".into(),
+                        sensitive,
+                        args: Some(serde_json::to_string(&args).unwrap_or_default()),
+                        result: Some("用户跳过执行（未授权）".into()),
+                        duration_ms: None,
+                        created_at: now_ms(),
+                        step: Some(current_step),
+                        op: op.map(|s| s.to_string()),
+                        path: path_arg.clone(),
+                        lines_added: None,
+                        lines_removed: None,
+                    });
+                    messages.push(json!({
+                        "role": "tool",
+                        "tool_call_id": call_id,
+                        "content": "用户跳过执行（未授权），按原计划继续后续步骤"
+                    }));
+                    continue;
+                }
+            }
+        }
+
         if let Some((reason, grant_key)) = policy_approval {
             // 策略命中（非 never 模式）：硬门禁审批——无视 auto_tool_exec_mode，危险操作必须过目。
             let approval_id = format!("ap-{}-{}", cfg.agent_id, step_id);
@@ -1242,6 +1349,9 @@ pub(crate) async fn run_tool_calls_round(
                 hint: Some("该操作命中敏感路径特征。拒绝可填写原因引导纠偏。".into()),
                 reason: Some(reason),
                 grant_key: Some(grant_key.clone()),
+                domain: None,
+                host_meta: None,
+                run_id: cfg.round_id.clone(),
             };
             events::emit_awaiting_approval(app, &req);
             let rx = approval.suspend(req).await;
@@ -1297,7 +1407,7 @@ pub(crate) async fn run_tool_calls_round(
                     continue;
                 }
             }
-        } else if sensitive && !cfg.auto_tool_exec_mode && !policy_granted {
+        } else if sensitive && !cfg.auto_tool_exec_mode && !policy_granted && host_denied.is_none() && host_approval_req.is_none() {
             let approval_id = format!("ap-{}-{}", cfg.agent_id, step_id);
             let req = ApprovalRequest {
                 approval_id: approval_id.clone(),
@@ -1308,6 +1418,9 @@ pub(crate) async fn run_tool_calls_round(
                 hint: Some("请在弹窗中允许或拒绝（拒绝可填写原因引导纠偏）".into()),
                 reason: None,
                 grant_key: None,
+                domain: None,
+                host_meta: None,
+                run_id: cfg.round_id.clone(),
             };
             events::emit_awaiting_approval(app, &req);
             let rx = approval.suspend(req).await;

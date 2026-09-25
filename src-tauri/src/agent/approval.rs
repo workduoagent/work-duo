@@ -123,6 +123,11 @@ impl ApprovalManager {
         tracing::info!("[agent] approval: 清理 approval_id={} removed={}", approval_id, removed);
     }
 
+    /// 读取挂起中的原始请求（host_grant 写入需要其中的 host_meta / run_id 上下文）。
+    pub async fn pending_request(&self, approval_id: &str) -> Option<ApprovalRequest> {
+        self.pending.lock().await.get(approval_id).map(|p| p.request.clone())
+    }
+
     /// 全局停止时清空所有挂起审批：drop 全部 Sender → 对应 `rx.await` 走拒绝分支，
     /// 唤醒被审批挂起的流水线（否则「停止」无法跳出 `rx.await` 挂起）。
     /// 幂等：已 `resolve` 的条目不在 Map 中，`clear` 无副作用。

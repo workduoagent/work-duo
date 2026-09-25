@@ -454,3 +454,118 @@ CREATE TABLE IF NOT EXISTS agent_kb_ref
     updated_at INTEGER NOT NULL,
     CONSTRAINT uk_agent_kb UNIQUE (agent_id, kb_id)
 );
+
+-- ============================================================
+-- ---------- v30：服务器托管（Host）管理面（设计稿 docs/server-hosting-design.md） ----------
+-- 独立授权域（domain=host），与本地审批硬隔离；Agent 只见 server_id，凭证永不入授权链。
+-- 六表：server_host / server_credential / agent_server_ref / server_exec_log / host_grant / host_authz_log。
+CREATE TABLE IF NOT EXISTS server_host
+(
+    id                  TEXT    PRIMARY KEY,
+    name                TEXT    NOT NULL,
+    host                TEXT    NOT NULL,
+    port                INTEGER NOT NULL DEFAULT 22,
+    user                TEXT    NOT NULL,
+    auth_type           TEXT    NOT NULL DEFAULT 'password',
+    credential_id       TEXT,
+    path_allow          TEXT,
+    path_deny           TEXT,
+    local_path_allow    TEXT,
+    default_cwd         TEXT,
+    login_note          TEXT,
+    sudo_mode           TEXT    NOT NULL DEFAULT 'none',
+    sudo_user           TEXT    NOT NULL DEFAULT 'root',
+    host_auto_mode      TEXT    NOT NULL DEFAULT 'strict',
+    allow_grant_memory  INTEGER NOT NULL DEFAULT 0,
+    l3_policy           TEXT    NOT NULL DEFAULT 'single_shot',
+    grant_bind_as_user  INTEGER NOT NULL DEFAULT 1,
+    tags                TEXT,
+    note                TEXT,
+    last_used_at        INTEGER,
+    created_at          INTEGER NOT NULL,
+    updated_at          INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_server_host_updated ON server_host (updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS server_credential
+(
+    id          TEXT    PRIMARY KEY,
+    secret_type TEXT    NOT NULL,
+    secret_enc  TEXT    NOT NULL,
+    hint        TEXT    NOT NULL,
+    created_at  INTEGER NOT NULL,
+    updated_at  INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS agent_server_ref
+(
+    id           TEXT    PRIMARY KEY,
+    agent_id     TEXT    NOT NULL,
+    server_id    TEXT    NOT NULL,
+    role         TEXT    NOT NULL DEFAULT 'secondary',
+    cwd_override TEXT,
+    created_at   INTEGER NOT NULL,
+    updated_at   INTEGER NOT NULL,
+    CONSTRAINT uk_agent_server UNIQUE (agent_id, server_id)
+);
+CREATE INDEX IF NOT EXISTS idx_agent_server_agent ON agent_server_ref (agent_id);
+
+CREATE TABLE IF NOT EXISTS server_exec_log
+(
+    id          TEXT    PRIMARY KEY,
+    server_id   TEXT    NOT NULL,
+    agent_id    TEXT,
+    session_id  TEXT,
+    run_id      TEXT,
+    tool_name   TEXT    NOT NULL,
+    argv        TEXT,
+    as_user     TEXT,
+    cwd         TEXT,
+    started_at  INTEGER NOT NULL,
+    duration_ms INTEGER,
+    exit_code   INTEGER,
+    bytes_in    INTEGER,
+    bytes_out   INTEGER,
+    approved    TEXT,
+    error       TEXT,
+    created_at  INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_server_exec_log_server ON server_exec_log (server_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS host_grant
+(
+    grant_id     TEXT    PRIMARY KEY,
+    domain       TEXT    NOT NULL DEFAULT 'host',
+    run_id       TEXT    NOT NULL,
+    agent_id     TEXT    NOT NULL,
+    server_id    TEXT    NOT NULL,
+    action       TEXT    NOT NULL,
+    as_user      TEXT    NOT NULL,
+    risk_key     TEXT    NOT NULL,
+    scope_digest TEXT,
+    granted_by   TEXT    NOT NULL,
+    granted_at   INTEGER NOT NULL,
+    expires_at   INTEGER NOT NULL,
+    max_uses     INTEGER NOT NULL DEFAULT 1,
+    uses         INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_host_grant_lookup ON host_grant (run_id, agent_id, server_id, action, as_user, risk_key);
+
+CREATE TABLE IF NOT EXISTS host_authz_log
+(
+    id             TEXT    PRIMARY KEY,
+    run_id         TEXT,
+    session_id     TEXT,
+    agent_id       TEXT,
+    server_id      TEXT,
+    action         TEXT,
+    as_user        TEXT,
+    risk_level     TEXT,
+    risk_key       TEXT,
+    signals_json   TEXT,
+    decision       TEXT,
+    grant_id       TEXT,
+    request_digest TEXT,
+    created_at     INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_host_authz_log_server ON host_authz_log (server_id, created_at DESC);
