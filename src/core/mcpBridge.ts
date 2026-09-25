@@ -96,15 +96,23 @@ import {
   type ResourceFile,
 } from '@/core/file/skill-file'
 
-let started = false
-let unlisten: UnlistenFn | null = null
+// 台账 S5：模块级状态挂 globalThis（跨 Vite HMR 存活）——此前 HMR 热替换本模块时
+// started 复位、旧 unlisten 丢失 → mcp:intent 监听重复注册（每个意图被处理多次）。
+interface BridgeState {
+  started: boolean
+  unlisten: UnlistenFn | null
+}
+const bridgeState = ((globalThis as { __wdMcpBridge?: BridgeState }).__wdMcpBridge ??= {
+  started: false,
+  unlisten: null,
+})
 
 /** 在应用启动时调用一次，注册 mcp:intent 监听。幂等。 */
 export async function connectMcpBridge(): Promise<void> {
-  if (started) return
-  started = true
+  if (bridgeState.started) return
+  bridgeState.started = true
 
-  unlisten = await listen<McpIntent>('mcp:intent', async (event) => {
+  bridgeState.unlisten = await listen<McpIntent>('mcp:intent', async (event) => {
     const { id, intent, payload } = event.payload
     try {
       const data = await dispatch(intent, payload)
@@ -122,11 +130,11 @@ export async function connectMcpBridge(): Promise<void> {
 
 /** 解除监听（一般无需调用）。 */
 export function disconnectMcpBridge(): void {
-  if (unlisten) {
-    unlisten()
-    unlisten = null
+  if (bridgeState.unlisten) {
+    bridgeState.unlisten()
+    bridgeState.unlisten = null
   }
-  started = false
+  bridgeState.started = false
 }
 
 interface McpIntent {

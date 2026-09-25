@@ -7,8 +7,15 @@
  *
  * 必须在应用启动时调用一次（见 main.tsx）。
  */
-let timer: ReturnType<typeof setTimeout> | undefined
-let activeEl: HTMLElement | null = null
+// 台账 S5：挂 globalThis 跨 HMR 存活（热更后丢状态仅影响滚动条瞬态，低危但同款治理）。
+interface ScrollbarState {
+  timer: ReturnType<typeof setTimeout> | undefined
+  activeEl: HTMLElement | null
+}
+const st = ((globalThis as { __wdScrollbar?: ScrollbarState }).__wdScrollbar ??= {
+  timer: undefined,
+  activeEl: null,
+})
 
 export function initScrollbarAutoHide(): void {
   const onScroll = (e: Event) => {
@@ -16,16 +23,16 @@ export function initScrollbarAutoHide(): void {
     if (!el || !el.classList) return
 
     // 切换到另一个滚动容器时，先清掉旧容器的状态
-    if (activeEl && activeEl !== el) {
-      activeEl.classList.remove('wd-scrolling')
+    if (st.activeEl && st.activeEl !== el) {
+      st.activeEl.classList.remove('wd-scrolling')
     }
-    activeEl = el
+    st.activeEl = el
     el.classList.add('wd-scrolling')
 
-    if (timer) clearTimeout(timer)
-    timer = setTimeout(() => {
+    if (st.timer) clearTimeout(st.timer)
+    st.timer = setTimeout(() => {
       el.classList.remove('wd-scrolling')
-      if (activeEl === el) activeEl = null
+      if (st.activeEl === el) st.activeEl = null
     }, 800)
   }
 

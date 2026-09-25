@@ -314,8 +314,24 @@ function ThoughtSegmentLine({ text, active = false }: { text?: string; active?: 
   )
 }
 
-/** 模块级：会话列表刷新回调（页面挂载时注入；未挂载则跳过，回来时从库重载即可）。 */
-let refreshSessionsRef: (() => void) | null = null
+// 台账 S5：对话页模块级可变状态挂 globalThis（跨 HMR 存活）——否则热更后 Map/ref 重建，
+// 「最后查看会话」映射与注入回调丢失（恢复逻辑、通知判定失效一整轮直到下次刷新）。
+interface ChatModuleState {
+  refreshSessionsRef: (() => void) | null
+  lastSessionByAgent: Map<string, string>
+  chatViewSessionRef: string | null
+  sessionsSnapshot: AgentConversationSession[]
+  openSessionRef: ((sid: string, agentId: string) => boolean) | null
+}
+const chatMod = ((globalThis as { __wdChatModule?: ChatModuleState }).__wdChatModule ??= {
+  refreshSessionsRef: null,
+  lastSessionByAgent: new Map(),
+  chatViewSessionRef: null,
+  sessionsSnapshot: [],
+  openSessionRef: null,
+})
+
+
 
 /**
  * 按智能体记住「最后查看的会话 id」。
@@ -323,25 +339,19 @@ let refreshSessionsRef: (() => void) | null = null
  * 模块级 store（按会话 id 隔离）。重挂时用它把会话 id 找回来绑定，运行态即可 1:1 还原
  * ——需求②「切到任何页面再回来，没跑完的任务要恢复成正在进行的界面」。
  */
-const lastSessionByAgent = new Map<string, string>()
+const lastSessionByAgent = chatMod.lastSessionByAgent
 
 /**
  * 对话页当前正在查看的会话 id（对话页卸载时为 null）。
  * 终态到达时若「正在查看的不是该会话」（切到别的页面 / 在看别的会话），就弹通知提醒。
  */
-let chatViewSessionRef: string | null = null
-
-/** 会话列表快照（组件同步进来，供模块级提醒逻辑取会话名）。 */
-let sessionsSnapshot: AgentConversationSession[] = []
-
-/** 由对话页注册：若当前正停在该会话所属智能体的对话页，则直接切会话（返回 true）。 */
-let openSessionRef: ((sid: string, agentId: string) => boolean) | null = null
+/** 以下字段的存取统一走 chatMod.*（globalThis 跨 HMR 存活）。 */
 
 /** 从任意页面跳回某个会话的对话页：已在该智能体对话页则直接切会话，否则走路由。 */
 function jumpToSession(agentId: string | null, sessionId: string) {
   if (!agentId) return
   lastSessionByAgent.set(agentId, sessionId)
-  if (openSessionRef?.(sessionId, agentId)) return
+  if (chatMod.openSessionRef?.(sessionId, agentId)) return
   window.location.hash = `#/agent-studio/${agentId}/chat`
 }
 
@@ -396,10 +406,10 @@ setTerminalHandler('chat-terminal', (info: RunTerminalInfo) => {
       if ((!name || name === '未命名会话') && lastPrompt) {
         await renameSession(sessionId, lastPrompt.trim().slice(0, 40))
       }
-      refreshSessionsRef?.()
+      chatMod.refreshSessionsRef?.()
 
       // 用户此刻没在看这个会话（切到别的页面 / 在看别的会话）→ 弹提醒，并可一键跳回。
-      if (chatViewSessionRef !== sessionId) {
+      if (chatMod.chatViewSessionRef !== sessionId) {
         // 紧凑提示（对齐 WorkBuddy 风格）：只给「任务已完成 + 会话名」，不铺正文摘要，
         // 通知高度压到最小；详细内容回到会话里看。
         const finalName = name || lastPrompt.trim().slice(0, 40) || '未命名会话'
@@ -435,13 +445,13 @@ setTerminalHandler('chat-terminal', (info: RunTerminalInfo) => {
  * 用户点开该会话或提交决策后由组件侧关闭（见下方 effect）。
  */
 setPendingNotifyHandler('chat-pending-notify', (info: PendingNotifyInfo) => {
-  console.info('[chat] pending notify handler', { sessionId: info.sessionId, kind: info.kind, viewing: chatViewSessionRef })
-  if (chatViewSessionRef === info.sessionId) return // 正在看该会话，界面里已有决策面板，不打扰
+  console.info('[chat] pending notify handler', { sessionId: info.sessionId, kind: info.kind, viewing: chatMod.chatViewSessionRef })
+  if (chatMod.chatViewSessionRef === info.sessionId) return // 正在看该会话，界面里已有决策面板，不打扰
   const api = getNotifyApi()
   if (!api) return
   // 会话名：优先从当前列表拿，拿不到就用运行元信息里的首问
   const meta = getRunMeta(info.sessionId)
-  const sess = sessionsSnapshot.find((s) => s.id === info.sessionId)
+  const sess = chatMod.sessionsSnapshot.find((s) => s.id === info.sessionId)
   const rawName = sess?.sessionName || meta.lastPrompt || '未命名会话'
   const brief = rawName.length > 24 ? `${rawName.slice(0, 24)}…` : rawName
   api.notification.warning({
@@ -1223,7 +1233,7 @@ export default function AgentChatPage() {
       // 与组件生命周期解耦：切页期间任务跑完也照常落库。此处不再重复写库，
       // 否则 addSessionTokens 会被调用两次导致 token 双倍累加。
       roundIdRef.current = null
-      // 左侧列表刷新由模块级 handler 经 refreshSessionsRef 回调完成（见下方注入），
+      // 左侧列表刷新由模块级 handler 经 chatMod.refreshSessionsRef 回调完成（见下方注入），
       // 此处不直接调用，避免引用尚未声明的 refreshSessions。
 
       setMessages((prev) => {
@@ -1671,11 +1681,11 @@ export default function AgentChatPage() {
   // 把会话列表刷新能力注入模块级终态落库流程：任务在后台跑完并改名/定稿后，
   // 由模块级 handler 回调这里刷新左侧列表（未挂载时跳过，回来时会从库重载）。
   useEffect(() => {
-    refreshSessionsRef = () => {
+    chatMod.refreshSessionsRef = () => {
       void refreshSessions()
     }
     return () => {
-      refreshSessionsRef = null
+      chatMod.refreshSessionsRef = null
     }
   }, [refreshSessions])
 
@@ -1687,30 +1697,30 @@ export default function AgentChatPage() {
   // 供模块级终态逻辑判断「用户此刻是否在看这个会话」（决定是否弹完成提醒）。
   // 同时：用户点开该会话即收起它的「任务暂停」通知（界面里已有决策面板，不必再弹）。
   useEffect(() => {
-    chatViewSessionRef = activeSessionId
+    chatMod.chatViewSessionRef = activeSessionId
     if (activeSessionId) getNotifyApi()?.notification?.destroy(`pending-${activeSessionId}`)
   }, [activeSessionId])
   useEffect(() => {
     return () => {
-      chatViewSessionRef = null
+      chatMod.chatViewSessionRef = null
     }
   }, [])
 
   // 供通知上「查看」按钮直接切会话（仅当当前就停在该智能体的对话页时生效）。
   useEffect(() => {
-    openSessionRef = (sid: string, aid: string) => {
+    chatMod.openSessionRef = (sid: string, aid: string) => {
       if (agent?.id !== aid) return false
       void openSession(sid)
       return true
     }
     return () => {
-      openSessionRef = null
+      chatMod.openSessionRef = null
     }
   }, [agent?.id, openSession])
 
   // 同步会话列表快照给模块级提醒逻辑（取会话名用）
   useEffect(() => {
-    sessionsSnapshot = sessions
+    chatMod.sessionsSnapshot = sessions
   }, [sessions])
 
   // 挂起通知收起（其二）：提交决策后挂起态解除 → 精准关掉对应那条通知。

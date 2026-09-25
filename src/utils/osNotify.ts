@@ -21,28 +21,45 @@ import {
 import { isTauri } from '@/core/config'
 import { loadSettings } from '@/core/file/settings-file'
 
+// 台账 S5：模块级状态挂 globalThis（跨 HMR 存活）——否则热更后 tracker 重复初始化
+// （多次挂聚焦监听）、节流表清空（系统通知可能重复）。
+interface OsNotifyState {
+  focused: boolean
+  trackerInitialized: boolean
+  permissionAsked: boolean
+  lastSent: { key: string; at: number } | null
+}
+const state = ((globalThis as { __wdOsNotify?: OsNotifyState }).__wdOsNotify ??= {
+  focused: true,
+  trackerInitialized: false,
+  permissionAsked: false,
+  lastSent: null,
+})
+
 // 主窗口当前是否聚焦（在桌面最前）。默认 true，避免启动早期误发。
-let focused = true
-let trackerInitialized = false
-let permissionAsked = false
+const focused = {
+  get: () => state.focused,
+  set: (v: boolean) => {
+    state.focused = v
+  },
+}
 
 // 同内容节流：10s 内相同 标题+正文 只发一条。
 // 调用方可能因多路径重复触发（真机见过「任务暂停」系统通知连弹两次），在此兜底。
 const OS_NOTIFY_THROTTLE_MS = 10_000
-let lastSent: { key: string; at: number } | null = null
 
 /** 惰性初始化主窗口聚焦追踪；幂等。 */
 async function initWindowFocusTracker(): Promise<void> {
-  if (!isTauri || trackerInitialized) return
-  trackerInitialized = true
+  if (!isTauri || state.trackerInitialized) return
+  state.trackerInitialized = true
   try {
-    focused = await getCurrentWindow().isFocused()
+    focused.set(await getCurrentWindow().isFocused())
   } catch {
-    focused = true
+    focused.set(true)
   }
   try {
     await getCurrentWindow().onFocusChanged(({ payload }) => {
-      focused = payload
+      focused.set(payload)
     })
   } catch {
     // 聚焦事件监听失败不影响主流程，保持 focused 上次值即可。
@@ -51,7 +68,7 @@ async function initWindowFocusTracker(): Promise<void> {
 
 /** 当前主窗口是否聚焦（在桌面最前）。 */
 export function isWindowFocused(): boolean {
-  return focused
+  return focused.get()
 }
 
 /** 申请通知权限（仅首次真正弹系统授权框，之后复用结果）。 */
@@ -60,8 +77,8 @@ async function ensurePermission(): Promise<boolean> {
   try {
     const granted = await isPermissionGranted()
     if (granted) return true
-    if (!permissionAsked) {
-      permissionAsked = true
+    if (!state.permissionAsked) {
+      state.permissionAsked = true
       const res = await requestPermission()
       return res === 'granted'
     }
@@ -82,7 +99,7 @@ export async function notifyOSWhenHidden(title: string, body?: string): Promise<
   if (!isTauri) return
   await initWindowFocusTracker()
   // 窗口就在最前：应用内通知已足够，不发系统通知避免打扰。
-  if (focused) return
+  if (focused.get()) return
   // 受「设置 → 客户端通知」开关控制，关闭时不发系统通知（每次直读库，确保实时）。
   try {
     const s = await loadSettings()
@@ -93,8 +110,8 @@ export async function notifyOSWhenHidden(title: string, body?: string): Promise<
   // 同内容节流：窗口期内重复触发直接跳过（不影响不同内容的正常提醒）。
   const throttleKey = `${title}|${body ?? ''}`
   const now = Date.now()
-  if (lastSent && lastSent.key === throttleKey && now - lastSent.at < OS_NOTIFY_THROTTLE_MS) return
-  lastSent = { key: throttleKey, at: now }
+  if (state.lastSent && state.lastSent.key === throttleKey && now - state.lastSent.at < OS_NOTIFY_THROTTLE_MS) return
+  state.lastSent = { key: throttleKey, at: now }
   if (!(await ensurePermission())) return
   try {
     sendNotification({ title, body: body ?? '' })

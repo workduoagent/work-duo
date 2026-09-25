@@ -1,7 +1,9 @@
 import { isTauri } from '@/core/config'
 
 const STORE_FILE = 'work-duo.dat'
-const memoryFallback = new Map<string, unknown>()
+// 台账 S5：挂 globalThis 跨 HMR 存活（热更后 Map 重建会丢非 Tauri 模式的内存持久化数据）。
+const memoryFallback = ((globalThis as { __wdMemoryFallback?: Map<string, unknown> })
+  .__wdMemoryFallback ??= new Map<string, unknown>())
 
 async function getStore() {
   if (!isTauri) return null

@@ -17,27 +17,30 @@ import { runScriptLineByLine } from '@/core/db/sqlUtils'
  */
 export const DB_NAME = 'sqlite:workduo.db'
 
-let dbInstance: Database | null = null
+// 台账 S5：挂 globalThis 跨 HMR 存活（热更后 dbInstance 重建会额外开一条后端连接）。
+const dbHolder = (globalThis as { __wdSqlDb?: { instance: Database | null } }).__wdSqlDb ??= {
+  instance: null,
+}
 
 /**
  * 获取数据库连接实例。
  * 首次调用：建立连接并配置 WAL / busy_timeout；后续调用直接返回已存在的实例。
  */
 export const getDb = async (): Promise<Database> => {
-  if (dbInstance) {
-    return dbInstance
+  if (dbHolder.instance) {
+    return dbHolder.instance
   }
 
   // 1. 初始化连接
-  dbInstance = await Database.load(DB_NAME)
+  dbHolder.instance = await Database.load(DB_NAME)
 
   // 2. 开启 WAL 模式（大幅提升并发读写性能）
-  await dbInstance.execute('PRAGMA journal_mode = WAL;')
+  await dbHolder.instance.execute('PRAGMA journal_mode = WAL;')
 
   // 3. 设置忙等待时间（数据库被锁时等待 5000ms 再报错，而非立即失败）
-  await dbInstance.execute('PRAGMA busy_timeout = 5000;')
+  await dbHolder.instance.execute('PRAGMA busy_timeout = 5000;')
 
-  return dbInstance
+  return dbHolder.instance
 }
 
 /**
