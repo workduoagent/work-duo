@@ -12,23 +12,33 @@ use std::time::{Duration, Instant};
 use russh::client::{self, Handle};
 use russh_keys::key;
 use sqlx::Row;
+use tauri::AppHandle;
 use tokio::sync::Mutex;
 
 use super::credential::{self, SecretPayload};
+use super::known_key;
 use super::types::ServerBinding;
 
 const IDLE_TIMEOUT_MS: u128 = 10 * 60 * 1000;
 const KEEPALIVE_SECS: u64 = 15;
 
-/// 池内 Handler：信任服务器主机键（TOFU 指纹校验后续接入）。
-pub struct PoolHandler;
+/// 池内 Handler：TOFU 主机键校验（台账 P0-1）。
+/// 每个 PoolHandler 实例绑定一台服务器（app + server_id），按会话档案读写指纹记录。
+pub struct PoolHandler {
+    app: AppHandle,
+    server_id: String,
+}
 
 #[async_trait::async_trait]
 impl client::Handler for PoolHandler {
     type Error = russh::Error;
 
-    async fn check_server_key(&mut self, _server_public_key: &key::PublicKey) -> Result<bool, Self::Error> {
-        Ok(true)
+    async fn check_server_key(&mut self, server_public_key: &key::PublicKey) -> Result<bool, Self::Error> {
+        Ok(
+            known_key::check_server_key(&self.app, &self.server_id, server_public_key)
+                .await
+                .unwrap_or(false), // TOFU 内部错误已日志化，fail-close
+        )
     }
 }
 
@@ -84,10 +94,21 @@ async fn connect_binding(app: &tauri::AppHandle, binding: &ServerBinding) -> Res
     let mut handle = client::connect(
         client_config(),
         (binding.host.as_str(), binding.port),
-        PoolHandler,
+        PoolHandler {
+            app: app.clone(),
+            server_id: binding.server_id.clone(),
+        },
     )
     .await
-    .map_err(|e| format!("SSH 连接失败（{}:{}）：{e}", binding.host, binding.port))?;
+    .map_err(|e| {
+        use super::known_key::friendly_connect_error;
+        format!(
+            "{}（{}:{}）",
+            friendly_connect_error(&e, &binding.name),
+            binding.host,
+            binding.port
+        )
+    })?;
 
     let ok = match &secret {
         SecretPayload::Password(pass) => handle

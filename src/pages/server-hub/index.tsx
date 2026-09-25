@@ -67,6 +67,7 @@ interface FormState {
   grantBindAsUser: boolean
   tagsText: string
   note: string
+  resetKnownKey: boolean
 }
 
 function emptyForm(): FormState {
@@ -92,6 +93,7 @@ function emptyForm(): FormState {
     grantBindAsUser: true,
     tagsText: '',
     note: '',
+    resetKnownKey: false,
   }
 }
 
@@ -118,6 +120,7 @@ function formFromHost(h: ServerHost): FormState {
     grantBindAsUser: h.grantBindAsUser,
     tagsText: h.tags.join(', '),
     note: h.note ?? '',
+    resetKnownKey: false,
   }
 }
 
@@ -147,6 +150,7 @@ function formToInput(f: FormState): ServerHostInput {
       .map((s) => s.trim())
       .filter(Boolean),
     note: f.note.trim() || undefined,
+    resetKnownKey: f.resetKnownKey,
   }
 }
 
@@ -524,6 +528,20 @@ export default function ServerHubPage() {
               </label>
             </div>
           </section>
+          {editingId && (
+            <section className="server-hub__form-section">
+              <label className="server-hub__form-switch server-hub__form-switch--danger">
+                重置主机键指纹（TOFU）
+                <Switch
+                  checked={form.resetKnownKey}
+                  onChange={(v) => set('resetKnownKey', v)}
+                />
+              </label>
+              <p className="server-hub__form-hint">
+                仅在服务器重装/换键且你确认其合法后使用：重置后下次连接将按首次使用重新记录指纹。
+              </p>
+            </section>
+          )}
 
           <section>
             <h4>备注</h4>

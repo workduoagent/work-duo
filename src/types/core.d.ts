@@ -653,6 +653,8 @@ export interface ServerHostInput {
   grantBindAsUser?: boolean
   tags?: string[]
   note?: string
+  /** 重置 TOFU 主机键指纹（known_key_fingerprint 置 NULL）：服务器重装/换键经人工确认后使用 */
+  resetKnownKey?: boolean
 }
 
 /** 测试连接报告。 */

@@ -569,3 +569,8 @@ CREATE TABLE IF NOT EXISTS host_authz_log
     created_at     INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_host_authz_log_server ON host_authz_log (server_id, created_at DESC);
+
+-- ---------- v31：TOFU 主机键指纹（服务器托管，台账 P0-1） ----------
+-- 首次连接记录服务器 SSH 主机键指纹（SHA-256/base64-nopad，russh_keys::PublicKey::fingerprint）；
+-- 后续连接比对：一致放行、不一致拒绝（中间人/服务器重装换键告警）。重置=置 NULL，下次连接重新记录。
+ALTER TABLE server_host ADD COLUMN known_key_fingerprint TEXT;

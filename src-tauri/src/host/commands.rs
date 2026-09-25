@@ -76,6 +76,10 @@ pub struct ServerHostInput {
     pub sudo_user: Option<String>,
     #[serde(default)]
     pub host_auto_mode: Option<String>,
+    /// 重置 TOFU 主机键指纹（known_key_fingerprint 置 NULL）：服务器重装/换键且人工确认合法后，
+    /// 由用户在 UI 显式勾选；下次连接重新记录（台账 P0-1 重置入口）。
+    #[serde(default)]
+    pub reset_known_key: Option<bool>,
     #[serde(default)]
     pub allow_grant_memory: Option<bool>,
     #[serde(default)]
@@ -299,6 +303,17 @@ pub async fn server_host_save(app: AppHandle, input: ServerHostInput) -> Result<
         .map_err(|e| format!("新建服务器失败：{e}"))?;
     }
 
+    // TOFU 指纹重置（台账 P0-1）：用户显式勾选时清空已记录的主机键指纹，
+    // 下次连接按首次使用重新记录。独立语句：不影响上方档案字段的 upsert 语义。
+    if input.reset_known_key.unwrap_or(false) {
+        sqlx::query("UPDATE server_host SET known_key_fingerprint = NULL WHERE id = ?")
+            .bind(&input.id)
+            .execute(&pool)
+            .await
+            .map_err(|e| format!("重置主机键指纹失败：{e}"))?;
+        tracing::info!("[host] 已重置服务器 {} 的 TOFU 主机键指纹（用户显式操作）", input.id);
+    }
+
     server_host_get(app, input.id)
         .await?
         .ok_or_else(|| "保存后回读失败".into())
@@ -408,7 +423,7 @@ pub async fn server_host_test_connection(
         });
     }
 
-    match crate::host::transport::probe(&host, port, &user, &secret, 15).await {
+    match crate::host::transport::probe(&app, &input.id, &host, port, &user, &secret, 15).await {
         Ok((login_user, os_hint, home)) => {
             // 成功测试刷新 last_used_at（尽力而为，失败不阻断）
             if let Ok(pool) = crate::agent::engine::round_compactor::get_pool(&app).await {

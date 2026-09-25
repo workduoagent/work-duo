@@ -757,6 +757,7 @@ CREATE TABLE IF NOT EXISTS server_host
     grant_bind_as_user  INTEGER NOT NULL DEFAULT 1,            -- grant 精确匹配 as_user
     tags                TEXT,                                  -- JSON 数组
     note                TEXT,
+    known_key_fingerprint TEXT,                                -- TOFU：首次连接记录的 SSH 主机键指纹（SHA-256），换键即拒
     last_used_at        INTEGER,
     created_at          INTEGER NOT NULL,
     updated_at          INTEGER NOT NULL

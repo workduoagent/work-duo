@@ -191,3 +191,15 @@
     }
   }
 }
+
+/* TOFU 重置指纹（危险操作提示区） */
+.server-hub__form-switch--danger {
+  color: var(--color-danger, #d4380d);
+}
+
+.server-hub__form-hint {
+  margin: 6px 0 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--color-text-tertiary, rgba(0, 0, 0, 0.45));
+}

@@ -13,38 +13,54 @@ use async_trait::async_trait;
 use russh::client::{self, Handle};
 use russh::ChannelMsg;
 use russh_keys::key;
+use tauri::AppHandle;
 
 use super::credential::SecretPayload;
+use super::known_key;
 
-/// 测试连接专用 Handler：信任服务器主机键（TOFU 在工具面接入）。
-struct ProbeHandler;
+/// 测试连接专用 Handler：TOFU 主机键校验（台账 P0-1）。
+/// 持有 app+server_id 以读写 `server_host.known_key_fingerprint`；
+/// DB 不可用/未建档时的策略见 known_key.rs（fail-close / 无档案放行）。
+struct ProbeHandler {
+    app: AppHandle,
+    server_id: String,
+}
 
 #[async_trait]
 impl client::Handler for ProbeHandler {
     type Error = russh::Error;
 
-    async fn check_server_key(&mut self, _server_public_key: &key::PublicKey) -> Result<bool, Self::Error> {
-        Ok(true)
+    async fn check_server_key(&mut self, server_public_key: &key::PublicKey) -> Result<bool, Self::Error> {
+        Ok(
+            known_key::check_server_key(&self.app, &self.server_id, server_public_key)
+                .await
+                .unwrap_or(false), // TOFU 内部错误已日志化，fail-close
+        )
     }
 }
 
 /// 连接 + 认证 + 三条探测命令，返回 `(login_user, os_hint, home)`。
 ///
 /// `timeout_secs` 内未完成整体视为失败（网络不可达 / 端口不通 / 握手挂起）。
+/// `server_id` 用于 TOFU 指纹记录（未建档时跳过记录直接放行，见 known_key.rs）。
 pub async fn probe(
+    app: &AppHandle,
+    server_id: &str,
     host: &str,
     port: u16,
     user: &str,
     secret: &SecretPayload,
     timeout_secs: u64,
 ) -> Result<(String, String, String), String> {
-    let fut = probe_inner(host, port, user, secret);
+    let fut = probe_inner(app.clone(), server_id.to_string(), host, port, user, secret);
     tokio::time::timeout(Duration::from_secs(timeout_secs), fut)
         .await
         .map_err(|_| format!("连接超时（{timeout_secs}s）：主机不可达或端口未开放"))?
 }
 
 async fn probe_inner(
+    app: AppHandle,
+    server_id: String,
     host: &str,
     port: u16,
     user: &str,
@@ -56,9 +72,9 @@ async fn probe_inner(
         ..Default::default()
     });
 
-    let mut handle: Handle<ProbeHandler> = client::connect(config, (host, port), ProbeHandler)
+    let mut handle: Handle<ProbeHandler> = client::connect(config, (host, port), ProbeHandler { app, server_id })
         .await
-        .map_err(|e| format!("SSH 连接失败：{e}"))?;
+        .map_err(|e| known_key::friendly_connect_error(&e, host))?;
 
     match secret {
         SecretPayload::Password(pass) => {

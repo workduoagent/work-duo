@@ -10,6 +10,7 @@
 pub mod authz;
 pub mod commands;
 pub mod credential;
+pub mod known_key;
 pub mod exec;
 pub mod policy;
 pub mod pool;
