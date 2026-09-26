@@ -116,6 +116,8 @@ import { agentEditPath } from '@/core/router/paths'
 import { isTauri } from '@/core/config'
 import { MarkdownRenderer } from '@/components/markdown/MarkdownRenderer'
 import { useAgentSession } from './session/useAgentSession'
+import { useMentionSuggest } from './chat/useMentionSuggest'
+import { useAttachments } from './chat/useAttachments'
 import { TracePanel } from './session/TracePanel'
 import { RunDagCanvas } from './session/RunDagCanvas'
 import { ToolStepLine } from './session/ToolStepLine'
@@ -136,10 +138,8 @@ import type {
   BoundMcpServer,
   ChatMessage,
   ChatSegment,
-  PendingAttachment,
   SpeechLike,
   SuggestItem,
-  SuggestState,
 } from './chat/types'
 import { ArtifactGallery } from './chat/artifact-ui'
 import {
@@ -160,19 +160,12 @@ import {
 } from './chat/mention-ui'
 import { buildSessionTree, roundsToMessages } from './chat/session-helpers'
 import {
-  attId,
   AVG_TOOL_TOKENS,
   estimateTokens,
   formatConversationDuration,
   formatDuration,
   formatSize,
   formatTime,
-  isTextType,
-  MAX_FILE,
-  MAX_INLINE_IMAGE,
-  readFileAsDataURL,
-  readFileAsText,
-  TEXT_INLINE_LIMIT,
   textPreview,
 } from './chat/file-helpers'
 import './chat.scss'
@@ -339,6 +332,13 @@ const chatMod = ((globalThis as { __wdChatModule?: ChatModuleState }).__wdChatMo
  * 模块级 store（按会话 id 隔离）。重挂时用它把会话 id 找回来绑定，运行态即可 1:1 还原
  * ——需求②「切到任何页面再回来，没跑完的任务要恢复成正在进行的界面」。
  */
+const SLASH_COMMANDS: SuggestItem[] = [
+  { key: 'cmd:new', token: '/new', label: '新建会话', sub: '开启一个全新对话', group: '指令' },
+  { key: 'cmd:clear', token: '/clear', label: '清空对话', sub: '清除当前全部消息', group: '指令' },
+  { key: 'cmd:reset', token: '/reset', label: '重置运行态', sub: '中断并复位智能体运行态', group: '指令' },
+  { key: 'cmd:help', token: '/help', label: '使用帮助', sub: '查看 @提及 与 /指令 说明', group: '指令' },
+]
+
 const lastSessionByAgent = chatMod.lastSessionByAgent
 
 /**
@@ -522,7 +522,6 @@ export default function AgentChatPage() {
   // 全量插件缓存（P2 新增）：供输入框 @提及 候选（不局限于本智能体绑定项）
   const [allPlugins, setAllPlugins] = useState<Awaited<ReturnType<typeof listPlugins>>>([])
   // 输入框 @提及 / /指令 浮层状态
-  const [suggest, setSuggest] = useState<SuggestState | null>(null)
   const [helpOpen, setHelpOpen] = useState(false)
   // @提及 选中的标签（chip）：独立维护，发送时序列化为「@标签」前缀，从文本框剥离避免歧义
   // token = 序列化进 prompt 的稳定标识（优先 skill.identifier，绝不依赖 name 判断）；label = 展示用人类可读名
@@ -564,12 +563,6 @@ export default function AgentChatPage() {
   const [renameTarget, setRenameTarget] = useState<{ kind: 'session' | 'project'; id: string; current: string } | null>(null)
   const [renameValue, setRenameValue] = useState('')
 
-  // 多模态图片附件
-  const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([])
-  const [dragOver, setDragOver] = useState(false)
-  // 整窗拖拽吸附：dragDepth 计数嵌套 enter/leave，windowDrag 控制全窗遮罩。
-  const [windowDrag, setWindowDrag] = useState(false)
-  const dragDepth = useRef(0)
   // 右侧投影面板（图 / 过程 / 产物）：二期方案 C Graph-first，默认关闭、发消息自动展开「图」。
   // 接管不再常驻 Tab，改为 recovery 非空时右栏底部情境升起。
   const [rightOpen, setRightOpen] = useState(false)
@@ -735,16 +728,6 @@ export default function AgentChatPage() {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const fileAttachRef = useRef<HTMLInputElement>(null)
 
-  // 兜底：任何拖拽真正结束时（dragend）复位整窗吸附状态。
-  // 落在输入框内已在 onDrop 就地复位；此处再防其他边角（如 drop 命中未知落点 / 逻辑遗漏）导致遮罩卡死。
-  useEffect(() => {
-    const resetWindowDrag = () => {
-      dragDepth.current = 0
-      setWindowDrag(false)
-    }
-    window.addEventListener('dragend', resetWindowDrag)
-    return () => window.removeEventListener('dragend', resetWindowDrag)
-  }, [])
 
   // 语音输入
   const [recording, setRecording] = useState(false)
@@ -1133,6 +1116,19 @@ export default function AgentChatPage() {
     })
   }, [])
 
+  // ---- 附件与拖拽吸附（台账 S1：逻辑抽至 chat/useAttachments）----
+  const {
+    pendingAttachments,
+    setPendingAttachments,
+    dragOver,
+    setDragOver,
+    windowDrag,
+    setWindowDrag,
+    dragDepth,
+    addFiles,
+    onPaste,
+  } = useAttachments({ workspaceDir, notifyError: message.error })
+
   const send = useCallback(() => {
     // 序列化：@标签 作为前缀，再拼接自由文本；token 用 skill.identifier（稳定、无空格），label 仅用于展示
     const mentionPrefix = mentionTags.map((t) => `@${t.token}`).join(' ')
@@ -1206,6 +1202,32 @@ export default function AgentChatPage() {
       })
     })
   }, [input, isRunning, agent, run, workspaceDir, pendingAttachments, ensureRound, removedSkillIds, removedMcpIds, disabledMcpToolIds, removedPluginIds, mentionTags])
+
+  // 指令动作表经 ref 延迟绑定：hook 需先于 newChat 声明（newChat 内使用 hook 返回值），
+  // 而 newChat 等动作定义在其后——ref 转发解开这一循环。
+  const commandActionRef = useRef<(key: string) => void>(() => {})
+  const {
+    suggest,
+    setSuggest,
+    handleInputChange,
+    handleCaretMove,
+    handleInputKeyDown,
+    applyMention,
+    runCommand,
+  } = useMentionSuggest(
+    input,
+    setInput,
+    textareaRef,
+    setMentionTags,
+    {
+      skills: allSkills,
+      mcps: allMcps,
+      plugins: allPlugins,
+      commands: SLASH_COMMANDS,
+      runCommandAction: (key) => commandActionRef.current(key),
+    },
+    send,
+  )
 
   // 将 session 的流式文本/思考/工具步骤同步进「最后一条助手气泡」的效果已删除
   // （台账 S4）：改由 displayMessages 渲染期派生承担，见上方 useMemo。
@@ -1462,193 +1484,6 @@ export default function AgentChatPage() {
     )
   }, [agent, reset])
 
-  /* ---------------- 输入框 @提及 / /指令 ---------------- */
-
-  /** 快捷指令定义（/ 触发）。 */
-  const COMMANDS: SuggestItem[] = [
-    { key: 'cmd:new', token: '/new', label: '新建会话', sub: '开启一个全新对话', group: '指令' },
-    { key: 'cmd:clear', token: '/clear', label: '清空对话', sub: '清除当前全部消息', group: '指令' },
-    { key: 'cmd:reset', token: '/reset', label: '重置运行态', sub: '中断并复位智能体运行态', group: '指令' },
-    { key: 'cmd:help', token: '/help', label: '使用帮助', sub: '查看 @提及 与 /指令 说明', group: '指令' },
-  ]
-
-  /** 解析输入框中位于光标前的激活触发词（@ 或 / 开头、且前导为行首或空白）。 */
-  const computeTrigger = (
-    text: string,
-    caret: number,
-  ): { mode: 'mention' | 'command'; start: number; end: number; query: string } | null => {
-    let i = caret - 1
-    while (i >= 0) {
-      const ch = text[i]
-      if (ch === ' ' || ch === '\n' || ch === '\t') break
-      if (ch === '@' || ch === '/') {
-        const prevCh = i > 0 ? text[i - 1] : ''
-        const boundary = i === 0 || /\s/.test(prevCh)
-        if (!boundary) break // 形如邮箱 foo@bar 不视为触发
-        return { mode: ch === '@' ? 'mention' : 'command', start: i, end: caret, query: text.slice(i + 1, caret) }
-      }
-      i--
-    }
-    return null
-  }
-
-  /** 按模式 + 查询串过滤候选（@ 取技能 + MCP 服务；/ 取快捷指令）。 */
-  const getCandidates = (mode: 'mention' | 'command', query: string): SuggestItem[] => {
-    const q = query.trim().toLowerCase()
-    if (mode === 'command') {
-      return COMMANDS.filter((c) => !q || c.token.toLowerCase().includes(q) || c.label.toLowerCase().includes(q))
-    }
-    const skills = allSkills
-      .filter(
-        (s) =>
-          !q ||
-          s.name.toLowerCase().includes(q) ||
-          (s.identifier || '').toLowerCase().includes(q) ||
-          (s.description || '').toLowerCase().includes(q),
-      )
-      // token 用 skill.identifier（稳定、无空格），label 用 s.name 仅展示；硬化后不再依赖 name 做判断
-      .map<SuggestItem>((s) => ({ key: `skill:${s.id}`, token: s.identifier || s.name, label: s.name, sub: s.description || '技能', group: '技能' }))
-    const mcps = allMcps
-      .filter((m) => !q || (m.aliasName || m.mcpName || '').toLowerCase().includes(q))
-      .map<SuggestItem>((m) => {
-        const name = m.aliasName || m.mcpName || m.id
-        return { key: `mcp:${m.id}`, token: name, label: name, sub: 'MCP 服务', group: 'MCP 服务' }
-      })
-    // 插件候选（P2 新增）：token 用 identifier（稳定无空格），label 用 name 仅展示
-    const plugins = allPlugins
-      .filter(
-        (p) =>
-          !q ||
-          p.name.toLowerCase().includes(q) ||
-          p.identifier.toLowerCase().includes(q) ||
-          (p.description || '').toLowerCase().includes(q),
-      )
-      .map<SuggestItem>((p) => ({
-        key: `plugin:${p.id}`,
-        token: p.identifier || p.name,
-        label: p.name,
-        sub: '插件',
-        group: '插件',
-      }))
-    return [...skills, ...mcps, ...plugins]
-  }
-
-  /** 依据当前文本与光标位置刷新浮层；命中候选则展开，否则收起。 */
-  const syncSuggest = (text: string, caret: number) => {
-    const trig = computeTrigger(text, caret)
-    if (!trig) {
-      setSuggest(null)
-      return
-    }
-    const items = getCandidates(trig.mode, trig.query)
-    if (items.length === 0) {
-      setSuggest(null)
-      return
-    }
-    setSuggest((prev) => {
-      const p = prev
-      // 触发词签名未变（仅光标微调）时保留当前高亮，避免方向键被 keyup 重置
-      const keepIndex = p && p.mode === trig.mode && p.query === trig.query && p.index < items.length ? p.index : 0
-      return { ...trig, items, index: keepIndex }
-    })
-  }
-
-  /** 选中 @提及 候选：把触发词从文本框剥离，改为生成一个可移除的 Tag（chip）。 */
-  const applyMention = (item: SuggestItem) => {
-    if (!suggest) return
-    // 从文本框删除「@query」片段（标签已独立承载，避免空格歧义）
-    const next = input.slice(0, suggest.start) + input.slice(suggest.end)
-    setInput(next)
-    setMentionTags((prev) => {
-      if (prev.some((t) => t.key === item.key)) return prev // 去重：同一技能/MCP 不重复添加
-      // 写入 chip：label 展示人类名，token 携带 identifier（send 序列化与 regenerate 反解都按 token 匹配）
-      return [...prev, { key: item.key, label: item.label, token: item.token }]
-    })
-    setSuggest(null)
-    requestAnimationFrame(() => {
-      const el = textareaRef.current
-      if (el) {
-        el.focus()
-        const caret = suggest.start
-        el.setSelectionRange(caret, caret)
-      }
-    })
-  }
-
-  /** 选中 / 指令：立即执行对应动作。 */
-  const runCommand = (item: SuggestItem) => {
-    setSuggest(null)
-    setInput('')
-    setMentionTags([])
-    switch (item.key) {
-      case 'cmd:new':
-        newChat()
-        break
-      case 'cmd:clear':
-        reset()
-        setMessages(
-          agent
-            ? [{ id: 'welcome', role: 'agent', content: agent.welcomeMessage || `你好，我是 ${agent.name}，有什么可以帮你的？`, createdAt: Date.now() }]
-            : [],
-        )
-        break
-      case 'cmd:reset':
-        reset()
-        break
-      case 'cmd:help':
-        setHelpOpen(true)
-        break
-    }
-  }
-
-  /** 输入框内容变化：写回 state 并刷新浮层。 */
-  const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    const val = e.target.value
-    setInput(val)
-    syncSuggest(val, e.target.selectionStart ?? val.length)
-  }
-
-  /** 光标移动（点击 / 方向键）：重新判定触发词，离开触发词则收起浮层。 */
-  const handleCaretMove = (e: React.SyntheticEvent<HTMLTextAreaElement>) => {
-    const el = e.currentTarget
-    syncSuggest(el.value, el.selectionStart ?? el.value.length)
-  }
-
-  /** 键盘事件：浮层展开时方向键导航、Enter/Tab 选中、Esc 收起；否则保持原 Enter 发送逻辑。 */
-  const handleInputKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (suggest && suggest.items.length > 0) {
-      const n = suggest.items.length
-      if (e.key === 'ArrowDown') {
-        e.preventDefault()
-        setSuggest((s) => (s ? { ...s, index: (s.index + 1) % n } : s))
-        return
-      }
-      if (e.key === 'ArrowUp') {
-        e.preventDefault()
-        setSuggest((s) => (s ? { ...s, index: (s.index - 1 + n) % n } : s))
-        return
-      }
-      if (e.key === 'Enter' || e.key === 'Tab') {
-        e.preventDefault()
-        const item = suggest.items[suggest.index]
-        if (item) {
-          if (suggest.mode === 'mention') applyMention(item)
-          else runCommand(item)
-        }
-        return
-      }
-      if (e.key === 'Escape') {
-        e.preventDefault()
-        setSuggest(null)
-        return
-      }
-    }
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault()
-      send()
-    }
-  }
-
   const removeSession = useCallback(
     async (sessionId: string, e?: React.MouseEvent) => {
       e?.stopPropagation()
@@ -1836,6 +1671,29 @@ export default function AgentChatPage() {
     [agent, projects, reset, welcomeMessages, refreshSessions, message, cleanupPendingEmptySession],
   )
 
+// 斜杠指令动作表（每次渲染刷新闭包，newChat / reset / agent 均为最新值）
+commandActionRef.current = (key: string) => {
+  switch (key) {
+    case 'cmd:new':
+      newChat()
+      break
+    case 'cmd:clear':
+      reset()
+      setMessages(
+        agent
+          ? [{ id: 'welcome', role: 'agent', content: agent.welcomeMessage || `你好，我是 ${agent.name}，有什么可以帮你的？`, createdAt: Date.now() }]
+          : [],
+      )
+      break
+    case 'cmd:reset':
+      reset()
+      break
+    case 'cmd:help':
+      setHelpOpen(true)
+      break
+  }
+}
+
   /** 输入框工作空间胶囊：选择 / 更改绑定目录（即时重绑当前会话为工程）。 */
   const changeWorkspaceDir = useCallback(async () => {
     if (!isTauri) return
@@ -1978,107 +1836,6 @@ export default function AgentChatPage() {
       })
     },
     [activeSessionId, sessions, newChat, refreshAll, message, modal],
-  )
-
-  // ---- 附件（图片 / 文本 / 文件）----
-  /** 把文件分片上传到后端 `workspace/.attachments/`，返回落地路径（Tauri 环境）。
-   *  非 Tauri（dev/mock）环境无原生落盘能力，回退为 base64 内联（仅小文件）。 */
-  const stageFile = useCallback(
-    async (file: File): Promise<string> => {
-      if (!isTauri) {
-        if (file.size > MAX_INLINE_IMAGE) throw new Error('非 Tauri 环境不支持超大文件')
-        const dataUrl = await readFileAsDataURL(file)
-        const comma = dataUrl.indexOf(',')
-        return dataUrl.slice(comma + 1)
-      }
-      const CHUNK = 4 * 1024 * 1024
-      const stageId = await invoke<string>('begin_stage_attachment', {
-        name: file.name,
-        mime: file.type || 'application/octet-stream',
-      })
-      try {
-        for (let off = 0; off < file.size; off += CHUNK) {
-          const slice = file.slice(off, Math.min(off + CHUNK, file.size))
-          const buf = await slice.arrayBuffer()
-          await invoke('append_stage_chunk', { stageId, data: new Uint8Array(buf) })
-        }
-        return await invoke<string>('commit_stage_attachment', {
-          stageId,
-          workspace: workspaceDir ?? null,
-        })
-      } catch (e) {
-        await invoke('abort_stage_attachment', { stageId }).catch(() => {})
-        throw e
-      }
-    },
-    [isTauri, workspaceDir, message],
-  )
-
-  const addFiles = useCallback(
-    async (files: FileList | File[]) => {
-      const list = Array.from(files)
-      for (const file of list) {
-        const size = file.size
-        try {
-          // 图片：≤20MB 多模态 dataUrl 内联；超大图片走分片落盘（file 类型，agent 用 native__read_file 看）。
-          if (file.type.startsWith('image/') && size <= MAX_INLINE_IMAGE) {
-            const dataUrl = await readFileAsDataURL(file)
-            setPendingAttachments((prev) => [
-              ...prev,
-              { id: attId(), type: 'image', dataUrl, name: file.name, size },
-            ])
-            continue
-          }
-          if (size > MAX_FILE) {
-            message.error(`「${file.name}」超过 500MB，已忽略`)
-            continue
-          }
-          // 文本（≤200KB）直接内联；其余（二进制 / 超大文本 / 超大图片）分片落盘。
-          if (isTextType(file) && size <= TEXT_INLINE_LIMIT && !file.type.startsWith('image/')) {
-            const text = await readFileAsText(file)
-            setPendingAttachments((prev) => [
-              ...prev,
-              { id: attId(), type: 'text', content: text, name: file.name, mime: file.type || 'text/plain', size },
-            ])
-            continue
-          }
-          const path = await stageFile(file)
-          setPendingAttachments((prev) => [
-            ...prev,
-            {
-              id: attId(),
-              type: 'file',
-              name: file.name,
-              mime: file.type || 'application/octet-stream',
-              size,
-              path,
-            },
-          ])
-        } catch (e) {
-          const msg = e instanceof Error ? e.message : String(e)
-          message.error(`「${file.name}」处理失败：${msg}`)
-        }
-      }
-    },
-    [message, stageFile],
-  )
-
-  const onPaste = useCallback(
-    (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
-      const items = e.clipboardData?.items
-      if (!items) return
-      const files: File[] = []
-      for (const it of Array.from(items)) {
-        // 任意文件（不再仅限图片，也不再要求多模态模型）——文本/文件附件任意模型可用
-        const file = it.getAsFile()
-        if (file) files.push(file)
-      }
-      if (files.length) {
-        e.preventDefault()
-        addFiles(files)
-      }
-    },
-    [addFiles],
   )
 
   /** 复制错误详情到剪贴板（错误诊断面板用）。 */

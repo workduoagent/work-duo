@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useRef, useState } from 'react'
 import { Spin } from 'antd'
 import { getDb, initTables, updateTables } from '@/core/db/SqlService'
+import { getRawConfig, setRawConfig } from '@/core/mapper/config-mapper'
 import { isTauri } from '@/core/config'
 import { normalizeSkillPaths } from '@/core/mapper/skill-mapper'
 
@@ -54,11 +55,9 @@ export const InitProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setLoadingTip('初始化本地数据库…')
         await initTables(db)
 
-        // 3. 此时 app_config 已存在，读取首启标记
-        const rows = await db.select<{ value: string }[]>(
-          "SELECT value FROM app_config WHERE key = 'first_load'",
-        )
-        const isFirstLoad = rows.length === 0 || rows[0].value === 'true'
+        // 3. 此时 app_config 已存在，读取首启标记（台账 S12：经 config-mapper，组件不直写 SQL）
+        const firstLoadRaw = await getRawConfig('first_load')
+        const isFirstLoad = firstLoadRaw === null || firstLoadRaw === 'true'
 
         // 4. 版本迁移脚本（当前为空，安全跳过）；首启与非首启都执行，确保补丁不遗漏
         setLoadingTip('检查数据库版本更新…')
@@ -77,7 +76,7 @@ export const InitProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         // 5. 首启完成后置标记，供应用层判断「是否首次运行」
         if (isFirstLoad) {
-          await db.execute("UPDATE app_config SET value = 'false' WHERE key = 'first_load'")
+          await setRawConfig('first_load', 'false')
         }
 
         setLoadingTip(isFirstLoad ? '首次启动完成' : '数据库就绪')
