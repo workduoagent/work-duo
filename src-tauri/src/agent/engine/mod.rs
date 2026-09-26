@@ -13,6 +13,8 @@ pub mod planner;
 pub mod policy;
 pub mod round_compactor;
 pub mod runtime;
+pub mod simple_chat;
+pub mod tool_round;
 pub mod token_estimate;
 pub mod tools;
 pub mod verifier;
