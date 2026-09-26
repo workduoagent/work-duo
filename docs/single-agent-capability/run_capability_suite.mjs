@@ -220,6 +220,7 @@ export const CASE_META = {
   'D8-1': { dim: 'D8', title: '取消+锁', llm: true },
   'D8-2': { dim: 'D8', title: '轨迹隔离', llm: true },
   'D8-3': { dim: 'D8', title: '孤儿 round', llm: false },
+  'D9-1': { dim: 'D9', title: '跨会话记忆命中', llm: true },
   'SK-1': { dim: 'Skill', title: '技能发现', llm: false },
   'SK-2': { dim: 'Skill', title: '技能创建', llm: false },
   'SK-3': { dim: 'Skill', title: '技能文件读写', llm: false },
@@ -811,6 +812,50 @@ const RUNNERS = {
     } catch (e) {
       return [A('sweep_ok', false, e.message)]
     }
+  },
+
+  // ---- D9 记忆召回（台账 D3：把「跨会话记忆命中率」做成 L2 用例，评测先行）----
+  async 'D9-1'() {
+    const ws = wsOf('D9-1')
+    const ag = await createAgent({ tag: 'd91', memoryMode: 'forced' })
+    try {
+      // 独特事实 + 时间戳代号：回答命中断言只可能来自记忆注入，杜绝常识编造误判
+      const code = `stardust${Date.now().toString(36)}`
+      // ① 会话 1：沉淀记忆（forced 模式 + 显式锚定指令）
+      const sess1 = await mkSession(ag.identifier, 'D9-1-a')
+      const r1 = await startRun(
+        ag.id,
+        `请记住（锚定记忆 + 写入 .wd_mem/notes.md）：${code} 星尘计划，交付日期定为 12 月 8 日。完成后回复 OK。`,
+        sess1.id, { workspace: ws }, { maxMs: WAIT_MS },
+      )
+      // 写入侧：memory_list 确认锚定成功
+      const mem = asRows(await callTool('memory_list', { query: '星尘计划' }))
+      const memTok = asRows(await callTool('memory_list', { query: code }))
+      // ② 会话 2（全新会话，零上下文）：提问事实 → 考察召回与命中
+      const sess2 = await mkSession(ag.identifier, 'D9-1-b')
+      const r2 = await startRun(
+        ag.id,
+        `${code} 星尘计划的交付日期是哪一天？只根据记忆回答；记忆里没有就明确说不清楚，不要编造。`,
+        sess2.id, { workspace: ws }, { maxMs: WAIT_MS },
+      )
+      const tr = await getTrace(r2.runId)
+      const reply = tr.reply || ''
+      const hit = /12\s*月\s*8|12\/8|Dec(ember)?\s*8/i.test(reply)
+      // 召回客观证据：召回路径收尾 ref_count+1 / last_recalled 置时间——
+      // memory-recalled 事件只走 Tauri 广播不进 trace，DB 计数是更硬的召回证据
+      const after = asRows(await callTool('memory_list', { query: '星尘计划' }))
+      const hitRow = after.find((m) => (m.content || '').includes('星尘计划') || (m.key || '').includes('星尘'))
+        || after.find((m) => (m.content || '').includes(code))
+      const refCount = hitRow ? Number(hitRow.refCount ?? hitRow.ref_count ?? 0) : 0
+      const lastRecalled = hitRow ? Number(hitRow.lastRecalledAt ?? hitRow.last_recalled ?? 0) : 0
+      return [
+        A('s1_terminal', !!r1.status, r1.status),
+        A('memory_anchored', mem.length + memTok.length > 0, `星尘=${mem.length} code=${memTok.length}`),
+        A('s2_done', r2.status === 'done', r2.status),
+        A('answer_hits_fact', hit, reply.slice(0, 120)),
+        A('memory_ref_counted', refCount > 0 || lastRecalled > 0, `refCount=${refCount} lastRecalled=${lastRecalled}`),
+      ]
+    } finally { await deleteAgent(ag.id) }
   },
 
   // ---- Skill ----
