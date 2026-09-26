@@ -188,6 +188,7 @@ fn capability_outline(registry: &ToolRegistry, cfg: &AgentRuntimeConfig) -> Stri
     let host = pick("host__");
     let mcp = pick("mcp__");
     let custom = pick("custom__");
+    let skill_tools = pick("skill__");
     let list_of = |items: &[(String, String)], sep: &str| -> String {
         items
             .iter()
@@ -255,6 +256,15 @@ fn capability_outline(registry: &ToolRegistry, cfg: &AgentRuntimeConfig) -> Stri
             "本地插件工具（用户自定义函数，任务与其描述匹配时**必须优先直接调用对应 custom__ 工具**，\
              严禁手写脚本重复实现插件已有功能）：{}；",
             list_of(&custom, "、")
+        ));
+    }
+
+    // 6. Skill 随包工具（台账 D1 第三步）：Skill 包 tools.json 声明、注册表派生——
+    //    大纲缺失时规划器会按「严禁编造不存在的能力」直接判任务不可执行（E2E 实锤教训）。
+    if !skill_tools.is_empty() {
+        caps.push(format!(
+            "Skill 随包工具（来自已启用技能包的可执行脚本，**任务与工具描述匹配时优先直接调用**）：{}；",
+            list_of(&skill_tools, "、")
         ));
     }
 

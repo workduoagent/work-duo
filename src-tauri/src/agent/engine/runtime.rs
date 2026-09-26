@@ -962,6 +962,12 @@ pub fn build_full_registry(app: &AppHandle, cfg: &AgentRuntimeConfig) -> ToolReg
     // 本地插件（P2）：cfg.plugin_tools 非空时注册为 custom__<identifier> 工具；
     // 为空时零影响（register_plugins_into 对空切片不做事）。
     crate::agent::plugins::plugin_adapter::register_plugins_into(&mut base, app, &cfg.plugin_tools);
+    // Skill 随包工具（台账 D1 第三步）：绑定的 Skill 包内 tools.json 声明的工具
+    // 注册为 skill__{identifier}__{slug}——与插件同规则，allow_sandbox=1 才注册
+    // （脚本执行前置条件）；无 tools.json 的纯知识包零影响。
+    if cfg.allow_sandbox {
+        crate::agent::plugins::skill_tools::register_skill_tools(&mut base, app, &cfg.skill_tools);
+    }
     // 服务器托管（Host）：绑定非空时注册 host__* 工具族（12 个，HostAuthz 独立授权域）。
     crate::host::register_host_tools(&mut base, app, Arc::new(cfg.server_bindings.clone()));
     base
