@@ -2555,8 +2555,12 @@ commandActionRef.current = (key: string) => {
               if (!dragOver) setDragOver(true)
             }}
             onDragLeave={(e) => {
-              // 仅当真正离开 input-box 整体时收起（避免子元素冒泡误触发）
-              if (e.currentTarget === e.target) setDragOver(false)
+              // 仅当真正离开 input-box 整体时收起（台账 S1 拖拽回归修复）：
+              // relatedTarget = 拖拽移入的相邻元素——为 null（离开窗口）或不属于本容器
+              // 子树（移出到外层空白）才复位；容器内部子元素间移动（textarea ↔ 附件 chip）
+              // 则保持高亮。旧判定 `e.currentTarget === e.target` 在「从子元素直接拖出」时
+              // target 是子元素 ≠ 容器，高亮永不复位（虚线框残留）。
+              if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragOver(false)
             }}
             onDrop={(e) => {
               // 在输入框内落盘：阻止冒泡到整窗处理器，避免重复添加。

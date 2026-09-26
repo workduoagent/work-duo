@@ -176,6 +176,9 @@ export function useAttachments({ workspaceDir, notifyError }: UseAttachmentsOpti
       if (dragDepth.current <= 0) {
         dragDepth.current = 0
         setWindowDrag(false)
+        // 防御性复位（台账 S1 拖拽回归修复）：彻底离开窗口时输入框高亮必不应残留——
+        // 输入框自身 onDragLeave 的 relatedTarget 判定可能因快速掠过而漏触发。
+        setDragOver(false)
       }
     },
     onDrop: (e: React.DragEvent) => {
