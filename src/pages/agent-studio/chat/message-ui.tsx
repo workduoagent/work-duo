@@ -7,13 +7,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type * as React from 'react'
 import type { ReactElement } from 'react'
-import { ClipboardList, Copy, File, FileArchive, FileCode, FileImage, FileSpreadsheet, FileText, RefreshCw, Volume2 } from 'lucide-react'
+import { ChevronDown, ChevronRight, ClipboardList, Copy, File, FileArchive, FileCode, FileImage, FileSpreadsheet, FileText, RefreshCw, Volume2 } from 'lucide-react'
 import { openPath } from '@tauri-apps/plugin-opener'
 import { useNotify } from '@/components/ui/notify'
+import { MarkdownRenderer } from '@/components/markdown/MarkdownRenderer'
+import { ToolStepLine } from '../session/ToolStepLine'
+import { KbCiteMark } from '../session/KbSearchCitations'
+import { makeRemarkKbCites } from '../session/remarkKbCites'
 import { isTauri } from '@/core/config'
-import { stripWinVerbatim } from '@/utils/pathDisplay'
+import { stripWinVerbatim, stripWinVerbatimInText } from '@/utils/pathDisplay'
 import type { AgentInfo } from '@/types/core'
-import type { ChatMessage } from './types'
+import type { ChatMessage, ChatSegment } from './types'
+import type { ToolStep } from '../session/types'
+import type { KbHit } from '../session/KbSearchCitations'
 import {
   extractFilePaths,
   FILE_CODE_EXTS,
@@ -360,6 +366,133 @@ export function MessageActions({
           <RefreshCw size={14} />
         </button>
       </div>
+    </div>
+  )
+}
+
+/* ---------------- 引用感知渲染 / 打字机正文 / 过程折叠（台账 S1 步骤A 自 chat.tsx 迁入） ---------------- */
+
+/** K3-2 引用感知正文渲染：消息带 kbSources 时启用内联引标 remark 插件——正文中的 `[N]`
+ *  渲染为可悬浮溯源的引标（hover 展示召回片段内容）；无引用数据时与普通 MarkdownRenderer 等价。 */
+export function CiteAwareMarkdown({ text, kbSources }: { text?: string; kbSources?: KbHit[] }) {
+  const remarkExt = useMemo(() => (kbSources?.length ? [makeRemarkKbCites(kbSources)] : undefined), [kbSources])
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const compsExt = useMemo(
+    () =>
+      kbSources?.length
+        ? {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            'kb-cite': (p: any) => <KbCiteMark cite={p?.cite} hits={kbSources} />,
+          }
+        : undefined,
+    [kbSources],
+  )
+  // 展示净化：去掉 Rust canonicalize 带来的 Windows 逐字前缀 `\\?\`
+  // （模型会把工具返回的路径原样写进正文，不处理就显示成 `\\?\E:\xxx`）。
+  return (
+    <MarkdownRenderer
+      content={stripWinVerbatimInText(text ?? '')}
+      remarkPluginsExt={remarkExt}
+      componentsExt={compsExt}
+    />
+  )
+}
+
+/** 运行中正文段打字机（用户反馈：流式 chunk 整段刷出=「一句句往外刷」）：
+ *  复用 useTypewriter 常速逐字（30ms/字≈33 字/秒，肉眼单字节奏；积压 >200 字按比例
+ *  加速追赶防永久滞后）。仅最后一段 active 参与打字；非激活段直接全文渲染
+ *  （绕过 hook 首帧空闪）。任务结束切非激活 → 终态一次性全文（既有约定）。 */
+export function TypewriterMarkdownInner({ text, kbSources }: { text?: string; kbSources?: KbHit[] }) {
+  const shown = useTypewriter(text ?? '', true, 30)
+  return <CiteAwareMarkdown text={shown} kbSources={kbSources} />
+}
+
+export function TypewriterMarkdown({
+  text,
+  active,
+  kbSources,
+}: {
+  text?: string
+  active?: boolean
+  kbSources?: KbHit[]
+}) {
+  if (!active) return <CiteAwareMarkdown text={text} kbSources={kbSources} />
+  return <TypewriterMarkdownInner text={text} kbSources={kbSources} />
+}
+
+/* ------------------------------------------------------------------ *
+ * 对话中的文件路径卡片：自动识别 Agent 回复里的文件路径，以内联卡片展示。
+ * ---------------------------------------------------------------- */
+
+/** 折叠的「思考与执行过程」块（2026-09-18 体验重构）：
+ * 任务结束后，思考旁白、中间叙述文本与全部工具行**按真实时序**收进此处（默认收起），
+ * 气泡正文只保留最终交付内容（最后一段模型文本），对话流恢复「一句问答一段回复」的干净形态。
+ * thought 段渲染为「- 文本」小行，与工具块穿插（用户期望形式）。 */
+export function ProcessCollapse({
+  items,
+  toolById,
+  psOf,
+}: {
+  items: ChatSegment[]
+  toolById: Map<string, ToolStep>
+  psOf: (t?: ToolStep) => { verified?: boolean; evidence?: string } | undefined
+}) {
+  const [open, setOpen] = useState(false)
+  const toolCount = items.filter((s) => s.kind === 'tool').length
+  return (
+    <div className="agent-chat__proc">
+      <button type="button" className="agent-chat__proc-head" onClick={() => setOpen((v) => !v)}>
+        {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+        <span>思考与执行过程</span>
+        {toolCount > 0 && <span className="agent-chat__proc-n">{toolCount} 次工具调用</span>}
+      </button>
+      {open && (
+        <div className="agent-chat__proc-body">
+          {items.map((s, i) =>
+            s.kind === 'text' ? (
+              <div key={i} className="agent-chat__seg-text">
+                <MarkdownRenderer content={stripWinVerbatimInText(s.text ?? '')} />
+              </div>
+            ) : s.kind === 'thought' ? (
+              <div key={i} className="agent-chat__seg-thought">
+                - {s.text}
+              </div>
+            ) : (
+              (() => {
+                const t = toolById.get(s.callId ?? '')
+                if (!t) return null
+                const ps = psOf(t)
+                return (
+                  <ToolStepLine
+                    key={`${s.callId}-${i}`}
+                    step={t}
+                    verified={ps?.verified}
+                    evidence={ps?.evidence}
+                  />
+                )
+              })()
+            ),
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/**
+ * 运行中的思考段（#20260918011 工作空间模式打字机）：
+ * 时间线此前把 thought 段当静态文本渲染（旁白/推理整段蹦出）。这里复用现成 useTypewriter
+ * 逐字流出——段内文本增量续写时打字机继续推进，已打完的段自然静止（不回退、不重打）。
+ */
+export function ThoughtSegmentLine({ text, active = false }: { text?: string; active?: boolean }) {
+  const full = text ?? ''
+  // 30ms/字（≈33 字/秒）：8ms 对十几字旁白仅 ~150ms 一闪而过，肉眼感知不到打字机（真机反馈）；
+  // 30ms 时一行旁白约 0.6s、一段推理 1.5~3s，节奏清晰可读。
+  const shown = useTypewriter(full, active, 30)
+  return (
+    <div className="agent-chat__seg-thought">
+      - {active ? shown : full}
+      {active && shown.length < full.length && <span className="agent-chat__type-caret" />}
     </div>
   )
 }
