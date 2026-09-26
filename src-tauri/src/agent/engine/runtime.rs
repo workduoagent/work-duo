@@ -931,8 +931,8 @@ impl AgentRuntime {
             // （协议上 assistant.tool_calls 必须跟 tool 消息，且数据已请求、丢弃可惜），
             // 再注入强制总结指令、以空 tools 追加一轮——「有界」与「终态必有正文」两全。
             // 旧逻辑此处直接把空正文当终态，用户看到「（智能体未返回文本内容）」。
+            // （不自增 tool_rounds：本分支必以 break/return 收尾，计数器不再被读。）
             if !outcome.tool_calls.is_empty() && tool_rounds >= SIMPLE_CHAT_MAX_TOOL_ROUNDS {
-                tool_rounds += 1;
                 Self::exec_simple_tool_round(
                     app,
                     cfg,
