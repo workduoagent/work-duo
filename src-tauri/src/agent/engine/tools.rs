@@ -142,6 +142,75 @@ impl ToolRegistry {
             .map(|t| t.tool_definition())
             .collect()
     }
+
+    /// 规划器能力摘要（台账 S6：工具「提示与能力同源」自动化）。
+    ///
+    /// 从全部已注册工具的 `tool_definition()` 自动派生 `(工具名, 一句话摘要)` 清单，
+    /// `planner::capability_outline` 的工具清单以此为准——**未注册的工具不会出现在
+    /// 大纲，新增/删除工具无需改 planner**，消灭「注册表与能力大纲双维护」
+    /// （漏写=规划器判任务不可执行，2026-09-25 E2E 实锤）。
+    /// 按工具名排序保证输出稳定（HashMap 遍历序随机，大纲文案需确定性）。
+    pub fn planner_digest(&self) -> Vec<(String, String)> {
+        let mut out: Vec<(String, String)> = self
+            .tools
+            .values()
+            .map(|t| {
+                let def = t.tool_definition();
+                let desc = def
+                    .get("function")
+                    .and_then(|f| f.get("description"))
+                    .and_then(|d| d.as_str())
+                    .unwrap_or("");
+                (t.name(), first_sentence(desc))
+            })
+            .collect();
+        out.sort_by(|a, b| a.0.cmp(&b.0));
+        out
+    }
+}
+
+/// 取工具描述首句作规划摘要（台账 S6）：按 `。`/`；`/`;`/换行 切第一段，
+/// 超长截断到 48 字符（规划大纲只需「这是干什么的」，细则由执行模型的 tools
+/// 数组全量 description 承载）。
+fn first_sentence(desc: &str) -> String {
+    let head = desc
+        .split(['。', '；', ';', '\n', '\r'])
+        .map(str::trim)
+        .find(|s| !s.is_empty())
+        .unwrap_or("");
+    head.chars().take(48).collect()
+}
+
+#[cfg(test)]
+mod digest_tests {
+    use super::first_sentence;
+
+    #[test]
+    fn first_sentence_takes_first_clause() {
+        assert_eq!(
+            first_sentence("读取工作空间内指定路径的文件。支持文本与图片。第二句"),
+            "读取工作空间内指定路径的文件"
+        );
+    }
+
+    #[test]
+    fn first_sentence_splits_on_semicolon_and_newline() {
+        assert_eq!(first_sentence("执行命令；第二个分句\n第二行"), "执行命令");
+        assert_eq!(first_sentence("a; b; c"), "a");
+    }
+
+    #[test]
+    fn first_sentence_truncates_long_head() {
+        let long = "这是一个没有任何句读的超长描述".repeat(10);
+        let out = first_sentence(&long);
+        assert_eq!(out.chars().count(), 48);
+    }
+
+    #[test]
+    fn first_sentence_handles_empty_and_whitespace() {
+        assert_eq!(first_sentence(""), "");
+        assert_eq!(first_sentence("   \n  x。y"), "x");
+    }
 }
 
 /// 绝对沙箱守卫。

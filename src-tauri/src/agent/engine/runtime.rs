@@ -23,7 +23,6 @@ use serde::Serialize;
 use serde_json::json;
 use serde_json::Value;
 use tauri::AppHandle;
-use tokio::sync::Mutex;
 use tokio::time::timeout;
 
 use crate::agent::hitl::approval::ApprovalManager;
@@ -71,8 +70,6 @@ pub struct AgentTaskState {
     pub choice: Arc<ChoiceHub>,
     pub plan_approval: Arc<crate::agent::hitl::plan_approval::PlanApprovalHub>,
     pub approval_grants: Arc<crate::agent::engine::policy::ApprovalGrants>,
-    /// 本任务的工具注册表（基础原生 + KB/MCP/插件工具按绑定注册，任务结束随状态束回收）。
-    pub native: Arc<Mutex<ToolRegistry>>,
 }
 
 impl AgentTaskState {
@@ -87,7 +84,6 @@ impl AgentTaskState {
             choice: Arc::new(ChoiceHub::new()),
             plan_approval: crate::agent::hitl::plan_approval::PlanApprovalHub::new(),
             approval_grants: Arc::new(crate::agent::engine::policy::ApprovalGrants::new()),
-            native: Arc::new(Mutex::new(ToolRegistry::new())),
         }
     }
 }
@@ -257,31 +253,10 @@ impl AgentRuntime {
             .await;
         }
 
-        // 1) 组装工具注册表（基础原生 + 绑定的 MCP 工具）。
-        //    绑定的 Skill 不再注册为工具（避免「先调 skill__xxx 拿指引再干活」的浪费轮次），
-        //    改为在 pipeline::run_subtask 的 user 消息中注入 skill_markdown 指引。
-        //    20260919002：registry 随 AgentTaskState（per-agent），并行任务互不污染。
-        let mut base = task.native.lock().await.clone();
-        // 沙箱模式下不注册 execute_command（宿主 shell），能力层与提示层保持一致
-        native::register_native_tools(&mut base, app, cfg.allow_sandbox, &cfg.memory_mode);
-        // 知识库检索工具（K2）：仅在绑定了知识库时注册（提示与能力同源）
-        native::register_kb_search_tool(&mut base, app, cfg.kb_ids.clone());
-        // MCP：按 mcp_id 分组，逐 server 注册（复用现有 mcp::call_mcp_tool 透传）
-        let mut by_server: std::collections::BTreeMap<String, Vec<crate::agent::plugins::mcp_adapter::MountedMcpTool>> =
-            Default::default();
-        for t in &cfg.mcp_tools {
-            by_server.entry(t.mcp_id.clone()).or_default().push(t.clone());
-        }
-        for (server, tools) in by_server {
-            crate::agent::plugins::mcp_adapter::register_mcp_into(&mut base, &server, tools);
-        }
-        // 本地插件（P2 纯增量）：cfg.plugin_tools 非空时注册为 custom__<identifier> 工具；
-        // 为空时零影响（register_plugins_into 对空切片不做事），不触碰既有注册逻辑。
-        crate::agent::plugins::plugin_adapter::register_plugins_into(&mut base, app, &cfg.plugin_tools);
-        // 服务器托管（Host）：绑定非空时注册 host__* 工具族（12 个，HostAuthz 独立授权域）。
-        crate::host::register_host_tools(&mut base, app, Arc::new(cfg.server_bindings.clone()));
-        // 工具已全部直接注册进 base（原生 + Skill + MCP + 插件 + Host），base 即完整注册表。
-        let registry = base;
+        // 1) 组装工具注册表（台账 S6 收敛：原生 + kb + MCP + 插件 + Host 统一在
+        //    build_full_registry 注册——run_task / 分支规划 / squad 成员规划三处共用，
+        //    注册链单一事实源；每次调用产出全新 registry，per-run 隔离语义不变）。
+        let registry = build_full_registry(app, &cfg);
         tracing::info!(
             "[agent] run_task: 工具注册完成，共 {} 个工具（原生 + Skill + MCP + 插件）",
             registry.get_tools_for_llm().len()
@@ -383,7 +358,7 @@ impl AgentRuntime {
             );
             (po, (0u64, 0u64), String::new())
         } else {
-            crate::agent::engine::planner::build_plan(&cfg, &prompt, cfg.workspace.as_deref(), Some(&task.cancel_flag)).await
+            crate::agent::engine::planner::build_plan(&cfg, &prompt, cfg.workspace.as_deref(), Some(&task.cancel_flag), &registry).await
         };
 
         // 规划期间用户可能已点击取消：规划完成后立即检查，避免拉起无意义的流水线。
@@ -464,7 +439,7 @@ impl AgentRuntime {
                         events::emit_status(app, "🔄 已收到修改意见，正在重新规划…");
                         let revised_prompt = format!("{}\n\n用户修改意见：{}", prompt, guidance);
                         let (np, nu, nr) =
-                            crate::agent::engine::planner::build_plan(&cfg, &revised_prompt, cfg.workspace.as_deref(), Some(&task.cancel_flag)).await;
+                            crate::agent::engine::planner::build_plan(&cfg, &revised_prompt, cfg.workspace.as_deref(), Some(&task.cancel_flag), &registry).await;
                         plan = np;
                         plan_usage.0 += nu.0;
                         plan_usage.1 += nu.1;
@@ -958,6 +933,38 @@ impl AgentRuntime {
             }
         }
     }
+}
+
+/// 组装一次任务的完整工具注册表（台账 S6 收敛点）。
+///
+/// 原生 + 知识库 + MCP + 本地插件 + Host 五路统一在此注册——`run_task` /
+/// 分支规划（commands）/ squad 成员规划（orchestrator）三处共用，注册链单一事实源：
+/// 新增工具族只改这里，注册结果经 `ToolRegistry::planner_digest()` 自动进入规划器
+/// 能力大纲（提示与能力同源，不再人工双维护）。
+/// 每次调用产出全新 `ToolRegistry`，per-run 隔离语义不变。
+pub fn build_full_registry(app: &AppHandle, cfg: &AgentRuntimeConfig) -> ToolRegistry {
+    let mut base = ToolRegistry::new();
+    // 沙箱模式下不注册 execute_command（宿主 shell），能力层与提示层保持一致
+    native::register_native_tools(&mut base, app, cfg.allow_sandbox, &cfg.memory_mode);
+    // 知识库检索工具（K2）：仅在绑定了知识库时注册（提示与能力同源）
+    native::register_kb_search_tool(&mut base, app, cfg.kb_ids.clone());
+    // MCP：按 mcp_id 分组，逐 server 注册（复用现有 mcp::call_mcp_tool 透传）
+    let mut by_server: std::collections::BTreeMap<
+        String,
+        Vec<crate::agent::plugins::mcp_adapter::MountedMcpTool>,
+    > = Default::default();
+    for t in &cfg.mcp_tools {
+        by_server.entry(t.mcp_id.clone()).or_default().push(t.clone());
+    }
+    for (server, tools) in by_server {
+        crate::agent::plugins::mcp_adapter::register_mcp_into(&mut base, &server, tools);
+    }
+    // 本地插件（P2）：cfg.plugin_tools 非空时注册为 custom__<identifier> 工具；
+    // 为空时零影响（register_plugins_into 对空切片不做事）。
+    crate::agent::plugins::plugin_adapter::register_plugins_into(&mut base, app, &cfg.plugin_tools);
+    // 服务器托管（Host）：绑定非空时注册 host__* 工具族（12 个，HostAuthz 独立授权域）。
+    crate::host::register_host_tools(&mut base, app, Arc::new(cfg.server_bindings.clone()));
+    base
 }
 
 /// 单轮工具执行结果统计（供连续错误熔断判定）。

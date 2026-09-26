@@ -1097,11 +1097,14 @@ pub async fn branch_from_step(app: AppHandle, input: BranchFromStepInput) -> Res
 
     // 分支重跑规划：branch_from_step 是独立命令（无运行中 task_state 可达），无取消语义传 None；
     // 规划产出的 DAG 随后经 agent_run_task(plan_override) 执行，彼时任务级取消链路正常生效。
+    // 台账 S6：注册链与能力大纲同源——分支规划与 run_task 共用 build_full_registry。
+    let registry = crate::agent::engine::runtime::build_full_registry(&app, &cfg);
     let (plan, _, _) = crate::agent::engine::planner::build_plan(
         &cfg,
         &prompt,
         cfg.workspace.as_deref(),
         None,
+        &registry,
     )
     .await;
 

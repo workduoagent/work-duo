@@ -13,6 +13,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
 use crate::agent::engine::runtime;
+use crate::agent::engine::tools::ToolRegistry;
 use crate::agent::types::AgentRuntimeConfig;
 use crate::agent::types::PlanDAG;
 use crate::agent::types::PlanSubTask;
@@ -26,8 +27,10 @@ pub async fn build_plan(
     cfg: &AgentRuntimeConfig,
     prompt: &str,
     workspace: Option<&str>,
-    cancel: Option<&Arc<AtomicBool>>,) -> (PlanDAG, (u64, u64), String) {
-    let outline = capability_outline(cfg);
+    cancel: Option<&Arc<AtomicBool>>,
+    registry: &ToolRegistry,
+) -> (PlanDAG, (u64, u64), String) {
+    let outline = capability_outline(registry, cfg);
     let ws_line = workspace
         .map(|w| format!("\n当前工作空间目录：{w}（所有文件产物都必须落在该目录内）"))
         .unwrap_or_default();
@@ -61,7 +64,8 @@ file*/directory_exists/json_valid/excel_row_count 须带 target；stdout_contain
 \n记忆沉淀约定：当用户要求「记住 / 沉淀」长期约定、偏好或决策时，负责该步骤的执行器应**同时**做两件事：\
 ① 调用原生工具 `native__anchor_memory`（key 简短、content 完整、category 按规范）把要点逐条沉淀为结构化记忆——\
 记忆宫殿是独立于文件系统的语义召回库，只写 .wd_mem 文件不调 anchor 会导致记忆缺条目、语义召回失效；\
-② 需要完整长文档时另写 .wd_mem/ 下的 md 文件，两轨并存。请在 description 里明确写出「调用 native__anchor_memory 沉淀以下要点：…」。\
+② 需要完整长文档时另写 .wd_mem/ 下的 md 文件，两轨并存。请在 description 里明确写出「调用 native__anchor_memory 沉淀以下要点：…」。
+注意：若上方能力大纲未列出 native__anchor_memory（本智能体记忆模式为关闭），则跳过①，仅执行②写文件沉淀。\
 \n验收绑定行为（2026-09-18 外部评审；2026-09-24 P-5 强化）：**改代码 / 修复 / 对齐约定类步骤，success_criteria 必须含行为级断言**——\
 修复类步骤（标题/描述含 修复/fix/bug/CVE/报错 等）**必须用 tests_passed**（解析步骤内 pytest 输出，要求 ≥1 passed 且 failed=0 且 errors=0），\
 禁止对修复类步骤只声明 command_succeeded：退出码 0 无法区分「验证脚本跑通」与「缺陷已修复」（S-J6 实测：agent 写检查脚本即闭环，修复代码一行未动）；\
@@ -163,32 +167,50 @@ tests_passed 无需额外字段，但该步骤 description 里必须明确「运
 }
 
 /// 系统能力大纲（概括，不含 JSON Schema）。
-/// 与能力层注册表保持同源：原生收敛工具 + 全局注入的 MCP/Skill。
-fn capability_outline(cfg: &AgentRuntimeConfig) -> String {
-    // 能力清单（按先后顺序排列，不含编号），最后统一编号，保证「沙箱条目被条件跳过」时编号仍连续。
-    let mut caps: Vec<String> = vec![
-        "本地文件系统操作：读 / 写 / 改 / 删 / 移 / 列目录 / 检索 / 压缩解压 / 正则替换（限于授权工作空间内）；HTTP 请求（native__http_request，需用户审批）；".to_string(),
-    ];
-    // 方案 A：沙箱运行时仅在 allow_sandbox=true 时列入能力大纲，与工具注册表同源
-    //（allow_sandbox=false 时沙箱工具未注册，此处也不应谎称「你有沙箱能力」，否则又一处提示/能力不一致）。
-    if cfg.allow_sandbox {
-        caps.push(
-            "沙箱 Python 执行（run_python_sandbox，直接传 code 参数）：数据抓取、报表生成、数学建模；沙箱为纯净 Python 3.11，脚本运行时会自动按需安装缺失的常用数据科学库（pandas/numpy/openpyxl/scipy 等），你只需正常 import 即可，无需手动安装；".to_string(),
-        );
+///
+/// 台账 S6 重构：工具清单**从 `ToolRegistry::planner_digest()` 自动派生**——
+/// 注册表注册了什么，大纲就列什么；沙箱 / 记忆锚定 / 知识库 / Host 的条件增减
+/// 由注册函数（`build_full_registry`）唯一决定，与能力层天然同源。新增/删除工具
+/// 无需改本函数（旧版手写清单漏同步=规划器判任务不可执行，2026-09-25 E2E 实锤）。
+/// 本函数只保留 **规划级使用指导**（红线 / 优先级 / 约定）——那是工具 description
+/// 承载不了的策略语义；参数级细则由执行模型的 tools 数组全量承载，此处不重复。
+fn capability_outline(registry: &ToolRegistry, cfg: &AgentRuntimeConfig) -> String {
+    let digest = registry.planner_digest();
+    let pick =
+        |prefix: &str| -> Vec<(String, String)> {
+            digest
+                .iter()
+                .filter(|(n, _)| n.starts_with(prefix))
+                .cloned()
+                .collect()
+        };
+    let native = pick("native__");
+    let host = pick("host__");
+    let mcp = pick("mcp__");
+    let custom = pick("custom__");
+    let list_of = |items: &[(String, String)], sep: &str| -> String {
+        items
+            .iter()
+            .map(|(n, s)| format!("{n}（{s}）"))
+            .collect::<Vec<_>>()
+            .join(sep)
+    };
+
+    let mut caps: Vec<String> = Vec::new();
+
+    // 1. 本地原生工具族：逐工具列举。是否含沙箱运行时 / 记忆锚定 / 知识库检索，
+    //    由注册条件（allow_sandbox / memory_mode / kb_ids）决定，此处不再人工判断。
+    if !native.is_empty() {
+        caps.push(format!(
+            "本地原生工具（native__ 系列；文件读写编辑检索删除限于授权工作空间内，HTTP 请求需用户审批）：{}；\
+             涉及事实、配置、领域知识的问题应优先用知识库检索工具核对，而非凭记忆臆测；",
+            list_of(&native, "；")
+        ));
     }
-    caps.push("工作空间记忆管理：沉淀或提取 .wd_mem/ 历史工件与长期记忆；".to_string());
-    // 知识库检索（K2）：仅在绑定了知识库时列入能力大纲（与工具注册同源）。
-    // 明确「优先检索而非臆测」，避免规划员把「查资料」规划成凭记忆编造。
-    if !cfg.kb_ids.is_empty() {
-        caps.push(
-            "知识库检索（native__kb_search(query, kb_ids?, tags?)：默认检索**全部已绑定知识库**中的文档片段，返回源文件与层级位置可溯源；按库收窄传 kb_ids（库 id 或 identifier，须已绑定）；tags 仅用于**文档级标签**过滤（meta_data.tags，不是库名/identifier））；\
-             涉及事实、配置、领域知识的问题应**优先检索知识库核对**，而非凭记忆臆测；"
-                .to_string(),
-        );
-    }
-    // 服务器托管（Host）：仅在绑定了服务器时列入能力大纲（与工具注册同源，提示/能力一致；
-    // 2026-09-25 E2E 实锤：大纲缺失时规划器按「严禁编造不存在的能力」直接判 host 任务无法执行）。
-    if !cfg.server_bindings.is_empty() {
+
+    // 2. 服务器托管（Host）：registry 注册了 host__ 工具才出本条（条件同源）；
+    //    已绑定服务器清单来自 cfg（数据驱动）；规划红线保留。
+    if !host.is_empty() {
         let hosts: Vec<String> = cfg
             .server_bindings
             .iter()
@@ -203,54 +225,42 @@ fn capability_outline(cfg: &AgentRuntimeConfig) -> String {
                 )
             })
             .collect();
-        caps.push(
-            format!(
-                "远程服务器运维（host__ 系列工具，统一走 HostAuthz 独立授权域，敏感操作会弹审批卡等用户确认，属正常流程而非故障）：                 已绑定服务器：{}；\
-                 连接管理：host__list_servers（列档案）/ host__connect(server_id?) / host__status(server_id) / host__disconnect(server_id) / host__disconnect_all；\
-                 远程命令：host__exec(server_id?, command, cwd?, as_user?, timeout_secs?)——只执行用户明确要求的命令，严禁 rm -rf/mkfs/dd/shutdown 等毁灭性命令；\
-                 文件传输（SFTP）：host__list_dir(server_id?, path) / host__upload(local_path, remote_path) / host__download(remote_path, local_path) / host__mkdir(remote_path) / host__sync(local_dir, remote_dir, delete_extraneous?——高危，删远端多余文件) / host__remove(remote_path, recursive?——高危)；\
-                 远端路径必须落在该服务器档案的 path_allow 白名单内；未配置白名单时也只操作用户明确指定的目录，系统默认黑名单（/etc、/root/.ssh 等）始终生效；",
-                hosts.join("、")
-            ),
-        );
+        caps.push(format!(
+            "远程服务器运维（host__ 系列工具，统一走 HostAuthz 独立授权域，敏感操作会弹审批卡等用户确认，属正常流程而非故障）：\
+             已绑定服务器：{}；工具：{}；\
+             严禁规划 rm -rf/mkfs/dd/shutdown 等毁灭性命令；远端路径必须落在服务器档案 path_allow 白名单内；",
+            hosts.join("、"),
+            list_of(&host, "；")
+        ));
     }
-    let mut lines: Vec<String> = Vec::with_capacity(caps.len() + 2);
-    for (i, c) in caps.iter().enumerate() {
-        lines.push(format!("{}. {}", i + 1, c));
+
+    // 3. MCP 外部工具：从 registry 派生（未挂载不出现，条件同源）。
+    if !mcp.is_empty() {
+        caps.push(format!("MCP 外部工具：{}；", list_of(&mcp, "、")));
     }
-    let mut idx = caps.len() + 1;
-    if !cfg.mcp_tools.is_empty() {
-        let names: Vec<&str> = cfg
-            .mcp_tools
-            .iter()
-            .map(|t| t.tool_name.as_str())
-            .collect();
-        lines.push(format!("{idx}. MCP 外部工具：{}；", names.join("、")));
-        idx += 1;
-    }
+
+    // 4. 技能工具（Skill 不注册进 registry，按 cfg 数据驱动——指引随任务注入）。
     if !cfg.skill_tools.is_empty() {
         let names: Vec<&str> = cfg
             .skill_tools
             .iter()
             .map(|t| t.skill_name.as_str())
             .collect();
-        lines.push(format!("{idx}. 技能工具：{}；", names.join("、")));
-        idx += 1;
+        caps.push(format!("技能工具：{}；", names.join("、")));
     }
-    // 本地插件（P2 纯增量，与 MCP/Skill 同款模式）：plugin_tools 为空时不出现该行。
-    // 存在插件时明确「优先直接调用」，避免规划员把任务规划成手写脚本重复实现插件功能
-    // （设计稿 §13 预判风险；真机 2026-09-16 首测暴露：planner 不知插件存在 → 规划成写 Python 脚本）。
-    if !cfg.plugin_tools.is_empty() {
-        let names: Vec<String> = cfg
-            .plugin_tools
-            .iter()
-            .map(|p| format!("custom__{}（{}）", p.identifier, p.description))
-            .collect();
-        lines.push(format!(
-            "{idx}. 本地插件工具（用户自定义函数，任务与其描述匹配时**必须优先直接调用对应 custom__ 工具**，\
-严禁手写脚本重复实现插件已有功能）：{}；",
-            names.join("、")
+
+    // 5. 本地插件：从 registry 派生 + 优先调用指导。
+    if !custom.is_empty() {
+        caps.push(format!(
+            "本地插件工具（用户自定义函数，任务与其描述匹配时**必须优先直接调用对应 custom__ 工具**，\
+             严禁手写脚本重复实现插件已有功能）：{}；",
+            list_of(&custom, "、")
         ));
+    }
+
+    let mut lines: Vec<String> = Vec::with_capacity(caps.len());
+    for (i, c) in caps.iter().enumerate() {
+        lines.push(format!("{}. {}", i + 1, c));
     }
     lines.join("\n")
 }
