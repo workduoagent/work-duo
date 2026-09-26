@@ -185,7 +185,11 @@ export function KbCiteMark({ cite, hits }: { cite?: string | number; hits?: KbHi
       <span className="kb-cite-pop">
         <span className="kb-cite-pop__src">{hit.originFilePath || '（未知源文件）'}</span>
         {hit.breadcrumbs && <span className="kb-cite-pop__crumbs">{hit.breadcrumbs}</span>}
-        <pre className="kb-cite-pop__content">{hit.content}</pre>
+        {/* 台账 S4 复查修复：此处曾用 <pre>，随引标嵌进 markdown 段落 <p> 时触发
+            React validateDOMNesting 警告（<p> 不允许嵌套块级 <pre>，任务结束聚合出
+            kbSources 后才渲染弹层，故报错时机总在回答结束时）。改用 <span> +
+            display:block + 既有 pre-wrap 样式，视觉与换行行为完全一致且 DOM 合法。 */}
+        <span className="kb-cite-pop__content">{hit.content}</span>
       </span>
     </span>
   )

@@ -298,6 +298,7 @@
 }
 
 .kb-cite-pop__content {
+  display: block; /* 原为 <pre>（块级），改 <span> 后在此补回块级布局（S4 复查：p 内禁嵌 pre） */
   margin: 0;
   white-space: pre-wrap;
   word-break: break-word;

@@ -488,9 +488,6 @@ export default function AgentChatPage() {
   const agentBusy = isRunning || isAgentRunning(agent?.id)
   const [loading, setLoading] = useState(true)
   const [messages, setMessages] = useState<ChatMessage[]>([])
-  // 每次从 DB 重载消息（切会话/切页回来）时自增，用于强制「流式回填」effect 重新把
-  // 运行态正文写进最后一条 agent 气泡（否则回到运行中会话时气泡会停在空的 DB 内容）。
-  const [msgEpoch, setMsgEpoch] = useState(0)
   const [input, setInput] = useState('')
   // 输入框高度（px）：默认 48，用户可从顶部拖拽手柄向上扩展，发送后复位。
   const [inputHeight, setInputHeight] = useState(48)
@@ -801,26 +798,48 @@ export default function AgentChatPage() {
   const lastPromptRef = useRef('')
   const lastTokensRef = useRef<{ input: number; output: number }>({ input: 0, output: 0 })
 
-  // 收到 agent-task-error 时，把错误挂到最后一条 agent 消息，渲染「错误诊断面板」
-  // （展示 + 复制 + 重试本轮/查看恢复面板，20260915006）。
-  useEffect(() => {
-    if (!taskError) return
-    setMessages((prev) => {
-      let realIdx = -1
-      for (let i = prev.length - 1; i >= 0; i--) {
-        if (prev[i].role === 'agent') {
-          realIdx = i
-          break
-        }
-      }
-      if (realIdx === -1) return prev
-      return prev.map((m, i) => (i === realIdx ? { ...m, error: taskError } : m))
-    })
-  }, [taskError])
+  /**
+   * 渲染期消息派生（台账 S4：消息流单一派生，歼灭双源回填三 hack）。
+   *
+   * messages 只承担「DB 快照 + 会话骨架」（欢迎语 / 乐观插入 / 终态固化），
+   * 运行态正文在**渲染时**合成进最后一条 agent 气泡——不再用 effect 把运行态
+   * 写回 messages（旧方案的三个 hack 全部源于「写回」这一步）：
+   *  - msgEpoch 强刷：回填 effect 依赖运行态值，DB 重载后值未变不重跑，只能手动
+   *    触发；派生 memo 直接依赖 messages 引用，重载即重算，hack 自然消失；
+   *  - hasLive 六条件守卫：回填 effect 在空运行态时会误覆盖 DB 快照，需要补丁
+   *    拦截；在派生里它是「无运行态就纯展示 DB」的自然分支，不是补丁；
+   *  - welcome 守卫：reset() 清空运行态会触发回填 effect 覆盖欢迎语；派生不写回
+   *    state，时序不再产生破坏，「欢迎语永不回填」退化为纯语义规则。
+   */
+  const displayMessages = useMemo<ChatMessage[]>(() => {
+    let base = messages
+    const last = base[base.length - 1]
+    const lastIsAgent = !!last && last.role === 'agent' && last.id !== 'welcome'
+    const hasLive =
+      isRunning ||
+      !!streamingText ||
+      thoughts.length > 0 ||
+      toolSteps.length > 0 ||
+      segments.length > 0 ||
+      kbSources.length > 0
+    if (hasLive && lastIsAgent) {
+      base = [
+        ...base.slice(0, -1),
+        { ...last, content: streamingText, thought: thoughts, toolSteps, segments, kbSources },
+      ]
+    }
+    // 错误诊断面板附加：独立于 hasLive——失败任务可能零流式产出（运行态全空），
+    // 此时也要把 taskError 挂到最后一条 agent 气泡上（20260915006）。
+    // 行为优于旧 effect：切会话回来后 store 里的 taskError 仍在 → 错误面板不再丢。
+    if (taskError && lastIsAgent) {
+      base = [...base.slice(0, -1), { ...base[base.length - 1], error: taskError }]
+    }
+    return base
+  }, [messages, isRunning, streamingText, thoughts, toolSteps, segments, kbSources, taskError])
 
   const lastAgentContent =
-    messages.length > 0 && messages[messages.length - 1].role === 'agent'
-      ? messages[messages.length - 1].content
+    displayMessages.length > 0 && displayMessages[displayMessages.length - 1].role === 'agent'
+      ? displayMessages[displayMessages.length - 1].content
       : ''
   // 气泡正文打字机（非 segments 旧分支/FilePathCards 消费）：30ms/字（≈33 字/秒，肉眼单字节奏），
   // 积压按比例追赶——原默认 10ms/字（100 字/秒）对长回复过快，用户反馈「一句句往外刷」。
@@ -1188,30 +1207,13 @@ export default function AgentChatPage() {
     })
   }, [input, isRunning, agent, run, workspaceDir, pendingAttachments, ensureRound, removedSkillIds, removedMcpIds, disabledMcpToolIds, removedPluginIds, mentionTags])
 
-  // 将 session 的流式文本/思考/工具步骤同步进「最后一条助手气泡」
-  useEffect(() => {
-    // 关键守卫：运行态为空且任务没在跑时**绝不回填**。
-    // 否则打开一个已完成的历史会话（或运行态已被清空的会话）时，会用空运行态覆盖
-    // 刚从数据库加载出来的正文 / 思考过程，导致「完成的正文和思考全没了」。
-    const hasLive =
-      isRunning ||
-      !!streamingText ||
-      thoughts.length > 0 ||
-      toolSteps.length > 0 ||
-      segments.length > 0 ||
-      kbSources.length > 0
-    if (!hasLive) return
-    setMessages((prev) => {
-      const last = prev[prev.length - 1]
-      // 欢迎语是静态提示，不参与流式回填：避免 reset() 清空 streamingText 后
-      // 把欢迎语覆盖成空内容，导致界面误显示「思考中…」
-      if (!last || last.role !== 'agent' || last.id === 'welcome') return prev
-      return [...prev.slice(0, -1), { ...last, content: streamingText, thought: thoughts, toolSteps, segments, kbSources }]
-    })
-    // msgEpoch：DB 重载消息后强制重新回填一次（回到运行中会话时正文可见）。
-  }, [streamingText, thoughts, toolSteps, segments, kbSources, isRunning, msgEpoch])
+  // 将 session 的流式文本/思考/工具步骤同步进「最后一条助手气泡」的效果已删除
+  // （台账 S4）：改由 displayMessages 渲染期派生承担，见上方 useMemo。
 
-  // 任务结束（完成/异常/取消）时，补全耗时、token 与历史持久化
+  // 任务结束（完成/异常/取消）时，补全耗时、token 与历史持久化。
+  // 【台账 S4 保留说明】终态「固化写回 messages」必须保留：displayMessages 派生只覆盖
+  // 最后一条气泡，而下一轮 send → beginRun 会清空运行态——若此刻历史气泡仍是骨架
+  // （content 空），上一轮正文会瞬间消失。固化后 messages 自含最终值，运行态清零不影响历史显示。
   useEffect(() => {
     if (prevIsRunningRef.current && !isRunning) {
       const completedAt = Date.now()
@@ -1422,7 +1424,6 @@ export default function AgentChatPage() {
         setPendingProjectId(sess?.projectId ?? null)
         const rounds = await listRounds(sessionId)
         setMessages(roundsToMessages(rounds))
-        setMsgEpoch((e) => e + 1) // 触发流式回填：运行中会话回来即显示已累计正文
         setMentionTags([]) // 切换会话清空 @提及 标签
         roundIndexRef.current = rounds.length
       } catch (e) {
@@ -1747,7 +1748,6 @@ export default function AgentChatPage() {
         setPendingProjectId(sess?.projectId ?? null)
         const rounds = await listRounds(prev)
         setMessages(roundsToMessages(rounds))
-        setMsgEpoch((e) => e + 1) // 触发流式回填：运行中会话回来即显示已累计正文
         roundIndexRef.current = rounds.length
         setActiveSessionId(prev)
       } catch {
@@ -2497,12 +2497,12 @@ export default function AgentChatPage() {
             lastScrollTopRef.current = st
           }}
         >
-          {messages.map((m, idx) => {
-            const isLastAgent = idx === messages.length - 1 && m.role === 'agent'
+          {displayMessages.map((m, idx) => {
+            const isLastAgent = idx === displayMessages.length - 1 && m.role === 'agent'
             const content = isLastAgent ? displayedContent : m.content
             const conversationMs =
-              m.completedAt && messages[0]?.createdAt
-                ? m.completedAt - messages[0].createdAt
+              m.completedAt && displayMessages[0]?.createdAt
+                ? m.completedAt - displayMessages[0].createdAt
                 : 0
             return (
               <div key={m.id} className={`agent-chat__msg agent-chat__msg--${m.role}`}>
