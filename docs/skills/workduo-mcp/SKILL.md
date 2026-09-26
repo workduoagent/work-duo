@@ -413,7 +413,7 @@ node scripts/kb_driver.mjs
 
 ## 集成核对清单
 
-- [ ] `tools/list` 返回 72 个工具（引擎 9 + 发现 7 + UI 55，含 P2 新增 agent_get_run_progress）。
+- [ ] `tools/list` 返回 84 个工具（引擎 16 + 发现 7 + UI 意图 54 + 服务器托管 6，与正文分层清单一致）。
 - [ ] 端口 18755 有监听；外部编程工具已成功连上该 MCP Server。
 - [ ] 绑定 KB 的 Agent 跑「kb_chunks 的 id 字段格式是什么？」→ trace events 出现 `native__kb_search`，reply 引用 KB。
 - [ ] `plugin_upsert` 编写插件后 `plugin_test` 返回 `ok:true`；前端插件列表可见。
