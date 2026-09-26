@@ -540,6 +540,73 @@ fn compact_token_threshold() -> u64 {
         .unwrap_or(COMPACT_TOKEN_THRESHOLD)
 }
 
+/// 单次压缩窗口的 token 上限（台账 D3②）：env `WD_COMPACT_WINDOW_TOKENS` 可调（≥4000），
+/// 默认 60_000。摘要输入过长会稀释摘要质量并放大成本——窗口在预算内尽量多吞、超限分批。
+const COMPACT_WINDOW_TOKENS: u64 = 60_000;
+
+fn compact_window_tokens() -> u64 {
+    std::env::var("WD_COMPACT_WINDOW_TOKENS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .map(|n| n.max(4_000))
+        .unwrap_or(COMPACT_WINDOW_TOKENS)
+}
+
+/// 从最旧未压缩轮起按 token 累计扩展压缩窗口（台账 D3②）。
+/// 「固定向前合并 2 轮」对巨型轮失效（2 轮可能 100k+ tokens，摘要输入过长稀释质量），
+/// 对微型轮又浪费（2 轮才 2k tokens，压缩频率过高）。窗口语义变为：
+/// **最少 `min_rounds` 轮（保底）+ token 预算内尽量多吞（上限）**。
+/// 返回 `(窗口末轮 index, 窗口估算 tokens)`；无轮可压时返回 `(range_start-1, 0)`。
+async fn plan_compact_window(
+    pool: &sqlx::SqlitePool,
+    session_id: &str,
+    range_start: i64,
+    min_rounds: i64,
+    token_cap: u64,
+) -> (i64, u64) {
+    let rows = sqlx::query(
+        "SELECT round_index, raw_messages_json FROM agent_conversation_round \
+         WHERE session_id = ? AND round_index >= ? \
+         ORDER BY round_index ASC",
+    )
+    .bind(session_id)
+    .bind(range_start)
+    .fetch_all(pool)
+    .await;
+    let rows = match rows {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::warn!("[Compactor] plan_compact_window: 读取轮次失败：{e}");
+            return (range_start + min_rounds - 1, 0);
+        }
+    };
+    let mut acc: u64 = 0;
+    let mut end = range_start - 1;
+    let mut count: i64 = 0;
+    for r in &rows {
+        let idx: i64 = r.try_get::<i64, _>("round_index").unwrap_or(0);
+        let raw: Option<String> = r
+            .try_get::<Option<String>, _>("raw_messages_json")
+            .ok()
+            .flatten();
+        let t = match raw.as_deref().map(serde_json::from_str::<Vec<serde_json::Value>>) {
+            Some(Ok(msgs)) => crate::agent::engine::token_estimate::estimate_messages_tokens(&msgs),
+            _ => raw.as_ref().map(|s| s.chars().count() as u64 / 4).unwrap_or(0),
+        };
+        // 最少轮数内强制吞入（保底）；此后「再吃一轮就超预算」即停。
+        if count >= min_rounds && acc + t > token_cap {
+            break;
+        }
+        acc += t;
+        end = idx;
+        count += 1;
+    }
+    if count == 0 {
+        return (range_start + min_rounds - 1, 0);
+    }
+    (end, acc)
+}
+
 /// 估算某会话中「尚未压缩进摘要」的轮次（round_index > last_compact）的累计 token 体量。
 /// 解析失败的 raw_messages_json 按 0 计（不阻断触发判定）；仅压缩判定路径调用，每轮一次。
 async fn estimate_pending_tokens(
@@ -645,11 +712,21 @@ pub(crate) async fn trigger_background_compaction(
     }
 
     let range_start = last_compact + 1;
-    let range_end = last_compact + compactor.roll_forward_count;
+    // 台账 D3②：窗口从「固定 roll_forward_count 轮」升级为「最少 roll_forward_count 轮
+    // 保底 + token 预算内尽量多吞」——巨型轮不再一次性塞爆摘要输入，微型轮不再频繁空转。
+    let (range_end, window_tokens) = plan_compact_window(
+        &pool,
+        session_id,
+        range_start,
+        compactor.roll_forward_count,
+        compact_window_tokens(),
+    )
+    .await;
     tracing::info!(
-        "[Compactor] 达到阈值，派发后台压缩：合并轮次 {}..={}（旧摘要={}）",
+        "[Compactor] 达到阈值，派发后台压缩：合并轮次 {}..={}（窗口约 {} tokens，旧摘要={}）",
         range_start,
         range_end,
+        window_tokens,
         old_summary
             .as_ref()
             .map(|s| format!("{}字符", s.chars().count()))
