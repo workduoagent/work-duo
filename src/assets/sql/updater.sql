@@ -579,3 +579,22 @@ CREATE INDEX IF NOT EXISTS idx_host_authz_log_server ON host_authz_log (server_i
 -- 首次连接记录服务器 SSH 主机键指纹（SHA-256/base64-nopad，russh_keys::PublicKey::fingerprint）；
 -- 后续连接比对：一致放行、不一致拒绝（中间人/服务器重装换键告警）。重置=置 NULL，下次连接重新记录。
 ALTER TABLE server_host ADD COLUMN known_key_fingerprint TEXT;
+
+
+-- ---------- v32：run 轨迹持久化（台账 D4） ----------
+CREATE TABLE IF NOT EXISTS agent_run_trace
+(
+    run_id            TEXT    PRIMARY KEY,
+    agent_id          TEXT,
+    session_id        TEXT,
+    started_at        INTEGER,
+    finished_at       INTEGER NOT NULL,
+    events_json       TEXT    NOT NULL,
+    thinking          TEXT,
+    reply             TEXT,
+    prompt_tokens     INTEGER,
+    completion_tokens INTEGER,
+    created_at        INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_agent_run_trace_session ON agent_run_trace (session_id, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_agent_run_trace_agent ON agent_run_trace (agent_id, started_at DESC);

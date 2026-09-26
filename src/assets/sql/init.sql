@@ -2,7 +2,7 @@
 -- Work Duo 本地数据库初始化脚本（DDL 单一事实源）
 -- 当前 schema 版本（台账 S11）：每次 DDL 变更时同步递增（与 updater.sql 末段版本号一致），
 -- SqlService.updateTables 读取此标记作为 user_version 封存目标。
--- SCHEMA_VERSION: 31
+-- SCHEMA_VERSION: 32
 -- 由 InitContext 在「每次启动」时幂等执行：
 --   - CREATE TABLE IF NOT EXISTS：表已存在则跳过，不会重建/丢数据；
 --   - INSERT OR IGNORE：种子已存在则跳过，不会重复插入。
@@ -854,3 +854,24 @@ CREATE TABLE IF NOT EXISTS host_authz_log
     created_at     INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_host_authz_log_server ON host_authz_log (server_id, created_at DESC);
+
+
+-- ---------- v32：run 轨迹持久化（台账 D4：Trajectory 回放数据底座） ----------
+-- RUN_TRACES 内存桶（CAP=128、重启即丢）的落盘归档：run 终态时全量事件流写入；
+-- agent_get_run_trace 内存 miss 时回退查本表 → 历史回放/交付包导出有据可查。
+CREATE TABLE IF NOT EXISTS agent_run_trace
+(
+    run_id            TEXT    PRIMARY KEY,
+    agent_id          TEXT,
+    session_id        TEXT,
+    started_at        INTEGER,
+    finished_at       INTEGER NOT NULL,
+    events_json       TEXT    NOT NULL,   -- 全事件流（按 ts 升序的 JSON 数组）
+    thinking          TEXT,
+    reply             TEXT,
+    prompt_tokens     INTEGER,
+    completion_tokens INTEGER,
+    created_at        INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_agent_run_trace_session ON agent_run_trace (session_id, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_agent_run_trace_agent ON agent_run_trace (agent_id, started_at DESC);

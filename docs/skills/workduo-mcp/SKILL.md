@@ -1,6 +1,6 @@
 ---
 name: workduo-mcp
-description: WorkDuo 桌面应用（Tauri2 + React19）内建 MCP Server 的集成指南。面向外部编程工具（AI IDE / Agent 框架等任意支持 MCP 的客户端），说明如何将 127.0.0.1:18755/mcp（Streamable HTTP）注册为标准 MCP Server，并以 UI 级真实链路驱动 WorkDuo 全模块（Agent 对话 / 本地插件 / 知识库 / 记忆宫殿 / 技能中心）。覆盖：83 个工具分层、UI 级各模块流程、插件脚本范式（scripts/）、已知坑与根因修复。
+description: WorkDuo 桌面应用（Tauri2 + React19）内建 MCP Server 的集成指南。面向外部编程工具（AI IDE / Agent 框架等任意支持 MCP 的客户端），说明如何将 127.0.0.1:18755/mcp（Streamable HTTP）注册为标准 MCP Server，并以 UI 级真实链路驱动 WorkDuo 全模块（Agent 对话 / 本地插件 / 知识库 / 记忆宫殿 / 技能中心）。覆盖：84 个工具分层、UI 级各模块流程、插件脚本范式（scripts/）、已知坑与根因修复。
 agent_created: true
 ---
 
@@ -34,7 +34,7 @@ MCP 客户端 **UI 级**驱动 WorkDuo 全模块。
 - 端点：`POST http://127.0.0.1:18755/mcp`（Streamable HTTP；可选 `GET /mcp` SSE）。
 - 开关：`app_config.mcp_server_enabled`（默认启用）、`mcp_server_port`（默认 18755）。改端口/开关需重启 WorkDuo。
 - 启动位置：`src-tauri/src/mcp_server.rs::start_mcp_server`，在 app setup 中以独立 std 线程监听。
-- 工具分层，共 **83** 个：引擎层(16，含 P2 新增 `agent_get_run_progress`、孤儿清扫 `agent_sweep_orphan_rounds`、压缩状态 `agent_session_compact_status`、P-4 `agent_project_ensure`/`agent_project_list`、D' `agent_snapshot_list`/`agent_snapshot_rollback`) + 模块发现层(7) + UI 意图层(54，含 Agent/会话 12 + 插件 8 + 知识库 15 + 记忆 9 + 技能 10) + 服务器托管层(6，Rust 直调 host::commands)。
+- 工具分层，共 **84** 个：引擎层(16，含 P2 新增 `agent_get_run_progress`、孤儿清扫 `agent_sweep_orphan_rounds`、压缩状态 `agent_session_compact_status`、P-4 `agent_project_ensure`/`agent_project_list`、D' `agent_snapshot_list`/`agent_snapshot_rollback`) + 模块发现层(7) + UI 意图层(54，含 Agent/会话 12 + 插件 8 + 知识库 15 + 记忆 9 + 技能 10) + 服务器托管层(6，Rust 直调 host::commands)。
 - **并发语义（P2-5，2026-09-23 明确）**：同一 Agent 同一时刻只有一个 run（per-agent 运行锁，第二个 `agent_run_task` 直接 Err「已有任务正在运行」）；**并行 = 多个 Agent 各自跑**（不同 Agent 互不影响）。需要并行跑多个任务时，为每个任务装配/复用一个独立 Agent（`agent_ui_create`）。
 - **工具轮分级（Batch C，2026-09-23）**：子任务工具轮预算基线 8（env `WD_SUBTASK_MAX_ITERATIONS`），带诊断回灌的修复型轮 +8（`WD_SUBTASK_REPAIR_EXTRA_ITERATIONS`）——修复型任务「跑测试→读码→改码→再跑测试」天然多轮，基线对其过紧（C-H1 实测）。
 - 引擎层 + 模块发现层由 Rust 直调；UI 意图层经 `mcp:intent` 派发到 `src/core/mcpBridge.ts` 真实 handler，
@@ -72,14 +72,14 @@ curl -s -X POST http://127.0.0.1:18755/mcp \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
 ```
 
-应返回含 83 个工具的 `tools` 数组（2026-09-25 起含服务器托管层 server_host_* / agent_server_bind）。
+应返回含 84 个工具的 `tools` 数组（2026-09-25 起含服务器托管层 server_host_* / agent_server_bind）。
 
 > 注意：部分客户端会缓存工具清单。若改过 Rust 后工具数/签名没刷新，**重新加载该 MCP Server 连接**即可；
 > 也可直接打上面的 `tools/list` 端点绕过缓存核对。
 
 ---
 
-## 工具清单（83 个，按层）
+## 工具清单（84 个，按层）
 
 ### A. 引擎层（Rust 直调，无需前端）
 | 工具 | 作用 | 关键入参 |
@@ -93,6 +93,7 @@ curl -s -X POST http://127.0.0.1:18755/mcp \
 | `agent_cancel_task` | 取消指定 Agent 的当前任务 | `agentId?` |
 | `agent_get_run_logs` | 增量读 Rust 运行日志 | `cursor` / `since_ts` / `level` / `limit` |
 | `agent_get_run_trace` | 取**指定 run** 的轨迹缓冲；**返回外层是 `{"run_id":..., "trace":{...}}` 包裹**，取字段须先剥 `trace` 层：`r.trace.{events, thinking, reply, counts}`。#8 per-run：必须传 `run_id`（由 `agent_run_task` 返回的 `run_id`），按 run 取独立桶，**并发 run 互不串台**；不传则返回空桶 | `run_id`（必填，来自 `agent_run_task` 返回） |
+| `agent_get_run_history` | **历史 run 归档索引（台账 D4）**：按 `session_id`/`agent_id` 过滤（至少传一个）列 `agent_run_trace` 落盘表（v32），started_at 倒序默认 20 条；每条含 run_id / reply 首行 / tokens / 事件数——先选 run 再用 `agent_get_run_trace` 回放完整时间线（trace 内存 miss 自动回退查 DB，同一工具即可回放历史） | `session_id` 或 `agent_id`（至少一个），`limit` 可选 |
 | `agent_get_run_progress` | **长任务进度观测（P2-1）**：轮询这个而非干等。返回 `{status, elapsedSec, budgetSec, step, totalSteps, stepTitle, lastTool}`——elapsedSec 逼近 budgetSec 即将进入预算软窗口（最后 30s 停止发起新步骤）。step/totalSteps 来自规划事件（SIMPLE_CHAT 为 0/0） | `run_id`（必填） |
 | `agent_sweep_orphan_rounds` | **孤儿轮次按需清扫**：并发/取消/崩溃遗留 end_time IS NULL 轮次，此前仅启动时清扫；返回 {ok, swept}。用途：并发/取消后调用并断言无残留「进行中」轮次 | 无入参 |
 | `agent_session_compact_status` | 会话滚动压缩状态+成本观测：{totalTurns,summaryRoundCount,pendingUncompacted,triggerThreshold(5),willTriggerNext,summaryChars,tokens{prompt,completion,tools},projectBound}；pendingUncompacted≥5 触发后台压缩；projectBound=false 时 .wd_mem/sessions 文件轨不落盘 | `sessionId` |

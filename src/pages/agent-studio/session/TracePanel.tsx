@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Bot, GitBranch, Sparkles, Wrench, ShieldAlert, CheckCircle2, XCircle, Loader2, ChevronRight, ChevronDown, AlertTriangle, RefreshCw } from 'lucide-react'
+import { Bot, GitBranch, Sparkles, Wrench, ShieldAlert, CheckCircle2, XCircle, Loader2, ChevronRight, ChevronDown, AlertTriangle, RefreshCw, History } from 'lucide-react'
 import { MarkdownRenderer } from '@/components/markdown/MarkdownRenderer'
 import type { IntentClassified, PlanStep, ThinkingChunk, ToolStep } from './types'
+import { listRunTraces, getRunTrace, type RunTraceIndexItem, type RunTraceFull } from '@/core/mapper/agent-run-trace-mapper'
 
 interface TracePanelProps {
   intent?: IntentClassified
@@ -10,6 +11,8 @@ interface TracePanelProps {
   toolSteps: ToolStep[]
   /** #20260919003：任务启动 → 规划就绪的窗口期，空态显示「正在启动」占位而非静态文案。 */
   planning?: boolean
+  /** 台账 D4：当前会话 id——提供时启用「历史运行回放」下拉（查 agent_run_trace 归档）。 */
+  sessionId?: string
 }
 
 const LAYER_META: Record<ThinkingChunk['layer'], { label: string; color: string }> = {
@@ -99,11 +102,42 @@ function useTypedText(text: string, active: boolean, groupKey: number) {
   return shown
 }
 
-export function TracePanel({ intent, thinking, planSteps, toolSteps, planning = false }: TracePanelProps) {
+export function TracePanel({ intent, thinking, planSteps, toolSteps, planning = false, sessionId }: TracePanelProps) {
   // 工具调用默认折叠：工具调用很多时全部展开会撑高右栏，默认收起、点击标题展开。
   const [toolsOpen, setToolsOpen] = useState(false)
   // 规划步骤默认全部展开（让用户看到每步详情）；单步可独立收叠。
   const [stepCollapsed, setStepCollapsed] = useState<Record<number, boolean>>({})
+  // 台账 D4：历史运行回放——null=当前运行；选中归档 run 时加载落盘事件渲染简版时间线。
+  const [history, setHistory] = useState<RunTraceIndexItem[] | null>(null)
+  const [replay, setReplay] = useState<RunTraceFull | null>(null)
+  const [replayLoading, setReplayLoading] = useState(false)
+
+  useEffect(() => {
+    if (!sessionId) return
+    let alive = true
+    listRunTraces({ sessionId, limit: 20 })
+      .then((rows) => {
+        if (alive && rows.length > 0) setHistory(rows)
+      })
+      .catch(() => {})
+    return () => {
+      alive = false
+    }
+  }, [sessionId])
+
+  const loadReplay = async (runId: string) => {
+    if (runId === '__current__') {
+      setReplay(null)
+      return
+    }
+    setReplayLoading(true)
+    try {
+      setReplay(await getRunTrace(runId))
+    } finally {
+      setReplayLoading(false)
+    }
+  }
+
   const hasData = intent || thinking.length > 0 || planSteps.length > 0 || toolSteps.length > 0
 
   const toggleStep = (step: number) => {
@@ -151,6 +185,66 @@ export function TracePanel({ intent, thinking, planSteps, toolSteps, planning = 
 
   return (
     <div className="agent-trace">
+      {/* 台账 D4：历史运行回放（有归档时显示；选中后本面板切换为落盘事件时间线） */}
+      {history && history.length > 0 && (
+        <section className="agent-trace__section">
+          <div className="agent-trace__section-head">
+            <History size={13} />
+            <span>历史运行</span>
+          </div>
+          <select
+            className="agent-trace__replay-select"
+            value={replay?.runId ?? '__current__'}
+            onChange={(e) => void loadReplay(e.target.value)}
+          >
+            <option value="__current__">当前运行</option>
+            {history.map((h) => (
+              <option key={h.runId} value={h.runId}>
+                {new Date(h.startedAt ?? h.finishedAt).toLocaleTimeString()} ·{' '}
+                {h.replyHead.slice(0, 24) || '(无正文)'} · {h.eventCount} 事件
+              </option>
+            ))}
+          </select>
+          {replayLoading && <div className="agent-trace__replay-hint">加载中…</div>}
+        </section>
+      )}
+
+      {replay ? (
+        <section className="agent-trace__section">
+          <div className="agent-trace__section-head">
+            <Bot size={13} />
+            <span>回放时间线（{replay.events.length} 事件 · {replay.counts.promptTokens}+{replay.counts.completionTokens} tokens）</span>
+          </div>
+          <div className="agent-trace__replay">
+            {replay.events.map((e, i) => {
+              const p = e.payload as Record<string, unknown> | undefined
+              const type = String(p?.type ?? e.event ?? '?')
+              const summary =
+                type === 'tool_started' || type === 'tool_finished'
+                  ? String((p?.step as Record<string, unknown> | undefined)?.toolName ?? '')
+                  : type === 'status'
+                    ? String(p?.message ?? '')
+                    : type === 'host_exec_output'
+                      ? String((p?.hostOutput as Record<string, unknown> | undefined)?.chunk ?? '').trim()
+                      : ''
+              return (
+                <div key={i} className="agent-trace__replay-row">
+                  <span className="agent-trace__replay-idx">{i + 1}</span>
+                  <span className="agent-trace__replay-type">{type}</span>
+                  <span className="agent-trace__replay-sum">{summary.slice(0, 80)}</span>
+                </div>
+              )
+            })}
+            {replay.reply && (
+              <div className="agent-trace__replay-reply">
+                <div className="agent-trace__block-title">最终回复</div>
+                <MarkdownRenderer content={replay.reply} className="agent-trace__plan-card-md" />
+              </div>
+            )}
+          </div>
+        </section>
+      ) : (
+        <>
       {/* 意图分类节点 */}
       {intent && (
         <section className="agent-trace__section">
@@ -292,6 +386,8 @@ export function TracePanel({ intent, thinking, planSteps, toolSteps, planning = 
             </div>
           )}
         </section>
+      )}
+        </>
       )}
     </div>
   )

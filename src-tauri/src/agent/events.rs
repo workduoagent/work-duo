@@ -6,6 +6,7 @@
 //!  - `agent-task-done`：整轮任务结束；
 //!  - `agent-task-error`：整轮任务异常终止。
 
+use sqlx::Row;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -56,6 +57,9 @@ struct RunTrace {
     /// 供 MCP `agent_get_run_trace` 成本观测——此前 counts 只有字符数，成本观测断）。
     prompt_tokens: u64,
     completion_tokens: u64,
+    /// 归属上下文（台账 D4 落盘用）：spawn 顶层经 set_trace_context 注入。
+    agent_id: Option<String>,
+    session_id: Option<String>,
 }
 
 /// per-run 轨迹缓冲表：run_id → 缓冲。进程级，并发 run 各自独立桶。
@@ -247,6 +251,121 @@ pub fn get_trace(run_id: &str) -> serde_json::Value {
             "completion_tokens": buckets.1,
         },
     })
+}
+
+/// 归属上下文注入（台账 D4 落盘用）：run spawn 顶层（commands.rs 两处 reset_trace 后）
+/// 调用，使终态落盘的轨迹行带上 agent_id / session_id（历史回放按会话/智能体检索）。
+pub fn set_trace_context(run_id: &str, agent_id: Option<String>, session_id: Option<String>) {
+    with_run_trace_mut(run_id, |b| {
+        b.agent_id = agent_id;
+        b.session_id = session_id;
+    });
+}
+
+/// 终态落盘（台账 D4-1）：把内存桶全量事件流归档进 `agent_run_trace`。
+/// 由 emit_task_done spawn 异步执行（不阻塞终态推送）；重复终态经
+/// `INSERT OR REPLACE` 幂等（后写覆盖前写，保留最后一次终态快照）。
+async fn persist_finished_trace(app: AppHandle, run_id: String) {
+    let snapshot = {
+        let map = run_traces().lock().unwrap_or_else(|e| e.into_inner());
+        match map.get(&run_id) {
+            Some(b) => Some((
+                b.events.clone(),
+                b.thinking.clone(),
+                b.reply.clone(),
+                b.started_at,
+                b.prompt_tokens,
+                b.completion_tokens,
+                b.agent_id.clone(),
+                b.session_id.clone(),
+            )),
+            None => None,
+        }
+    };
+    let Some((events, thinking, reply, started_at, p_tok, c_tok, agent_id, session_id)) = snapshot
+    else {
+        return;
+    };
+    if events.is_empty() {
+        return; // 空桶（无事件）不值得归档
+    }
+    let pool = match crate::agent::engine::round_compactor::get_pool(&app).await {
+        Ok(p) => p,
+        Err(e) => {
+            tracing::warn!("[events] persist_finished_trace: 取池失败（本次 run 不落盘）：{e}");
+            return;
+        }
+    };
+    let events_json = match serde_json::to_string(&events) {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::warn!("[events] persist_finished_trace: 序列化失败：{e}");
+            return;
+        }
+    };
+    let finished_at = now_ms();
+    let r = sqlx::query(
+        "INSERT OR REPLACE INTO agent_run_trace \
+         (run_id, agent_id, session_id, started_at, finished_at, events_json, thinking, reply, prompt_tokens, completion_tokens, created_at) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind(&run_id)
+    .bind(&agent_id)
+    .bind(&session_id)
+    .bind(started_at)
+    .bind(finished_at)
+    .bind(&events_json)
+    .bind(&thinking)
+    .bind(&reply)
+    .bind(p_tok as i64)
+    .bind(c_tok as i64)
+    .bind(finished_at)
+    .execute(&pool)
+    .await;
+    match r {
+        Ok(_) => tracing::info!(
+            "[events] run 轨迹已落盘：run={} events={} reply={}字符 tokens=({},{})",
+            run_id,
+            events.len(),
+            reply.chars().count(),
+            p_tok,
+            c_tok
+        ),
+        Err(e) => tracing::warn!("[events] run 轨迹落盘失败（run={}）：{e}", run_id),
+    }
+}
+
+/// 历史 run 轨迹兜底读取（台账 D4-1）：内存桶 miss（重启/被淘汰）时查 `agent_run_trace`。
+/// 返回与 get_trace 同构的 JSON；查无返回 None（调用方自行回退空桶）。
+pub async fn get_trace_from_db(app: &AppHandle, run_id: &str) -> Option<serde_json::Value> {
+    let pool = crate::agent::engine::round_compactor::get_pool(app).await.ok()?;
+    let row = sqlx::query(
+        "SELECT events_json, thinking, reply, prompt_tokens, completion_tokens \
+         FROM agent_run_trace WHERE run_id = ?",
+    )
+    .bind(run_id)
+    .fetch_optional(&pool)
+    .await
+    .ok()
+    .flatten()?;
+    let events_json: String = row.try_get("events_json").ok()?;
+    let events: Vec<serde_json::Value> = serde_json::from_str(&events_json).unwrap_or_default();
+    let thinking: String = row.try_get("thinking").ok().unwrap_or_default();
+    let reply: String = row.try_get("reply").ok().unwrap_or_default();
+    let p_tok: i64 = row.try_get("prompt_tokens").ok().unwrap_or(0);
+    let c_tok: i64 = row.try_get("completion_tokens").ok().unwrap_or(0);
+    Some(serde_json::json!({
+        "events": events,
+        "thinking": thinking,
+        "reply": reply,
+        "counts": {
+            "events": events.len(),
+            "thinking_chars": thinking.chars().count(),
+            "reply_chars": reply.chars().count(),
+            "prompt_tokens": p_tok,
+            "completion_tokens": c_tok,
+        },
+    }))
 }
 
 /// 引擎终态回填用（2026-09-21，#8 per-run）：指定 run 的思考累计快照（只读不清空，get_run_trace 仍可用）。
@@ -553,6 +672,13 @@ pub fn emit_task_done(app: &AppHandle, prompt_tokens: u64, completion_tokens: u6
     with_run_trace_mut(&rid, |b| {
         b.prompt_tokens = prompt_tokens;
         b.completion_tokens = completion_tokens;
+    });
+    // 台账 D4-1：终态异步落盘（agent_run_trace）——不阻塞终态推送；
+    // app clone 进后台 Task（Send + 'static）。
+    let app_bg = app.clone();
+    let rid_bg = rid.clone();
+    tauri::async_runtime::spawn(async move {
+        persist_finished_trace(app_bg, rid_bg).await;
     });
     emit(
         app,

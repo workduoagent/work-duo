@@ -193,6 +193,13 @@ pub async fn run_agent_task(
     // 锁已在上方入口处抢占（running_guard）：跨 spawn 持有，run_task 任意出口
     // （正常 / 取消 / panic）自动复位 running 并回收状态束；本处不再抢锁。
     events::reset_trace(&internal_rid); // #8 per-run：重置该 run 的轨迹桶
+    // 台账 D4：注入归属上下文——终态落盘（agent_run_trace）的轨迹行带 agent/session，
+    // 历史回放可按会话/智能体检索（spawn 顶层同步调用，桶内可见）。
+    events::set_trace_context(
+        &internal_rid,
+        Some(input.agent_id.clone()),
+        input.session_id.clone(),
+    );
     tauri::async_runtime::spawn(async move {
         let _running_guard = running_guard;
         // #8 per-run：当前任务的所有 emit 点经 task_local 落到 internal_rid 桶，并发 run 互不串台。
@@ -346,6 +353,8 @@ pub async fn run_task_ex(
     let rid = run_id.clone();
 
     events::reset_trace(&rid); // #8 per-run：重置该 run 的轨迹桶
+    // 台账 D4：同上——归属上下文注入（run_task_ex / MCP 链路）。
+    events::set_trace_context(&rid, Some(cfg.agent_id.clone()), cfg.session_id.clone());
     // 超时/取消/预算标志（P0-1+P1-2，2026-09-23）：registry 终态区分 done / error / cancelled，
     // 且非正常终态必须带结构化 error（否则观测上分不清「正常完成/被终止/被取消」，违反支柱③）。
     let timed_out = std::sync::Arc::new(AtomicBool::new(false));

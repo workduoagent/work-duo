@@ -554,8 +554,96 @@ async fn call_tool(app: &AppHandle, name: &str, args: &Value) -> Value {
             // get_run_logs 只回 Rust tracing 日志、不含思考/轨迹/正文；本工具补上事件流视角，
             // 用于判断「整链哪里断」：plan / step / tool / intent / status / task_done 全在 events，
             // 思考过程在 thinking，正文回复在 reply。
+            // 台账 D4-1：内存桶 miss（重启/被 128 上限淘汰）时回退查 agent_run_trace 落盘归档
+            // ——同一工具即获得「历史回放」能力，调用方无感知。
             let run_id = args.get("run_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            json!({ "run_id": run_id, "trace": events::get_trace(&run_id) })
+            let trace = {
+                let mem = events::get_trace(&run_id);
+                let empty = mem
+                    .get("events")
+                    .and_then(|v| v.as_array())
+                    .map(|a| a.is_empty())
+                    .unwrap_or(true);
+                if empty {
+                    match events::get_trace_from_db(app, &run_id).await {
+                        Some(db_trace) => db_trace,
+                        None => mem,
+                    }
+                } else {
+                    mem
+                }
+            };
+            json!({ "run_id": run_id, "trace": trace })
+        }
+        "agent_get_run_history" => {
+            // 台账 D4-2：历史 run 归档索引——session/agent 过滤 + started_at 倒序。
+            // 与 agent_get_run_trace（完整时间线）配套：先选 run，再回放。
+            use sqlx::Row;
+            let session_id = args.get("session_id").and_then(|v| v.as_str()).filter(|s| !s.trim().is_empty());
+            let agent_id = args.get("agent_id").and_then(|v| v.as_str()).filter(|s| !s.trim().is_empty());
+            if session_id.is_none() && agent_id.is_none() {
+                return json!({ "error": "session_id 与 agent_id 至少传一个（防止全表扫描）" });
+            }
+            let limit = args
+                .get("limit")
+                .and_then(|v| v.as_u64())
+                .map(|n| n.clamp(1, 100))
+                .unwrap_or(20);
+            let pool = match crate::agent::engine::round_compactor::get_pool(app).await {
+                Ok(p) => p,
+                Err(e) => return json!({ "error": format!("取池失败：{e}") }),
+            };
+            let mut sql = String::from(
+                "SELECT run_id, agent_id, session_id, started_at, finished_at, reply, prompt_tokens, completion_tokens, events_json \
+                 FROM agent_run_trace WHERE ",
+            );
+            let mut conditions: Vec<String> = Vec::new();
+            if session_id.is_some() {
+                conditions.push("session_id = ?".into());
+            }
+            if agent_id.is_some() {
+                conditions.push("agent_id = ?".into());
+            }
+            sql.push_str(&conditions.join(" AND "));
+            sql.push_str(" ORDER BY started_at DESC LIMIT ");
+            sql.push_str(&limit.to_string());
+            let mut q = sqlx::query(&sql);
+            if let Some(s) = session_id {
+                q = q.bind(s);
+            }
+            if let Some(a) = agent_id {
+                q = q.bind(a);
+            }
+            match q.fetch_all(&pool).await {
+                Ok(rows) => {
+                    let items: Vec<serde_json::Value> = rows
+                        .iter()
+                        .map(|r| {
+                            let reply: String = r.try_get::<Option<String>, _>("reply").ok().flatten().unwrap_or_default();
+                            let first_line = reply.lines().next().unwrap_or("").to_string();
+                            let events_json: String = r
+                                .try_get::<Option<String>, _>("events_json")
+                                .ok()
+                                .flatten()
+                                .unwrap_or_default();
+                            let event_count = events_json.matches("\"type\"").count();
+                            json!({
+                                "run_id": r.try_get::<String, _>("run_id").unwrap_or_default(),
+                                "agent_id": r.try_get::<Option<String>, _>("agent_id").ok().flatten(),
+                                "session_id": r.try_get::<Option<String>, _>("session_id").ok().flatten(),
+                                "started_at": r.try_get::<Option<i64>, _>("started_at").ok().flatten(),
+                                "finished_at": r.try_get::<i64, _>("finished_at").unwrap_or(0),
+                                "reply_head": first_line.chars().take(120).collect::<String>(),
+                                "prompt_tokens": r.try_get::<Option<i64>, _>("prompt_tokens").ok().flatten().unwrap_or(0),
+                                "completion_tokens": r.try_get::<Option<i64>, _>("completion_tokens").ok().flatten().unwrap_or(0),
+                                "event_count": event_count,
+                            })
+                        })
+                        .collect();
+                    json!({ "items": items, "count": items.len() })
+                }
+                Err(e) => json!({ "error": format!("查询失败：{e}") }),
+            }
         }
         "agent_session_compact_status" => session_compact_status(app, &args).await,
         "agent_get_run_progress" => {
@@ -1104,8 +1192,22 @@ assistantAnswer/thinkingContent——否则 agent_conversation_round 的正文�
 thinking（累计思考过程）、reply（累计正文回复）、counts（各维度计数）。\n\
 用途：判断「整链哪里断」——例如 events 里有没有 plan_generated、step 卡在哪、thinking 是否出现、reply 是否为空。\n\
 #8 per-run：必须传 run_id（由 run_task_ex 返回的 run_id），按 run 取独立桶，并发 run 互不串台；不传则取空桶。\
-须在 wait_task 返回 done 后调用，且须用启动该 run 的同一 run_id。",
+须在 wait_task 返回 done 后调用，且须用启动该 run 的同一 run_id。\n\
+台账 D4：内存桶 miss（App 重启 / 超出 128 上限淘汰）时自动回退查落盘归档（agent_run_trace）——\
+同一工具即可回放历史 run 的完整轨迹。",
             json!({ "type": "object", "properties": { "run_id": { "type": "string", "description": "run_task_ex 返回的运行 id；不传则返回空轨迹桶" } }, "required": ["run_id"] }),
+        ),
+        tool(
+            "agent_get_run_history",
+            "台账 D4：列出历史 run 的归档索引（agent_run_trace 落盘表）。\n\
+按 session_id 或 agent_id 过滤（两者至少传一个），按 started_at 倒序，默认返回最近 20 条。\n\
+每条含 run_id / started_at / finished_at / reply 首行摘要 / token 用量 / 事件数——\
+用于「回放历史任务轨迹」时先选 run，再以 agent_get_run_trace 取完整时间线。",
+            json!({ "type": "object", "properties": {
+                "session_id": { "type": "string", "description": "按会话过滤（推荐，与 agent_session_create 返回的 id 对应）" },
+                "agent_id": { "type": "string", "description": "按智能体过滤" },
+                "limit": { "type": "integer", "description": "返回条数上限，默认 20，上限 100" }
+            } }),
         ),
         tool(
             "agent_session_compact_status",

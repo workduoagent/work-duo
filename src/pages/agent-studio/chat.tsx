@@ -2945,6 +2945,7 @@ commandActionRef.current = (key: string) => {
                 planSteps={planSteps}
                 toolSteps={toolSteps}
                 planning={session.planning}
+                sessionId={activeSessionId ?? undefined}
               />
             ) : rightTab === 'actions' ? (
               <DecisionCenter
