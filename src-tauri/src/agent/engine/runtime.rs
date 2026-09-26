@@ -69,10 +69,6 @@ pub(crate) fn run_wall_clock_limit() -> Duration {
 }
 
 /// 工具返回结果物理截断阈值（字符）。防止超大输出撑爆上下文、无谓消耗 Token。
-/// 敏感工具审批挂起超时（秒）。用户不点弹窗时避免任务永久挂起；
-/// 超时与「停止」(`cancel_all` drop Sender) 都收敛到拒绝分支，不新增状态通路。
-const APPROVAL_TIMEOUT_SECS: u64 = 300;
-
 /// 单 Agent 任务级状态束（20260919002 per-agent 隔离）。
 ///
 /// 取消标志 / 审批挂起 / 步骤恢复 / 方案推荐 / 计划审批 / 授权集 / 工具注册表
