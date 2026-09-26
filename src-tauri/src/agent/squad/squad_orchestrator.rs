@@ -445,7 +445,7 @@ async fn run_member_subtask(
 
     // 台账 S6：注册链与能力大纲同源——成员子任务规划与单 Agent run_task 共用 build_full_registry。
     let registry = crate::agent::engine::runtime::build_full_registry(app, &cfg);
-    let (plan, _, _) = planner::build_plan(&cfg, prompt, Some(workspace), None, &registry).await;
+    let (plan, _, _) = planner::build_plan(&cfg, prompt, Some(workspace), None, &registry, None).await;
 
     // 图驱动：为每个成员子任务打开独立实体图（按 workspace + 成员 id 区分会话），
     // 规划写入图，运行时状态由图承载，与单 Agent 路径一致。

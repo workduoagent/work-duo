@@ -15,7 +15,10 @@
 //! 装配（读路径）由 `build_request_messages` 完成：system + 摘要 + 活跃窗口轮次(restore) + 当前。
 //! 压缩（写路径）由 `trigger_background_compaction` 完成：每 `trigger_threshold`(5) 个未压缩轮次
 //! 触发一次，向前滚动合并 `roll_forward_count`(2) 个旧轮次进 `summary`，`summary_round_count`
-//! （= last_compact_turn）随之推进。
+//! 随之推进。**0-based 区间语义（2026-09-26 定版）**：round_index 自 0 起（前端 roundIndexRef
+//! 初始 0、恢复时 rounds.length），`summary_round_count` =「下一个未压缩 round_index」=
+//! 已压缩轮数；活跃窗口查询用 `round_index >= summary_round_count`，压缩窗口用
+//! `[summary_round_count, +roll_forward_count)`，写回值为窗口末 index。
 
 use serde_json::json;
 use serde_json::Value;
@@ -563,14 +566,16 @@ async fn plan_compact_window(
     range_start: i64,
     min_rounds: i64,
     token_cap: u64,
+    max_end: i64,
 ) -> (i64, u64) {
     let rows = sqlx::query(
         "SELECT round_index, raw_messages_json FROM agent_conversation_round \
-         WHERE session_id = ? AND round_index >= ? \
+         WHERE session_id = ? AND round_index >= ? AND round_index <= ? \
          ORDER BY round_index ASC",
     )
     .bind(session_id)
     .bind(range_start)
+    .bind(max_end)
     .fetch_all(pool)
     .await;
     let rows = match rows {
@@ -607,19 +612,23 @@ async fn plan_compact_window(
     (end, acc)
 }
 
-/// 估算某会话中「尚未压缩进摘要」的轮次（round_index > last_compact）的累计 token 体量。
+/// 估算某会话中「尚未压缩进摘要」轮次（round_index ∈ [last_compact, max_end]，0-based 区间
+/// 语义 + 压缩保护窗上界）的累计 token 体量。
 /// 解析失败的 raw_messages_json 按 0 计（不阻断触发判定）；仅压缩判定路径调用，每轮一次。
 async fn estimate_pending_tokens(
     pool: &sqlx::SqlitePool,
     session_id: &str,
     last_compact: i64,
+    max_end: i64,
 ) -> u64 {
     let rows = sqlx::query(
         "SELECT raw_messages_json FROM agent_conversation_round \
-         WHERE session_id = ? AND round_index > ? AND raw_messages_json IS NOT NULL AND raw_messages_json != ''",
+         WHERE session_id = ? AND round_index >= ? AND round_index <= ? \
+           AND raw_messages_json IS NOT NULL AND raw_messages_json != ''",
     )
     .bind(session_id)
     .bind(last_compact)
+    .bind(max_end)
     .fetch_all(pool)
     .await;
     let rows = match rows {
@@ -649,7 +658,8 @@ async fn estimate_pending_tokens(
 ///
 /// 读取会话 `total_turns` 与 `summary_round_count`，计算未压缩轮数
 /// `pending = total_turns - summary_round_count`；达到 `trigger_threshold` 即派发
-/// Tokio 异步任务，向前合并 `[summary_round_count+1 .. +roll_forward_count]` 轮进摘要，
+/// Tokio 异步任务，向前合并 `[summary_round_count .. +roll_forward_count)` 轮进摘要
+/// （0-based 区间，summary_round_count = 下一个未压缩 round_index），
 /// 并原子推进 `summary_round_count`。调用方（run_task）在 ReAct 循环结束后立即返回，
 /// 真正的压缩 HTTP 请求在后台 Task 中独立运行，**不阻塞用户下一轮提问**。
 #[tracing::instrument(skip_all)]
@@ -691,16 +701,26 @@ pub(crate) async fn trigger_background_compaction(
 
     // 每轮触发阈值与滚动步长由 CompactorConfig 默认配置决定（规范：每 5 轮触发、向前合并 2 轮）。
     let compactor = CompactorConfig::default();
+    // 压缩保护窗（2026-09-26 指代断链修复）：最近 KEEP_RECENT_ROUNDS 轮原文**永不进压缩**
+    // ——带图/大对象轮一旦退出活跃窗口，后续「这个图 / 上面说的国家」指代即断链
+    // （实测：带图第一问 65k tokens（base64 虚高已由 token_estimate 修正）一轮即触发压缩，
+    // 第二问模型只剩 312 字符摘要可用）。轮次总数增长后保护窗自然前移，早期轮次照常滚动压缩。
+    const KEEP_RECENT_ROUNDS: i64 = 2;
+    // 可压缩区间的 inclusive 上界（0-based round_index）：越过保护窗的最后可压轮。
+    let max_compressible_end = total_turns - 1 - KEEP_RECENT_ROUNDS;
     let pending = total_turns.saturating_sub(last_compact);
     tracing::info!(
-        "[Compactor] 触发判定：session={} total_turns={} 已压缩至={} 未压缩={} 阈值={}",
-        session_id, total_turns, last_compact, pending, compactor.trigger_threshold
+        "[Compactor] 触发判定：session={} total_turns={} 已压缩至={} 未压缩={} 阈值={} 保护最近{}轮",
+        session_id, total_turns, last_compact, pending, compactor.trigger_threshold, KEEP_RECENT_ROUNDS
     );
     if pending < compactor.trigger_threshold {
         // 台账 S7：token 体量优先触发——巨型任务可能 2~3 轮就吃掉大半个上下文窗口，
-        // 不能死等 5 轮计数。未压缩轮累计 token 估算 ≥ 阈值（env 可调）即提前触发。
+        // 不能死等 5 轮计数。未压缩**可压缩区间**（不含保护窗）累计 token ≥ 阈值即提前触发。
+        if max_compressible_end < last_compact {
+            return; // 可压缩区间为空（全部在保护窗内），本次不压缩
+        }
         let pending_tokens =
-            estimate_pending_tokens(&pool, session_id, last_compact).await;
+            estimate_pending_tokens(&pool, session_id, last_compact, max_compressible_end).await;
         let threshold = compact_token_threshold();
         if pending_tokens < threshold {
             return; // 轮次与体量均未达阈值，本次不压缩（零阻塞返回）
@@ -711,15 +731,20 @@ pub(crate) async fn trigger_background_compaction(
         );
     }
 
-    let range_start = last_compact + 1;
+    // 0-based 区间语义（2026-09-26 修复）：summary_round_count =「下一个未压缩 round_index」
+    // = 已压缩轮数。旧 `last_compact + 1` 配合前端 0-based round_index 会把 round0 永久
+    // 排除在压缩与上下文之外（孤儿轮：既不进活跃窗口，也从不进摘要）。
+    let range_start = last_compact;
     // 台账 D3②：窗口从「固定 roll_forward_count 轮」升级为「最少 roll_forward_count 轮
     // 保底 + token 预算内尽量多吞」——巨型轮不再一次性塞爆摘要输入，微型轮不再频繁空转。
+    // 吞轮上界受保护窗约束（不吞最近 KEEP_RECENT_ROUNDS 轮）。
     let (range_end, window_tokens) = plan_compact_window(
         &pool,
         session_id,
         range_start,
         compactor.roll_forward_count,
         compact_window_tokens(),
+        max_compressible_end,
     )
     .await;
     tracing::info!(
@@ -732,6 +757,10 @@ pub(crate) async fn trigger_background_compaction(
             .map(|s| format!("{}字符", s.chars().count()))
             .unwrap_or_else(|| "无".into()),
     );
+    // 无轮可压（含保护窗吞没全部未压缩轮的情形）：不派发，避免后台空跑并误推进指针。
+    if range_end < range_start {
+        return;
+    }
 
     // 复制到后台 Task 拥有（Send + 'static）。
     let app_bg = app.clone();
@@ -784,6 +813,17 @@ pub(crate) async fn trigger_background_compaction(
                     .unwrap_or_default(),
             })
             .collect();
+
+        // 区间为空：不生成摘要、不推进 summary_round_count（防指针越过未压缩轮次）。
+        if rounds.is_empty() {
+            tracing::warn!(
+                "[Compactor] 待压缩区间 {}..={} 为空，跳过本次压缩（session={}）",
+                range_start,
+                range_end,
+                sid
+            );
+            return;
+        }
 
         match execute_summary_call(&cfg_bg, old_summary.as_deref(), &rounds).await {
             Ok(new_summary) => {
@@ -996,6 +1036,37 @@ fn parse_candidate_lines(text: &str) -> Vec<(String, String, String)> {
     candidates
 }
 
+/// 剥离 JSON 文本中的图片 base64 载荷：`data:image/...;base64,<数据>` → `[图片数据已省略]`。
+/// 摘要引擎无需像素数据，base64 占压缩输入 95%+ 体量却零信息量（2026-09-26 实测
+/// 264K 字符压缩 prompt 白烧 18 万 tokens/18 秒）。手写扫描（无 regex 依赖）：
+/// 命中 `data:image/` 前缀后跳到最近的 `"`（JSON 字符串收尾），中间整体替换。
+fn strip_base64_images(s: &str) -> String {
+    const MARKER: &str = "data:image/";
+    const PLACEHOLDER: &str = "data:image/...;base64,[图片数据已省略]";
+    let mut out = String::with_capacity(s.len().min(1 << 20));
+    let mut i = 0usize;
+    while i < s.len() {
+        if s[i..].starts_with(MARKER) {
+            match s[i + MARKER.len()..].find('"') {
+                Some(rel) => {
+                    out.push_str(PLACEHOLDER);
+                    i += MARKER.len() + rel; // 落在收尾 `"` 上，由下方逐字符分支原样写入
+                }
+                None => {
+                    // 无收尾引号（损坏数据）：丢弃残余 base64，防其进入摘要输入
+                    out.push_str(PLACEHOLDER);
+                    break;
+                }
+            }
+        } else {
+            let ch = s[i..].chars().next().unwrap_or('\u{fffd}');
+            out.push(ch);
+            i += ch.len_utf8();
+        }
+    }
+    out
+}
+
 /// 执行压缩大模型调用（按规范 SummaryPrompt 契约生成结构化状态摘要）。
 /// M3 修订：蒸馏候选改为**独立轻量调用**（execute_distill_call）——真机实测超长压缩
 /// prompt（111K 字符）下模型注意力全在摘要 schema，同调用内追加第二产出段必被忽略。
@@ -1015,7 +1086,9 @@ async fn execute_summary_call(
             round.user_question.as_deref().unwrap_or(""),
             round.assistant_answer.as_deref().unwrap_or(""),
             round.tool_calls_summary.as_deref().unwrap_or("None"),
-            round.raw_messages_json
+            // 图片 base64 对摘要毫无信息量（摘要引擎看不懂像素），却占压缩输入 95%+ 体量
+            // （实测 264K 字符 prompt 中 base64 占 25 万+，白烧 18s/18 万 tokens）——剥离。
+            strip_base64_images(&round.raw_messages_json)
         ));
     }
 
@@ -1126,8 +1199,37 @@ concurrent-refresh-pitfall | fix | 并发刷新令牌会互踢，客户端需 si
 
 #[cfg(test)]
 mod tests {
-    use super::{compact_history_kb_hits, parse_candidate_lines};
+    use super::{compact_history_kb_hits, parse_candidate_lines, strip_base64_images};
     use serde_json::json;
+
+    /// base64 剥离：data URL 载荷替换为占位符，前后文与字符串结构保留。
+    #[test]
+    fn strip_base64_replaces_data_url_payload() {
+        let raw = r#"{"role":"user","content":[{"type":"text","text":"识别图中国家"},{"type":"image_url","image_url":{"url":"data:image/png;base64,iVBORw0KGgoAAAANSUhEUg"}}]}"#;
+        let stripped = strip_base64_images(raw);
+        assert!(stripped.contains("[图片数据已省略]"), "实际：{stripped}");
+        assert!(!stripped.contains("iVBORw0KGgo"), "base64 残留：{stripped}");
+        assert!(stripped.contains("识别图中国家"));
+        assert!(stripped.contains("image_url")); // 结构键保留，摘要引擎仍知有图
+        // 可反序列化（结构未破坏）
+        let v: serde_json::Value = serde_json::from_str(&stripped).expect("剥离后应为合法 JSON");
+        assert!(v.get("role").is_some());
+    }
+
+    /// 无图片的文本原样通过；中文等多字节字符边界安全。
+    #[test]
+    fn strip_base64_passthrough_plain_text() {
+        let raw = r#"{"content":"中文消息 no images"}"#;
+        assert_eq!(strip_base64_images(raw), raw);
+    }
+
+    /// 损坏数据（无收尾引号）：丢弃残余，不 panic、不残留 base64。
+    #[test]
+    fn strip_base64_tolerates_unterminated() {
+        let out = strip_base64_images(r#"{"url":"data:image/png;base64,AAAA"#);
+        assert!(out.contains("[图片数据已省略]"));
+        assert!(!out.contains("AAAA"));
+    }
 
     #[test]
     fn parse_basic_candidate_lines() {

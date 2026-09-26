@@ -22,6 +22,11 @@ use crate::agent::types::PlanSubTask;
 const MAX_PLAN_STEPS: usize = 5;
 
 /// 生成任务规划。返回 (PlanDAG, 本次规划的真实 token 用量)。
+///
+/// `session_background`：会话背景摘要（滚动摘要 + 最近用户原话，来自 load_session_background）。
+/// 2026-09-26 指代断链修复：规划器此前只看得到当前一句话——「搜索**这个国家**的详细信息」
+/// 被规划成「请用户补充国家名称」的废步骤（实测把子任务带偏成重新要图）。注入背景后
+/// 规划器能解析指代、直接规划正确的检索步骤。
 #[tracing::instrument(skip_all)]
 pub async fn build_plan(
     cfg: &AgentRuntimeConfig,
@@ -29,6 +34,7 @@ pub async fn build_plan(
     workspace: Option<&str>,
     cancel: Option<&Arc<AtomicBool>>,
     registry: &ToolRegistry,
+    session_background: Option<&str>,
 ) -> (PlanDAG, (u64, u64), String) {
     let outline = capability_outline(registry, cfg);
     let ws_line = workspace
@@ -91,9 +97,18 @@ tests_passed 无需额外字段，但该步骤 description 里必须明确「运
         ws_line,
         json_example,
     );
+    // 会话背景注入：让规划器解析当前输入中的指代（「这个国家」「上面的方案」）。
+    let user_content = match session_background {
+        Some(bg) if !bg.trim().is_empty() => {
+            format!(
+                "【会话背景（此前轮次的摘要与最近用户原话，供解析当前目标中的指代——上文已确认的结论/实体直接沿用，不要再规划「向用户确认」类步骤）】\n{bg}\n\n【用户当前目标】\n{prompt}"
+            )
+        }
+        _ => prompt.to_string(),
+    };
     let messages = vec![
         json!({ "role": "system", "content": sys }),
-        json!({ "role": "user", "content": prompt }),
+        json!({ "role": "user", "content": user_content }),
     ];
 
     // 规划是「确定性架构决策」，必须可复现：强制 temperature=0，不受智能体默认温度影响。

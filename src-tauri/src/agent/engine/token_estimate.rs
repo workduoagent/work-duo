@@ -47,9 +47,51 @@ fn is_cjk(c: char) -> bool {
     )
 }
 
+/// 单条多模态图片的固定 token 估算（visionDetail=auto 低分辨率档，参照 OpenAI vision 定价
+/// 取整）。**绝不对 base64 数据按字符估算**——一张几百 KB 的图 base64 按文本算会虚高 5 万+
+/// tokens，导致带图首轮立即触发压缩、原始问答退出活跃窗口，后续「这个图/上面说的国家」
+/// 指代断链（2026-09-26 用户实锤）。
+pub const PER_IMAGE_TOKENS: u64 = 1200;
+
+/// 从 JSON 值中剥出「非 base64 图片」的可计文本：递归收集所有字符串，跳过 image_url 的
+/// data URL 载荷（该部分按 PER_IMAGE_TOKENS 计，由调用方单独累加）。
+fn collect_text_excluding_images(v: &serde_json::Value, out: &mut String, images: &mut u64) {
+    match v {
+        serde_json::Value::String(s) => out.push_str(s),
+        serde_json::Value::Array(arr) => {
+            for item in arr {
+                // 多模态图片项：{"type":"image_url","image_url":{"url":"data:...;base64,.."}}
+                let is_image = item.get("type").and_then(|t| t.as_str()) == Some("image_url")
+                    || item.get("image_url").is_some();
+                if is_image {
+                    *images += 1;
+                } else {
+                    collect_text_excluding_images(item, out, images);
+                }
+            }
+        }
+        serde_json::Value::Object(map) => {
+            for (k, val) in map {
+                if k == "image_url" {
+                    // 命中图片字段：计一张图，跳过其 url 载荷
+                    *images += 1;
+                } else if k == "url" && val.as_str().map(|u| u.starts_with("data:image/")).unwrap_or(false) {
+                    // 防御：裸 url 字段是 data URL 也按图片计（正常不会走到）
+                    *images += 1;
+                } else {
+                    collect_text_excluding_images(val, out, images);
+                }
+            }
+        }
+        serde_json::Value::Null => {}
+        other => out.push_str(&other.to_string()),
+    }
+}
+
 /// 单条 message 的 token 估算：content 主体 + role/结构开销。
 /// OpenAI 报文每条约有 4~8 token 的固定结构开销（role/命名/分隔）；
-/// tool_calls（含 function.name/arguments JSON）按完整序列化文本估算。
+/// tool_calls（含 function.name/arguments JSON）按完整序列化文本估算；
+/// 多模态图片按 PER_IMAGE_TOKENS 固定计（base64 载荷不按字符估算）。
 pub fn estimate_message_tokens(m: &serde_json::Value) -> u64 {
     const PER_MESSAGE_OVERHEAD: u64 = 8;
     let mut total = PER_MESSAGE_OVERHEAD;
@@ -57,6 +99,13 @@ pub fn estimate_message_tokens(m: &serde_json::Value) -> u64 {
         match c {
             serde_json::Value::String(s) => total += estimate_tokens(s),
             serde_json::Value::Null => {}
+            serde_json::Value::Array(_) => {
+                // 多模态 content 数组：文本部分正常估算，图片按固定值计
+                let mut text = String::new();
+                let mut images = 0u64;
+                collect_text_excluding_images(c, &mut text, &mut images);
+                total += estimate_tokens(&text) + images * PER_IMAGE_TOKENS;
+            }
             other => total += estimate_tokens(&other.to_string()),
         }
     }
@@ -129,5 +178,24 @@ mod tests {
         ];
         // 第一条 8 结构开销 + 3 CJK；第二条仅 8 结构开销（content=null 不计）
         assert_eq!(estimate_messages_tokens(&msgs), 8 + 3 + 8);
+    }
+
+    /// 图片 base64 不按字符估算（2026-09-26 指代断链修复）：一张大图按固定
+    /// PER_IMAGE_TOKENS 计，文本部分正常估算——防止带图轮 token 虚高触发过早压缩。
+    #[test]
+    fn multimodal_image_counts_fixed_not_by_base64_length() {
+        let big_base64 = "A".repeat(400_000);
+        let m = json!({
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "识别图中国家"},
+                {"type": "image_url", "image_url": {"url": format!("data:image/png;base64,{big_base64}")}}
+            ]
+        });
+        let t = estimate_message_tokens(&m);
+        // 8 结构 + 6 CJK + content 数组键名("type" 4 ASCII=1) + 固定 1200；
+        // 绝不允许 400KB base64 按文本涨进去（>10_000 即回归）
+        assert_eq!(t, 8 + 6 + 1 + PER_IMAGE_TOKENS, "实际 {t}");
+        assert!(t < 10_000);
     }
 }

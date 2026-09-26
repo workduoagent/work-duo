@@ -52,10 +52,16 @@ const RISK_HINTS: &[&str] = &[
 ];
 
 /// 意图分类入口：规则短路优先，灰色地带走 LLM 轻量分类。
+///
+/// `session_background`：会话背景摘要（滚动摘要 + 最近用户原话，来自 load_session_background）。
+/// 2026-09-26 指代断链修复：分类器此前只能看到当前一句话——「搜索**这个国家**的详细信息」
+/// 因指代不明被误判 COMPOSITE_TASK（规划器同样看不到上文，规划出「请用户补充国家名」的
+/// 废步骤）。注入背景后分类器能结合上文判断任务性质。
 pub async fn classify_intent(
     cfg: &AgentRuntimeConfig,
     prompt: &str,
     cancel: Option<&Arc<AtomicBool>>,
+    session_background: Option<&str>,
 ) -> IntentProfile {
     let trimmed = prompt.trim();
     let len = trimmed.chars().count();
@@ -91,9 +97,21 @@ risk_level（low/medium/high/critical，涉及删除/安装/执行/改系统/部
     if !cfg.kb_ids.is_empty() {
         sys.push_str("\n本智能体已绑定知识库：若任务仅为检索知识库并作答（不含文件写入、代码执行、命令操作或多步骤业务流程），判定为 SIMPLE_CHAT——知识库检索工具在简单对话路径可用，无需规划。");
     }
+    // 2026-09-26：联网检索/搜索类问答同理——SIMPLE_CHAT 路径携带只读 MCP 搜索工具，
+    // 「搜索 X 的详细信息并作答」无需规划（除非还要写文件/执行命令）。
+    sys.push_str("\n若任务仅为联网搜索/检索资料后整理作答（不含文件写入、代码执行、命令操作或多步骤业务流程），判定为 SIMPLE_CHAT——只读搜索工具在简单对话路径可用，无需规划。");
+    // 会话背景注入：当前输入常含指代（「这个国家」「上面说的」），无背景则分类失准。
+    let user_content = match session_background {
+        Some(bg) if !bg.trim().is_empty() => {
+            format!(
+                "【会话背景（此前轮次的摘要与最近用户原话，供理解当前输入中的指代）】\n{bg}\n\n【用户当前输入】\n{trimmed}"
+            )
+        }
+        _ => trimmed.to_string(),
+    };
     let messages = vec![
         json!({ "role": "system", "content": sys }),
-        json!({ "role": "user", "content": trimmed }),
+        json!({ "role": "user", "content": user_content }),
     ];
 
     let started = std::time::Instant::now();

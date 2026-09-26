@@ -1115,6 +1115,7 @@ pub async fn branch_from_step(app: AppHandle, input: BranchFromStepInput) -> Res
         cfg.workspace.as_deref(),
         None,
         &registry,
+        None,
     )
     .await;
 

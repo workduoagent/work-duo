@@ -387,15 +387,32 @@ pub(crate) async fn build_context_messages(
         None => db_summary,
     };
 
-    // 读取活跃窗口轮次：round_index > last_compact（已压缩的轮次不进入上下文）。
+    // 读取活跃窗口轮次：round_index >= last_compact（0-based 区间语义：summary_round_count
+    // =「下一个未压缩 round_index」= 已压缩轮数。2026-09-26 修复：旧 `round_index > ?` 条件
+    // 在 last_compact=0 时把 round0 永久排除——首轮问答从不进入上下文，多轮指代
+    // （「上面说的国家」）断链，模型答「我看不到你说的国家」）。
+    // 同时排除本轮：前端 send 时已 INSERT 本轮 round（user_question 已写、assistant_answer
+    // 未回填），混入历史会造成「当前提问重复两条 + 空回答占位」。
+    let current_round_index: Option<i64> = match &cfg.round_id {
+        Some(rid) => sqlx::query("SELECT round_index FROM agent_conversation_round WHERE id = ?")
+            .bind(rid)
+            .fetch_optional(&pool)
+            .await
+            .ok()
+            .flatten()
+            .and_then(|r| r.try_get::<Option<i64>, _>("round_index").ok().flatten()),
+        None => None,
+    };
+    let current_idx_bound = current_round_index.unwrap_or(i64::MAX);
     let rows = sqlx::query(
         "SELECT round_index, user_question, assistant_answer, tool_calls_summary, raw_messages_json \
          FROM agent_conversation_round \
-         WHERE session_id = ? AND round_index > ? \
+         WHERE session_id = ? AND round_index >= ? AND round_index < ? \
          ORDER BY round_index ASC",
     )
     .bind(&sid)
     .bind(last_compact)
+    .bind(current_idx_bound)
     .fetch_all(&pool)
     .await
     .map_err(|e| format!("读取轮次失败：{e}"))?;
@@ -436,7 +453,7 @@ pub(crate) async fn build_context_messages(
         "已并入Slot0(系统提示)".to_string(),
         session_summary.as_ref().map(|s| format!("{}字符", s.chars().count())).unwrap_or_else(|| "无".into()),
         records.len(),
-        last_compact + 1,
+        last_compact,
         prompt.chars().count(),
         cfg.attachments.len(),
         messages.len(),
@@ -512,22 +529,41 @@ pub(crate) async fn load_session_background(
         None => db_summary,
     };
 
-    // 最近 1~2 条用户原话（round_index > last_compact，取最新两条）。
-    let recent_user: Vec<String> = sqlx::query(
-        "SELECT user_question FROM agent_conversation_round \
-         WHERE session_id = ? AND round_index > ? \
+    // 最近 1~2 轮问答（round_index >= last_compact 排除本轮，取最新两条；0-based 区间语义
+    // 与 build_context_messages 同步修复）。**除用户原话外同时取助手结论**：压缩未触发时
+    // （压缩保护窗常态）摘要为空，「这个国家/上面说的」的指代对象在上一轮 assistant_answer
+    // 里——不含它则意图分类与规划器依然无法解析指代（2026-09-26 实测缺口）。
+    let current_idx_bound: i64 = match &cfg.round_id {
+        Some(rid) => sqlx::query("SELECT round_index FROM agent_conversation_round WHERE id = ?")
+            .bind(rid)
+            .fetch_optional(&pool)
+            .await
+            .ok()
+            .flatten()
+            .and_then(|r| r.try_get::<Option<i64>, _>("round_index").ok().flatten())
+            .unwrap_or(i64::MAX),
+        None => i64::MAX,
+    };
+    let recent_rounds: Vec<(Option<String>, Option<String>)> = sqlx::query(
+        "SELECT user_question, assistant_answer FROM agent_conversation_round \
+         WHERE session_id = ? AND round_index >= ? AND round_index < ? \
          ORDER BY round_index DESC LIMIT 2",
     )
     .bind(sid)
     .bind(last_compact)
+    .bind(current_idx_bound)
     .fetch_all(&pool)
     .await
     .ok()
     .map(|rows| {
         rows.iter()
-            .filter_map(|r| r.try_get::<Option<String>, _>("user_question").ok().flatten())
-            .filter(|s| !s.trim().is_empty())
-            .collect::<Vec<_>>()
+            .map(|r| {
+                (
+                    r.try_get::<Option<String>, _>("user_question").ok().flatten(),
+                    r.try_get::<Option<String>, _>("assistant_answer").ok().flatten(),
+                )
+            })
+            .collect()
     })
     .unwrap_or_default();
 
@@ -535,11 +571,22 @@ pub(crate) async fn load_session_background(
     if let Some(s) = &session_summary {
         bg.push_str(s.trim());
     }
-    for q in &recent_user {
-        if !bg.is_empty() {
-            bg.push('\n');
+    for (q, a) in &recent_rounds {
+        if let Some(q) = q.as_deref().filter(|s| !s.trim().is_empty()) {
+            if !bg.is_empty() {
+                bg.push('\n');
+            }
+            bg.push_str(&format!("（用户原话）{q}"));
         }
-        bg.push_str(&format!("（用户原话）{q}"));
+        // 助手结论节选 300 字符：足够承载「识别结论/已确认实体」，不挤占 800 上限。
+        if let Some(a) = a.as_deref().filter(|s| !s.trim().is_empty()) {
+            let brief: String = a.trim().chars().take(300).collect();
+            let ellipsis = if a.trim().chars().count() > 300 { "…" } else { "" };
+            if !bg.is_empty() {
+                bg.push('\n');
+            }
+            bg.push_str(&format!("（此前助手结论节选）{brief}{ellipsis}"));
+        }
     }
 
     // [Slot 3b] 图聚合（§5.9 会话背景从图读）：本会话已在统一实体图中有「已完成 / 历史任务」节点时，

@@ -280,8 +280,13 @@ impl AgentRuntime {
         // 下方旧的全局大 ReAct 循环已废弃（if false 留档，验证后删除）。
         // ────────────────────────────────────────────────────────────────────
 
+        // 会话背景（2026-09-26 指代断链修复）：意图分类器与规划器此前只看得到当前一句话，
+        // 「搜索这个国家的详细信息」这类含指代的输入被误判/误规划。加载一次（滚动摘要 +
+        // 最近用户原话，已排除本轮），两处共用；无会话或 DB 未就绪时为 None，链路照常。
+        let session_background = crate::agent::engine::context::load_session_background(app, &cfg).await;
+
         // 阶段一：意图分流（规则短路优先，灰色地带走轻量 LLM 分类）。
-        let mut intent = crate::agent::engine::intent::classify_intent(&cfg, &prompt, Some(&task.cancel_flag)).await;
+        let mut intent = crate::agent::engine::intent::classify_intent(&cfg, &prompt, Some(&task.cancel_flag), session_background.as_deref()).await;
         // KB 已绑定 + SIMPLE_CHAT → 简单对话快路径（20260922 #1）：run_simple_chat 现已携带
         // native__kb_search 工具（kb_ids 非空时构造实例），纯 KB 问答跳过规划直接「检索→综合」，
         // 不再强制转 COMPOSITE（旧设计因空工具集导致 KB 不可检索而强制转换；网关慢时规划调用
@@ -360,7 +365,7 @@ impl AgentRuntime {
             );
             (po, (0u64, 0u64), String::new())
         } else {
-            crate::agent::engine::planner::build_plan(&cfg, &prompt, cfg.workspace.as_deref(), Some(&task.cancel_flag), &registry).await
+            crate::agent::engine::planner::build_plan(&cfg, &prompt, cfg.workspace.as_deref(), Some(&task.cancel_flag), &registry, session_background.as_deref()).await
         };
 
         // 规划期间用户可能已点击取消：规划完成后立即检查，避免拉起无意义的流水线。
@@ -441,7 +446,7 @@ impl AgentRuntime {
                         events::emit_status(app, "🔄 已收到修改意见，正在重新规划…");
                         let revised_prompt = format!("{}\n\n用户修改意见：{}", prompt, guidance);
                         let (np, nu, nr) =
-                            crate::agent::engine::planner::build_plan(&cfg, &revised_prompt, cfg.workspace.as_deref(), Some(&task.cancel_flag), &registry).await;
+                            crate::agent::engine::planner::build_plan(&cfg, &revised_prompt, cfg.workspace.as_deref(), Some(&task.cancel_flag), &registry, session_background.as_deref()).await;
                         plan = np;
                         plan_usage.0 += nu.0;
                         plan_usage.1 += nu.1;
