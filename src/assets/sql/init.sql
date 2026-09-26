@@ -1,5 +1,8 @@
 -- ============================================================
 -- Work Duo 本地数据库初始化脚本（DDL 单一事实源）
+-- 当前 schema 版本（台账 S11）：每次 DDL 变更时同步递增（与 updater.sql 末段版本号一致），
+-- SqlService.updateTables 读取此标记作为 user_version 封存目标。
+-- SCHEMA_VERSION: 31
 -- 由 InitContext 在「每次启动」时幂等执行：
 --   - CREATE TABLE IF NOT EXISTS：表已存在则跳过，不会重建/丢数据；
 --   - INSERT OR IGNORE：种子已存在则跳过，不会重复插入。

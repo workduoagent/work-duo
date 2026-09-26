@@ -10,21 +10,150 @@ import type Database from '@tauri-apps/plugin-sql'
  */
 
 /**
- * 按分号拆分并逐条执行（忽略以 -- 开头的行注释）。
+ * 按语句切分 SQL 脚本（台账 S11）。
+ *
+ * 状态机解析，正确跳过以下「分号非语句边界」的场景：
+ *  - 单引号字符串（'' 转义）与双引号标识符（"" 转义）内的分号；
+ *  - 反引号 / [方括号] 标识符内的分号；
+ *  - `--` 行注释与 `/* ... *`/` 块注释内的分号（同时保证字符串字面量里的
+ *    `--` 不会被误当注释破坏——旧实现 replace(/--.*$/gm) 有此缺陷）。
+ *
+ * 切出的语句保留内部注释（驱动可接受前导/内部注释）；仅含注释的片段被丢弃。
+ * 注意：CREATE TRIGGER ... BEGIN...END 体内的分号仍会误切——项目 DDL 惯例
+ * 不在 init/updater 中使用触发器，若未来引入需改用真正的 SQL 解析器。
+ */
+export const splitSqlStatements = (script: string): string[] => {
+  const statements: string[] = []
+  let cur = ''
+  let i = 0
+  const n = script.length
+
+  /** 丢弃仅含注释的片段：去掉行/块注释后无实质内容则不作为语句下发 */
+  const push = (): void => {
+    const meaningful = cur
+      .replace(/--[^\n]*/g, '')
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .trim()
+    if (meaningful) statements.push(cur.trim())
+    cur = ''
+  }
+
+  while (i < n) {
+    const ch = script[i]
+    const next = script[i + 1]
+
+    // 行注释：读到行尾（换行符保留在语句内，无语义影响）
+    if (ch === '-' && next === '-') {
+      while (i < n && script[i] !== '\n') {
+        cur += script[i]
+        i++
+      }
+      continue
+    }
+    // 块注释：读到 */
+    if (ch === '/' && next === '*') {
+      cur += '/*'
+      i += 2
+      while (i < n && !(script[i] === '*' && script[i + 1] === '/')) {
+        cur += script[i]
+        i++
+      }
+      if (i < n) {
+        cur += '*/'
+        i += 2
+      }
+      continue
+    }
+    // 单引号字符串（'' 转义）
+    if (ch === "'") {
+      cur += ch
+      i++
+      while (i < n) {
+        if (script[i] === "'") {
+          if (script[i + 1] === "'") {
+            cur += "''"
+            i += 2
+            continue
+          }
+          cur += "'"
+          i++
+          break
+        }
+        cur += script[i]
+        i++
+      }
+      continue
+    }
+    // 双引号标识符（"" 转义）
+    if (ch === '"') {
+      cur += ch
+      i++
+      while (i < n) {
+        if (script[i] === '"') {
+          if (script[i + 1] === '"') {
+            cur += '""'
+            i += 2
+            continue
+          }
+          cur += '"'
+          i++
+          break
+        }
+        cur += script[i]
+        i++
+      }
+      continue
+    }
+    // 反引号标识符（无转义）
+    if (ch === '`') {
+      cur += ch
+      i++
+      while (i < n && script[i] !== '`') {
+        cur += script[i]
+        i++
+      }
+      if (i < n) {
+        cur += '`'
+        i++
+      }
+      continue
+    }
+    // [方括号] 标识符（无转义）
+    if (ch === '[') {
+      cur += ch
+      i++
+      while (i < n && script[i] !== ']') {
+        cur += script[i]
+        i++
+      }
+      if (i < n) {
+        cur += ']'
+        i++
+      }
+      continue
+    }
+    // 语句边界
+    if (ch === ';') {
+      push()
+      i++
+      continue
+    }
+    cur += ch
+    i++
+  }
+  push()
+  return statements
+}
+
+/**
+ * 按语句切分并逐条执行。
  * 任一条失败即中断并向上抛出，便于定位写错的 SQL。
  */
 export const runScriptLineByLine = async (
   db: Database,
   script: string,
 ): Promise<void> => {
-  // 1. 去除 -- 风格注释
-  const cleanScript = script.replace(/--.*$/gm, '')
-
-  // 2. 按分号拆分
-  const statements = cleanScript
-    .split(';')
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0)
+  const statements = splitSqlStatements(script)
 
   for (const sql of statements) {
     try {

@@ -3,7 +3,12 @@
 -- 仅在「非首启」（app_config.first_load = 'false'）时执行。
 -- 后续软件版本更新、附带表 / 字段变更时，在此集中追加 SQL。
 -- InitContext 会安全跳过已存在的表 / 字段（重复执行不报错）。
--- 当前为初始版本，暂无变更（以下为已落地的历史变更，按时间顺序追加即可）。
+-- 版本封存（台账 S11）：每次 DDL 变更除在此追加语句外，还须把 init.sql 头部
+-- `SCHEMA_VERSION: N` 递增为相同版本号——updateTables 在全部语句执行成功后
+-- `PRAGMA user_version = N` 封存，已封版的库不再重复重放本文件。
+-- 注意：语句经状态机按分号切分，字符串/注释内的分号是安全的；
+-- 但请勿使用 CREATE TRIGGER ... BEGIN...END（体内分号仍会误切）。
+-- （以下为已落地的历史变更，按时间顺序追加即可。）
 
 -- ---------- v1：模型新增 Tool/Function Calling 能力标记字段 ----------
 -- 存量库（已建表但无该列）通过本语句补齐；updateTables 已安全忽略「duplicate column name」，
