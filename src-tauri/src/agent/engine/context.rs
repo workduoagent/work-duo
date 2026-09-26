@@ -425,7 +425,7 @@ pub(crate) async fn build_context_messages(
 
     // 装配链路日志：各 Slot 体量 + 最终规模，便于排错时确认上下文构成。
     tracing::info!(
-        "[agent] context: 装配完成 session={} | Slot0 系统提示={}字符(custom_rules={}) | Slot1 项目记忆={} | Slot2 摘要={} | 活跃轮次={}(起始round_index={}) | 当前提问={}字符 附件={} | 最终 messages={}条/约{}字符",
+        "[agent] context: 装配完成 session={} | Slot0 系统提示={}字符(custom_rules={}) | Slot1 项目记忆={} | Slot2 摘要={} | 活跃轮次={}(起始round_index={}) | 当前提问={}字符 附件={} | 最终 messages={}条/约{}字符/约{}tokens",
         sid,
         system_prompt.chars().count(),
         custom_rules.as_ref().map(|r| r.chars().count()).unwrap_or(0),
@@ -437,6 +437,7 @@ pub(crate) async fn build_context_messages(
         cfg.attachments.len(),
         messages.len(),
         messages_chars(&messages),
+        crate::agent::engine::token_estimate::estimate_messages_tokens(&messages),
     );
 
     Ok(messages)

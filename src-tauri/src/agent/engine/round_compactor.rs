@@ -527,6 +527,57 @@ pub(crate) async fn persist_artifact(
     }
 }
 
+/// token 体量优先触发的默认阈值（台账 S7）：未压缩轮累计估算 token 超过此值即触发压缩，
+/// 不等轮次计数。60k ≈ 保守假设 128k 窗口（系统提示+工具定义+摘要约 30k）下安全体量。
+/// env `WD_COMPACT_TOKEN_THRESHOLD` 可覆盖（改后重启生效，与 WD_RUN_* 惯例一致）。
+const COMPACT_TOKEN_THRESHOLD: u64 = 60_000;
+
+fn compact_token_threshold() -> u64 {
+    std::env::var("WD_COMPACT_TOKEN_THRESHOLD")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .filter(|v| *v >= 1000)
+        .unwrap_or(COMPACT_TOKEN_THRESHOLD)
+}
+
+/// 估算某会话中「尚未压缩进摘要」的轮次（round_index > last_compact）的累计 token 体量。
+/// 解析失败的 raw_messages_json 按 0 计（不阻断触发判定）；仅压缩判定路径调用，每轮一次。
+async fn estimate_pending_tokens(
+    pool: &sqlx::SqlitePool,
+    session_id: &str,
+    last_compact: i64,
+) -> u64 {
+    let rows = sqlx::query(
+        "SELECT raw_messages_json FROM agent_conversation_round \
+         WHERE session_id = ? AND round_index > ? AND raw_messages_json IS NOT NULL AND raw_messages_json != ''",
+    )
+    .bind(session_id)
+    .bind(last_compact)
+    .fetch_all(pool)
+    .await;
+    let rows = match rows {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::warn!("[Compactor] estimate_pending_tokens: 读取失败：{e}");
+            return 0;
+        }
+    };
+    let mut total = 0u64;
+    for r in &rows {
+        let raw: Option<String> = r.try_get::<Option<String>, _>("raw_messages_json").ok().flatten();
+        if let Some(raw) = raw {
+            match serde_json::from_str::<Vec<serde_json::Value>>(&raw) {
+                Ok(msgs) => total += crate::agent::engine::token_estimate::estimate_messages_tokens(&msgs),
+                Err(_) => {
+                    // 非 JSON/损坏数据退化为字符数折算（4 chars/token），不静默丢体量
+                    total += (raw.chars().count() as u64) / 4;
+                }
+            }
+        }
+    }
+    total
+}
+
 /// 后台非阻塞滚动压缩触发器。
 ///
 /// 读取会话 `total_turns` 与 `summary_round_count`，计算未压缩轮数
@@ -579,7 +630,18 @@ pub(crate) async fn trigger_background_compaction(
         session_id, total_turns, last_compact, pending, compactor.trigger_threshold
     );
     if pending < compactor.trigger_threshold {
-        return; // 未达阈值，本次不压缩（零阻塞返回）
+        // 台账 S7：token 体量优先触发——巨型任务可能 2~3 轮就吃掉大半个上下文窗口，
+        // 不能死等 5 轮计数。未压缩轮累计 token 估算 ≥ 阈值（env 可调）即提前触发。
+        let pending_tokens =
+            estimate_pending_tokens(&pool, session_id, last_compact).await;
+        let threshold = compact_token_threshold();
+        if pending_tokens < threshold {
+            return; // 轮次与体量均未达阈值，本次不压缩（零阻塞返回）
+        }
+        tracing::info!(
+            "[Compactor] token 体量优先触发：未压缩轮估算 {} tokens ≥ 阈值 {}（轮次未达 {}）",
+            pending_tokens, threshold, compactor.trigger_threshold
+        );
     }
 
     let range_start = last_compact + 1;
