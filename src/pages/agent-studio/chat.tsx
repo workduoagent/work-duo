@@ -37,7 +37,6 @@ import {
   Square,
   ChevronDown,
   ChevronRight,
-  ChevronLeft,
   Coins,
   Clock,
   Mic,
@@ -774,6 +773,9 @@ export default function AgentChatPage() {
   const prevIsRunningRef = useRef(false)
   const roundIdRef = useRef<string | null>(null)
   const roundIndexRef = useRef(0)
+  // 会话加载代次：openSession 的异步加载（getSession/listRounds）resolve 后核对，
+  // 代次已变（newChat / 切智能体）则丢弃结果——防「历史会话消息盖回新建对话」竞态。
+  const sessionLoadEpochRef = useRef(0)
   // 标记「本次由『新增子对话』创建的、尚未发过任何消息的空会话」——离开时若仍为 0 轮则清理
   const pendingEmptySessionIdRef = useRef<string | null>(null)
   // 卸载守卫：避免卸载后调用 setState 触发警告
@@ -947,6 +949,7 @@ export default function AgentChatPage() {
 
   // 切换智能体时清空会话状态
   useEffect(() => {
+    sessionLoadEpochRef.current += 1 // 使 openSession 在途加载作废
     void cleanupPendingEmptySession()
     // 旧会话若正在跑任务则不清它的运行态（让它后台继续）。
     if (!isSessionRunning(activeSessionId)) reset()
@@ -1161,9 +1164,8 @@ export default function AgentChatPage() {
     replyStartRef.current = Date.now()
     // 新提问 = 用户明确要看最新内容：恢复跟随模式（此前可能因回看历史已解除）
     setFollowBottom(true)
-    // 方案 C：发消息即自动展开右栏并切到「图」（本轮 DAG 主视图），符合 Graph-first 作用域。
-    setRightOpen(true)
-    setRightTab('graph')
+    // 用户约定（2026-09-26）：执行图不再随发消息自动展开，由用户手动打开；
+    // 运行中改由悬浮按钮的呼吸灯提醒「图里有内容」（见 agent-chat__right-reopen--pulse）。
     const attachments = pendingAttachments
     const disabledSkillIds = [...removedSkillIds]
     const disabledMcpIds = [...removedMcpIds]
@@ -1440,11 +1442,17 @@ export default function AgentChatPage() {
       setRemovedSkillIds(new Set()) // 切换会话即复位临时移除（重新打开会话恢复全部技能）
       setRemovedMcpIds(new Set()) // 临时移除的 MCP 服务复位
       setDisabledMcpToolIds(new Set()) // 临时关闭的 MCP 工具复位
+      // 会话加载代次守卫：快速连点「历史会话 → 新建对话」时，listRounds 在途结果
+      // 会在 newChat 渲染完欢迎语之后 resolve 并把历史消息盖回去（表现为「新建对话
+      // 要点两次才生效」）。newChat / 切智能体都会自增代次，此处 resolve 后代次已变
+      // 即丢弃本次加载。
+      const loadEpoch = sessionLoadEpochRef.current
       try {
         // 回显该会话绑定的工程（工作空间），无则自由对话
         const sess = await getSession(sessionId)
-        setPendingProjectId(sess?.projectId ?? null)
         const rounds = await listRounds(sessionId)
+        if (sessionLoadEpochRef.current !== loadEpoch) return
+        setPendingProjectId(sess?.projectId ?? null)
         setMessages(roundsToMessages(rounds))
         setMentionTags([]) // 切换会话清空 @提及 标签
         roundIndexRef.current = rounds.length
@@ -1457,6 +1465,7 @@ export default function AgentChatPage() {
 
   /** 新建对话：清空当前会话，回到欢迎语。 */
   const newChat = useCallback(() => {
+    sessionLoadEpochRef.current += 1 // 使 openSession 在途加载作废（防快速连点竞态覆盖欢迎语）
     void cleanupPendingEmptySession()
     // 当前会话若正在跑任务，不清它的运行态（让它在后台继续），仅切到全新会话。
     if (!isSessionRunning(activeSessionId)) reset()
@@ -1570,18 +1579,28 @@ export default function AgentChatPage() {
   // 切页回来（对话页重挂）：恢复上次查看的会话。
   // **刻意不走 openSession**——它会 resetRuntime 清掉该会话的运行态，把正在跑的任务
   // 的进度抹掉；这里只加载历史轮次并绑定会话 id，运行态由模块级 store 原样带出。
+  // 竞态守卫（2026-09-26 二修）：恢复期间用户点历史会话 / 点「新建对话」都会改变
+  // activeSessionId → effect cleanup 置 cancelled，在途恢复 resolve 后丢弃——
+  // 否则历史消息会在 newChat 渲染完欢迎语后被盖回（仅首次进入页面快速连点可见）。
+  // 资格守卫（2026-09-26 三修，真正主因）：恢复资格的消耗必须先于 prev 检查——
+  // 否则「进入页面时无 lastSession → 资格保留；点开历史 A 时 :1539 把 A 写入
+  // lastSessionByAgent；点新建对话使 activeSessionId=null 触发本 effect 重跑 →
+  // prev=A 出现 → 把刚离开的会话当「上次会话」恢复回来盖掉欢迎语」——即重启软件
+  // 后首次进入页面、点历史会话再点新建对话要点两次的完整引爆链。
   const restoredSessionRef = useRef<string | null>(null)
   useEffect(() => {
     if (!agent?.id || activeSessionId) return
     if (restoredSessionRef.current === agent.id) return
+    restoredSessionRef.current = agent.id // 无论有无 lastSession，本 agent 的自动恢复只判断这一次
     const prev = lastSessionByAgent.get(agent.id)
     if (!prev) return
-    restoredSessionRef.current = agent.id
+    let cancelled = false
     void (async () => {
       try {
         const sess = await getSession(prev)
-        setPendingProjectId(sess?.projectId ?? null)
         const rounds = await listRounds(prev)
+        if (cancelled) return
+        setPendingProjectId(sess?.projectId ?? null)
         setMessages(roundsToMessages(rounds))
         roundIndexRef.current = rounds.length
         setActiveSessionId(prev)
@@ -1589,6 +1608,9 @@ export default function AgentChatPage() {
         // 会话可能已被删除：忽略，停留在「新建对话」
       }
     })()
+    return () => {
+      cancelled = true
+    }
   }, [agent?.id, activeSessionId])
 
   // 方案B：监听会话压缩完成事件，重读会话表使顶栏环形图随压缩回落。
@@ -2951,12 +2973,18 @@ commandActionRef.current = (key: string) => {
       ) : (
         <button
           type="button"
-          className="agent-chat__right-reopen"
+          className={[
+            'agent-chat__right-reopen',
+            isRunning && (session.planning || planSteps.length > 0 || toolSteps.length > 0)
+              ? 'agent-chat__right-reopen--pulse'
+              : '',
+          ]
+            .filter(Boolean)
+            .join(' ')}
           title="展开执行图"
           onClick={() => setRightOpen(true)}
         >
-          <ChevronLeft size={14} />
-          <span>执行图</span>
+          <Workflow size={18} />
         </button>
       )}
 

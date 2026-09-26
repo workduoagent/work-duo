@@ -3199,40 +3199,84 @@
   }
 }
 
-// 收起后的重开入口：贴右边缘的竖条按钮
+// 收起后的重开入口：毛玻璃圆形悬浮钮（Workflow 图标）。
+// 运行中且执行图有内容时叠加 --pulse 呼吸灯（用户约定 2026-09-26：
+// 不再自动展开右栏，仅以呼吸提醒「图里有内容」，由用户手动打开）。
 &__right-reopen {
   position: fixed;
-  right: 0;
+  right: 16px;
   top: 84px;
   z-index: 30;
   display: inline-flex;
-  flex-direction: column;
   align-items: center;
-  gap: 4px;
-  width: 34px;
-  padding: 10px 4px;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
   border: 1px solid var(--color-border, #e5e5e5);
-  border-right: none;
-  border-radius: 10px 0 0 10px;
-  background: var(--color-background, #fff);
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--color-background, #fff) 76%, transparent);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
   color: var(--color-foreground-muted, #666);
-  font-size: 11px;
   cursor: pointer;
-  box-shadow: -2px 2px 10px rgba(0, 0, 0, 0.06);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+  transition:
+    color 0.18s ease,
+    border-color 0.18s ease,
+    background 0.18s ease,
+    box-shadow 0.18s ease;
 
   &:hover {
-    color: var(--color-foreground, #222);
-    background: var(--color-background-subtle, #fafafa);
+    color: var(--color-primary, #3b82f6);
+    border-color: color-mix(in srgb, var(--color-primary, #3b82f6) 55%, transparent);
+    background: var(--color-background, #fff);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  }
+
+  &--pulse {
+    color: var(--color-primary, #3b82f6);
+    border-color: color-mix(in srgb, var(--color-primary, #3b82f6) 45%, transparent);
+    animation: agent-chat-graph-breathe 2.4s ease-in-out infinite;
   }
 
   .dark & {
-    background: #1a1a1a;
+    background: rgba(26, 26, 26, 0.72);
     border-color: #2f2f2f;
     color: #aaa;
 
     &:hover {
-      color: #e6e6e6;
+      color: #93b4ff;
+      border-color: color-mix(in srgb, #93b4ff 40%, transparent);
+      background: #1f1f1f;
     }
+
+    &--pulse {
+      color: #93b4ff;
+      border-color: color-mix(in srgb, #93b4ff 40%, transparent);
+      animation-name: agent-chat-graph-breathe-dark;
+    }
+  }
+}
+
+// 呼吸灯：主色光环自按钮边缘扩散、淡出，循环往复（无位移无缩放，符合 hover 纪律）。
+@keyframes agent-chat-graph-breathe {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-primary, #3b82f6) 38%, transparent), 0 2px 12px rgba(0, 0, 0, 0.08);
+  }
+  55% {
+    box-shadow: 0 0 0 9px color-mix(in srgb, var(--color-primary, #3b82f6) 0%, transparent), 0 2px 12px rgba(0, 0, 0, 0.08);
+  }
+}
+
+@keyframes agent-chat-graph-breathe-dark {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(147, 180, 255, 0.38), 0 2px 12px rgba(0, 0, 0, 0.3);
+  }
+  55% {
+    box-shadow: 0 0 0 9px rgba(147, 180, 255, 0), 0 2px 12px rgba(0, 0, 0, 0.3);
   }
 }
 
