@@ -88,7 +88,7 @@ impl Default for CompactorConfig {
     }
 }
 
-/// 从 Tauri 托管的 DbInstances 取出 `sqlite:workduo.db` 连接池（与 commands::load_config 同机制）。
+/// 从 Tauri 托管的 DbInstances 取出 `sqlite:workduo.db` 连接池（与 engine::config_loader::load_config 同机制）。
 pub(crate) async fn get_pool(app: &AppHandle) -> Result<SqlitePool, String> {
     let instances = app.state::<DbInstances>();
     let guard = instances.0.read().await;

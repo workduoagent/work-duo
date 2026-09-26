@@ -95,7 +95,7 @@ fn row_to_item(row: &sqlx::sqlite::SqliteRow) -> MemoryItem {
     }
 }
 
-/// 从 Tauri 托管的 DbInstances 取出连接池（与 commands::load_config / round_compactor 同机制）。
+/// 从 Tauri 托管的 DbInstances 取出连接池（与 engine::config_loader::load_config / round_compactor 同机制）。
 async fn get_pool(app: &AppHandle) -> Result<SqlitePool, String> {
     round_compactor::get_pool(app).await
 }
@@ -808,7 +808,7 @@ async fn bump_and_block(
 /// ④ M2 rerank 精排（可选级：配置了 rerank 模型时对粗排池精排取 top-K，失败/未配置保持粗排序）。
 /// 命中统一走 `bump_and_block` 累计引用计数并拼「记忆宫殿 · 召回」系统提示块。
 ///
-/// 由 `commands::load_config` 在组装系统提示的尾部注入，使记忆宫殿真正参与任务上下文，
+/// 由 `engine::config_loader::load_config` 在组装系统提示的尾部注入，使记忆宫殿真正参与任务上下文，
 /// 且每次运行自然累积引用计数（驱动热力图）。
 pub async fn recall_top_memories(
     app: &AppHandle,
