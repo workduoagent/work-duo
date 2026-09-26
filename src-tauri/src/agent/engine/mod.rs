@@ -4,9 +4,11 @@
 pub mod config_loader;
 pub mod context;
 pub mod graph;
+pub mod llm;
 pub mod intent;
 pub mod native;
 pub mod pipeline;
+pub mod protocol;
 pub mod planner;
 pub mod policy;
 pub mod round_compactor;
