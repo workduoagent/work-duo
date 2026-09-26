@@ -278,6 +278,17 @@ struct HostExecTool {
 impl crate::agent::engine::tools::AgentTool for HostExecTool {
     host_tool_common!("host__exec", "exec", AuthzDomain::Host);
 
+    // 台账 S6 进阶：声明式行为元数据——旧 runtime::tool_op 叶子名 "exec" 命中语义。
+    // host__ 前缀已走 HostAuthz 独立授权域，此 op 仅驱动本地危险信号的双保险评估
+    // （Proceed 已授权时本地 EdgeOp::Exec 仍扫描命令内容，与改造前一致）。
+    fn behavior(&self) -> crate::agent::engine::tools::ToolBehavior {
+        crate::agent::engine::tools::ToolBehavior {
+            op: Some("exec"),
+            file_mutating: false,
+            file_reading: false,
+        }
+    }
+
     fn tool_definition(&self) -> serde_json::Value {
         // 规范 function-calling 形状（复用 native::def；扁平结构会被网关丢弃 → 模型看不到工具）
         crate::agent::engine::native::def(

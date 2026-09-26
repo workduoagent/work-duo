@@ -30,6 +30,7 @@ use tokio::time::Duration;
 use crate::agent::events;
 use crate::agent::engine::graph::{KnowledgeGraph, NodeKind};
 use crate::agent::engine::tools::AgentTool;
+use crate::agent::engine::tools::ToolBehavior;
 use crate::agent::engine::tools::PathGuard;
 use crate::agent::engine::tools::PermissionLevel;
 use crate::agent::engine::tools::ToolContext;
@@ -281,6 +282,13 @@ impl AgentTool for ReadFileTool {
     fn name(&self) -> String {
         "native__read_file".into()
     }
+    fn behavior(&self) -> ToolBehavior {
+        ToolBehavior {
+            op: Some("read"),
+            file_mutating: false,
+            file_reading: true,
+        }
+    }
     fn tool_definition(&self) -> Value {
         def(
             "native__read_file",
@@ -405,6 +413,13 @@ pub struct WriteFileTool {
 impl AgentTool for WriteFileTool {
     fn name(&self) -> String {
         "native__write_file".into()
+    }
+    fn behavior(&self) -> ToolBehavior {
+        ToolBehavior {
+            op: Some("write"),
+            file_mutating: true,
+            file_reading: false,
+        }
     }
     fn tool_definition(&self) -> Value {
         def(
@@ -710,6 +725,13 @@ impl AgentTool for AnchorMemoryTool {
     fn name(&self) -> String {
         "native__anchor_memory".into()
     }
+    fn behavior(&self) -> ToolBehavior {
+        ToolBehavior {
+            op: Some("memory"),
+            file_mutating: false,
+            file_reading: false,
+        }
+    }
     fn tool_definition(&self) -> Value {
         def(
             "native__anchor_memory",
@@ -780,6 +802,13 @@ pub struct EditFileTool {
 impl AgentTool for EditFileTool {
     fn name(&self) -> String {
         "native__edit_file".into()
+    }
+    fn behavior(&self) -> ToolBehavior {
+        ToolBehavior {
+            op: Some("edit"),
+            file_mutating: true,
+            file_reading: false,
+        }
     }
     fn tool_definition(&self) -> Value {
         def(
@@ -964,6 +993,13 @@ impl AgentTool for ListDirectoryTool {
     fn name(&self) -> String {
         "native__list_directory".into()
     }
+    fn behavior(&self) -> ToolBehavior {
+        ToolBehavior {
+            op: Some("list"),
+            file_mutating: false,
+            file_reading: false,
+        }
+    }
     fn tool_definition(&self) -> Value {
         def(
             "native__list_directory",
@@ -1044,6 +1080,13 @@ impl AgentTool for PathExistsTool {
     fn name(&self) -> String {
         "native__path_exists".into()
     }
+    fn behavior(&self) -> ToolBehavior {
+        ToolBehavior {
+            op: Some("check"),
+            file_mutating: false,
+            file_reading: false,
+        }
+    }
     fn tool_definition(&self) -> Value {
         def(
             "native__path_exists",
@@ -1121,6 +1164,13 @@ pub struct ExecuteCommandTool;
 impl AgentTool for ExecuteCommandTool {
     fn name(&self) -> String {
         "native__execute_command".into()
+    }
+    fn behavior(&self) -> ToolBehavior {
+        ToolBehavior {
+            op: Some("exec"),
+            file_mutating: false,
+            file_reading: false,
+        }
     }
     fn tool_definition(&self) -> Value {
         def(
@@ -1284,6 +1334,13 @@ impl RunPythonSandboxTool {
 impl AgentTool for RunPythonSandboxTool {
     fn name(&self) -> String {
         "native__run_python_sandbox".into()
+    }
+    fn behavior(&self) -> ToolBehavior {
+        ToolBehavior {
+            op: Some("exec"),
+            file_mutating: false,
+            file_reading: false,
+        }
     }
     fn tool_definition(&self) -> Value {
         def(
@@ -1514,6 +1571,13 @@ impl AgentTool for RunNodeSandboxTool {
     fn name(&self) -> String {
         "native__run_node_sandbox".into()
     }
+    fn behavior(&self) -> ToolBehavior {
+        ToolBehavior {
+            op: Some("exec"),
+            file_mutating: false,
+            file_reading: false,
+        }
+    }
     fn tool_definition(&self) -> Value {
         def(
             "native__run_node_sandbox",
@@ -1729,6 +1793,13 @@ impl AgentTool for DeletePathTool {
     fn name(&self) -> String {
         "native__delete_path".into()
     }
+    fn behavior(&self) -> ToolBehavior {
+        ToolBehavior {
+            op: Some("delete"),
+            file_mutating: true,
+            file_reading: false,
+        }
+    }
     fn tool_definition(&self) -> Value {
         def(
             "native__delete_path",
@@ -1821,6 +1892,13 @@ pub struct MovePathTool;
 impl AgentTool for MovePathTool {
     fn name(&self) -> String {
         "native__move_path".into()
+    }
+    fn behavior(&self) -> ToolBehavior {
+        ToolBehavior {
+            op: Some("move"),
+            file_mutating: true,
+            file_reading: false,
+        }
     }
     fn tool_definition(&self) -> Value {
         def(
@@ -1962,6 +2040,13 @@ pub struct GrepFilesTool;
 impl AgentTool for GrepFilesTool {
     fn name(&self) -> String {
         "native__grep_files".into()
+    }
+    fn behavior(&self) -> ToolBehavior {
+        ToolBehavior {
+            op: Some("search"),
+            file_mutating: false,
+            file_reading: false,
+        }
     }
     fn tool_definition(&self) -> Value {
         def(
@@ -2120,6 +2205,13 @@ impl AgentTool for ZipCreateTool {
     fn name(&self) -> String {
         "native__zip_create".into()
     }
+    fn behavior(&self) -> ToolBehavior {
+        ToolBehavior {
+            op: Some("zip"),
+            file_mutating: false,
+            file_reading: false,
+        }
+    }
     fn tool_definition(&self) -> Value {
         def(
             "native__zip_create",
@@ -2265,6 +2357,13 @@ pub struct ZipExtractTool;
 impl AgentTool for ZipExtractTool {
     fn name(&self) -> String {
         "native__zip_extract".into()
+    }
+    fn behavior(&self) -> ToolBehavior {
+        ToolBehavior {
+            op: Some("unzip"),
+            file_mutating: false,
+            file_reading: false,
+        }
     }
     fn tool_definition(&self) -> Value {
         def(
@@ -2451,6 +2550,13 @@ pub struct RegexReplaceTool;
 impl AgentTool for RegexReplaceTool {
     fn name(&self) -> String {
         "native__regex_replace".into()
+    }
+    fn behavior(&self) -> ToolBehavior {
+        ToolBehavior {
+            op: Some("replace"),
+            file_mutating: true,
+            file_reading: false,
+        }
     }
     fn tool_definition(&self) -> Value {
         def(
@@ -2705,6 +2811,13 @@ pub struct HttpRequestTool;
 impl AgentTool for HttpRequestTool {
     fn name(&self) -> String {
         "native__http_request".into()
+    }
+    fn behavior(&self) -> ToolBehavior {
+        ToolBehavior {
+            op: Some("http"),
+            file_mutating: false,
+            file_reading: false,
+        }
     }
     fn tool_definition(&self) -> Value {
         def(
@@ -3612,5 +3725,42 @@ impl AgentTool for QueryGraphTool {
         }
         serde_json::to_string(&out)
             .map_err(|e| ToolError::ExecutionFailed(format!("序列化检索结果失败：{e}")))
+    }
+}
+
+#[cfg(test)]
+mod behavior_tests {
+    use super::*;
+    use crate::agent::engine::tools::ToolBehavior;
+
+    /// 台账 S6 进阶：声明式行为元数据自检——可无参实例化的原生工具直接断言
+    /// behavior() 声明与旧叶子名匹配语义一致（写/删/移/替换等危险语义工具漏标
+    /// 会导致 policy 危险信号评估跳过，此处为声明落地的回归保障）。
+    #[test]
+    fn behavior_declarations_match_legacy_semantics() {
+        assert_eq!(
+            ReadFileTool.behavior(),
+            ToolBehavior { op: Some("read"), file_mutating: false, file_reading: true }
+        );
+        assert_eq!(
+            PathExistsTool.behavior(),
+            ToolBehavior { op: Some("check"), file_mutating: false, file_reading: false }
+        );
+        assert_eq!(
+            ListDirectoryTool.behavior(),
+            ToolBehavior { op: Some("list"), file_mutating: false, file_reading: false }
+        );
+        assert_eq!(
+            GrepFilesTool.behavior(),
+            ToolBehavior { op: Some("search"), file_mutating: false, file_reading: false }
+        );
+        assert_eq!(
+            ZipCreateTool.behavior(),
+            ToolBehavior { op: Some("zip"), file_mutating: false, file_reading: false }
+        );
+        assert_eq!(
+            ZipExtractTool.behavior(),
+            ToolBehavior { op: Some("unzip"), file_mutating: false, file_reading: false }
+        );
     }
 }

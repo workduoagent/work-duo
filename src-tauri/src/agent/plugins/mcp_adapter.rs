@@ -62,6 +62,15 @@ impl AgentTool for McpRemoteTool {
         format!("mcp__{}__{}", self.server_name, self.original_name)
     }
 
+    // 台账 S6 进阶：声明式行为元数据——MCP 工具统一动词（旧 runtime::tool_op 的 mcp__ 前缀分支）。
+    fn behavior(&self) -> crate::agent::engine::tools::ToolBehavior {
+        crate::agent::engine::tools::ToolBehavior {
+            op: Some("mcp"),
+            file_mutating: false,
+            file_reading: false,
+        }
+    }
+
     fn tool_definition(&self) -> serde_json::Value {
         json!({
             "type": "function",

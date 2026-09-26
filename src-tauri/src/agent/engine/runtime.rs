@@ -984,31 +984,9 @@ pub(crate) struct ToolRoundStats {
     pub read_files: std::collections::HashSet<String>,
 }
 
-/// 工具「操作类型」：供前端一行式工具行展示动词。
-/// 原生工具按叶子名映射；MCP 工具（`mcp__server__tool`）统一 "mcp"。
-fn tool_op(tool_name: &str) -> Option<&'static str> {
-    if tool_name.starts_with("mcp__") {
-        return Some("mcp");
-    }
-    let leaf = tool_name.rsplit("__").next().unwrap_or(tool_name);
-    Some(match leaf {
-        "read_file" => "read",
-        "write_file" => "write",
-        "edit_file" => "edit",
-        "delete_path" => "delete",
-        "move_path" => "move",
-        "list_directory" => "list",
-        "grep_files" => "search",
-        "regex_replace" => "replace",
-        "zip_create" => "zip",
-        "zip_extract" => "unzip",
-        "path_exists" => "check",
-        "run_python_sandbox" | "run_node_sandbox" | "execute_command" => "exec",
-        "http_request" => "http",
-        "anchor_memory" => "memory",
-        _ => return None,
-    })
-}
+/// 工具「操作类型」与文件变更/读取判定已声明式化（台账 S6 进阶 / D1 第一步）：
+/// 见 `tools::ToolBehavior` 与各工具 impl 的 `behavior()` 覆写；
+/// 旧 `tool_op` / `is_file_mutating` / `is_file_reading` 叶子名匹配函数已删除。
 
 /// 从工具入参提取「目标路径 / 对象」：优先 path，其次 file/source/url/command。
 fn tool_path(args: &Value) -> Option<String> {
@@ -1021,18 +999,6 @@ fn tool_path(args: &Value) -> Option<String> {
         }
     }
     None
-}
-
-/// 是否为「文件变更类」工具（需要执行前后快照做精确 diff）。
-fn is_file_mutating(tool_name: &str) -> bool {
-    let leaf = tool_name.rsplit("__").next().unwrap_or(tool_name);
-    matches!(leaf, "write_file" | "edit_file" | "delete_path" | "move_path")
-}
-
-/// 文件读取类工具判定（阶段二图驱动：read_file 执行成功后登记 `Read` 边）。
-fn is_file_reading(tool_name: &str) -> bool {
-    let leaf = tool_name.rsplit("__").next().unwrap_or(tool_name);
-    matches!(leaf, "read_file")
 }
 
 /// 从失败工具入参提取「命令文本」：沙箱 `code` > `command` > 路径类字段 > 整段 args（截断），
@@ -1160,6 +1126,9 @@ pub(crate) async fn run_tool_calls_round(
                 continue;
             }
         };
+        // 台账 S6 进阶：声明式行为元数据（op 动词 / 文件变更 / 文件读取），
+        // 与工具实现同处一地，替代旧叶子名散落匹配。
+        let beh = tool.behavior();
 
         tracing::info!(
             "[agent] tool_round: 执行工具 {} (call_id={}) 参数={}",
@@ -1209,7 +1178,7 @@ pub(crate) async fn run_tool_calls_round(
         // host__* 已走 HostAuthz（上方分流），跳过本地策略评估与本地审批分支。
         if host_denied.is_none() && host_approval_req.is_none() {
         {
-            if let Some(op_str) = tool_op(&tool_name) {
+            if let Some(op_str) = beh.op {
                 if let Some(edge) = crate::agent::engine::policy::EdgeOp::from_op_str(op_str) {
                     let targets = crate::agent::engine::policy::edge_targets(edge, &args);
                     // grants=None（小分队等无授权集场景）→ 策略不适用，维持旧行为
@@ -1256,7 +1225,7 @@ pub(crate) async fn run_tool_calls_round(
         }
         } // host 分流守卫闭合
         // 一行式工具行元数据：操作类型 + 目标路径（执行前即可确定；行数在执行后 diff 得出）。
-        let op = tool_op(&tool_name);
+        let op = beh.op;
         let path_arg = tool_path(&args);
         events::emit_tool_started(app, &ToolStep {
             call_id: step_id.clone(),
@@ -1500,7 +1469,7 @@ pub(crate) async fn run_tool_calls_round(
         }
 
         // 文件变更类工具：执行前快照原内容，执行后对比得出精确增删行数（前端工具行 +N/-M）。
-        let before_snapshot: Option<String> = if is_file_mutating(&tool_name) {
+        let before_snapshot: Option<String> = if beh.file_mutating {
             path_arg
                 .as_deref()
                 .and_then(|p| crate::agent::engine::tools::PathGuard::check(p, ctx).ok())
@@ -1535,7 +1504,7 @@ pub(crate) async fn run_tool_calls_round(
             }
         };
         // 精确 diff：文件变更类工具对比执行前后快照，得出 +N/-M（后端 LCS，非前端估算）。
-        let (lines_added, lines_removed) = if is_file_mutating(&tool_name) {
+        let (lines_added, lines_removed) = if beh.file_mutating {
             let after_snapshot = path_arg
                 .as_deref()
                 .and_then(|p| crate::agent::engine::tools::PathGuard::check(p, ctx).ok())
@@ -1546,13 +1515,13 @@ pub(crate) async fn run_tool_calls_round(
             (None, None)
         };
         // 文件变更类工具：收集实际触碰过的路径，供接管面板「已改文件」区展示（2b-2）。
-        if is_file_mutating(&tool_name) {
+        if beh.file_mutating {
             if let Some(p) = &path_arg {
                 iter_changed_files.insert(p.clone());
             }
         }
         // 文件读取类工具（read_file）：执行成功后收集实际读过的路径，阶段二图驱动写 `Read` 边。
-        if is_file_reading(&tool_name) && result.is_ok() {
+        if beh.file_reading && result.is_ok() {
             if let Some(p) = &path_arg {
                 iter_read_files.insert(p.clone());
             }

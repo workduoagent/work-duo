@@ -85,6 +85,26 @@ pub enum AuthzDomain {
     Host,
 }
 
+/// 工具行为元数据（台账 S6 进阶 / D1 第一步：**声明式**取代 runtime 侧按叶子名
+/// 散落匹配的 `tool_op` / `is_file_mutating` / `is_file_reading` 三函数）。
+///
+/// 旧方案的坑：新增工具要记得去 runtime.rs 三个函数（+policy 映射）各补叶子名，
+/// 漏配静默生效——文件变更工具漏标 = 不做快照 diff、不进 changed_files；
+/// 危险工具漏标 op = policy 危险信号评估整段跳过。声明式后元数据与工具实现
+/// 同处一地（写工具时自然看到），漏配面收敛为「写 impl 时漏一行」。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub struct ToolBehavior {
+    /// 操作动词：前端工具行展示 + policy `EdgeOp::from_op_str` 危险信号评估入口。
+    /// **会产生策略边的工具（write/edit/replace/delete/move/exec/http）必须声明**，
+    /// 否则危险信号检测对该工具失效（静态 check_permission 主闸仍在，但边审批
+    /// 策略/grants 失效）。None = 无专属性动词（通用展示、策略跳过）。
+    pub op: Option<&'static str>,
+    /// 文件变更类：执行前后快照 diff + `changed_files` 聚合（接管面板「已改文件」）。
+    pub file_mutating: bool,
+    /// 文件读取类：执行成功后登记知识图 `Read` 边（记录哪步读了哪些文件）。
+    pub file_reading: bool,
+}
+
 /// 统一工具契约。
 #[async_trait]
 pub trait AgentTool: Send + Sync {
@@ -100,6 +120,12 @@ pub trait AgentTool: Send + Sync {
     /// 授权域（默认 Local=本地审批边界；`host__*` 工具返回 Host 走 HostAuthz）。
     fn authz_domain(&self) -> AuthzDomain {
         AuthzDomain::Local
+    }
+
+    /// 行为元数据（声明式，默认「无动词 / 非变更 / 非读取」）。
+    /// 语义见 [`ToolBehavior`]；危险操作类工具必须覆写 op 字段。
+    fn behavior(&self) -> ToolBehavior {
+        ToolBehavior::default()
     }
 
     /// 执行工具（args 为 LLM 传入的 JSON 参数）。

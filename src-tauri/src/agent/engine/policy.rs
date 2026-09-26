@@ -74,7 +74,8 @@ pub enum EdgeOp {
 }
 
 impl EdgeOp {
-    /// 从 `tool_op()` 的操作字符串映射（见 runtime.rs）。
+    /// 从工具声明式元数据 `ToolBehavior.op`（tools.rs）映射（台账 S6 进阶：
+    /// 旧实现经 runtime::tool_op 叶子名匹配，已随声明式改造移除）。
     pub fn from_op_str(op: &str) -> Option<Self> {
         match op {
             "write" | "edit" | "replace" => Some(Self::Wrote),
