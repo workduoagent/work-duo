@@ -237,6 +237,24 @@ curl -s -X POST http://127.0.0.1:18755/mcp \
 6. 卡死/想中止 → `agent_cancel_task` `{agentId}`。
 > 说明：MCP 决策与前端弹窗**同源**（同一 Hub），UI 点「允许/跳过」和外部 Agent 调 `agent_submit_*` 效果一致、幂等。恢复门禁在 `get_status` 以 `recoveryWaiting=true` + `pending.kind='recovery'` 透出（2026-09-22 起支持）。
 
+### 流程 1.2：多模态与附件类用例（上下文传递验证，2026-09-26 补）
+> `agent_run_task` 的 `attachments` 参数：`[{type, dataUrl, name, mime?, size?, content?}]`。
+> 三类路由的传递语义不同，验收断言也不同：
+>
+> | type | 引擎行为 | 传递语义 | 第二问断言 |
+> |---|---|---|---|
+> | `image` | data URL 注入多模态 `image_url` 数组（需多模态模型） | 原文留在活跃轮 raw_messages_json；token 按固定 1200/图计（不随 base64 虚高） | `trace.reply` 能引用第一问对图的结论（指代不断链） |
+> | `text` | 全文内联进 user 消息 | 同上（真体量计入 token，压缩保护窗管住） | 同上 |
+> | `file` | base64 落盘 `workspace/.attachments/`，注入「路径 + 解析指引」提示 | base64 不进消息（零虚高）；路径随历史回放，模型可 `native__read_file` 重读 | 第二问能说出文件路径/重新解析文件 |
+>
+> **多轮指代用例模板（图片场景）**：
+> 1. `agent_round_create` round 0 + `agent_run_task` prompt「识别图中说的是哪个国家」+ `attachments:[{type:"image",dataUrl:"data:image/png;base64,...",name:"map.png"}]` → 等终态 → 断言 `trace.reply` 含具体地名。
+> 2. 同 session `agent_round_create` round 1 + `agent_run_task` prompt「@AnySearch 帮我搜索上面说的国家的详细信息」（**不带附件**）→ 等终态。
+> 3. **核心断言**：`trace.reply` 不出现「请补充国家名称 / 我看不到你说的国家」类澄清反问——出现即上下文断链（曾因四层缺陷叠加实锤：装配 off-by-one 排除 round0 / base64 按文本算 token 触发过早压缩 / 意图与规划器无会话背景 / 背景缺助手结论，均已修复 99b8bae）。
+> 4. DB 级证据（可选）：查 `agent_conversation_round` 两轮的 `assistant_answer` 均非空；`agent_conversation_session.summary_round_count=0`（保护窗内不压缩）。
+>
+> **已知坑**：附件测试**不要**把超大 base64 塞进 `prompt` 文本里（应走 `attachments` 参数）——曾实测 prompt 里带图 264K 字符把压缩摘要输入撑爆（白烧 18 万 tokens/18s，已剥离但仍是坏实践）。
+
 ### 流程 2：插件编写（百宝箱 → 插件）
 1. 读本 skill `scripts/plugin.python.template.py` 或 `plugin.bun.template.ts`，复制并改写 `run(params)`。
 2. （可选）`plugin_extract_meta` `{runtime, script}` 预览元数据。
