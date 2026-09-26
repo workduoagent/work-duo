@@ -511,7 +511,7 @@ impl crate::agent::engine::tools::AgentTool for HostSyncTool {
         // 规范 function-calling 形状（复用 native::def；扁平结构会被网关丢弃 → 模型看不到工具）
         crate::agent::engine::native::def(
             "host__sync",
-            "双向同步本地与远端目录（按相对路径 + 大小判异）。direction: upload/download/both；delete_extraneous=true 会删除对侧多余文件（升 L2 审批）。",
+            "双向同步本地与远端目录（按相对路径 + 大小 + mtime 判异，容差 2s；exclude 支持目录名/前缀/通配如 *.log）。direction: upload/download/both；delete_extraneous=true 会删除对侧多余文件（升 L2 审批）。",
             json!({"server_id": {"type": "string"}, "local_dir": {"type": "string"}, "remote_dir": {"type": "string"}, "direction": {"type": "string", "enum": ["upload", "download", "both"]}, "delete_extraneous": {"type": "boolean"}, "exclude": {"type": "array", "items": {"type": "string"}}}),
             &["server_id", "local_dir", "remote_dir", "direction"],
         )
@@ -541,7 +541,8 @@ impl crate::agent::engine::tools::AgentTool for HostSyncTool {
             .unwrap_or_default();
 
         let excluded = |rel: &str, name: &str| {
-            exclude.iter().any(|pat| rel.contains(pat.as_str()) || name == pat)
+            // S9：路径段/前缀/通配语义（旧 rel.contains 子串匹配，exclude:["log"] 曾误伤 catalog.txt）
+            exclude.iter().any(|pat| sftp_impl::is_excluded(rel, pat) || name == pat)
         };
 
         let remote_tree = sftp_impl::list_tree(&mut *session.lock().await, &remote_dir)
@@ -552,17 +553,21 @@ impl crate::agent::engine::tools::AgentTool for HostSyncTool {
         let (mut up_files, mut down_files, mut del_files) = (0u64, 0u64, 0u64);
         let (mut up_bytes, mut down_bytes) = (0u64, 0u64);
 
-        let local_map: std::collections::HashMap<String, u64> =
-            local_tree.iter().cloned().map(|e| (e.rel, e.size)).collect();
-        let remote_map: std::collections::HashMap<String, u64> =
-            remote_tree.iter().cloned().map(|e| (e.rel, e.size)).collect();
+        // S9：判异升级「size + mtime（容差 2s）」——旧「仅 size」漏检同 size 不同内容。
+        // 传输完成时两侧 mtime 已互相同步（upload 回写远端 / download 回写本地），
+        // 二次 sync 不会因 mtime 漂移重传；任一侧 mtime 未知（0）自动退化 size-only。
+        let local_map: std::collections::HashMap<String, sftp_impl::SyncEntry> =
+            local_tree.iter().cloned().map(|e| (e.rel.clone(), e)).collect();
+        let remote_map: std::collections::HashMap<String, sftp_impl::SyncEntry> =
+            remote_tree.iter().cloned().map(|e| (e.rel.clone(), e)).collect();
 
         if direction == "upload" || direction == "both" {
             for e in &local_tree {
                 if excluded(&e.rel, e.rel.rsplit('/').next().unwrap_or("")) {
                     continue;
                 }
-                if remote_map.get(&e.rel) != Some(&e.size) {
+                let differs = remote_map.get(&e.rel).map(|r| sftp_impl::entries_differ(e, r)).unwrap_or(true);
+                if differs {
                     let lf = local_dir.join(&e.rel);
                     let rf = format!("{}/{}", remote_dir.trim_end_matches('/'), e.rel);
                     sftp_impl::upload(&mut *session.lock().await, &lf, &rf, false)
@@ -578,7 +583,8 @@ impl crate::agent::engine::tools::AgentTool for HostSyncTool {
                 if excluded(&e.rel, e.rel.rsplit('/').next().unwrap_or("")) {
                     continue;
                 }
-                if local_map.get(&e.rel) != Some(&e.size) {
+                let differs = local_map.get(&e.rel).map(|l| sftp_impl::entries_differ(l, e)).unwrap_or(true);
+                if differs {
                     let rf = format!("{}/{}", remote_dir.trim_end_matches('/'), e.rel);
                     let lf = local_dir.join(&e.rel);
                     sftp_impl::download(&mut *session.lock().await, &rf, &lf, false)
