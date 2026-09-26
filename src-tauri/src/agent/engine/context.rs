@@ -307,9 +307,13 @@ pub(crate) async fn build_context_messages(
     let sid = match &cfg.session_id {
         Some(s) => s.clone(),
         None => {
-            tracing::info!("[agent] context: 无 session_id，仅装配 [system + 当前提问]（不含历史）");
             let mut m = build_request_messages(&cfg.system_prompt, None, None, &[], prompt);
             inject_attachments(&mut m, &cfg.attachments, &cfg.workspace);
+            tracing::info!(
+                "[agent] context: 无 session_id，仅装配 [system + 当前提问]（不含历史） messages={}条/约{}tokens",
+                m.len(),
+                crate::agent::engine::token_estimate::estimate_messages_tokens(&m),
+            );
             return Ok(m);
         }
     };
