@@ -27,12 +27,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
-  Box,
-  ChevronRight,
-  GitBranch,
-  Workflow,
   Paperclip,
-  TriangleAlert,
 } from 'lucide-react'
 import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
@@ -91,11 +86,7 @@ import { useAttachments } from './chat/useAttachments'
 import { SessionSidebar } from './chat/SessionSidebar'
 import { MessageList } from './chat/MessageList'
 import { ChatComposer } from './chat/ChatComposer'
-import { TracePanel } from './session/TracePanel'
-import { RunDagCanvas } from './session/RunDagCanvas'
 import { fe } from '@/core/logBridge'
-import { DecisionCenter } from './session/DecisionCenter'
-import { TakeoverPanel } from './session/TakeoverPanel'
 import type { ReadArtifactResult, BranchFromStepInput, BranchStep, PlanDAG, ContextCompactedPayload, ToolStep } from './session/types'
 import type {
   AgentInfo,
@@ -110,7 +101,7 @@ import type {
   SpeechLike,
   SuggestItem,
 } from './chat/types'
-import { ArtifactGallery } from './chat/artifact-ui'
+import { RightPanel } from './chat/RightPanel'
 import {
   useTypewriter,
 } from './chat/message-ui'
@@ -303,7 +294,7 @@ export default function AgentChatPage() {
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
   // 会话状态机（必须早于任何引用 session.* 的回调/依赖数组，否则 TDZ）。
   const session = useAgentSession(activeSessionId)
-  const { toolSteps, segments, lastLlmUsage, streamingText, isStreaming, statusText, thoughts, planSteps, isRunning, pendingApproval, run, submitDecision, reset, cancel, lastTaskUsage, liveTokenUsage, taskError, artifacts, recovery, resolveRecovery, pendingChoice, submitChoice, planApproval, resolvePlanApproval, kbSources } =
+  const { toolSteps, segments, lastLlmUsage, streamingText, isStreaming, statusText, thoughts, isRunning, pendingApproval, run, submitDecision, reset, cancel, lastTaskUsage, liveTokenUsage, taskError, recovery, pendingChoice, planApproval, kbSources } =
     session
 
   const [agent, setAgent] = useState<AgentInfo | undefined>()
@@ -1942,125 +1933,38 @@ commandActionRef.current = (key: string) => {
 
       </section>
 
-      {/* 右侧投影面板：图（本轮 DAG）/ 过程 / 产物（方案 C Graph-first） */}
-      {rightOpen ? (
-        <>
-          <div className="agent-chat__resize" ref={resizeElRef} onMouseDown={startResize} title="拖拽调节宽度" />
-          <aside className="agent-chat__right" style={{ width: rightWidth }}>
-          <div className="agent-chat__right-tabs">
-            <button
-              type="button"
-              className={`agent-chat__right-tab ${rightTab === 'graph' ? 'is-active' : ''}`}
-              onClick={() => setRightTab('graph')}
-            >
-              <Workflow size={13} />
-              图
-            </button>
-            <button
-              type="button"
-              className={`agent-chat__right-tab ${rightTab === 'process' ? 'is-active' : ''}`}
-              onClick={() => setRightTab('process')}
-            >
-              <GitBranch size={13} />
-              过程
-            </button>
-            <button
-              type="button"
-              className={`agent-chat__right-tab ${rightTab === 'artifacts' ? 'is-active' : ''}`}
-              onClick={() => setRightTab('artifacts')}
-            >
-              <Box size={13} />
-              产物（{artifacts.length}）
-            </button>
-            {/* 处置 Tab（弹窗改版 Phase 1）：授权/恢复决策迁移入口；角标=待处置数量 */}
-            <button
-              type="button"
-              className={`agent-chat__right-tab ${rightTab === 'actions' ? 'is-active' : ''}`}
-              onClick={() => setRightTab('actions')}
-            >
-              <TriangleAlert size={13} />
-              处置
-              {(pendingApproval || recovery || pendingChoice || planApproval) && (
-                <span className="agent-chat__right-tab-badge">
-                  {(pendingApproval ? 1 : 0) +
-                    (recovery ? 1 : 0) +
-                    (pendingChoice ? 1 : 0) +
-                    (planApproval ? 1 : 0)}
-                </span>
-              )}
-            </button>
-            <button
-              type="button"
-              className="agent-chat__right-collapse"
-              title="收起面板"
-              onClick={() => setRightOpen(false)}
-            >
-              <ChevronRight size={14} />
-            </button>
-          </div>
-          <div className="agent-chat__right-body">
-            {rightTab === 'graph' ? (
-              <RunDagCanvas
-                planSteps={planSteps}
-                toolSteps={toolSteps}
-                artifacts={artifacts}
-                planBranch={session.planBranch}
-                planning={session.planning}
-                onPreviewArtifact={handlePreviewArtifact}
-                onBranchFromStep={handleBranchFromStep}
-                onApplyBranch={handleApplyBranch}
-                onDismissBranch={handleDismissBranch}
-              />
-            ) : rightTab === 'process' ? (
-              <TracePanel
-                intent={session.trace.intent}
-                thinking={session.trace.thinking}
-                planSteps={planSteps}
-                toolSteps={toolSteps}
-                planning={session.planning}
-                sessionId={activeSessionId ?? undefined}
-              />
-            ) : rightTab === 'actions' ? (
-              <DecisionCenter
-                approval={pendingApproval}
-                recovery={recovery}
-                choice={pendingChoice}
-                planApproval={planApproval}
-                agentName={agent?.name ?? ''}
-                onApproval={handleApproval}
-                onResolve={resolveRecovery}
-                onSubmitChoice={submitChoice}
-                onResolvePlanApproval={resolvePlanApproval}
-              />
-            ) : (
-              <ArtifactGallery artifacts={artifacts} isTauri={isTauri} />
-            )}
-          </div>
-          {/* 接管详情条：工具栈 / 已改动文件 / 失败命令（决策键已迁至「处置」Tab） */}
-          {recovery && (
-            <div className="agent-chat__right-recovery">
-              <TakeoverPanel recovery={recovery} onPreviewArtifact={handlePreviewArtifact} />
-            </div>
-          )}
-        </aside>
-        </>
-      ) : (
-        <button
-          type="button"
-          className={[
-            'agent-chat__right-reopen',
-            isRunning && (session.planning || planSteps.length > 0 || toolSteps.length > 0)
-              ? 'agent-chat__right-reopen--pulse'
-              : '',
-          ]
-            .filter(Boolean)
-            .join(' ')}
-          title="展开执行图"
-          onClick={() => setRightOpen(true)}
-        >
-          <Workflow size={18} />
-        </button>
-      )}
+      {/* 右侧投影面板：图（本轮 DAG）/ 过程 / 产物 / 处置（S1 拆分 → chat/RightPanel） */}
+      <RightPanel
+        rightOpen={rightOpen}
+        rightTab={rightTab}
+        setRightTab={setRightTab}
+        setRightOpen={setRightOpen}
+        rightWidth={rightWidth}
+        resizeElRef={resizeElRef}
+        startResize={startResize}
+        planSteps={session.planSteps}
+        toolSteps={session.toolSteps}
+        artifacts={session.artifacts}
+        planning={session.planning}
+        isRunning={session.isRunning}
+        pendingApproval={session.pendingApproval}
+        recovery={session.recovery}
+        pendingChoice={session.pendingChoice}
+        planApproval={session.planApproval}
+        trace={session.trace}
+        planBranch={session.planBranch}
+        resolveRecovery={session.resolveRecovery}
+        submitChoice={session.submitChoice}
+        resolvePlanApproval={session.resolvePlanApproval}
+        agentName={agent?.name ?? ''}
+        isTauri={isTauri}
+        activeSessionId={activeSessionId}
+        onPreviewArtifact={handlePreviewArtifact}
+        onBranchFromStep={handleBranchFromStep}
+        onApplyBranch={handleApplyBranch}
+        onDismissBranch={handleDismissBranch}
+        onApproval={handleApproval}
+      />
 
       {/* 图片放大预览（点击气泡/待发区缩略图打开） */}
       <Modal
