@@ -10,7 +10,7 @@
  *  - sensitive 工具在头部加「需审批」红色小标，提示该步骤曾经过用户授权；
  *  - args / result 以 `<pre>` 展示（保留换行与缩进），过长时容器滚动（限高）。
  */
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Check, ChevronRight, Loader2, X, ShieldAlert } from 'lucide-react'
 import type { ToolStep } from './types'
 import { ToolResultView } from './ToolResultView'
@@ -33,6 +33,12 @@ function tryPretty(json?: string): string {
 export function ToolStepCard({ step }: ToolStepCardProps) {
   const [open, setOpen] = useState(false)
   const { status, toolLabel, sensitive, args, result } = step
+  // 台账 D5：host__exec 实时输出窗自动贴底（内容增长时滚到最新行）
+  const liveRef = useRef<HTMLPreElement>(null)
+  useEffect(() => {
+    const el = liveRef.current
+    if (el && step.liveOutput) el.scrollTop = el.scrollHeight
+  }, [step.liveOutput])
 
   const statusIcon =
     status === 'running' ? (
@@ -45,6 +51,9 @@ export function ToolStepCard({ step }: ToolStepCardProps) {
 
   const statusText =
     status === 'running' ? '执行中' : status === 'success' ? '完成' : '失败'
+
+  // 台账 D5：host__exec 执行中的实时输出尾巴（仅 running 态展示，终态被 result 取代）
+  const liveTail = status === 'running' && step.liveOutput ? step.liveOutput : ''
 
   return (
     <div className={`tool-step tool-step--${status}`}>
@@ -71,6 +80,12 @@ export function ToolStepCard({ step }: ToolStepCardProps) {
           <span className="tool-step__dur">{(step.durationMs / 1000).toFixed(1)}s</span>
         )}
       </button>
+
+      {liveTail && (
+        <pre className="tool-step__live" ref={liveRef} aria-live="polite">
+          {liveTail}
+        </pre>
+      )}
 
       {open && (
         <div className="tool-step__body">

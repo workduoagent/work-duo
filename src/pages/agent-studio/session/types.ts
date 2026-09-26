@@ -44,6 +44,8 @@ export interface ToolStep {
   linesAdded?: number
   /** 本次变更删除行数（仅文件变更类工具，后端精确 diff）。 */
   linesRemoved?: number
+  /** host__exec 执行中的实时输出尾巴（host_exec_output 逐块追加，截尾保留最近 ~4KB；仅 running 态展示）。 */
+  liveOutput?: string
 }
 
 /** 对话流里的一段流式/完整文本（助手的最终回复）。 */
@@ -283,8 +285,19 @@ export interface AgentEvent {
     | 'intent_classified' // 阶段一意图分流结果（轨迹视图首节点）
     | 'thinking_chunk' // 分层思考片段（plan/exec/selfcheck）
     | 'plan_branch_generated' // §3.2 分支重规划结果（双分支对比）
+    | 'host_exec_output' // 台账 D5：host__exec 执行中的增量输出（stdout/stderr 流）
   /** 工具步骤（tool_started / tool_finished 时使用）。 */
   step?: ToolStep
+  /** host__exec 增量输出（host_exec_output 时使用）。 */
+  hostOutput?: {
+    callId: string
+    toolName?: string
+    serverId?: string
+    stream: 'stdout' | 'stderr'
+    chunk: string
+    streamedBytes: number
+    truncated: boolean
+  }
   /** 文本片段（text_chunk / thinking_chunk 时使用）。 */
   chunk?: StreamChunk
   /** 状态/错误信息（status / error 时使用）。 */

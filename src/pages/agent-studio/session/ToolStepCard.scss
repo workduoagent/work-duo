@@ -132,3 +132,25 @@
     transform: rotate(360deg);
   }
 }
+
+// 台账 D5：host__exec 执行中的实时输出尾巴（running 态，等宽小窗、自动贴底由 max-height 控制）
+.tool-step__live {
+  margin: 4px 12px 8px 40px;
+  padding: 8px 10px;
+  max-height: 140px;
+  overflow: auto;
+  border-radius: 8px;
+  border: 1px solid var(--color-border, #e5e5e5);
+  background: var(--color-background-subtle, #fafafa);
+  color: var(--color-foreground-muted, #666);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-all;
+
+  .dark & {
+    background: #161616;
+    border-color: #2f2f2f;
+    color: #aaa;
+  }
+}

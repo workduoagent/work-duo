@@ -438,11 +438,23 @@ function applyAgentEvent(rt: RuntimeState, refs: RuntimeRefs, e: AgentEvent): Ru
         }
       }
       break
+    case 'host_exec_output': {
+      // 台账 D5：host__exec 实时输出——按 callId 找到 running 态步骤追加尾巴（截尾 4KB）。
+      const ho = e.hostOutput
+      if (ho?.callId) {
+        const step = refs.steps.get(ho.callId)
+        if (step && step.status === 'running') {
+          const tail = ((step.liveOutput ?? '') + ho.chunk).slice(-4096)
+          refs.steps.set(ho.callId, { ...step, liveOutput: tail })
+          rt = flushSteps(rt, refs)
+        }
+      }
+      break
+    }
     case 'text_chunk':
       if (e.chunk) {
         const chunk = e.chunk
-        if (chunk.text) {
-          rt = { ...rt, streamingText: rt.streamingText + chunk.text }
+        if (chunk.text) {          rt = { ...rt, streamingText: rt.streamingText + chunk.text }
           const last = rt.segments[rt.segments.length - 1]
           rt = last && last.kind === 'text'
             ? { ...rt, segments: [...rt.segments.slice(0, -1), { kind: 'text' as const, text: (last.text ?? '') + chunk.text }] }
