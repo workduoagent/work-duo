@@ -41,6 +41,9 @@ pub struct ToolContext {
     /// 执行结果（含退出码），供 verifier 的 `command_succeeded` 通用判定。仅运行工具写入，
     /// 串行执行下安全累积；流水线每轮结束后统一 drain 进 `session_tool_outputs`。
     pub run_outcomes: std::sync::Arc<std::sync::Mutex<Vec<RunOutcome>>>,
+    /// 当前工具调用的 call_id（台账 D5：host__exec 流式输出事件据此关联前端工具步骤卡片；
+    /// 非 LLM 工具轮场景为 None）。
+    pub call_id: Option<String>,
 }
 
 /// 工具执行错误。

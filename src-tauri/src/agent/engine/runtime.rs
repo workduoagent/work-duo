@@ -272,6 +272,7 @@ impl AgentRuntime {
             run_id: cfg.round_id.clone(),
             http_allowed_hosts: cfg.http_allowed_hosts.clone(),
             run_outcomes: Default::default(),
+            call_id: None,
         };
 
         // ────────────────────────────────────────────────────────────────────
@@ -819,6 +820,7 @@ impl AgentRuntime {
                         session_id: cfg.session_id.clone(),
                         workspace: cfg.workspace.as_ref().map(std::path::PathBuf::from),
                         http_allowed_hosts: cfg.http_allowed_hosts.clone(),
+                        call_id: Some(call_id.clone()),
                         ..Default::default()
                     };
                     match crate::agent::engine::tools::AgentTool::execute(t.as_ref(), args, &ctx).await {
@@ -1618,9 +1620,14 @@ pub(crate) async fn run_tool_calls_round(
         } else {
             None
         };
-        // 执行工具
+        // 执行工具（台账 D5：注入本次调用的 call_id——host__exec 流式输出事件据此
+        // 关联前端工具步骤卡片；其余工具忽略该字段，零影响）
+        let call_ctx = ToolContext {
+            call_id: Some(call_id.clone()),
+            ..ctx.clone()
+        };
         let t0 = Instant::now();
-        let result = tool.execute(args.clone(), ctx).await;
+        let result = tool.execute(args.clone(), &call_ctx).await;
         let (status, result_text) = match &result {
             Ok(s) => {
                 iter_had_success = true;

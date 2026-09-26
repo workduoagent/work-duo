@@ -479,6 +479,7 @@ async fn run_member_subtask(
         run_id: None,
         http_allowed_hosts: cfg.http_allowed_hosts.clone(),
         run_outcomes: Default::default(),
+        call_id: None,
     };
 
     let approval = ApprovalManager::new();

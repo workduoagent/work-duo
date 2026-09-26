@@ -38,7 +38,14 @@ pub fn build_remote_command(command: &str, cwd: Option<&str>, as_user: &str, log
     }
 }
 
+/// 流式推送封顶：单命令累计推送上限（台账 D5）——tail -f 类高频流防刷屏，
+/// 超出后静默丢弃（终态 ExecOutcome 仍含完整输出，不受影响）。
+const STREAM_CAP_BYTES: usize = 64 * 1024;
+
 /// 执行命令并收集输出（调用方已过 HostAuthz）。
+///
+/// `on_output`：可选增量回调 `(is_stderr, chunk)`——台账 D5 流式传输，长命令
+/// 执行期间逐块推送 stdout/stderr；None 时行为与旧版完全一致（静默收集）。
 pub async fn exec_command(
     handle: &mut Handle<PoolHandler>,
     command: &str,
@@ -46,6 +53,7 @@ pub async fn exec_command(
     as_user: &str,
     login_user: &str,
     timeout_sec: u64,
+    on_output: Option<&(dyn Fn(bool, &str) + Send + Sync)>,
 ) -> Result<ExecOutcome, String> {
     let timeout_sec = timeout_sec.clamp(1, 300);
     let remote = build_remote_command(command, cwd, as_user, login_user);
@@ -64,10 +72,28 @@ pub async fn exec_command(
         let mut stdout: Vec<u8> = Vec::new();
         let mut stderr: Vec<u8> = Vec::new();
         let mut exit_code: Option<u32> = None;
+        let mut streamed: usize = 0usize;
         loop {
             match channel.wait().await {
-                Some(russh::ChannelMsg::Data { data }) => stdout.extend_from_slice(&data),
-                Some(russh::ChannelMsg::ExtendedData { data, .. }) => stderr.extend_from_slice(&data),
+                Some(russh::ChannelMsg::Data { data }) => {
+                    // 流式推送（封顶前）：终态完整输出不受封顶影响
+                    if let Some(cb) = on_output {
+                        if streamed < STREAM_CAP_BYTES {
+                            cb(false, &String::from_utf8_lossy(&data));
+                            streamed += data.len();
+                        }
+                    }
+                    stdout.extend_from_slice(&data);
+                }
+                Some(russh::ChannelMsg::ExtendedData { data, .. }) => {
+                    if let Some(cb) = on_output {
+                        if streamed < STREAM_CAP_BYTES {
+                            cb(true, &String::from_utf8_lossy(&data));
+                            streamed += data.len();
+                        }
+                    }
+                    stderr.extend_from_slice(&data);
+                }
                 Some(russh::ChannelMsg::ExitStatus { exit_status }) => exit_code = Some(exit_status),
                 Some(russh::ChannelMsg::Eof) => {}
                 Some(russh::ChannelMsg::Close) | None => break,

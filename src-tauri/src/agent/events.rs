@@ -359,6 +359,9 @@ pub struct AgentEventPayload {
     /// 意图分类结果（intent_classified 事件携带），序列化后的 IntentProfile。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub intent: Option<serde_json::Value>,
+    /// host__exec 增量输出（host_exec_output 事件携带，台账 D5）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub host_output: Option<HostExecOutputPayload>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -394,6 +397,7 @@ pub fn emit_tool_started(app: &AppHandle, step: &ToolStep) {
             seq: None,
             plan: None,
             intent: None,
+            host_output: None,
         },
     );
 }
@@ -411,6 +415,7 @@ pub fn emit_tool_finished(app: &AppHandle, step: &ToolStep) {
             seq: None,
             plan: None,
             intent: None,
+            host_output: None,
         },
     );
 }
@@ -434,6 +439,7 @@ pub fn emit_text_chunk(app: &AppHandle, text: &str, done: bool) {
             seq: None,
             plan: None,
             intent: None,
+            host_output: None,
         },
     );
 }
@@ -451,6 +457,7 @@ pub fn emit_status(app: &AppHandle, message: &str) {
             seq: None,
             plan: None,
             intent: None,
+            host_output: None,
         },
     );
 }
@@ -468,6 +475,7 @@ pub fn emit_error(app: &AppHandle, message: &str) {
             seq: None,
             plan: None,
             intent: None,
+            host_output: None,
         },
     );
 }
@@ -487,6 +495,7 @@ pub fn emit_intent_classified(app: &AppHandle, profile: &IntentProfile) {
             seq: None,
             plan: None,
             intent,
+            host_output: None,
         },
     );
 }
@@ -511,6 +520,7 @@ pub fn emit_thinking_chunk(app: &AppHandle, text: &str, done: bool, layer: &str)
             seq: None,
             plan: None,
             intent: None,
+            host_output: None,
         },
     );
 }
@@ -627,6 +637,7 @@ pub fn emit_plan_generated(app: &AppHandle, plan: &crate::agent::types::PlanDAG)
                 "tasks": tasks,
             })),
             intent: None,
+            host_output: None,
         },
     );
 }
@@ -677,6 +688,7 @@ pub fn emit_step_started(app: &AppHandle, step: usize, total: usize, title: &str
                 "status": "running",
             })),
             intent: None,
+            host_output: None,
         },
     );
 }
@@ -733,6 +745,7 @@ pub fn emit_step_finished(
                 "evidence": evidence,
             })),
             intent: None,
+            host_output: None,
         },
     );
 }
@@ -758,6 +771,7 @@ pub fn emit_step_blocked(app: &AppHandle, step: usize, total: usize, title: &str
                 "summary": summary,
             })),
             intent: None,
+            host_output: None,
         },
     );
 }
@@ -782,6 +796,7 @@ pub fn emit_step_retrying(app: &AppHandle, step: usize, total: usize, title: &st
                 "status": "retrying",
             })),
             intent: None,
+            host_output: None,
         },
     );
 }
@@ -854,6 +869,46 @@ pub fn emit_plan_branch(app: &AppHandle, branch: &crate::agent::types::PlanBranc
 #[serde(rename_all = "camelCase")]
 pub struct MemoryRecalledPayload {
     pub item: MemoryItem,
+}
+
+/// host__exec 增量输出（台账 D5：exec 流式传输）。
+/// 长命令执行期间逐块推送 stdout/stderr，前端/轨迹可实时观测；
+/// 单命令总推送量由 exec.rs 封顶（默认 64KB），防止 tail -f 类高频流刷屏。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HostExecOutputPayload {
+    /// 调用唯一标识（前端据此关联到 running 态工具步骤卡片）。
+    pub call_id: String,
+    pub tool_name: String,
+    pub agent_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
+    pub server_id: String,
+    pub stream: String, // "stdout" | "stderr"
+    pub chunk: String,
+    /// 该命令累计已推送字节数（封顶判断用）。
+    pub streamed_bytes: usize,
+    pub truncated: bool,
+}
+
+/// host__exec 增量输出：走 `agent-event` 单通道（event_type=host_exec_output，
+/// 前端 runtimeStore 一个 case 路由）；`emit()` 内部已落 trace 桶（MCP/评测可断言），
+/// 勿再手动 push_event（会双写）。
+pub fn emit_host_exec_output(app: &AppHandle, payload: &HostExecOutputPayload) {
+    emit(
+        app,
+        "agent-event",
+        &AgentEventPayload {
+            event_type: "host_exec_output".into(),
+            step: None,
+            chunk: None,
+            message: None,
+            seq: None,
+            plan: None,
+            intent: None,
+            host_output: Some(payload.clone()),
+        },
+    );
 }
 
 /// 记忆被召回（引用计数 +1）后推送，供「记忆宫殿」实时刷新引用计数与热力图。

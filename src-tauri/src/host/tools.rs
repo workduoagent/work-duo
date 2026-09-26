@@ -312,8 +312,37 @@ impl crate::agent::engine::tools::AgentTool for HostExecTool {
         let timeout_sec = args.get("timeout_sec").and_then(|v| v.as_u64()).unwrap_or(60);
         let fail_on_nonzero = arg_bool(&args, "fail_on_nonzero", true);
 
+        // 台账 D5：exec 流式传输——执行期间逐块推送 stdout/stderr（agent-event 单通道
+        // event_type=host_exec_output + trace 桶双发），前端按 callId 关联到运行中的
+        // 工具步骤卡片实时展示；64KB 总量封顶由 exec.rs 内部处理。
+        let stream_app = self.app.clone();
+        let stream_agent = ctx.agent_id.clone();
+        let stream_session = ctx.session_id.clone();
+        let stream_server = binding.server_id.clone();
+        let stream_call = ctx.call_id.clone().unwrap_or_default();
+        let streamed_total = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let streamed_cb = streamed_total.clone();
+        let on_output = move |is_stderr: bool, chunk: &str| {
+            let n = streamed_cb.fetch_add(chunk.len(), std::sync::atomic::Ordering::Relaxed);
+            crate::agent::events::emit_host_exec_output(
+                &stream_app,
+                &crate::agent::events::HostExecOutputPayload {
+                    call_id: stream_call.clone(),
+                    tool_name: "host__exec".into(),
+                    agent_id: stream_agent.clone(),
+                    session_id: stream_session.clone(),
+                    server_id: stream_server.clone(),
+                    stream: if is_stderr { "stderr".into() } else { "stdout".into() },
+                    chunk: chunk.to_string(),
+                    streamed_bytes: n + chunk.len(),
+                    truncated: false,
+                },
+            );
+        };
+
         let outcome = exec_impl::exec_command(
             &mut *session.lock().await, &command, cwd.as_deref(), &as_user, &binding.login_user, timeout_sec,
+            Some(&on_output),
         )
         .await
         .map_err(ToolError::ExecutionFailed)?;
