@@ -3608,6 +3608,7 @@ impl AgentTool for KbSearchTool {
 impl KbSearchTool {
     /// 构造独立实例（20260922 #1：SIMPLE_CHAT 快路径由 runtime 直接携带 kb_search 工具，
     /// 纯 KB 问答跳过规划，单轮「检索→综合」即答）。
+    #[allow(dead_code)]
     pub fn new_arc(app: AppHandle, kb_ids: Vec<String>) -> std::sync::Arc<Self> {
         std::sync::Arc::new(Self {
             app,

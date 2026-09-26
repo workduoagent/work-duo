@@ -28,7 +28,6 @@ use tokio::time::timeout;
 use crate::agent::hitl::approval::ApprovalManager;
 use crate::agent::hitl::approval::ApprovalOutcome;
 use crate::agent::hitl::choice::ChoiceHub;
-use crate::agent::engine::tools::AgentTool;
 use crate::agent::events;
 use crate::agent::engine::graph::KnowledgeGraph;
 use crate::agent::engine::native;
@@ -285,15 +284,16 @@ impl AgentRuntime {
         // native__kb_search 工具（kb_ids 非空时构造实例），纯 KB 问答跳过规划直接「检索→综合」，
         // 不再强制转 COMPOSITE（旧设计因空工具集导致 KB 不可检索而强制转换；网关慢时规划调用
         // 纯属开销，实测可达 1~3 分钟）。requires_tool 保留为语义标记，requires_planning=false。
-        let kb_tool = if !cfg.kb_ids.is_empty() {
-            Some(crate::agent::engine::native::KbSearchTool::new_arc(app.clone(), cfg.kb_ids.clone()))
-        } else {
-            None
-        };
-        if kb_tool.is_some() && intent.is_simple_chat() {
+        // 台账 S1 回归修复：SIMPLE_CHAT 工具面 = registry 中全部「ReadSafe + Local 域」工具——
+        // 旧实现只挂 native__kb_search，@ 提及临时启用的 MCP（如 AnySearch）在简单对话路径
+        // 被静默丢弃，模型无搜索工具可用。过滤规则：ReadSafe（写/执行/审批类工具不进简单路径，
+        // 风险面不扩大）+ Local 域（host__ 的 HostAuthz 门禁在复合路径调度层，简单路径没有
+        // 该门，绝不挂载）。kb 未绑定时 MCP/只读工具同样可用。
+        let simple_tools = collect_simple_chat_tools(&registry);
+        if !simple_tools.is_empty() && intent.is_simple_chat() {
             tracing::info!(
-                "[agent] run_task: KB 已绑定({}个) 且意图=SIMPLE_CHAT → 简单对话路径携带 native__kb_search（跳过规划）",
-                cfg.kb_ids.len()
+                "[agent] run_task: 意图=SIMPLE_CHAT → 简单对话路径携带 {} 个 ReadSafe 工具（kb/MCP/只读 native；跳过规划）",
+                simple_tools.len()
             );
             intent.requires_tool = true;
             intent.requires_planning = false;
@@ -341,7 +341,7 @@ impl AgentRuntime {
         // 注意：分支重跑（plan_override 存在）时即便意图被分为 simple_chat 也强制走复合路径，
         // 因为用户已显式给出待执行的 DAG，必须进入流水线。
         if intent.is_simple_chat() && plan_override.is_none() {
-            self.run_simple_chat(app, &cfg, &prompt, &task.cancel_flag, kb_tool).await;
+            self.run_simple_chat(app, &cfg, &prompt, &task.cancel_flag, &simple_tools).await;
             return;
         }
 
@@ -776,7 +776,7 @@ impl AgentRuntime {
         cfg: &AgentRuntimeConfig,
         prompt: &str,
         cancel: &Arc<AtomicBool>,
-        kb_tool: Option<std::sync::Arc<crate::agent::engine::native::KbSearchTool>>,
+        simple_tools: &[(String, std::sync::Arc<dyn crate::agent::engine::tools::AgentTool>)],
     ) {
         let mut messages = match crate::agent::engine::context::build_context_messages(app, cfg, prompt).await {
             Ok(m) => m,
@@ -793,9 +793,10 @@ impl AgentRuntime {
         let mut trimmed = trim_history(&messages);
         sanitize_message_sequence(&mut trimmed);
 
-        let tool_defs = kb_tool.as_ref().map(|t| vec![t.tool_definition()]).unwrap_or_default();
+        let tool_defs: Vec<serde_json::Value> =
+            simple_tools.iter().map(|(_, t)| t.tool_definition()).collect();
         tracing::info!(
-            "[agent] run_simple_chat: 单次流式调用（上下文={}条消息[裁剪前{}条]，kb工具={}个）",
+            "[agent] run_simple_chat: 单次流式调用（上下文={}条消息[裁剪前{}条]，ReadSafe 工具={}个）",
             trimmed.len(),
             messages.len(),
             tool_defs.len(),
@@ -835,8 +836,8 @@ impl AgentRuntime {
                         events::emit_task_done(app, task_usage.0, task_usage.1);
                         return;
                     }
-                    // 终态：无工具调用 / KB 工具不可用 / 达到有界轮次上限。
-                    if outcome.tool_calls.is_empty() || kb_tool.is_none() || tool_rounds >= 2 {
+                    // 终态：无工具调用 / 无可用工具 / 达到有界轮次上限。
+                    if outcome.tool_calls.is_empty() || simple_tools.is_empty() || tool_rounds >= 2 {
                         let content = outcome.content;
                         tracing::info!(
                             "[agent] run_simple_chat: 终态文本 {} 字符：{}",
@@ -848,7 +849,7 @@ impl AgentRuntime {
                         messages.push(json!({ "role": "assistant", "content": content }));
                         break 'chat content;
                     }
-                    // 工具轮：执行 native__kb_search（ReadSafe 免审批），结果回灌后再来一轮。
+                    // 工具轮：执行挂载的 ReadSafe 工具（kb/MCP/只读 native），结果回灌后再来一轮。
                     tool_rounds += 1;
                     llm_messages.push(json!({
                         "role": "assistant",
@@ -861,6 +862,8 @@ impl AgentRuntime {
                         let args_str = tc.pointer("/function/arguments").and_then(|v| v.as_str()).unwrap_or("{}").to_string();
                         let args: Value = serde_json::from_str(&args_str).unwrap_or_else(|_| json!({}));
                         let started_at = std::time::Instant::now();
+                        let tool = simple_tools.iter().find(|(n, _)| *n == name).map(|(_, t)| t.clone());
+                        let op = tool.as_ref().map(|t| t.behavior().op.map(String::from)).flatten();
                         let mk_step = |status: &str, result: Option<String>, dur: Option<u64>| crate::agent::types::ToolStep {
                             call_id: call_id.clone(),
                             tool_name: name.clone(),
@@ -874,26 +877,31 @@ impl AgentRuntime {
                                 .map(|d| d.as_millis() as i64)
                                 .unwrap_or(0),
                             step: Some(1),
-                            op: Some("search".into()),
+                            op: op.clone(),
                             path: None,
                             lines_added: None,
                             lines_removed: None,
                         };
                         events::emit_tool_started(app, &mk_step("running", None, None));
-                        let result = if name == "native__kb_search" {
-                            let ctx = crate::agent::engine::tools::ToolContext {
-                                agent_id: cfg.agent_id.clone(),
-                                session_id: cfg.session_id.clone(),
-                                ..Default::default()
-                            };
-                            match crate::agent::engine::tools::AgentTool::execute(kb_tool.as_deref().unwrap(), args, &ctx).await {
-                                Ok(r) => r,
-                                Err(e) => format!("kb_search 执行失败：{e:?}"),
+                        let result = match &tool {
+                            Some(t) => {
+                                let ctx = crate::agent::engine::tools::ToolContext {
+                                    agent_id: cfg.agent_id.clone(),
+                                    session_id: cfg.session_id.clone(),
+                                    workspace: cfg.workspace.as_ref().map(std::path::PathBuf::from),
+                                    http_allowed_hosts: cfg.http_allowed_hosts.clone(),
+                                    ..Default::default()
+                                };
+                                match crate::agent::engine::tools::AgentTool::execute(t.as_ref(), args, &ctx).await {
+                                    Ok(r) => r,
+                                    Err(e) => format!("{} 执行失败：{:?}", name, e),
+                                }
                             }
-                        } else {
-                            format!("当前简单对话路径仅支持知识库检索（native__kb_search），{name} 不可用；请基于已有信息直接作答。")
+                            None => format!(
+                                "当前简单对话路径未挂载工具 {name}；请基于已有信息直接作答，或建议用户以完整任务方式重新提问。"
+                            ),
                         };
-                        let ok = !result.starts_with("kb_search 执行失败");
+                        let ok = !result.starts_with(&format!("{name} 执行失败"));
                         events::emit_tool_finished(app, &mk_step(
                             if ok { "success" } else { "failed" },
                             Some(clip(&result, 2000)),
@@ -933,6 +941,36 @@ impl AgentRuntime {
             }
         }
     }
+}
+
+/// 收集 SIMPLE_CHAT 路径可用的工具（台账 S1 回归修复）。
+///
+/// 过滤规则（双条件，缺一不可）：
+///  - `check_permission == ReadSafe`：写/执行/审批类工具不进简单对话路径（该路径
+///    无审批处理循环，高危工具挂上去就是裸奔）；
+///  - `authz_domain == Local`：host__ 的 HostAuthz 门禁位于复合路径调度层
+///    （run_tool_calls_round 的域分流），简单路径没有该门，host 工具一律不挂。
+///
+/// 按工具名排序保证 tool_defs 顺序稳定（prompt-cache 友好）。
+fn collect_simple_chat_tools(
+    registry: &ToolRegistry,
+) -> Vec<(String, std::sync::Arc<dyn crate::agent::engine::tools::AgentTool>)> {
+    let empty = serde_json::json!({});
+    let mut out: Vec<(String, std::sync::Arc<dyn crate::agent::engine::tools::AgentTool>)> =
+        registry
+            .tool_names()
+            .into_iter()
+            .filter_map(|name| {
+                let tool = registry.get(&name)?;
+                let domain_ok =
+                    tool.authz_domain() == crate::agent::engine::tools::AuthzDomain::Local;
+                let safe = tool.check_permission(&empty)
+                    == crate::agent::engine::tools::PermissionLevel::ReadSafe;
+                (domain_ok && safe).then(|| (name, tool))
+            })
+            .collect();
+    out.sort_by(|a, b| a.0.cmp(&b.0));
+    out
 }
 
 /// 组装一次任务的完整工具注册表（台账 S6 收敛点）。
