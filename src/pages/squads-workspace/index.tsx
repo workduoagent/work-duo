@@ -58,6 +58,7 @@ import type {
     SquadApiConfig,
 } from '@/types/core'
 import {listen, type UnlistenFn} from '@tauri-apps/api/event'
+import { useTauriEvent } from '@/hooks/useTauriEvent'
 import {invoke} from '@tauri-apps/api/core'
 import {open as openDialog} from '@tauri-apps/plugin-dialog'
 import {
@@ -1502,8 +1503,6 @@ function SquadMemoryPanel({
     const [scope, setScope] = useState<'team' | 'member'>('team')
     const [agentId, setAgentId] = useState<string>('')
     const [saving, setSaving] = useState(false)
-    const unlistenRef = useRef<UnlistenFn | null>(null)
-
     const reload = useCallback(async () => {
         try {
             setMemories(await listSquadMemories(squad.id))
@@ -1512,24 +1511,14 @@ function SquadMemoryPanel({
         }
     }, [squad.id, message])
 
+    // 弹窗打开期间订阅锚定事件实时刷新（台账 S12 ③：统一走 useTauriEvent 的 enabled；
+    // 原手写版存在「关闭后在途注册 resolve 才挂回」的泄漏，hook 的 cancelled 语义已修）
+    useTauriEvent<{ item: SquadMemory }>('agent-squad-memory-anchored', (payload) => {
+        if (payload.item.squadId === squad.id) void reload()
+    }, open)
     useEffect(() => {
-        if (!open) {
-            unlistenRef.current?.()
-            unlistenRef.current = null
-            return
-        }
-        void reload()
-        void (async () => {
-            const off = await listen<{ item: SquadMemory }>('agent-squad-memory-anchored', (e) => {
-                if (e.payload.item.squadId === squad.id) void reload()
-            })
-            unlistenRef.current = off
-        })()
-        return () => {
-            unlistenRef.current?.()
-            unlistenRef.current = null
-        }
-    }, [open, squad.id, reload])
+        if (open) void reload()
+    }, [open, reload])
 
     async function handleAdd() {
         if (!key.trim() || !content.trim()) {

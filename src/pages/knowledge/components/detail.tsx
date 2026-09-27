@@ -29,7 +29,7 @@ import { Button, Input, Field, FieldLabel, Empty, Progress, Spin } from '@/compo
 import { useNotify } from '@/components/ui/notify'
 import { isTauri } from '@/core/config'
 import { invoke } from '@tauri-apps/api/core'
-import { listen } from '@tauri-apps/api/event'
+import { useTauriEvent } from '@/hooks/useTauriEvent'
 import {
   getKnowledgeBase,
   refreshAssets,
@@ -311,27 +311,15 @@ export default function KnowledgeDetailPage() {
   }, [loadIndexStat])
 
   // 监听索引进度事件：按 kbId 过滤（其他知识库的重建不串台）
-  useEffect(() => {
-    if (!isTauri) return
-    let alive = true
-    let off: (() => void) | undefined
-    void listen<KbIndexProgressPayload>('agent-kb-index-progress', (ev) => {
-      const p = ev.payload
-      if (!alive || p.kbId !== kbIdRef.current) return
-      setRebuild({ running: !p.finished, done: p.done, total: p.total, message: p.message })
-      if (p.finished) {
-        if (p.phase === 'done' && p.message) message.success(p.message)
-        void loadIndexStat()
-      }
-    }).then((un) => {
-      if (!alive) un()
-      else off = un
-    })
-    return () => {
-      alive = false
-      off?.()
+  // （台账 S12 ③：订阅统一走 useTauriEvent；非 Tauri 环境由其内部 catch 兜底）
+  useTauriEvent<KbIndexProgressPayload>('agent-kb-index-progress', (p) => {
+    if (p.kbId !== kbIdRef.current) return
+    setRebuild({ running: !p.finished, done: p.done, total: p.total, message: p.message })
+    if (p.finished) {
+      if (p.phase === 'done' && p.message) message.success(p.message)
+      void loadIndexStat()
     }
-  }, [loadIndexStat, message])
+  })
 
   async function handleRebuild() {
     if (!kb || !isTauri) return

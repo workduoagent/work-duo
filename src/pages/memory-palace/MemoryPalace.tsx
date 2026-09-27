@@ -12,7 +12,7 @@
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { invoke } from '@tauri-apps/api/core'
-import { listen, type UnlistenFn } from '@tauri-apps/api/event'
+import { useTauriEvent } from '@/hooks/useTauriEvent'
 import {
   Search,
   Plus,
@@ -323,47 +323,28 @@ export default function MemoryPalace() {
   }, [message])
 
   // 订阅记忆召回 / 锚定 / 上下文压缩事件，实时刷新（仅页面存活期间）。
-  useEffect(() => {
-    if (!isTauri) return
-    let offRecall: UnlistenFn | undefined
-    let offAnchored: UnlistenFn | undefined
-    let offCompact: UnlistenFn | undefined
-    let offBackfill: UnlistenFn | undefined
-    let alive = true
-    void (async () => {
-      offRecall = await listen<MemoryRecalledPayload>('agent-memory-recalled', (ev) => {
-        const item = ev.payload.item
-        setMemories((prev) => prev.map((m) => (m.id === item.id ? item : m)))
-      })
-      // 记忆被锚定（手动或智能体自动沉淀）后实时新增/更新卡片，无需重开页面。
-      offAnchored = await listen<MemoryAnchoredPayload>('agent-memory-anchored', (ev) => {
-        const item = ev.payload.item
-        setMemories((prev) => {
-          const exists = prev.some((m) => m.id === item.id)
-          return exists
-            ? prev.map((m) => (m.id === item.id ? item : m))
-            : [item, ...prev]
-        })
-      })
-      offCompact = await listen<ContextCompactedPayload>('agent-context-compacted', (ev) => {
-        setCompactions((prev) => [ev.payload, ...prev].slice(0, 8))
-        // M3：蒸馏候选伴随压缩产生——压缩完成后顺带刷新待确认区。
-        void loadCandidates()
-      })
-      // 向量回填进度（逐批推送，finished=true 收尾）
-      offBackfill = await listen<BackfillProgress>('agent-memory-backfill', (ev) => {
-        setProgress(ev.payload)
-      })
-    })()
-    return () => {
-      alive = false
-      offRecall?.()
-      offAnchored?.()
-      offCompact?.()
-      offBackfill?.()
-      void alive
-    }
-  }, [isTauri, loadCandidates])
+  // （台账 S12 ③：订阅统一走 useTauriEvent；四事件各自独立订阅，等价于原合并 effect）
+  useTauriEvent<MemoryRecalledPayload>('agent-memory-recalled', (payload) => {
+    setMemories((prev) => prev.map((m) => (m.id === payload.item.id ? payload.item : m)))
+  })
+  // 记忆被锚定（手动或智能体自动沉淀）后实时新增/更新卡片，无需重开页面。
+  useTauriEvent<MemoryAnchoredPayload>('agent-memory-anchored', (payload) => {
+    setMemories((prev) => {
+      const exists = prev.some((m) => m.id === payload.item.id)
+      return exists
+        ? prev.map((m) => (m.id === payload.item.id ? payload.item : m))
+        : [payload.item, ...prev]
+    })
+  })
+  useTauriEvent<ContextCompactedPayload>('agent-context-compacted', (payload) => {
+    setCompactions((prev) => [payload, ...prev].slice(0, 8))
+    // M3：蒸馏候选伴随压缩产生——压缩完成后顺带刷新待确认区。
+    void loadCandidates()
+  })
+  // 向量回填进度（逐批推送，finished=true 收尾）
+  useTauriEvent<BackfillProgress>('agent-memory-backfill', (payload) => {
+    setProgress(payload)
+  })
 
   useEffect(() => {
     void loadAll()

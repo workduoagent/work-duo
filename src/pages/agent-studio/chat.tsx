@@ -29,10 +29,10 @@ import { useNavigate, useParams } from 'react-router-dom'
 import {
   Paperclip,
 } from 'lucide-react'
-import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { Modal } from '@/components/ui'
 import { getNotifyApi } from '@/components/ui/notifyBridge'
 import { useNotify } from '@/components/ui/notify'
+import { useTauriEvent } from '@/hooks/useTauriEvent'
 
 import { isAgentRunning } from './session/runtimeStore'
 import { isTauri } from '@/core/config'
@@ -490,20 +490,10 @@ export default function AgentChatPage() {
 
   // 方案B：监听会话压缩完成事件，重读会话表使顶栏环形图随压缩回落。
   // 后端压缩时已把估算节省量从累计 prompt token 回退（持久化），这里仅重读最新值，
-  // 保证「上下文占比」在压缩后下降、不再只增不减。
-  useEffect(() => {
-    let off: UnlistenFn | undefined
-    let cancelled = false
-    void listen<ContextCompactedPayload>('agent-context-compacted', (ev) => {
-      if (ev.payload?.success) refreshSessions()
-    }).then((fn) => {
-      if (!cancelled) off = fn
-    })
-    return () => {
-      cancelled = true
-      off?.()
-    }
-  }, [refreshSessions])
+  // 保证「上下文占比」在压缩后下降、不再只增不减。（台账 S12 ③：订阅统一走 useTauriEvent）
+  useTauriEvent<ContextCompactedPayload>('agent-context-compacted', (payload) => {
+    if (payload?.success) refreshSessions()
+  })
 
 // 斜杠指令动作表（每次渲染刷新闭包，newChat / reset / agent 均为最新值）
 commandActionRef.current = (key: string) => {
