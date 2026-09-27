@@ -322,7 +322,15 @@ pub async fn server_host_save(app: AppHandle, input: ServerHostInput) -> Result<
 #[tauri::command]
 pub async fn server_host_delete(app: AppHandle, id: String) -> Result<(), String> {
     let pool = crate::agent::engine::round_compactor::get_pool(&app).await?;
-    // 级联：凭证 + 绑定引用一并清理（host_grant / 日志按 run 生命周期，保留审计）
+    // 级联：凭证 + 绑定引用一并清理（host_grant / 日志按 run 生命周期，保留审计）。
+    // 顺序修复（2026-09-27）：credential_id 必须在删除 server_host 行**之前**读取——
+    // 原实现先删后查，SELECT 永远落空，凭证清理是死代码，每次删服务器都留一行
+    // 加密密文孤儿（server_credential 无限堆积，即「孤儿密文」悬案的制造机）。
+    let cred = sqlx::query("SELECT credential_id FROM server_host WHERE id = ?")
+        .bind(&id)
+        .fetch_optional(&pool)
+        .await
+        .map_err(|e| format!("查询服务器失败：{e}"))?;
     sqlx::query("DELETE FROM agent_server_ref WHERE server_id = ?")
         .bind(&id)
         .execute(&pool)
@@ -333,12 +341,6 @@ pub async fn server_host_delete(app: AppHandle, id: String) -> Result<(), String
         .execute(&pool)
         .await
         .map_err(|e| format!("删除服务器失败：{e}"))?;
-    let cred = sqlx::query("SELECT credential_id FROM server_host WHERE id = ?")
-        .bind(&id)
-        .fetch_optional(&pool)
-        .await
-        .ok()
-        .flatten();
     if let Some(row) = cred {
         if let Some(cid) = row.get::<Option<String>, _>("credential_id") {
             sqlx::query("DELETE FROM server_credential WHERE id = ?")

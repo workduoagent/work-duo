@@ -819,3 +819,35 @@ mod tests {
         });
     }
 }
+
+/// 真机 DB 辅助验证（不进 CI）：WD_DELIVERY_REAL_DB 设置时，统计 server_credential
+/// 中的「孤儿密文」行（无任何 server_host 档案引用的加密凭证）。
+#[test]
+fn real_db_orphan_credential_count() {
+    let Ok(db) = std::env::var("WD_DELIVERY_REAL_DB") else {
+        eprintln!("[skip] WD_DELIVERY_REAL_DB 未设置，跳过孤儿密文统计");
+        return;
+    };
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    rt.block_on(async move {
+        use std::str::FromStr;
+        use sqlx::sqlite::SqliteConnectOptions;
+        let url = format!("sqlite://{}", db.replace('\\', "/"));
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(SqliteConnectOptions::from_str(&url).unwrap().read_only(true))
+            .await
+            .unwrap();
+        let total: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM server_credential").fetch_one(&pool).await.unwrap();
+        let orphans: Vec<String> = sqlx::query_scalar(
+            "SELECT id FROM server_credential \
+             WHERE id NOT IN (SELECT credential_id FROM server_host WHERE credential_id IS NOT NULL)",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        println!("[real] server_credential 总行数 = {total}");
+        println!("[real] 孤儿密文（无档案引用）= {} 行：{:?}", orphans.len(), orphans);
+    });
+}
