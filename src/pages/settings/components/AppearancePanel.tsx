@@ -1,6 +1,6 @@
 import { useCallback } from 'react'
 import { Sun, Moon, Monitor } from 'lucide-react'
-import { Radio } from 'antd'
+import { Radio } from '@/components/ui'
 import { SettingItem } from './SettingItem'
 import { useTheme } from '@/hooks/useTheme'
 import { useAppDispatch } from '@/core/store'

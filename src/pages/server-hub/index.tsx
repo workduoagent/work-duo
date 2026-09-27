@@ -16,10 +16,8 @@ import {
   KeyRound,
   PlugZap,
 } from 'lucide-react'
-import { Button, Card, Input, Modal, Select, Switch, InputNumber } from '@/components/ui'
-import { Empty, Spin, Tag, Tooltip } from 'antd'
+import { Button, Card, Input, Modal, Select, Switch, InputNumber, Empty, Popconfirm, Spin, Tag, Tooltip } from '@/components/ui'
 import { useNotify } from '@/components/ui/notify'
-import { Popconfirm } from 'antd'
 import {
   listServerHosts,
   saveServerHost,

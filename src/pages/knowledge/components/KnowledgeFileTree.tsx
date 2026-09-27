@@ -6,7 +6,7 @@
  * 选中文件时自动展开其祖先目录。
  */
 import { useEffect, useRef, useState } from 'react'
-import { Popconfirm } from 'antd'
+import { Popconfirm } from '@/components/ui'
 import {
   Folder,
   FolderOpen,

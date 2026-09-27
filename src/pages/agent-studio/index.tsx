@@ -21,8 +21,7 @@ import {
   LayoutGrid,
   Bot,
 } from 'lucide-react'
-import { Popconfirm, Empty, Spin, Pagination } from 'antd'
-import { Button, Card, Switch } from '@/components/ui'
+import { Button, Card, Switch, Empty, Pagination, Popconfirm, Spin } from '@/components/ui'
 import { useNotify } from '@/components/ui/notify'
 import {
   listAgents,

@@ -29,8 +29,7 @@ import {
   Briefcase,
   type LucideIcon,
 } from 'lucide-react'
-import { Button, Input, Card, Switch } from '@/components/ui'
-import { Popconfirm, Empty, Spin, Pagination, Tooltip } from 'antd'
+import { Button, Input, Card, Switch, Empty, Pagination, Popconfirm, Spin, Tooltip } from '@/components/ui'
 import { useNotify } from '@/components/ui/notify'
 import {
   listPlugins,

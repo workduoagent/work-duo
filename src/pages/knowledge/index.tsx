@@ -10,8 +10,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Plus, Trash2, Pencil, FileText, HardDrive, LayoutGrid, BookOpen, Eye } from 'lucide-react'
-import { Popconfirm, Empty, Spin, Pagination } from 'antd'
-import { Button, Card } from '@/components/ui'
+import { Button, Card, Empty, Pagination, Popconfirm, Spin } from '@/components/ui'
 import { useNotify } from '@/components/ui/notify'
 import {
   listKnowledgeBases,

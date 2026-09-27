@@ -36,8 +36,11 @@ import {
   Field,
   FieldLabel,
   AutoComplete,
+  Empty,
+  Popconfirm,
+  Spin,
+  Tooltip,
 } from '@/components/ui'
-import { Popconfirm, Empty, Spin, Tooltip } from 'antd'
 import { useNotify } from '@/components/ui/notify'
 import { open } from '@tauri-apps/plugin-dialog'
 import {

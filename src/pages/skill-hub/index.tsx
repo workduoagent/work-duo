@@ -28,8 +28,7 @@ import {
   ShieldCheck,
   Coffee,
 } from 'lucide-react'
-import { Button, Card, Input, Switch } from '@/components/ui'
-import { Popconfirm, Empty, Spin, Pagination, Tooltip } from 'antd'
+import { Button, Card, Input, Switch, Empty, Pagination, Popconfirm, Spin, Tooltip } from '@/components/ui'
 import { useNotify } from '@/components/ui/notify'
 import {
   listSkills,

@@ -9,8 +9,7 @@ import {
   BookOpen,
   Database,
 } from 'lucide-react'
-import { Input, Switch, InputNumber } from '@/components/ui'
-import { Radio } from 'antd'
+import { Input, Switch, InputNumber, Radio } from '@/components/ui'
 import { SettingItem } from './SettingItem'
 import { useNotify } from '@/components/ui/notify'
 import {

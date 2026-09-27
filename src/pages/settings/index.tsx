@@ -7,7 +7,7 @@
  */
 import { useCallback, useEffect, useState } from 'react'
 import { SlidersHorizontal, Brain, ShieldCheck, Info, Palette } from 'lucide-react'
-import { Spin } from 'antd'
+import { Spin } from '@/components/ui'
 import { PythonLogo } from '@/components/icons/PythonLogo'
 import { NodeLogo } from '@/components/icons/NodeLogo'
 import SandboxPythonPage from '@/pages/sandbox/python'
