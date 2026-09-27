@@ -256,16 +256,8 @@ fn fallback(reason: &str, prompt: &str) -> IntentProfile {
 /// 取导致永远拿到空字符串 → 意图分类 100% 解析失败 → 一律降级 SIMPLE_CHAT → 知识库检索工具
 /// 永远无调用机会。这里直接取顶层 `content`，并保留对「完整信封」形态的兼容以防回归。
 fn extract_content(resp: &Value) -> String {
-    if let Some(s) = resp.get("content").and_then(|c| c.as_str()) {
-        return s.to_string();
-    }
-    resp.get("choices")
-        .and_then(|c| c.get(0))
-        .and_then(|c| c.get("message"))
-        .and_then(|m| m.get("content"))
-        .and_then(|c| c.as_str())
-        .unwrap_or("")
-        .to_string()
+    // S0 收编：转调 llm::extract_llm_content 唯一事实源（原内联实现逻辑一致）。
+    crate::agent::engine::llm::extract_llm_content(resp)
 }
 
 /// 剥离可能的 markdown 代码块包裹，截取首个 `{` 到末个 `}` 之间的 JSON 文本。

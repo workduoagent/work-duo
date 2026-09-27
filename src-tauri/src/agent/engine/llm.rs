@@ -912,6 +912,26 @@ fn normalize_chat_url(base: &str) -> String {
     }
 }
 
+/// 从 LLM 响应中提取助手文本内容（信封形状兼容层）。
+///
+/// `runtime::call_llm` 返回的是**归一化后的 `choices[0].message` 层**（顶层即 `content` 字符串），
+/// 但历史上多处调用方（squad_orchestrator 等）误把它当完整响应信封继续往下钻
+/// `choices[0].message.content` —— 永远取空（台账 G10：squad leader 委派/汇总空输出根因）。
+/// 本函数是唯一事实源：先取归一化层 `content`，兜底兼容完整信封形状。
+pub(crate) fn extract_llm_content(resp: &Value) -> String {
+    if let Some(s) = resp.get("content").and_then(|c| c.as_str()) {
+        return s.trim().to_string();
+    }
+    resp.get("choices")
+        .and_then(|c| c.get(0))
+        .and_then(|c| c.get("message"))
+        .and_then(|m| m.get("content"))
+        .and_then(|c| c.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
