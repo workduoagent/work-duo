@@ -27,6 +27,7 @@
 
 pub mod artifact;
 pub mod commands;
+pub mod delivery;
 pub mod engine;
 pub mod events;
 pub mod hitl;

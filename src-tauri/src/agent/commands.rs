@@ -1515,3 +1515,14 @@ pub struct KbRebuildInput {
 pub async fn kb_rebuild_index(app: AppHandle, input: KbRebuildInput) -> Result<knowledge::KbRebuildAccepted, String> {
     knowledge::spawn_rebuild_kb_index(app, input.kb_id).await
 }
+
+/// 台账 D4 第三步：任务交付包导出——把一次已完成 run 的轨迹/产物/KB 引用/审批链/成本
+/// 归档为用户选定目录下的自包含交付包（manifest + report.md + trajectory + approvals
+/// + sources + artifacts/）。业务逻辑在 agent/delivery.rs，本层只做参数透传。
+#[tauri::command]
+pub async fn agent_export_run_package(
+    app: tauri::AppHandle,
+    input: crate::agent::delivery::ExportRunPackageInput,
+) -> Result<crate::agent::delivery::ExportRunPackageOutput, String> {
+    crate::agent::delivery::export_run_package(&app, &input).await
+}

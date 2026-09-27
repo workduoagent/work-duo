@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Bot, GitBranch, Sparkles, Wrench, ShieldAlert, CheckCircle2, XCircle, Loader2, ChevronRight, ChevronDown, AlertTriangle, RefreshCw, History } from 'lucide-react'
 import { MarkdownRenderer } from '@/components/markdown/MarkdownRenderer'
 import type { IntentClassified, PlanStep, ThinkingChunk, ToolStep } from './types'
-import { listRunTraces, getRunTrace, type RunTraceIndexItem, type RunTraceFull } from '@/core/mapper/agent-run-trace-mapper'
+import { listRunTraces, getRunTrace, exportRunPackage, type RunTraceIndexItem, type RunTraceFull } from '@/core/mapper/agent-run-trace-mapper'
+import { open } from '@tauri-apps/plugin-dialog'
 
 interface TracePanelProps {
   intent?: IntentClassified
@@ -138,6 +139,25 @@ export function TracePanel({ intent, thinking, planSteps, toolSteps, planning = 
     }
   }
 
+  // 台账 D4 第三步：任务交付包导出——选中归档 run 后一键导出（目录由用户选择）。
+  const [exporting, setExporting] = useState(false)
+  const [exported, setExported] = useState<string | null>(null)
+  const handleExport = async () => {
+    if (!replay || exporting) return
+    try {
+      const dir = await open({ directory: true, multiple: false, title: '选择交付包保存目录' })
+      if (!dir || typeof dir !== 'string') return
+      setExporting(true)
+      setExported(null)
+      const out = await exportRunPackage(replay.runId, dir)
+      setExported(`✓ 已导出：${out.packageDir}（产物 ${out.artifactCount} · 审批 ${out.approvalCount}）`)
+    } catch (e) {
+      setExported(`导出失败：${e instanceof Error ? e.message : String(e)}`)
+    } finally {
+      setExporting(false)
+    }
+  }
+
   const hasData = intent || thinking.length > 0 || planSteps.length > 0 || toolSteps.length > 0
 
   const toggleStep = (step: number) => {
@@ -206,6 +226,15 @@ export function TracePanel({ intent, thinking, planSteps, toolSteps, planning = 
             ))}
           </select>
           {replayLoading && <div className="agent-trace__replay-hint">加载中…</div>}
+          {/* 台账 D4 第三步：交付包导出（仅归档 run 可导出；当前运行须终态落盘后经历史选择） */}
+          {replay && !replayLoading && (
+            <div className="agent-trace__export">
+              <button className="agent-trace__export-btn" disabled={exporting} onClick={() => void handleExport()}>
+                {exporting ? '⏳ 导出中…' : '📦 导出交付包'}
+              </button>
+              {exported && <div className="agent-trace__export-hint">{exported}</div>}
+            </div>
+          )}
         </section>
       )}
 

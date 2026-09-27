@@ -287,3 +287,38 @@
   color: var(--color-foreground-muted, #666);
   margin-bottom: 4px;
 }
+
+// ── 台账 D4 第三步：任务交付包导出 ──
+.agent-trace__export {
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.agent-trace__export-btn {
+  border: 1px solid var(--color-border, #e5e5e5);
+  background: var(--color-background, #fff);
+  color: var(--color-foreground, #222);
+  border-radius: 8px;
+  padding: 5px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  text-align: center;
+
+  &:hover:not(:disabled) {
+    border-color: var(--color-brand-500, #4C6FFF);
+  }
+
+  &:disabled {
+    opacity: 0.6;
+    cursor: default;
+  }
+}
+
+.agent-trace__export-hint {
+  font-size: 11px;
+  color: var(--color-foreground-muted, #666);
+  word-break: break-all;
+  line-height: 1.5;
+}

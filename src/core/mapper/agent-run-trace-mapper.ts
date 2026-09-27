@@ -6,6 +6,7 @@
  */
 import { isTauri } from '@/core/config'
 import { getDb } from '@/core/db/SqlService'
+import { invoke } from '@tauri-apps/api/core'
 
 /** 历史运行索引行（列表视图，不含全量事件以控传输量）。 */
 export interface RunTraceIndexItem {
@@ -113,4 +114,18 @@ export async function getRunTrace(runId: string): Promise<RunTraceFull | null> {
       completionTokens: r.completion_tokens ?? 0,
     },
   }
+}
+
+/** 交付包导出结果（台账 D4 第三步）。 */
+export interface ExportRunPackageOutput {
+  packageDir: string
+  files: string[]
+  artifactCount: number
+  approvalCount: number
+}
+
+/** 任务交付包导出：Rust 端查归档 + 拷产物 + 写盘（manifest/trajectory/report/approvals/sources/artifacts）。 */
+export async function exportRunPackage(runId: string, outDir: string): Promise<ExportRunPackageOutput> {
+  if (!isTauri) throw new Error('非 Tauri 环境不可导出交付包')
+  return invoke<ExportRunPackageOutput>('agent_export_run_package', { input: { runId, outDir } })
 }

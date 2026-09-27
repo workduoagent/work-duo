@@ -159,6 +159,7 @@ pub fn run() {
             agent::commands::commit_stage_attachment,
             agent::commands::abort_stage_attachment,
             agent::commands::read_artifact,
+            agent::commands::agent_export_run_package,
             agent::commands::branch_from_step,
             agent::commands::list_memories,
             agent::commands::get_memory_heatmap,
