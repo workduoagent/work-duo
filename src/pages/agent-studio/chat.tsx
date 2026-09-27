@@ -31,11 +31,9 @@ import {
 } from 'lucide-react'
 import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
-import { appDataDir, resourceDir } from '@tauri-apps/api/path'
 import { open } from '@tauri-apps/plugin-dialog'
-import { Button, Modal } from '@/components/ui'
+import { Modal } from '@/components/ui'
 import { getNotifyApi } from '@/components/ui/notifyBridge'
-import { notifyOSWhenHidden } from '@/utils/osNotify'
 import { useNotify } from '@/components/ui/notify'
 
 import { getAgent, listAgentMcpTools, listAgentSkills } from '@/core/mapper/agent-mapper'
@@ -45,7 +43,6 @@ import { listAgentPlugins } from '@/core/mapper/plugin-mapper'
 import type { UserPluginTool } from '@/core/file/plugin-file'
 import { listMcps, listMcpTools } from '@/core/mapper/mcp-mapper'
 import { getModel } from '@/core/mapper/model-mapper'
-import { getRawConfig } from '@/core/mapper/config-mapper'
 import {
   createSession,
   listSessions,
@@ -54,23 +51,13 @@ import {
   deleteSession,
   appendRound,
   listRounds,
-  updateRound,
-  addSessionTokens,
   renameSession,
   setSessionArchived,
   clearSessionProject,
   toggleSessionTop,
   type SessionTreeGroup,
 } from '@/core/mapper/agent-session-mapper'
-import {
-  isSessionRunning,
-  isAgentRunning,
-  setTerminalHandler,
-  setPendingNotifyHandler,
-  getRunMeta,
-  type RunTerminalInfo,
-  type PendingNotifyInfo,
-} from './session/runtimeStore'
+import { isSessionRunning, isAgentRunning } from './session/runtimeStore'
 import {
   listProjects,
   getProject,
@@ -83,11 +70,14 @@ import { isTauri } from '@/core/config'
 import { useAgentSession } from './session/useAgentSession'
 import { useMentionSuggest } from './chat/useMentionSuggest'
 import { useAttachments } from './chat/useAttachments'
+import { chatMod, lastSessionByAgent, SLASH_COMMANDS, resolveWorkspaceDir } from './chat/terminal-bridge'
+import { useFollowScroll } from './chat/useFollowScroll'
+import { useRightPanel } from './chat/useRightPanel'
 import { SessionSidebar } from './chat/SessionSidebar'
 import { MessageList } from './chat/MessageList'
 import { ChatComposer } from './chat/ChatComposer'
 import { fe } from '@/core/logBridge'
-import type { ReadArtifactResult, BranchFromStepInput, BranchStep, PlanDAG, ContextCompactedPayload, ToolStep } from './session/types'
+import type { BranchFromStepInput, BranchStep, PlanDAG, ContextCompactedPayload, ToolStep } from './session/types'
 import type {
   AgentInfo,
   AgentConversationSession,
@@ -95,12 +85,7 @@ import type {
 } from '@/types/core'
 import type { SkillInfo } from '@/core/file/skill-file'
 import type { McpToolDefinition } from '@/core/file/mcp-file'
-import type {
-  BoundMcpServer,
-  ChatMessage,
-  SpeechLike,
-  SuggestItem,
-} from './chat/types'
+import type { BoundMcpServer, ChatMessage, SpeechLike } from './chat/types'
 import { RightPanel } from './chat/RightPanel'
 import {
   useTypewriter,
@@ -108,182 +93,6 @@ import {
 import { buildSessionTree, roundsToMessages } from './chat/session-helpers'
 import { AVG_TOOL_TOKENS, estimateTokens } from './chat/file-helpers'
 import './chat.scss'
-
-/** 解析 app_config.workspace_path（$APPDATA/$RESOURCE 占位）为真实目录，并追加智能体子目录。 */
-async function resolveWorkspaceDir(agent: AgentInfo): Promise<string | null> {
-  if (!isTauri) return null
-  const raw = (await getRawConfig('workspace_path')) ?? '$APPDATA/.workspace'
-  // 去引号兜底：历史库可能把 value 存成了带双引号的形式。
-  const cleaned = raw.replace(/^"+/, '').replace(/"+$/, '').trim()
-  let base = cleaned
-  if (base.includes('$APPDATA')) base = base.replace('$APPDATA', await appDataDir())
-  if (base.includes('$RESOURCE')) base = base.replace('$RESOURCE', await resourceDir())
-  return `${base}/${agent.identifier}`
-}
-
-
-// 台账 S5：对话页模块级可变状态挂 globalThis（跨 HMR 存活）——否则热更后 Map/ref 重建，
-// 「最后查看会话」映射与注入回调丢失（恢复逻辑、通知判定失效一整轮直到下次刷新）。
-interface ChatModuleState {
-  refreshSessionsRef: (() => void) | null
-  lastSessionByAgent: Map<string, string>
-  chatViewSessionRef: string | null
-  sessionsSnapshot: AgentConversationSession[]
-  openSessionRef: ((sid: string, agentId: string) => boolean) | null
-}
-const chatMod = ((globalThis as { __wdChatModule?: ChatModuleState }).__wdChatModule ??= {
-  refreshSessionsRef: null,
-  lastSessionByAgent: new Map(),
-  chatViewSessionRef: null,
-  sessionsSnapshot: [],
-  openSessionRef: null,
-})
-
-
-
-/**
- * 按智能体记住「最后查看的会话 id」。
- * 对话页随路由切换会卸载，`activeSessionId` 是组件 state 会一起丢；但运行态已存在
- * 模块级 store（按会话 id 隔离）。重挂时用它把会话 id 找回来绑定，运行态即可 1:1 还原
- * ——需求②「切到任何页面再回来，没跑完的任务要恢复成正在进行的界面」。
- */
-const SLASH_COMMANDS: SuggestItem[] = [
-  { key: 'cmd:new', token: '/new', label: '新建会话', sub: '开启一个全新对话', group: '指令' },
-  { key: 'cmd:clear', token: '/clear', label: '清空对话', sub: '清除当前全部消息', group: '指令' },
-  { key: 'cmd:reset', token: '/reset', label: '重置运行态', sub: '中断并复位智能体运行态', group: '指令' },
-  { key: 'cmd:help', token: '/help', label: '使用帮助', sub: '查看 @提及 与 /指令 说明', group: '指令' },
-]
-
-const lastSessionByAgent = chatMod.lastSessionByAgent
-
-/**
- * 对话页当前正在查看的会话 id（对话页卸载时为 null）。
- * 终态到达时若「正在查看的不是该会话」（切到别的页面 / 在看别的会话），就弹通知提醒。
- */
-/** 以下字段的存取统一走 chatMod.*（globalThis 跨 HMR 存活）。 */
-
-/** 从任意页面跳回某个会话的对话页：已在该智能体对话页则直接切会话，否则走路由。 */
-function jumpToSession(agentId: string | null, sessionId: string) {
-  if (!agentId) return
-  lastSessionByAgent.set(agentId, sessionId)
-  if (chatMod.openSessionRef?.(sessionId, agentId)) return
-  window.location.hash = `#/agent-studio/${agentId}/chat`
-}
-
-/**
- * 终态落库（**模块级注册**，与组件生命周期解耦）：
- * 此前轮次定稿 / 会话状态 / 未命名会话改名全挂在对话页的 useEffect 上，页面一切走
- * 该 useEffect 就永不触发 →「跑完仍叫未命名会话」「历史会话被错排到首位」。
- * 现在由全局事件桥在收到终态事件时直接落库，即便对话页已切走或卸载也照常执行。
- */
-setTerminalHandler('chat-terminal', (info: RunTerminalInfo) => {
-  void (async () => {
-    const { sessionId, roundId, lastPrompt, runtime, ok } = info
-    try {
-      const answer = runtime.streamingText
-      const raw = info.usage
-      const validUsage = raw && (raw.promptTokens > 0 || raw.completionTokens > 0) ? raw : null
-      const inputTokens = validUsage ? raw!.promptTokens : estimateTokens(lastPrompt)
-      const outputTokens = validUsage ? raw!.completionTokens : estimateTokens(answer)
-      if (roundId) {
-        await updateRound(roundId, {
-          assistantAnswer: answer,
-          thinkingContent: runtime.thoughts.join('\n'),
-          toolCallsSummary: runtime.toolSteps.map((s) => ({
-            name: s.toolName,
-            status: s.status,
-            args: s.args,
-            result: s.result,
-            step: s.step,
-          })),
-          planStepsSummary: runtime.planSteps.map((s) => ({
-            step: s.step,
-            title: s.title,
-            status: s.status,
-            summary: s.summary,
-          })),
-          // 交错时间线持久化（v26）；引用来源追加为 kb-sources 段。
-          segments:
-            runtime.kbSources.length > 0
-              ? [...runtime.segments, { kind: 'kb-sources' as const, hits: runtime.kbSources }]
-              : runtime.segments,
-          inputTokens,
-          outputTokens,
-          endTime: Date.now(),
-        })
-      }
-      await updateSession(sessionId, { status: ok ? 'COMPLETED' : 'ERROR', endTime: Date.now() })
-      // Tauri 路径后端已累计真实 usage；无 usage 时用本地估算兜底，避免出现「消耗 0 tokens」。
-      if (!validUsage) await addSessionTokens(sessionId, inputTokens, outputTokens)
-      // 未命名会话兜底改名（正常发问时已改名，这里防其它途径遗漏）。
-      const fresh = await getSession(sessionId)
-      const name = (fresh?.sessionName ?? '').trim()
-      if ((!name || name === '未命名会话') && lastPrompt) {
-        await renameSession(sessionId, lastPrompt.trim().slice(0, 40))
-      }
-      chatMod.refreshSessionsRef?.()
-
-      // 用户此刻没在看这个会话（切到别的页面 / 在看别的会话）→ 弹提醒，并可一键跳回。
-      if (chatMod.chatViewSessionRef !== sessionId) {
-        // 紧凑提示（对齐 WorkBuddy 风格）：只给「任务已完成 + 会话名」，不铺正文摘要，
-        // 通知高度压到最小；详细内容回到会话里看。
-        const finalName = name || lastPrompt.trim().slice(0, 40) || '未命名会话'
-        const brief = finalName.length > 24 ? `${finalName.slice(0, 24)}…` : finalName
-        const api = getNotifyApi()
-        const cfg = {
-          message: ok ? '任务已完成' : '任务异常结束',
-          description: brief,
-          placement: 'bottomRight' as const,
-          duration: 0, // 不自动消失，手动关闭（用户要求）
-          className: 'agent-task-notify',
-          btn: (
-            <Button size="sm" onClick={() => jumpToSession(info.agentId, sessionId)}>
-              查看
-            </Button>
-          ),
-        }
-        if (ok) api?.notification?.success(cfg)
-        else api?.notification?.error(cfg)
-        // 窗口不在最前时再补一条系统原生通知（聚焦时该函数内部会静默跳过）。
-        void notifyOSWhenHidden(ok ? '任务已完成' : '任务异常结束', finalName)
-      }
-    } catch (e) {
-      console.error('[chat] 终态落库失败', e)
-    }
-  })()
-})
-
-/**
- * HITL 挂起提醒（授权 / 计划审批 / 方案选择 / 步骤恢复）：
- * 这些是**阻塞态**——任务暂停等人操作，人不在对话页时任务就默默卡死，必须提醒到位。
- * 通知用固定 key（`pending-<sessionId>`）：同类重推时 antd 会原地替换而不是叠加；
- * 用户点开该会话或提交决策后由组件侧关闭（见下方 effect）。
- */
-setPendingNotifyHandler('chat-pending-notify', (info: PendingNotifyInfo) => {
-  console.info('[chat] pending notify handler', { sessionId: info.sessionId, kind: info.kind, viewing: chatMod.chatViewSessionRef })
-  if (chatMod.chatViewSessionRef === info.sessionId) return // 正在看该会话，界面里已有决策面板，不打扰
-  const api = getNotifyApi()
-  if (!api) return
-  // 会话名：优先从当前列表拿，拿不到就用运行元信息里的首问
-  const meta = getRunMeta(info.sessionId)
-  const sess = chatMod.sessionsSnapshot.find((s) => s.id === info.sessionId)
-  const rawName = sess?.sessionName || meta.lastPrompt || '未命名会话'
-  const brief = rawName.length > 24 ? `${rawName.slice(0, 24)}…` : rawName
-  api.notification.warning({
-    key: `pending-${info.sessionId}`, // 固定 key：同类重推原地替换，不叠加
-    message: `任务暂停：${info.kind}`,
-    description: brief,
-    placement: 'bottomRight',
-    duration: 0, // 挂起未处理前不自动消失（手动关闭 / 处理后自动收起）
-    className: 'agent-task-notify',
-    btn: (
-      <Button size="sm" onClick={() => jumpToSession(info.agentId, info.sessionId)}>
-        去处理
-      </Button>
-    ),
-  })
-  void notifyOSWhenHidden(`任务暂停：${info.kind}`, rawName)
-})
 
 export default function AgentChatPage() {
   const { id = '' } = useParams<{ id: string }>()
@@ -378,25 +187,23 @@ export default function AgentChatPage() {
   const [renameTarget, setRenameTarget] = useState<{ kind: 'session' | 'project'; id: string; current: string } | null>(null)
   const [renameValue, setRenameValue] = useState('')
 
-  // 右侧投影面板（图 / 过程 / 产物）：二期方案 C Graph-first，默认关闭、发消息自动展开「图」。
-  // 接管不再常驻 Tab，改为 recovery 非空时右栏底部情境升起。
-  const [rightOpen, setRightOpen] = useState(false)
-  const [rightTab, setRightTab] = useState<'graph' | 'process' | 'artifacts' | 'actions'>('graph')
-  // 右栏宽度（可鼠标拖拽调节）：悬浮面板宽度。上限动态 clamp（窗口宽 - 左侧栏 - 主区最小 420px），
-  // 窄窗口自动收窄，避免悬浮面板盖满对话区。
-  const [rightWidth, setRightWidth] = useState(() => {
-    const max = Math.max(340, Math.min(680, window.innerWidth - 220 - 420))
-    return Math.min(680, max)
-  })
-  // 窗口尺寸变化时 clamp 右栏宽度（悬浮面板不再参与 flex 分配，需自行约束）
-  useEffect(() => {
-    const onResize = () => {
-      const max = Math.max(340, Math.min(680, window.innerWidth - 220 - 420))
-      setRightWidth((w) => Math.min(w, max))
-    }
-    window.addEventListener('resize', onResize)
-    return () => window.removeEventListener('resize', onResize)
-  }, [])
+  // ---- 右栏 UI 态（台账 S1：hook 化 → chat/useRightPanel）----
+  const {
+    rightOpen,
+    setRightOpen,
+    rightTab,
+    setRightTab,
+    rightWidth,
+    resizeElRef,
+    startResize,
+    previewSrc,
+    setPreviewSrc,
+    artifactPreview,
+    setArtifactPreview,
+    artifactLoading,
+    setArtifactLoading,
+    handlePreviewArtifact,
+  } = useRightPanel({ pendingApproval, recovery, pendingChoice, planApproval, workspaceDir })
   // 会话分组折叠态（自由会话 / 各工程分组）：仅会话内 UI 态，不持久化
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set())
   const toggleGroupFold = useCallback((groupId: string) => {
@@ -438,71 +245,7 @@ export default function AgentChatPage() {
       .then(() => message.success('已复制该条完整记录（含思考与工具调用）'))
       .catch(() => message.error('复制失败：剪贴板不可用'))
   }, [message])
-  const resizingRef = useRef(false)
-  const resizeElRef = useRef<HTMLDivElement>(null)
-  const startResize = (e: React.MouseEvent) => {
-    e.preventDefault()
-    resizingRef.current = true
-    resizeElRef.current?.classList.add('is-dragging')
-    const onMove = (ev: MouseEvent) => {
-      if (!resizingRef.current) return
-      // 右栏右侧留 14px margin；按指针位置反推右栏宽度；上限随窗口动态 clamp
-      const w = window.innerWidth - ev.clientX - 14
-      const max = Math.max(340, Math.min(680, window.innerWidth - 220 - 420))
-      setRightWidth(Math.min(max, Math.max(300, w)))
-    }
-    const onUp = () => {
-      resizingRef.current = false
-      resizeElRef.current?.classList.remove('is-dragging')
-      document.removeEventListener('mousemove', onMove)
-      document.removeEventListener('mouseup', onUp)
-      document.body.style.userSelect = ''
-      document.body.style.cursor = ''
-    }
-    document.addEventListener('mousemove', onMove)
-    document.addEventListener('mouseup', onUp)
-    document.body.style.userSelect = 'none'
-    document.body.style.cursor = 'col-resize'
-  }
-  // 图片放大预览：点击气泡/待发区缩略图打开
-  const [previewSrc, setPreviewSrc] = useState<string | null>(null)
-  // §3.2 产物预览：点击画布节点产物调 read_artifact 命令获取内容，在 Modal 里展示
-  const [artifactPreview, setArtifactPreview] = useState<ReadArtifactResult | null>(null)
-  const [artifactLoading, setArtifactLoading] = useState(false)
-
-  // §3.2 画布交互回调
-  // 点击产物文件 → 调 read_artifact 命令获取内容（文本/图片/目录列表），在 Modal 展示
-  const handlePreviewArtifact = useCallback(async (path: string) => {
-    if (!isTauri) return
-    setArtifactLoading(true)
-    setArtifactPreview(null)
-    try {
-      const result = await invoke<ReadArtifactResult>('read_artifact', {
-        path,
-        workspace: workspaceDir ?? null,
-      })
-      setArtifactPreview(result)
-    } catch (e) {
-      setArtifactPreview({
-        path,
-        name: path,
-        kind: 'error',
-        size: 0,
-        content: `读取产物失败：${e}`,
-        truncated: false,
-      })
-    } finally {
-      setArtifactLoading(false)
-    }
-  }, [isTauri, workspaceDir])
-
-  // 挂起自动聚焦（处置中心版）：四类 HITL 任一挂起时自动展开右栏并切到「处置」Tab。
-  useEffect(() => {
-    if (pendingApproval || recovery || pendingChoice || planApproval) {
-      setRightOpen(true)
-      setRightTab('actions')
-    }
-  }, [pendingApproval, recovery, pendingChoice, planApproval])
+  // 图片放大预览：点击气泡/待发区缩略图打开（状态在 useRightPanel）
 
   // 右键「从此步骤分支」→ 调 branch_from_step 命令，后端生成新分支并推 plan_branch 事件
   const handleBranchFromStep = useCallback(async (fromStep: number) => {
@@ -538,8 +281,6 @@ export default function AgentChatPage() {
     setRightTab('graph')
   }, [])
 
-  // 历史会话加载时瞬时跳到底部，避免 smooth 滚动造成的长列表滑动抖动
-  const restoringRef = useRef(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const fileAttachRef = useRef<HTMLInputElement>(null)
 
@@ -548,43 +289,9 @@ export default function AgentChatPage() {
   const [recording, setRecording] = useState(false)
   const recognitionRef = useRef<unknown>(null)
 
-  const scrollRef = useRef<HTMLDivElement>(null)
-  // 流式跟随滚动（用户反馈热修）：
-  // - followBottom=true（跟随模式）时内容增长自动贴底；用户向上滚（滚轮上/拖动滚动条离开
-  //   底部）即解除跟随、回看历史不被打扰；手动滚回底部附近自动恢复；发新提问强制恢复。
-  // - 跟随贴底一律瞬时赋值 scrollTop（禁用 smooth）：流式 chunk 每 16ms 一批，上一次 smooth
-  //   动画未完成即被下一次打断，多次平滑动画互相拉扯正是「抖动」根因；瞬时赋值恒显示最新内容。
-  // - 正文为打字机逐字渲染（比数据流滞后）：仅靠数据变化触发贴底会永远追着实际渲染高度跑
-  //   （「显示的不是最新内容」的另一层根因），故流式期间用 RAF 循环按**实际渲染高度**贴底。
-  const [followBottom, setFollowBottom] = useState(true)
-  const followRafRef = useRef<number | null>(null)
-  // 上次 scrollTop：onScroll 判定「用户向上拖动」的基准（程序贴底 scrollTop 只增不减）。
-  const lastScrollTopRef = useRef(0)
-
-  /** 跟随贴底（rAF 合并 + 瞬时赋值）：同一帧多次触发只滚一次。 */
-  const scheduleFollowScroll = useCallback(() => {
-    if (followRafRef.current != null) return
-    followRafRef.current = requestAnimationFrame(() => {
-      followRafRef.current = null
-      const el = scrollRef.current
-      if (el) el.scrollTop = el.scrollHeight
-    })
-  }, [])
-
-  // 流式期间持续贴底循环：每帧无条件贴底（赋相同值浏览器 no-op，成本可忽略）——
-  // 以实际渲染高度为准，任何间隙/高度暴涨下一帧立即补齐，输出中途绝不掉队。
-  // 解除跟随（followBottom=false）→ 循环即停；恢复/新提问 → 随依赖重启。
-  useEffect(() => {
-    if (!(isStreaming || isRunning) || !followBottom) return
-    let raf = 0
-    const tick = () => {
-      const el = scrollRef.current
-      if (el) el.scrollTop = el.scrollHeight
-      raf = requestAnimationFrame(tick)
-    }
-    raf = requestAnimationFrame(tick)
-    return () => cancelAnimationFrame(raf)
-  }, [isStreaming, isRunning, followBottom])
+  // ---- 会话流跟随滚动（台账 S1：hook 化 → chat/useFollowScroll）----
+  const { scrollRef, setFollowBottom, lastScrollTopRef, scheduleFollowScroll } =
+    useFollowScroll({ isStreaming, isRunning, messages, toolSteps, streamingText })
   const replyStartRef = useRef<number | null>(null)
   const prevIsRunningRef = useRef(false)
   const roundIdRef = useRef<string | null>(null)
@@ -786,22 +493,6 @@ export default function AgentChatPage() {
       void cleanupPendingEmptySession()
     }
   }, [])
-
-  // 新消息 / 工具步骤 / 流式文本变化时：仅「跟随模式」下贴底（瞬时、rAF 合并）；
-  // 用户已向上滚动回看历史时不打扰（解除跟随），滚回底部附近自动恢复。
-  // 流式期间的打字机逐字增长由上方 RAF 循环覆盖（以实际渲染高度为准）。
-  useEffect(() => {
-    const el = scrollRef.current
-    if (!el) return
-    if (restoringRef.current) {
-      // 历史会话回显：瞬时定位到底部，避免整列平滑滑动的视觉抖动
-      restoringRef.current = false
-      setFollowBottom(true)
-      el.scrollTop = el.scrollHeight
-      return
-    }
-    if (followBottom) scheduleFollowScroll()
-  }, [messages, toolSteps, streamingText, followBottom, scheduleFollowScroll])
 
   /** 持久化一轮：确保有会话 → 追加 round → 记录 roundId / 序号。 */
   const ensureRound = useCallback(
