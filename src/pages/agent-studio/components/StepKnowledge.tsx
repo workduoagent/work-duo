@@ -7,8 +7,7 @@
  */
 import { useEffect, useState } from 'react'
 import { BookOpen, Trash2, Check } from 'lucide-react'
-import { Spin } from 'antd'
-import { Button, Checkbox } from '@/components/ui'
+import { Button, Checkbox, Spin } from '@/components/ui'
 import { useNotify } from '@/components/ui/notify'
 import { listKnowledgeBases } from '@/core/mapper/knowledge-mapper'
 import type { KnowledgeBase } from '@/types/core'

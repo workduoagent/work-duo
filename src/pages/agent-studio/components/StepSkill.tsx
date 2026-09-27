@@ -6,8 +6,7 @@
  */
 import { useEffect, useState } from 'react'
 import { Puzzle, Trash2, Check } from 'lucide-react'
-import { Spin } from 'antd'
-import { Button, Checkbox } from '@/components/ui'
+import { Button, Checkbox, Spin } from '@/components/ui'
 import { useNotify } from '@/components/ui/notify'
 import { listSkills } from '@/core/mapper/skill-mapper'
 import type { SkillInfo } from '@/core/file/skill-file'

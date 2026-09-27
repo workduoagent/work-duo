@@ -22,8 +22,10 @@ import {
   DatabaseZap,
   Tags,
 } from 'lucide-react'
-import { Empty, Spin, Modal, Progress } from 'antd'
-import { Button, Input, Field, FieldLabel } from '@/components/ui'
+// Modal 保留 antd 直用：此处用 antd Modal API（onOk/confirmLoading/onCancel），
+// ui 层 Modal 是行为包装（onOpenChange 体系）不兼容，改写调用点属行为变更，随 S12 后续批次处理。
+import { Modal } from 'antd'
+import { Button, Input, Field, FieldLabel, Empty, Progress, Spin } from '@/components/ui'
 import { useNotify } from '@/components/ui/notify'
 import { isTauri } from '@/core/config'
 import { invoke } from '@tauri-apps/api/core'

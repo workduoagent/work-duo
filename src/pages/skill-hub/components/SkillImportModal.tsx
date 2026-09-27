@@ -12,8 +12,7 @@
  */
 import { useEffect, useState } from 'react'
 import { Inbox, FolderUp, Upload as UploadIcon, X } from 'lucide-react'
-import { Button, Modal, Input, Field, FieldLabel, Select } from '@/components/ui'
-import { Upload, Tag, Divider, Alert } from 'antd'
+import { Button, Modal, Input, Field, FieldLabel, Select, Upload, Tag, Divider, Alert } from '@/components/ui'
 import { useNotify } from '@/components/ui/notify'
 import {
   createEmptySkill,

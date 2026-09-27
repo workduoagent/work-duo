@@ -23,9 +23,8 @@ import {
   XCircle,
   CircleDashed,
 } from 'lucide-react'
-import { Tag, Descriptions, Tabs, Empty, Spin, Popconfirm, Tooltip } from 'antd'
 import { useNotify } from '@/components/ui/notify'
-import { Button, Card, Switch } from '@/components/ui'
+import { Button, Card, Switch, Tag, Descriptions, Tabs, Empty, Spin, Popconfirm, Tooltip } from '@/components/ui'
 import {
   getMcp,
   listMcpTools,

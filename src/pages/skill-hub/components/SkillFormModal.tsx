@@ -27,8 +27,7 @@ import {
   Bot,
   X,
 } from 'lucide-react'
-import { Button, Input, Field, FieldLabel, Modal, Select } from '@/components/ui'
-import { Tabs, Upload, Radio, Divider, Alert } from 'antd'
+import { Button, Input, Field, FieldLabel, Modal, Select, Tabs, Upload, Radio, Divider, Alert } from '@/components/ui'
 import { useNotify } from '@/components/ui/notify'
 import { MarkdownEditor } from '@/components/markdown/MarkdownEditor'
 import { MonacoJsonEditor } from '@/components/code-editor'

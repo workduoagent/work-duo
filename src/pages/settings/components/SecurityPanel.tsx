@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Database, RotateCcw, Globe, Plus, Trash2, ShieldAlert, RefreshCw } from 'lucide-react'
 import { invoke } from '@tauri-apps/api/core'
-import { Button, Input } from '@/components/ui'
-import { Popconfirm, Alert } from 'antd'
+import { Button, Input, Popconfirm, Alert } from '@/components/ui'
 import { SettingItem } from './SettingItem'
 import { DEFAULT_SETTINGS, type AppSettings } from '@/core/file/settings-file'
 

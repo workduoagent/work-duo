@@ -9,8 +9,7 @@
  */
 import { useEffect, useState } from 'react'
 import { Play, Save } from 'lucide-react'
-import { Button, Field, FieldLabel, Modal } from '@/components/ui'
-import { Alert, Descriptions, Tabs } from 'antd'
+import { Button, Field, FieldLabel, Modal, Alert, Descriptions, Tabs } from '@/components/ui'
 import { useNotify } from '@/components/ui/notify'
 import { MonacoJsonEditor } from '@/components/code-editor'
 import type { UserPluginTool, PluginTestResult } from '@/core/file/plugin-file'

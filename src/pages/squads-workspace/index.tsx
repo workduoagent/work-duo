@@ -29,8 +29,7 @@ import {
     Server,
     ImagePlus,
 } from 'lucide-react'
-import {Empty, Spin, Popconfirm, Tag, Tabs, Tooltip, Alert} from 'antd'
-import {Button, Card, Modal, Field, FieldLabel, Input, Select, Segmented, Switch, InputNumber} from '@/components/ui'
+import {Button, Card, Modal, Field, FieldLabel, Input, Select, Segmented, Switch, InputNumber, Empty, Spin, Popconfirm, Tag, Tabs, Tooltip, Alert} from '@/components/ui'
 import {useNotify} from '@/components/ui/notify'
 import {listAgents} from '@/core/mapper/agent-mapper'
 import {

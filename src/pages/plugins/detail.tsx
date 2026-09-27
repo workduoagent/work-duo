@@ -16,9 +16,8 @@ import {
   XCircle,
   CircleDashed,
 } from 'lucide-react'
-import { Tag, Descriptions, Tabs, Empty, Spin, Popconfirm } from 'antd'
 import { useNotify } from '@/components/ui/notify'
-import { Button } from '@/components/ui'
+import { Button, Tag, Descriptions, Tabs, Empty, Spin, Popconfirm } from '@/components/ui'
 import {
   getPlugin,
   listPluginRunLogs,

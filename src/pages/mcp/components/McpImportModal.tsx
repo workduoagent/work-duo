@@ -6,9 +6,8 @@
  * 远程服务的 env 自动转请求头（*_TOKEN / *API_KEY → Authorization: Bearer）。
  */
 import { useEffect, useMemo, useState } from 'react'
-import { Upload as AntUpload, Alert, Checkbox, Tag } from 'antd'
 import { FileJson, Globe, KeyRound, Plug } from 'lucide-react'
-import { Button, Modal, Input } from '@/components/ui'
+import { Button, Modal, Input, Alert, Checkbox, Tag, Upload as AntUpload } from '@/components/ui'
 import { useNotify } from '@/components/ui/notify'
 import {
   getMcpProtocolLabel,

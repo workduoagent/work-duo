@@ -30,19 +30,8 @@ import {
   Loader2,
   DatabaseZap,
 } from 'lucide-react'
-import { Button, Card, Input, Modal } from '@/components/ui'
 import { useNotify } from '@/components/ui/notify'
-import {
-  Drawer,
-  Popconfirm,
-  Empty,
-  Select,
-  Tag,
-  Tooltip,
-  Spin,
-  Segmented,
-  Input as AntInput,
-} from 'antd'
+import { Button, Card, Input, Modal, Drawer, Popconfirm, Empty, Select, Tag, Tooltip, Segmented, Spin, Input as AntInput } from '@/components/ui'
 import { isTauri } from '@/core/config'
 
 /** 语义召回状态（vector_status 命令返回，camelCase）。 */

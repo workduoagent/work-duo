@@ -12,8 +12,7 @@
  *  - 结果以 JSON 编辑器（只读）回显。真实调用走 Rust 后端 call_mcp_tool（避免 CORS）。
  */
 import { useEffect, useState } from 'react'
-import { Button, Field, FieldLabel, Modal } from '@/components/ui'
-import { Descriptions } from 'antd'
+import { Button, Field, FieldLabel, Modal, Descriptions } from '@/components/ui'
 import { useNotify } from '@/components/ui/notify'
 import {
   callMcpTool,

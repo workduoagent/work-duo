@@ -23,9 +23,8 @@ import {
   Save,
   X,
 } from 'lucide-react'
-import { Tag, Descriptions, Empty, Spin } from 'antd'
 import { useNotify } from '@/components/ui/notify'
-import { Button } from '@/components/ui'
+import { Button, Tag, Descriptions, Empty, Spin } from '@/components/ui'
 import { MarkdownRenderer } from '@/components/markdown/MarkdownRenderer'
 import { MonacoJsonEditor } from '@/components/code-editor'
 import { getSkill, upsertSkill, resolveSkillBasePath } from '@/core/mapper/skill-mapper'

@@ -2,9 +2,8 @@
  * 技能详情抽屉（只读）。
  * 展示基础信息 + 标签 + 存储路径 + 时间，以及技能正文（SKILL.md 原文）。
  */
-import { Drawer, Descriptions, Tag, Typography, Divider, Empty, Space } from 'antd'
 import { Calendar, Pencil } from 'lucide-react'
-import { Button } from '@/components/ui'
+import { Button, Drawer, Descriptions, Tag, Typography, Divider, Empty, Space } from '@/components/ui'
 import { MarkdownRenderer } from '@/components/markdown/MarkdownRenderer'
 import { getSkillCategoryLabel, type SkillInfo } from '@/core/file/skill-file'
 import { SkillAvatar } from './SkillAvatar'

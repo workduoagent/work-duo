@@ -8,8 +8,7 @@
  */
 import { useEffect, useState } from 'react'
 import { Puzzle, Trash2, Check, ShieldAlert } from 'lucide-react'
-import { Spin } from 'antd'
-import { Button, Checkbox } from '@/components/ui'
+import { Button, Checkbox, Spin } from '@/components/ui'
 import { useNotify } from '@/components/ui/notify'
 import { listPlugins } from '@/core/mapper/plugin-mapper'
 import { PLUGIN_RUNTIME_OPTIONS, type UserPluginTool } from '@/core/file/plugin-file'

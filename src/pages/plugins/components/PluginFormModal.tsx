@@ -22,8 +22,9 @@ import {
   Select,
   Switch,
   InputNumber,
+  Tabs,
+  Tooltip,
 } from '@/components/ui'
-import { Tabs, Tooltip } from 'antd'
 import { useNotify } from '@/components/ui/notify'
 import { MonacoJsonEditor } from '@/components/code-editor'
 import { ScenarioSelect } from '@/components/scenario'
