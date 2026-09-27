@@ -56,7 +56,9 @@ pub(crate) fn extract_run_facts(events: &Value) -> RunFacts {
             "agent-event" => {
                 let ty = payload.get("type").and_then(|x| x.as_str()).unwrap_or("");
                 if ty == "tool_started" {
-                    let name = payload
+                    // 真实信封：{type, step: ToolStep}——工具字段嵌套在 step 下（平铺兜底）。
+                    let step = payload.get("step").unwrap_or(&payload);
+                    let name = step
                         .get("toolName")
                         .or_else(|| payload.get("tool"))
                         .and_then(|x| x.as_str())
@@ -207,13 +209,15 @@ pub(crate) fn digest_events_up_to(events: &Value, upto_ts_ms: i64, char_budget: 
             "agent-event" => {
                 let ty = payload.get("type").and_then(|x| x.as_str()).unwrap_or("");
                 if ty == "tool_finished" {
-                    let name = payload
+                    // 真实信封：{type, step: ToolStep}——嵌套取值（平铺兜底）。
+                    let step = payload.get("step").unwrap_or(&payload);
+                    let name = step
                         .get("toolName")
                         .or_else(|| payload.get("tool"))
                         .and_then(|x| x.as_str())
                         .unwrap_or("(未知工具)");
-                    let status = payload.get("status").and_then(|x| x.as_str()).unwrap_or("done");
-                    let brief = payload
+                    let status = step.get("status").and_then(|x| x.as_str()).unwrap_or("done");
+                    let brief = step
                         .get("result")
                         .and_then(|x| x.as_str())
                         .map(|s| {
@@ -293,6 +297,14 @@ pub async fn build_event_fork(
     let pool = crate::agent::engine::round_compactor::get_pool(app)
         .await
         .map_err(|e| format!("取数据库池失败：{e}"))?;
+    build_event_fork_pool(pool, input).await
+}
+
+/// 可测内核：给定池直接合成（内存库集成测试与真机 DB 验证共用同一代码路径）。
+pub(crate) async fn build_event_fork_pool(
+    pool: sqlx::SqlitePool,
+    input: &BuildEventForkInput,
+) -> Result<BuildEventForkOutput, String> {
     let row = sqlx::query(
         "SELECT run_id, agent_id, session_id, started_at, finished_at, events_json, thinking, reply, prompt_tokens, completion_tokens \
          FROM agent_run_trace WHERE run_id = ?",
@@ -389,12 +401,20 @@ pub async fn export_run_package(
     app: &AppHandle,
     input: &ExportRunPackageInput,
 ) -> Result<ExportRunPackageOutput, String> {
-    if input.out_dir.trim().is_empty() {
-        return Err("输出目录为空".into());
-    }
     let pool = crate::agent::engine::round_compactor::get_pool(app)
         .await
         .map_err(|e| format!("取数据库池失败：{e}"))?;
+    export_run_package_pool(pool, input).await
+}
+
+/// 可测内核：给定池直接导出（内存库集成测试与真机 DB 验证共用同一代码路径）。
+pub(crate) async fn export_run_package_pool(
+    pool: sqlx::SqlitePool,
+    input: &ExportRunPackageInput,
+) -> Result<ExportRunPackageOutput, String> {
+    if input.out_dir.trim().is_empty() {
+        return Err("输出目录为空".into());
+    }
 
     let row = sqlx::query(
         "SELECT run_id, agent_id, session_id, started_at, finished_at, events_json, thinking, reply, prompt_tokens, completion_tokens \
@@ -659,5 +679,143 @@ mod tests {
         let empty = build_fork_prompt("", 0, &[]);
         assert!(empty.contains("（未记录"));
         assert!(empty.contains("（分叉点前无有效进展事件）"));
+    }
+
+    // ───────────── 集成测试：内存库往返（交付包导出 + 事件级分叉） ─────────────
+
+    use std::str::FromStr;
+
+    /// 最小 schema + 种子数据：与 export/fork 两条主流程所用列严格对齐。
+    async fn seed_pool() -> sqlx::SqlitePool {
+        use sqlx::sqlite::SqliteConnectOptions;
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1) // 内存库必须单连接（各自独立 DB）
+            .connect_with(SqliteConnectOptions::from_str("sqlite::memory:").unwrap())
+            .await
+            .unwrap();
+        for ddl in [
+            "CREATE TABLE agent_run_trace (run_id TEXT PRIMARY KEY, agent_id TEXT, session_id TEXT, started_at INTEGER, finished_at INTEGER NOT NULL, events_json TEXT NOT NULL, thinking TEXT, reply TEXT, prompt_tokens INTEGER, completion_tokens INTEGER, created_at INTEGER NOT NULL)",
+            "CREATE TABLE agent_conversation_session (id TEXT PRIMARY KEY, session_name TEXT, agent_code TEXT)",
+            "CREATE TABLE agent_conversation_round (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, user_question TEXT, start_time INTEGER, segments_json TEXT)",
+        ] {
+            sqlx::query(ddl).execute(&pool).await.unwrap();
+        }
+        // 产物文件落在真实临时目录（导出会实际拷贝）。
+        let artifact = std::env::temp_dir().join("wd-delivery-test-artifact.md");
+        std::fs::write(&artifact, "# 测试产物\n交付包导出用临时文件。").unwrap();
+        let events = json!([
+            {"event": "agent-event", "payload": {"type": "tool_started", "toolName": "fs__write_file"}, "ts_ms": 90},
+            {"event": "agent-event", "payload": {"type": "tool_finished", "toolName": "fs__write_file", "status": "ok", "result": "已写入"}, "ts_ms": 100},
+            {"event": "agent-artifact-created", "payload": {"artifacts": [{"artifactId": "art_1", "path": artifact.to_string_lossy()}]}, "ts_ms": 110},
+            {"event": "agent-awaiting-approval", "payload": {"approvalId": "ap_9", "riskLevel": "L3"}, "ts_ms": 120},
+        ]);
+        sqlx::query("INSERT INTO agent_run_trace VALUES ('run-test-1234-5678','agt-1','sess-1',50,200,?,'思考','已完成交付',120,45,300)")
+            .bind(events.to_string())
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO agent_conversation_session VALUES ('sess-1','交付包测试会话','coder')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO agent_conversation_round VALUES ('r-1','sess-1','生成季度交付报告',60,?)")
+            .bind(json!([{"kind": "text", "text": "x"}, {"kind": "kb-sources", "hits": [{"title": "设计文档"}]}]).to_string())
+            .execute(&pool)
+            .await
+            .unwrap();
+        pool
+    }
+
+    #[tokio::test]
+    async fn export_and_fork_roundtrip_on_memdb() {
+        let pool = seed_pool().await;
+        let out_dir = std::env::temp_dir().join(format!("wd-delivery-out-{}", std::process::id()));
+
+        // 1) 交付包导出：真实写盘 + 产物真实拷贝。
+        let out = export_run_package_pool(
+            pool.clone(),
+            &ExportRunPackageInput {
+                run_id: "run-test-1234-5678".into(),
+                out_dir: out_dir.to_string_lossy().to_string(),
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(out.artifact_count, 1);
+        assert_eq!(out.approval_count, 1);
+        for f in ["manifest.json", "trajectory.json", "approvals.json", "sources.json", "report.md"] {
+            assert!(out.files.iter().any(|x| x == f), "缺少 {f}");
+        }
+        let pkg = PathBuf::from(&out.package_dir);
+        assert!(pkg.join("artifacts/wd-delivery-test-artifact.md").is_file(), "产物未拷贝");
+        let manifest: Value =
+            serde_json::from_str(&std::fs::read_to_string(pkg.join("manifest.json")).unwrap()).unwrap();
+        assert_eq!(manifest["sessionName"], "交付包测试会话");
+        assert_eq!(manifest["artifactCount"], 1);
+        assert_eq!(manifest["missingArtifacts"].as_array().unwrap().len(), 0);
+        let report = std::fs::read_to_string(pkg.join("report.md")).unwrap();
+        for tag in ["生成季度交付报告", "交付包测试会话", "fs__write_file", "共 1 个审批请求", "共 1 条 kb-sources 段", "已完成交付"] {
+            assert!(report.contains(tag), "report 缺少：{tag}");
+        }
+        let sources: Vec<Value> =
+            serde_json::from_str(&std::fs::read_to_string(pkg.join("sources.json")).unwrap()).unwrap();
+        assert_eq!(sources[0]["hits"][0]["title"], "设计文档");
+
+        // 2) 事件级分叉：upto=0 → 全量进展摘要。
+        let fork = build_event_fork_pool(
+            pool,
+            &BuildEventForkInput { run_id: "run-test-1234-5678".into(), upto_ts_ms: 0 },
+        )
+        .await
+        .unwrap();
+        assert_eq!(fork.session_id, "sess-1");
+        for tag in ["【事件级分叉续跑】", "生成季度交付报告", "fs__write_file", "[产物]", "继续推进"] {
+            assert!(fork.prompt.contains(tag), "fork prompt 缺少：{tag}");
+        }
+        assert!(fork.initial_context.starts_with("【分叉进展摘要】"));
+        assert_eq!(fork.digest_event_count, 4);
+    }
+
+    /// 真机 DB 辅助验证（不进 CI）：WD_DELIVERY_REAL_DB=<workduo.db 路径> 时，
+    /// 对最新归档 run 实际执行交付包导出与分叉合成并打印结果。
+    #[test]
+    fn real_db_delivery_and_fork_smoke() {
+        let Ok(db) = std::env::var("WD_DELIVERY_REAL_DB") else {
+            eprintln!("[skip] WD_DELIVERY_REAL_DB 未设置，跳过真机验证");
+            return;
+        };
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async move {
+            use sqlx::sqlite::SqliteConnectOptions;
+            let url = format!("sqlite://{}", db.replace('\\', "/"));
+            let pool = sqlx::sqlite::SqlitePoolOptions::new()
+                .max_connections(1)
+                .connect_with(SqliteConnectOptions::from_str(&url).unwrap().read_only(true))
+                .await
+                .unwrap();
+            let run_id: String =
+                sqlx::query_scalar("SELECT run_id FROM agent_run_trace ORDER BY finished_at DESC LIMIT 1")
+                    .fetch_one(&pool)
+                    .await
+                    .unwrap();
+            println!("[real] 最新归档 run = {run_id}");
+
+            let out_dir = std::env::temp_dir().join("wd-delivery-real-check");
+            let _ = std::fs::remove_dir_all(&out_dir);
+            let out = export_run_package_pool(
+                pool.clone(),
+                &ExportRunPackageInput { run_id: run_id.clone(), out_dir: out_dir.to_string_lossy().to_string() },
+            )
+            .await
+            .unwrap();
+            println!("[real] 交付包 = {}", out.package_dir);
+            println!("[real] files = {:?} artifacts={} approvals={}", out.files, out.artifact_count, out.approval_count);
+            let manifest = std::fs::read_to_string(PathBuf::from(&out.package_dir).join("manifest.json")).unwrap();
+            println!("[real] manifest 头 400 字 = {}", manifest.chars().take(400).collect::<String>());
+
+            let fork = build_event_fork_pool(pool, &BuildEventForkInput { run_id, upto_ts_ms: 0 }).await.unwrap();
+            println!("[real] fork digestEventCount = {}", fork.digest_event_count);
+            println!("[real] fork prompt = {}", fork.prompt);
+        });
     }
 }
