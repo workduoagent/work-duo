@@ -33,6 +33,12 @@ async fn open_sftp(handle: &mut Handle<PoolHandler>) -> Result<SftpSession, Stri
         .channel_open_session()
         .await
         .map_err(|e| format!("打开 SFTP 通道失败：{e}"))?;
+    // 必须先请求 sftp 子系统：否则服务端在该通道上起的是 shell，SFTP 初始化包
+    // 永远无响应 → SftpSession::new 10s 超时（2026-09-27 真机复测实锤，47.100.74.23）。
+    channel
+        .request_subsystem(true, "sftp")
+        .await
+        .map_err(|e| format!("请求 sftp 子系统失败：{e}"))?;
     SftpSession::new(channel.into_stream())
         .await
         .map_err(|e| format!("SFTP 会话建立失败：{e}"))
