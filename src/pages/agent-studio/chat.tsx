@@ -307,6 +307,8 @@ export default function AgentChatPage() {
     handleBranchFromStep,
     handleDismissBranch,
     roundIndexRef,
+    ensureRound,
+    roundIdRef,
   } = useChatRun({
     session: {
       isRunning,
@@ -412,6 +414,29 @@ export default function AgentChatPage() {
     message,
     modal,
   })
+
+  // 台账 D4 收官：事件级分叉——把合成的续跑指令作为新一轮写入当前会话（走既有 run 通路，
+  // 进展摘要经 initialContext 注入；与 branch_from_step 的计划步粒度互补）。
+  const handleForkFromEvent = useCallback(
+    async (req: { prompt: string; initialContext: string }) => {
+      if (!agent?.id) return
+      const sid = await ensureRound(req.prompt)
+      if (!sid) return
+      try {
+        await run({
+          agentId: agent.id,
+          prompt: req.prompt,
+          workspace: workspaceDir ?? null,
+          sessionId: sid,
+          roundId: roundIdRef.current ?? undefined,
+          initialContext: req.initialContext,
+        })
+      } catch (e) {
+        console.error('[agent] fork from event 失败：', e)
+      }
+    },
+    [agent?.id, ensureRound, run, workspaceDir, roundIdRef],
+  )
 
   // 指令动作表经 ref 延迟绑定：hook 需先于 newChat 声明（newChat 内使用 hook 返回值），
   // 而 newChat 等动作定义在其后——ref 转发解开这一循环。
@@ -783,6 +808,7 @@ commandActionRef.current = (key: string) => {
         onBranchFromStep={handleBranchFromStep}
         onApplyBranch={handleApplyBranch}
         onDismissBranch={handleDismissBranch}
+        onForkFromEvent={handleForkFromEvent}
         onApproval={handleApproval}
       />
 

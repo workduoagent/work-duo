@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Bot, GitBranch, Sparkles, Wrench, ShieldAlert, CheckCircle2, XCircle, Loader2, ChevronRight, ChevronDown, AlertTriangle, RefreshCw, History } from 'lucide-react'
 import { MarkdownRenderer } from '@/components/markdown/MarkdownRenderer'
 import type { IntentClassified, PlanStep, ThinkingChunk, ToolStep } from './types'
-import { listRunTraces, getRunTrace, exportRunPackage, type RunTraceIndexItem, type RunTraceFull } from '@/core/mapper/agent-run-trace-mapper'
+import { listRunTraces, getRunTrace, exportRunPackage, buildEventFork, type RunTraceIndexItem, type RunTraceFull, type BuildEventForkOutput } from '@/core/mapper/agent-run-trace-mapper'
 import { open } from '@tauri-apps/plugin-dialog'
 
 interface TracePanelProps {
@@ -14,6 +14,8 @@ interface TracePanelProps {
   planning?: boolean
   /** 台账 D4：当前会话 id——提供时启用「历史运行回放」下拉（查 agent_run_trace 归档）。 */
   sessionId?: string
+  /** 台账 D4 收官：事件级分叉——确认后由 chat 层合成轮次并 run。 */
+  onForkFromEvent?: (req: { prompt: string; initialContext: string }) => void | Promise<void>
 }
 
 const LAYER_META: Record<ThinkingChunk['layer'], { label: string; color: string }> = {
@@ -103,7 +105,7 @@ function useTypedText(text: string, active: boolean, groupKey: number) {
   return shown
 }
 
-export function TracePanel({ intent, thinking, planSteps, toolSteps, planning = false, sessionId }: TracePanelProps) {
+export function TracePanel({ intent, thinking, planSteps, toolSteps, planning = false, sessionId, onForkFromEvent }: TracePanelProps) {
   // 工具调用默认折叠：工具调用很多时全部展开会撑高右栏，默认收起、点击标题展开。
   const [toolsOpen, setToolsOpen] = useState(false)
   // 规划步骤默认全部展开（让用户看到每步详情）；单步可独立收叠。
@@ -155,6 +157,51 @@ export function TracePanel({ intent, thinking, planSteps, toolSteps, planning = 
       setExported(`导出失败：${e instanceof Error ? e.message : String(e)}`)
     } finally {
       setExporting(false)
+    }
+  }
+
+  // 台账 D4 收官：事件级分叉——选分叉点 → 合成续跑指令（预览确认）→ chat 层开新一轮。
+  const [forkTs, setForkTs] = useState(0)
+  const [forkPreview, setForkPreview] = useState<BuildEventForkOutput | null>(null)
+  const [forkBusy, setForkBusy] = useState(false)
+  const [forkError, setForkError] = useState<string | null>(null)
+  // 分叉点候选：工具完成 / 产物 / 审批 / 计划生成（时间升序；纯文本流事件不入选）。
+  const forkPoints = useMemo(() => {
+    const evs = (replay?.events ?? []) as Array<Record<string, unknown>>
+    const pts: { ts: number; label: string }[] = []
+    for (const e of evs) {
+      const ev = String(e.event ?? '')
+      const payload = (e.payload ?? {}) as Record<string, unknown>
+      const ts = Number(e.ts_ms ?? 0)
+      const ty = String(payload.type ?? '')
+      let label = ''
+      if (ev === 'agent-artifact-created') {
+        const names = ((payload.artifacts as Array<{ path?: string }> | undefined) ?? [])
+          .map((a) => a.path?.split(/[\\/]/).pop() ?? '')
+          .filter(Boolean)
+          .join('、')
+        label = `📦 产物 ${names || '(未知)'}`
+      } else if (ev === 'agent-awaiting-approval') {
+        label = `🛡 审批 ${String(payload.approvalId ?? '')}`
+      } else if (ty === 'tool_finished') {
+        label = `🔧 ${String(payload.toolName ?? '工具')} 完成`
+      } else if (ty === 'plan_generated') {
+        label = '🗺 计划生成'
+      }
+      if (label) pts.push({ ts, label: `${new Date(ts).toLocaleTimeString()} · ${label}` })
+    }
+    return pts
+  }, [replay])
+  const handleForkBuild = async () => {
+    if (!replay || forkBusy) return
+    setForkBusy(true)
+    setForkError(null)
+    try {
+      setForkPreview(await buildEventFork(replay.runId, forkTs))
+    } catch (e) {
+      setForkError(`分叉合成失败：${e instanceof Error ? e.message : String(e)}`)
+    } finally {
+      setForkBusy(false)
     }
   }
 
@@ -233,6 +280,60 @@ export function TracePanel({ intent, thinking, planSteps, toolSteps, planning = 
                 {exporting ? '⏳ 导出中…' : '📦 导出交付包'}
               </button>
               {exported && <div className="agent-trace__export-hint">{exported}</div>}
+            </div>
+          )}
+          {/* 台账 D4 收官：事件级分叉——选分叉点合成续跑指令，确认后在原会话开新一轮 */}
+          {replay && !replayLoading && onForkFromEvent && (
+            <div className="agent-trace__fork">
+              <select
+                className="agent-trace__replay-select"
+                value={forkTs}
+                onChange={(e) => {
+                  setForkTs(Number(e.target.value))
+                  setForkPreview(null)
+                  setForkError(null)
+                }}
+              >
+                <option value={0}>⎇ 分叉点：run 末尾（全量进展）</option>
+                {forkPoints.map((fp) => (
+                  <option key={fp.ts} value={fp.ts}>
+                    ⎇ 分叉点：{fp.label}
+                  </option>
+                ))}
+              </select>
+              {!forkPreview ? (
+                <button
+                  className="agent-trace__export-btn"
+                  disabled={forkBusy}
+                  onClick={() => void handleForkBuild()}
+                >
+                  {forkBusy ? '⏳ 合成中…' : '⎇ 生成分叉续跑'}
+                </button>
+              ) : (
+                <div className="agent-trace__fork-preview">
+                  <div className="agent-trace__fork-prompt">
+                    {forkPreview.prompt.length > 400
+                      ? `${forkPreview.prompt.slice(0, 400)}…`
+                      : forkPreview.prompt}
+                  </div>
+                  <div className="agent-trace__fork-actions">
+                    <button
+                      className="agent-trace__export-btn"
+                      disabled={forkBusy}
+                      onClick={() => {
+                        void onForkFromEvent({ prompt: forkPreview.prompt, initialContext: forkPreview.initialContext })
+                        setForkPreview(null)
+                      }}
+                    >
+                      ✓ 确认续跑
+                    </button>
+                    <button className="agent-trace__export-btn" onClick={() => setForkPreview(null)}>
+                      ✕ 取消
+                    </button>
+                  </div>
+                </div>
+              )}
+              {forkError && <div className="agent-trace__export-hint">{forkError}</div>}
             </div>
           )}
         </section>

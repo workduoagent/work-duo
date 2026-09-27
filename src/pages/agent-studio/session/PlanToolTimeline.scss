@@ -322,3 +322,40 @@
   word-break: break-all;
   line-height: 1.5;
 }
+
+// ── 台账 D4 收官：事件级分叉 ──
+.agent-trace__fork {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.agent-trace__fork-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.agent-trace__fork-prompt {
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--color-foreground-muted, #666);
+  background: var(--color-background-muted, #f6f6f6);
+  border: 1px solid var(--color-border-muted, #eee);
+  border-radius: 6px;
+  padding: 6px 8px;
+  max-height: 120px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.agent-trace__fork-actions {
+  display: flex;
+  gap: 6px;
+
+  & > button {
+    flex: 1;
+  }
+}

@@ -163,6 +163,199 @@ pub(crate) fn build_report_md(
     md
 }
 
+// ───────────────────────── 事件级分叉（台账 D4 收官） ─────────────────────────
+//
+// 语义：从**已归档 run** 的事件时间线上选一个分叉点，把「原目标 + 该点前的执行进展
+// 摘要」合成为续跑指令，在原会话开新一轮走既有 run(initialContext) 通路继续推进
+// ——与 branch_from_step（计划步粒度）互补，不做运行态字节级重建。
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BuildEventForkInput {
+    pub run_id: String,
+    /// 分叉点：摘要覆盖 ts ≤ 此值的事件；0 = 仅原目标（无进展摘要）。
+    pub upto_ts_ms: i64,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BuildEventForkOutput {
+    pub prompt: String,
+    pub initial_context: String,
+    /// 摘要覆盖的事件条数。
+    pub digest_event_count: usize,
+    pub session_id: String,
+}
+
+/// 进展摘要（纯函数，单测覆盖）：取分叉点前事件的**尾部**行（最近进展优先），
+/// 总量按 char_budget 截断；工具结果/产物/计划/审批各成一行。
+pub(crate) fn digest_events_up_to(events: &Value, upto_ts_ms: i64, char_budget: usize) -> (Vec<String>, usize) {
+    let mut lines: Vec<String> = vec![];
+    let mut count = 0usize;
+    let Some(arr) = events.as_array() else {
+        return (lines, 0);
+    };
+    for e in arr {
+        let ts = e.get("ts_ms").and_then(|x| x.as_i64()).unwrap_or(0);
+        if ts > upto_ts_ms {
+            continue;
+        }
+        count += 1;
+        let event = e.get("event").and_then(|x| x.as_str()).unwrap_or("");
+        let payload = e.get("payload").cloned().unwrap_or(Value::Null);
+        match event {
+            "agent-event" => {
+                let ty = payload.get("type").and_then(|x| x.as_str()).unwrap_or("");
+                if ty == "tool_finished" {
+                    let name = payload
+                        .get("toolName")
+                        .or_else(|| payload.get("tool"))
+                        .and_then(|x| x.as_str())
+                        .unwrap_or("(未知工具)");
+                    let status = payload.get("status").and_then(|x| x.as_str()).unwrap_or("done");
+                    let brief = payload
+                        .get("result")
+                        .and_then(|x| x.as_str())
+                        .map(|s| {
+                            let t: String = s.chars().take(120).collect();
+                            t.replace('\n', " ")
+                        })
+                        .unwrap_or_default();
+                    lines.push(format!("- [工具] {name} → {status}：{brief}"));
+                }
+            }
+            "agent-artifact-created" => {
+                if let Some(list) = payload.get("artifacts").and_then(|x| x.as_array()) {
+                    for a in list {
+                        if let Some(p) = a.get("path").and_then(|x| x.as_str()) {
+                            lines.push(format!("- [产物] {p}"));
+                        }
+                    }
+                }
+            }
+            "agent-awaiting-approval" => {
+                lines.push(format!(
+                    "- [审批] {}",
+                    payload
+                        .get("approvalId")
+                        .and_then(|x| x.as_str())
+                        .unwrap_or("(未编号)")
+                ));
+            }
+            _ => {}
+        }
+    }
+    // 尾部优先 + 预算截断：从末尾往前收，超预算即停。
+    let mut kept: Vec<String> = vec![];
+    let mut used = 0usize;
+    for line in lines.iter().rev() {
+        let l = line.chars().count() + 1;
+        if used + l > char_budget {
+            break;
+        }
+        used += l;
+        kept.push(line.clone());
+    }
+    kept.reverse();
+    (kept, count)
+}
+
+/// 续跑指令合成（纯函数，单测覆盖）。
+pub(crate) fn build_fork_prompt(goal: &str, upto_ts_ms: i64, digest_lines: &[String]) -> String {
+    let mut p = String::from("【事件级分叉续跑】\n原目标：\n");
+    p.push_str(if goal.trim().is_empty() {
+        "（未记录，请依据进展摘要推断）"
+    } else {
+        goal.trim()
+    });
+    p.push_str("\n\n以下为归档 run 在分叉点（ts=");
+    p.push_str(&upto_ts_ms.to_string());
+    p.push_str("）之前的执行进展摘要：\n");
+    if digest_lines.is_empty() {
+        p.push_str("（分叉点前无有效进展事件）\n");
+    } else {
+        for l in digest_lines {
+            p.push_str(l);
+            p.push('\n');
+        }
+    }
+    p.push_str(
+        "\n请基于以上进展继续推进：完成剩余目标；若目标已基本达成，请复核已有产出并输出最终交付说明。\n",
+    );
+    p
+}
+
+/// 主流程：读归档轨迹 → 分叉点摘要 → 取原目标 → 返回续跑指令与上下文。
+pub async fn build_event_fork(
+    app: &AppHandle,
+    input: &BuildEventForkInput,
+) -> Result<BuildEventForkOutput, String> {
+    let pool = crate::agent::engine::round_compactor::get_pool(app)
+        .await
+        .map_err(|e| format!("取数据库池失败：{e}"))?;
+    let row = sqlx::query(
+        "SELECT run_id, agent_id, session_id, started_at, finished_at, events_json, thinking, reply, prompt_tokens, completion_tokens \
+         FROM agent_run_trace WHERE run_id = ?",
+    )
+    .bind(&input.run_id)
+    .fetch_optional(&pool)
+    .await
+    .map_err(|e| format!("查询轨迹失败：{e}"))?
+    .ok_or_else(|| format!("轨迹不存在：{}（仅终态 run 有归档）", input.run_id))?;
+
+    let session_id: String = row.try_get("session_id").unwrap_or_default();
+    let finished_at: i64 = row.try_get("finished_at").unwrap_or(0);
+    let events_json_raw: String = row.try_get("events_json").map_err(|e| e.to_string())?;
+    let events: Value =
+        serde_json::from_str(&events_json_raw).unwrap_or_else(|_| Value::Array(vec![]));
+
+    let upto = if input.upto_ts_ms > 0 {
+        input.upto_ts_ms
+    } else {
+        finished_at // 0 = 全量进展
+    };
+    let (digest_lines, digest_count) = digest_events_up_to(&events, upto, 4000);
+
+    // 原目标：与交付包同一匹配口径（start_time <= finished_at 的最近一轮首问）。
+    let mut goal = String::new();
+    if !session_id.is_empty() {
+        if let Ok(Some(r)) = sqlx::query(
+            "SELECT user_question FROM agent_conversation_round \
+             WHERE session_id = ? AND start_time IS NOT NULL AND start_time <= ? \
+             ORDER BY start_time DESC LIMIT 1",
+        )
+        .bind(&session_id)
+        .bind(finished_at)
+        .fetch_optional(&pool)
+        .await
+        {
+            if let Ok(Some(q)) = r.try_get::<Option<String>, _>("user_question") {
+                goal = q;
+            }
+        }
+    }
+
+    let initial_context = {
+        let mut c = String::from("【分叉进展摘要】\n");
+        if digest_lines.is_empty() {
+            c.push_str("（无）");
+        } else {
+            for l in &digest_lines {
+                c.push_str(l);
+                c.push('\n');
+            }
+        }
+        c
+    };
+
+    Ok(BuildEventForkOutput {
+        prompt: build_fork_prompt(&goal, upto, &digest_lines),
+        initial_context,
+        digest_event_count: digest_count,
+        session_id,
+    })
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExportRunPackageInput {
@@ -436,5 +629,35 @@ mod tests {
         assert_eq!(short_run("abcdefgh-xyz"), "abcdefgh");
         assert_eq!(safe_basename("/ws/out/报告.md"), "报告.md");
         assert_eq!(safe_basename("no-slash"), "no-slash");
+    }
+
+    #[test]
+    fn digest_up_to_filters_and_truncates() {
+        let events = json!([
+            {"event": "agent-event", "payload": {"type": "tool_finished", "toolName": "fs__read_file", "status": "ok", "result": "file body"}, "ts_ms": 10},
+            {"event": "agent-event", "payload": {"type": "text_chunk"}, "ts_ms": 11},
+            {"event": "agent-artifact-created", "payload": {"artifacts": [{"path": "/ws/out.md"}]}, "ts_ms": 12},
+            {"event": "agent-event", "payload": {"type": "tool_finished", "toolName": "fs__write_file", "status": "ok", "result": "written"}, "ts_ms": 13},
+        ]);
+        // 分叉点=12：只含 ts≤12 的事件；全量未截断时保持时间序（产物是最近一行）。
+        let (lines, count) = digest_events_up_to(&events, 12, 4000);
+        assert_eq!(count, 3);
+        assert!(lines.last().unwrap().starts_with("- [产物] /ws/out.md"));
+        assert!(lines.iter().any(|l| l.contains("fs__read_file")));
+        assert!(!lines.iter().any(|l| l.contains("fs__write_file")));
+        // 预算截断：budget 极小时保留 0 行但不 panic。
+        let (lines2, _) = digest_events_up_to(&events, 13, 8);
+        assert!(lines2.is_empty() || lines2.len() <= 1);
+    }
+
+    #[test]
+    fn fork_prompt_sections() {
+        let p = build_fork_prompt("修复登录", 1690000000000, &["- [工具] fs__read_file → ok：x".into()]);
+        for tag in ["【事件级分叉续跑】", "修复登录", "ts=1690000000000", "fs__read_file", "继续推进"] {
+            assert!(p.contains(tag), "缺少片段：{tag}");
+        }
+        let empty = build_fork_prompt("", 0, &[]);
+        assert!(empty.contains("（未记录"));
+        assert!(empty.contains("（分叉点前无有效进展事件）"));
     }
 }

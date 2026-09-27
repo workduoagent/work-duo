@@ -498,5 +498,8 @@ export function useChatRun(opts: {
     handleBranchFromStep,
     handleDismissBranch,
     roundIndexRef,
+    // 事件级分叉（台账 D4 收官）：chat.tsx 的 handleForkFromEvent 复用轮次落库与 run 通路
+    ensureRound,
+    roundIdRef,
   }
 }

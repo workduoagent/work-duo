@@ -1526,3 +1526,13 @@ pub async fn agent_export_run_package(
 ) -> Result<crate::agent::delivery::ExportRunPackageOutput, String> {
     crate::agent::delivery::export_run_package(&app, &input).await
 }
+
+/// 台账 D4 收官：事件级分叉——从已归档 run 的事件时间线选分叉点，
+/// 合成「原目标 + 进展摘要」续跑指令（原会话开新一轮走 run(initialContext)）。
+#[tauri::command]
+pub async fn agent_build_event_fork(
+    app: tauri::AppHandle,
+    input: crate::agent::delivery::BuildEventForkInput,
+) -> Result<crate::agent::delivery::BuildEventForkOutput, String> {
+    crate::agent::delivery::build_event_fork(&app, &input).await
+}

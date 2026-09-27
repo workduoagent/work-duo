@@ -129,3 +129,17 @@ export async function exportRunPackage(runId: string, outDir: string): Promise<E
   if (!isTauri) throw new Error('非 Tauri 环境不可导出交付包')
   return invoke<ExportRunPackageOutput>('agent_export_run_package', { input: { runId, outDir } })
 }
+
+/** 事件级分叉合成结果（台账 D4 收官）：续跑指令 + 进展摘要上下文。 */
+export interface BuildEventForkOutput {
+  prompt: string
+  initialContext: string
+  digestEventCount: number
+  sessionId: string
+}
+
+/** 从归档 run 的事件时间线选分叉点，合成续跑指令（原会话开新一轮）。 */
+export async function buildEventFork(runId: string, uptoTsMs: number): Promise<BuildEventForkOutput> {
+  if (!isTauri) throw new Error('非 Tauri 环境不可分叉')
+  return invoke<BuildEventForkOutput>('agent_build_event_fork', { input: { runId, uptoTsMs } })
+}

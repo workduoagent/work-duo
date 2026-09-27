@@ -46,6 +46,8 @@ export interface RightPanelProps extends SessionSlice {
   activeSessionId: string | null
   onPreviewArtifact: (path: string) => Promise<void> | void
   onBranchFromStep: (step: number) => void
+  /** 台账 D4 收官：事件级分叉——由 TracePanel 历史回放发起，chat 层合成轮次并 run。 */
+  onForkFromEvent: (req: { prompt: string; initialContext: string }) => void | Promise<void>
   onApplyBranch: () => void
   onDismissBranch: () => void
   onApproval: (decision: 'approve' | 'skip' | 'takeover', guidance?: string, remember?: boolean) => void
@@ -79,6 +81,7 @@ export function RightPanel(props: RightPanelProps) {
     activeSessionId,
     onPreviewArtifact,
     onBranchFromStep,
+    onForkFromEvent,
     onApplyBranch,
     onDismissBranch,
     onApproval,
@@ -180,6 +183,7 @@ export function RightPanel(props: RightPanelProps) {
               toolSteps={toolSteps}
               planning={planning}
               sessionId={activeSessionId ?? undefined}
+              onForkFromEvent={onForkFromEvent}
             />
           ) : rightTab === 'actions' ? (
             <DecisionCenter
