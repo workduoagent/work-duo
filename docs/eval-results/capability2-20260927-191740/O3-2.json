@@ -1,0 +1,38 @@
+{
+  "caseId": "O3-2",
+  "dim": "O办公",
+  "title": "营收走势图（PNG 模板插件链路）",
+  "status": "failed",
+  "autoPass": false,
+  "autoScore": 0,
+  "durationMs": 165649,
+  "asserts": [
+    {
+      "name": "status_done",
+      "ok": true,
+      "detail": "done"
+    },
+    {
+      "name": "png_exists",
+      "ok": false,
+      "detail": "营收走势图.png 缺失"
+    },
+    {
+      "name": "png_magic",
+      "ok": false,
+      "detail": "文件头应为 PNG 魔数"
+    },
+    {
+      "name": "size_reasonable",
+      "ok": false,
+      "detail": "无文件"
+    }
+  ],
+  "counts": {
+    "prompt": 24509,
+    "completion": 1017
+  },
+  "runId": "run-1790509530607-47",
+  "notes": "",
+  "at": "2026-09-27T11:48:16.237Z"
+}

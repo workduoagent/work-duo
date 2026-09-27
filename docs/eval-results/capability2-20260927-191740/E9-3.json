@@ -1,0 +1,53 @@
+{
+  "caseId": "E9-3",
+  "dim": "E编排",
+  "title": "中断-快照回滚-重跑闭环（D' 实战）",
+  "status": "failed",
+  "autoPass": false,
+  "autoScore": 0,
+  "durationMs": 84645,
+  "asserts": [
+    {
+      "name": "r1_v1_written",
+      "ok": true,
+      "detail": "{\"version\":\"v1\",\"features\":[\"a\"]}"
+    },
+    {
+      "name": "r2_broken_seen",
+      "ok": true,
+      "detail": "run2 应写入 v2-broken（破坏态）"
+    },
+    {
+      "name": "snapshots_available",
+      "ok": true,
+      "detail": "快照 2 份"
+    },
+    {
+      "name": "rollback_executed",
+      "ok": true,
+      "detail": "回滚到 20260927-202726682"
+    },
+    {
+      "name": "restored_v1",
+      "ok": false,
+      "detail": ""
+    },
+    {
+      "name": "broken_txt_gone",
+      "ok": true,
+      "detail": "broken.txt 应随回滚消失"
+    },
+    {
+      "name": "r3_final_v2",
+      "ok": true,
+      "detail": "{\"version\":\"v2\",\"features\":[\"a\",\"b\"]}"
+    }
+  ],
+  "counts": {
+    "prompt": 25876,
+    "completion": 791
+  },
+  "runId": "run-1790512087469-79",
+  "notes": "",
+  "at": "2026-09-27T12:28:43.691Z"
+}

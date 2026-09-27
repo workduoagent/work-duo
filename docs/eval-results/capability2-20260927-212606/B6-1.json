@@ -1,0 +1,43 @@
+{
+  "caseId": "B6-1",
+  "dim": "B知识库",
+  "title": "单库事实问答（三连问全命中）",
+  "status": "done",
+  "autoPass": true,
+  "autoScore": 1,
+  "durationMs": 12080,
+  "asserts": [
+    {
+      "name": "status_done",
+      "ok": true,
+      "detail": "done"
+    },
+    {
+      "name": "annual_15",
+      "ok": true,
+      "detail": "① 年假：正式员工15天，司龄每满一年加1天，最多20天。[3]\n\n② 上班打卡时间：每天9:30。[2]\n\n③ 日常报销单笔上限：800元，超过需部门总监审批。[1]"
+    },
+    {
+      "name": "clock_930",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "reimburse_800",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "kb_search_fired",
+      "ok": true,
+      "detail": "kb_search 事件 1 次"
+    }
+  ],
+  "counts": {
+    "prompt": 3481,
+    "completion": 124
+  },
+  "runId": "run-1790516079668-7",
+  "notes": "",
+  "at": "2026-09-27T13:34:51.731Z"
+}

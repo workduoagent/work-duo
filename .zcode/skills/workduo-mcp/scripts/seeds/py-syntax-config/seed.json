@@ -1,0 +1,10 @@
+{
+  "id": "py-syntax-config",
+  "tier": "syntax",
+  "lang": "python",
+  "targetDir": "cfg-proj",
+  "title": "语法错误修复（配置加载器）",
+  "testCmd": "python -m pytest test_config.py -v",
+  "prompt": "工作空间子目录 cfg-proj/ 的配置加载器 import 即炸（语法错误）。请：\n1) 跑 pytest 定位\n2) 【技术栈锁定】只修 config.py 本身，禁止改测试、禁止换语言重写\n3) 修到 pytest 全绿\n4) FIXLOG.md：问题清单 + 修复说明 + 最终 pytest 摘要；开修前先建骨架，修完回填\n完成后列出文件。\n⚠️ 最终交付物核对（缺一不可）：cfg-proj/FIXLOG.md（逐字一致；config.py 仍在且已修复）。",
+  "artifacts": ["cfg-proj/FIXLOG.md"]
+}

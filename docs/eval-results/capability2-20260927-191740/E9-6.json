@@ -1,0 +1,43 @@
+{
+  "caseId": "E9-6",
+  "dim": "E编排",
+  "title": "记忆驱动偏好复用（格式约束跨轮生效）",
+  "status": "done",
+  "autoPass": true,
+  "autoScore": 1,
+  "durationMs": 30248,
+  "asserts": [
+    {
+      "name": "r1_done",
+      "ok": true,
+      "detail": "done"
+    },
+    {
+      "name": "r2_done",
+      "ok": true,
+      "detail": "done"
+    },
+    {
+      "name": "title_prefix",
+      "ok": true,
+      "detail": "【简报】本月经营情况\n本月营收120万元，成本80万元，实现利润40万元。"
+    },
+    {
+      "name": "len_bounded",
+      "ok": true,
+      "detail": "len=37"
+    },
+    {
+      "name": "numbers_kept",
+      "ok": true,
+      "detail": "应含 120 万与 40 万"
+    }
+  ],
+  "counts": {
+    "prompt": 13312,
+    "completion": 441
+  },
+  "runId": "run-1790512572630-82",
+  "notes": "",
+  "at": "2026-09-27T12:36:33.801Z"
+}

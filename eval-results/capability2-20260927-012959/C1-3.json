@@ -1,0 +1,38 @@
+{
+  "caseId": "C1-3",
+  "dim": "C对话",
+  "title": "结构化 JSON 输出遵循",
+  "status": "failed",
+  "autoPass": false,
+  "autoScore": 0,
+  "durationMs": 21104,
+  "asserts": [
+    {
+      "name": "status_done",
+      "ok": true,
+      "detail": "done"
+    },
+    {
+      "name": "json_parseable",
+      "ok": false,
+      "detail": "已跳过：完成用户任务（预算耗尽或重试无效，未产出交付，建议单独重跑该步）"
+    },
+    {
+      "name": "schema_fields",
+      "ok": false,
+      "detail": "name=undefined feats=0 score=undefined"
+    },
+    {
+      "name": "feat_len_ok",
+      "ok": true,
+      "detail": ""
+    }
+  ],
+  "counts": {
+    "prompt": 0,
+    "completion": 0
+  },
+  "runId": "run-1790443799986-31",
+  "notes": "",
+  "at": "2026-09-26T17:30:21.071Z"
+}

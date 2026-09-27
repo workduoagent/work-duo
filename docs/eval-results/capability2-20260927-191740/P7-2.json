@@ -1,0 +1,38 @@
+{
+  "caseId": "P7-2",
+  "dim": "P插件",
+  "title": "Agent 自助装配图表插件并调用",
+  "status": "failed",
+  "autoPass": false,
+  "autoScore": 0,
+  "durationMs": 325369,
+  "asserts": [
+    {
+      "name": "status_done",
+      "ok": true,
+      "detail": "done"
+    },
+    {
+      "name": "plugin_created",
+      "ok": false,
+      "detail": "插件数 2→2"
+    },
+    {
+      "name": "png_exists",
+      "ok": true,
+      "detail": "6193B"
+    },
+    {
+      "name": "png_magic",
+      "ok": true,
+      "detail": "应为 PNG 魔数"
+    }
+  ],
+  "counts": {
+    "prompt": 207022,
+    "completion": 5496
+  },
+  "runId": "run-1790511179253-68",
+  "notes": "",
+  "at": "2026-09-27T12:18:24.606Z"
+}

@@ -1,0 +1,20 @@
+{
+  "caseId": "D8-3",
+  "dim": "D8",
+  "title": "孤儿 round",
+  "status": "done",
+  "autoPass": true,
+  "autoScore": 1,
+  "durationMs": 4,
+  "asserts": [
+    {
+      "name": "sweep_ok",
+      "ok": true,
+      "detail": "{\"ok\":true,\"swept\":2}"
+    }
+  ],
+  "counts": {},
+  "runId": null,
+  "notes": "",
+  "at": "2026-09-27T06:02:13.714Z"
+}

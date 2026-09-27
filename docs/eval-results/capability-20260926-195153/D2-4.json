@@ -1,0 +1,35 @@
+{
+  "caseId": "D2-4",
+  "dim": "D2",
+  "title": "纯问答不落盘",
+  "status": "done",
+  "autoPass": true,
+  "autoScore": 1,
+  "durationMs": 39299,
+  "asserts": [
+    {
+      "name": "status_done",
+      "ok": true,
+      "detail": "done"
+    },
+    {
+      "name": "mentions",
+      "ok": true,
+      "detail": "（暂定完成：无客观依据，建议人工确认）\nCSV 以行和列组织数据，结构简单，适合表格数据交换与批量处理。  \nJSON 以键值对、数组和对象组织数据，适合接口传"
+    },
+    {
+      "name": "no_files",
+      "ok": true,
+      "detail": "n=0"
+    },
+    {
+      "name": "token_ok",
+      "ok": true,
+      "detail": "tokens=8045"
+    }
+  ],
+  "counts": {},
+  "runId": null,
+  "notes": "",
+  "at": "2026-09-26T11:57:50.138Z"
+}

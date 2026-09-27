@@ -1,0 +1,25 @@
+{
+  "caseId": "PL-4",
+  "dim": "Plugin",
+  "title": "reject 缺字段",
+  "status": "done",
+  "autoPass": true,
+  "autoScore": 1,
+  "durationMs": 2,
+  "asserts": [
+    {
+      "name": "reject_missing_id",
+      "ok": true,
+      "detail": "{\"ok\":false,\"error\":\"connect ECONNREFUSED 127.0.0.1:18755\"}"
+    },
+    {
+      "name": "reject_missing_script",
+      "ok": true,
+      "detail": "{\"ok\":false,\"error\":\"connect ECONNREFUSED 127.0.0.1:18755\"}"
+    }
+  ],
+  "counts": {},
+  "runId": null,
+  "notes": "",
+  "at": "2026-09-26T11:50:02.470Z"
+}

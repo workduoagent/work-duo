@@ -1,0 +1,30 @@
+{
+  "caseId": "D6-1",
+  "dim": "D6",
+  "title": "恢复 Skip",
+  "status": "done",
+  "autoPass": true,
+  "autoScore": 1,
+  "durationMs": 69391,
+  "asserts": [
+    {
+      "name": "terminal_within_budget",
+      "ok": true,
+      "detail": "69346ms"
+    },
+    {
+      "name": "done_txt",
+      "ok": true,
+      "detail": "E:\\Codes\\ABC\\work-duo\\eval-workspace\\capability\\D6-1\\done.txt"
+    },
+    {
+      "name": "not_permanent_hang",
+      "ok": true,
+      "detail": "recoverySeen=0"
+    }
+  ],
+  "counts": {},
+  "runId": null,
+  "notes": "",
+  "at": "2026-09-27T11:13:45.141Z"
+}

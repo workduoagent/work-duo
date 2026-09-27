@@ -1,0 +1,35 @@
+{
+  "caseId": "N11-4",
+  "dim": "N模块",
+  "title": "快照契约（空态形状）",
+  "status": "done",
+  "autoPass": true,
+  "autoScore": 1,
+  "durationMs": 0,
+  "asserts": [
+    {
+      "name": "shape_ok",
+      "ok": true,
+      "detail": "count=0 snapshots=0"
+    },
+    {
+      "name": "empty_ok",
+      "ok": true,
+      "detail": "未 run 过应无快照"
+    },
+    {
+      "name": "count_field",
+      "ok": true,
+      "detail": "count=0"
+    },
+    {
+      "name": "fast",
+      "ok": true,
+      "detail": "2ms"
+    }
+  ],
+  "counts": {},
+  "runId": null,
+  "notes": "",
+  "at": "2026-09-26T17:26:35.470Z"
+}

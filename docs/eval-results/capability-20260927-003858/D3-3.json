@@ -1,0 +1,35 @@
+{
+  "caseId": "D3-3",
+  "dim": "D3",
+  "title": "产物管道摘要",
+  "status": "done",
+  "autoPass": true,
+  "autoScore": 1,
+  "durationMs": 210904,
+  "asserts": [
+    {
+      "name": "status_done",
+      "ok": true,
+      "detail": "done"
+    },
+    {
+      "name": "chapter1",
+      "ok": true,
+      "detail": "E:\\Codes\\ABC\\work-duo\\eval-workspace\\capability\\D3-3\\chapter1.md"
+    },
+    {
+      "name": "chapter2",
+      "ok": true,
+      "detail": "E:\\Codes\\ABC\\work-duo\\eval-workspace\\capability\\D3-3\\chapter2.md"
+    },
+    {
+      "name": "chapter2_not_huge",
+      "ok": true,
+      "detail": "size=432"
+    }
+  ],
+  "counts": {},
+  "runId": null,
+  "notes": "",
+  "at": "2026-09-26T16:52:03.377Z"
+}

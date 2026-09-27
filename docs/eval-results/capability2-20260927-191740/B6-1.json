@@ -1,0 +1,43 @@
+{
+  "caseId": "B6-1",
+  "dim": "B知识库",
+  "title": "单库事实问答（三连问全命中）",
+  "status": "failed",
+  "autoPass": false,
+  "autoScore": 0,
+  "durationMs": 72298,
+  "asserts": [
+    {
+      "name": "status_done",
+      "ok": true,
+      "detail": "done"
+    },
+    {
+      "name": "annual_15",
+      "ok": false,
+      "detail": "① 年"
+    },
+    {
+      "name": "clock_930",
+      "ok": false,
+      "detail": ""
+    },
+    {
+      "name": "reimburse_800",
+      "ok": false,
+      "detail": ""
+    },
+    {
+      "name": "kb_search_fired",
+      "ok": true,
+      "detail": "kb_search 事件 1 次"
+    }
+  ],
+  "counts": {
+    "prompt": 1470,
+    "completion": 60
+  },
+  "runId": "run-1790510520572-61",
+  "notes": "",
+  "at": "2026-09-27T12:03:12.854Z"
+}

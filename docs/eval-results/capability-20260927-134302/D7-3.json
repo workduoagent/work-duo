@@ -1,0 +1,30 @@
+{
+  "caseId": "D7-3",
+  "dim": "D7",
+  "title": "token 预算",
+  "status": "done",
+  "autoPass": true,
+  "autoScore": 1,
+  "durationMs": 3066,
+  "asserts": [
+    {
+      "name": "status_done",
+      "ok": true,
+      "detail": "done"
+    },
+    {
+      "name": "reply",
+      "ok": true,
+      "detail": "滑动窗口是一种通过移动固定大小的区间，逐步处理数据序列中连续片段的算法技巧。"
+    },
+    {
+      "name": "token_budget",
+      "ok": true,
+      "detail": "tokens=1079 budget=8000"
+    }
+  ],
+  "counts": {},
+  "runId": null,
+  "notes": "",
+  "at": "2026-09-27T06:02:00.364Z"
+}

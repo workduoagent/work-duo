@@ -1,0 +1,40 @@
+{
+  "caseId": "S8-2",
+  "dim": "S技能",
+  "title": "技能导出→导入→一致性闭环",
+  "status": "failed",
+  "autoPass": false,
+  "autoScore": 0,
+  "durationMs": 0,
+  "asserts": [
+    {
+      "name": "export_zip",
+      "ok": true,
+      "detail": "zipBase64 652 chars"
+    },
+    {
+      "name": "import_ok",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "markdown_consistent",
+      "ok": false,
+      "detail": "导入件 SKILL.md 应与源一致"
+    },
+    {
+      "name": "files_structure",
+      "ok": false,
+      "detail": "导入件应含 scripts/helper.py"
+    },
+    {
+      "name": "fast_no_llm",
+      "ok": true,
+      "detail": "0s"
+    }
+  ],
+  "counts": {},
+  "runId": null,
+  "notes": "",
+  "at": "2026-09-26T17:23:30.425Z"
+}

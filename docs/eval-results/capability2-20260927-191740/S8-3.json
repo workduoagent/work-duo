@@ -1,0 +1,38 @@
+{
+  "caseId": "S8-3",
+  "dim": "S技能",
+  "title": "双技能择路（周报 vs 纪要）",
+  "status": "done",
+  "autoPass": true,
+  "autoScore": 1,
+  "durationMs": 81540,
+  "asserts": [
+    {
+      "name": "r1_done",
+      "ok": true,
+      "detail": "done"
+    },
+    {
+      "name": "r2_done",
+      "ok": true,
+      "detail": "done"
+    },
+    {
+      "name": "weekly_uses_weekly_tpl",
+      "ok": true,
+      "detail": "周报应含「数据看板」且不含「参会人」"
+    },
+    {
+      "name": "minutes_uses_minutes_tpl",
+      "ok": true,
+      "detail": "纪要应含「参会人」且不含「数据看板」"
+    }
+  ],
+  "counts": {
+    "prompt": 47073,
+    "completion": 519
+  },
+  "runId": "run-1790511604471-72",
+  "notes": "",
+  "at": "2026-09-27T12:20:52.750Z"
+}

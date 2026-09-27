@@ -1,0 +1,38 @@
+{
+  "caseId": "P7-5",
+  "dim": "P插件",
+  "title": "插件多参复用编排（一次 run 调 ≥2 次）",
+  "status": "done",
+  "autoPass": true,
+  "autoScore": 1,
+  "durationMs": 30226,
+  "asserts": [
+    {
+      "name": "status_done",
+      "ok": true,
+      "detail": "done"
+    },
+    {
+      "name": "two_calls",
+      "ok": true,
+      "detail": "custom__ 调用 2 次"
+    },
+    {
+      "name": "miles_62",
+      "ok": true,
+      "detail": "含 62"
+    },
+    {
+      "name": "fahrenheit_986",
+      "ok": true,
+      "detail": "近似 98.6"
+    }
+  ],
+  "counts": {
+    "prompt": 13266,
+    "completion": 363
+  },
+  "runId": "run-1790511510177-69",
+  "notes": "",
+  "at": "2026-09-27T12:19:00.387Z"
+}

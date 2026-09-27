@@ -1,0 +1,117 @@
+{
+  "caseId": "V-M1",
+  "slot": 0,
+  "scene": "V",
+  "kind": "M",
+  "title": "服务器绑定执行面就绪（agent 视角，只读）",
+  "model": "7b1ccf8d-283c-47cb-ad9c-460a791acf17",
+  "workspace": "E:/Codes/ABC/work-duo/eval-workspace/eval-V-M1",
+  "startedAt": "2026-09-27T10:22:27.630Z",
+  "status": "done",
+  "runId": "run-1790504547778-9",
+  "durationMs": 24249,
+  "artifacts": [],
+  "artifactCheck": [
+    {
+      "artifact": "host-bind-report.md",
+      "ok": true
+    }
+  ],
+  "traceCounts": {
+    "completion_tokens": 591,
+    "events": 16,
+    "prompt_tokens": 41745,
+    "reply_chars": 137,
+    "thinking_chars": 781
+  },
+  "replyLen": 137,
+  "kbHits": 0,
+  "recoveries": 0,
+  "error": null,
+  "metrics": {
+    "ha": {
+      "terminal": true,
+      "status": "done"
+    },
+    "perf": {
+      "durationMs": 24249
+    },
+    "heal": {
+      "replyLen": 137
+    }
+  },
+  "files": [
+    {
+      "rel": ".wd_mem/.gitignore",
+      "size": 310,
+      "mtime": 1790503746105.8125
+    },
+    {
+      "rel": ".wd_mem/graph/edges.jsonl",
+      "size": 511,
+      "mtime": 1790504569063.933
+    },
+    {
+      "rel": ".wd_mem/graph/nodes.jsonl",
+      "size": 71665,
+      "mtime": 1790504569060.9236
+    },
+    {
+      "rel": ".wd_mem/graph/sessions/01543114-134a-4862-93e1-7498e23a81cd.json",
+      "size": 3006,
+      "mtime": 1790504569068.9204
+    },
+    {
+      "rel": ".wd_mem/graph/sessions/451419bd-7489-4ea2-af44-823b27032435.json",
+      "size": 3009,
+      "mtime": 1790503766527.6262
+    },
+    {
+      "rel": ".wd_mem/graph/sessions/d92fdabd-e890-4579-bc5c-2b4e87b4aee6.json",
+      "size": 3595,
+      "mtime": 1790504105238.7139
+    },
+    {
+      "rel": ".wd_mem/graph/_index.json",
+      "size": 2058,
+      "mtime": 1790504569062.9202
+    },
+    {
+      "rel": ".wd_mem/knowledge/MEMORY.md",
+      "size": 133,
+      "mtime": 1790503746104.8108
+    },
+    {
+      "rel": ".wd_mem/README.md",
+      "size": 1378,
+      "mtime": 1790503746105.8125
+    },
+    {
+      "rel": "host-bind-report.md",
+      "size": 264,
+      "mtime": 1790504564700.4155
+    }
+  ],
+  "agentId": "1b5dca24-5892-4700-a7fd-79cf106f64bc",
+  "agentIdentifier": "l2-v-m1-mujo6eyp-2pgiqf",
+  "modelName": "GPT-6-Luna",
+  "seedTier": null,
+  "seedId": null,
+  "sessionId": "01543114-134a-4862-93e1-7498e23a81cd",
+  "reply": "已生成/更新 host-bind-report.md\n已完成只读检查并生成报告，未连接服务器、未执行远端命令或其他远端操作。\n\n产出文件：`E:\\Codes\\ABC\\work-duo\\eval-workspace\\eval-V-M1\\host-bind-report.md`",
+  "thinkingLen": 781,
+  "eventCount": 16,
+  "kbCalls": 0,
+  "signals": {
+    "hasPlanGenerated": true,
+    "planSteps": 1,
+    "toolCalls": [
+      "host__list_servers",
+      "native__write_file"
+    ],
+    "writeCount": 1,
+    "sensitiveCount": 1,
+    "errorCount": 0
+  },
+  "artifactScore": 1
+}

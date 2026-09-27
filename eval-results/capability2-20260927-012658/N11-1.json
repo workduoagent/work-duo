@@ -1,0 +1,35 @@
+{
+  "caseId": "N11-1",
+  "dim": "N模块",
+  "title": "全模块枚举一致性（零副作用）",
+  "status": "done",
+  "autoPass": true,
+  "autoScore": 1,
+  "durationMs": 0,
+  "asserts": [
+    {
+      "name": "tools_84",
+      "ok": true,
+      "detail": "tools/list=84（应为 84）"
+    },
+    {
+      "name": "lists_shape_ok",
+      "ok": true,
+      "detail": "agents=7 models=6 skills=10 plugins=4 kbs=3 memories=20 scenarios=7"
+    },
+    {
+      "name": "models_nonempty",
+      "ok": true,
+      "detail": "至少一个模型"
+    },
+    {
+      "name": "fast",
+      "ok": true,
+      "detail": "52ms"
+    }
+  ],
+  "counts": {},
+  "runId": null,
+  "notes": "本用例可作 CI 探活",
+  "at": "2026-09-26T17:26:58.980Z"
+}

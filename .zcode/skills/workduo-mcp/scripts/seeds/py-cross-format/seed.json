@@ -1,0 +1,10 @@
+{
+  "id": "py-cross-format",
+  "tier": "cross-file",
+  "lang": "python",
+  "targetDir": "fmt-proj",
+  "title": "跨文件常量漂移修复（汇率换算）",
+  "testCmd": "python -m pytest test_fmt.py -v",
+  "prompt": "工作空间子目录 fmt-proj/ 的金额换算测试全红——**常量在两处定义且都漂移**（converter.py 与 exporter.py 本地覆盖各一个错值，契约值应为 100 分/元）。请：\n1) 跑 pytest 定位两处漂移\n2) 【技术栈锁定】converter.py 与 exporter.py **都要修**（exporter 应删除本地覆盖、统一引用 converter 的常量），禁止改测试、禁止换语言重写\n3) 修到 pytest 全绿\n4) SELFTEST.md：两处漂移清单 + 修复说明 + 最终 pytest 摘要；开修前先建骨架，修完回填\n完成后列出文件。\n⚠️ 最终交付物核对（缺一不可）：fmt-proj/SELFTEST.md（逐字一致；converter.py 与 exporter.py 都在且已修复）。",
+  "artifacts": ["fmt-proj/SELFTEST.md"]
+}

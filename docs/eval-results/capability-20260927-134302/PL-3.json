@@ -1,0 +1,20 @@
+{
+  "caseId": "PL-3",
+  "dim": "Plugin",
+  "title": "reject node",
+  "status": "done",
+  "autoPass": true,
+  "autoScore": 1,
+  "durationMs": 3,
+  "asserts": [
+    {
+      "name": "reject_node",
+      "ok": true,
+      "detail": "结构化拒绝: {\"data\":{\"error\":\"插件 runtime 不支持: node（仅允许 python | bun）\"},\"ok\":false}"
+    }
+  ],
+  "counts": {},
+  "runId": null,
+  "notes": "",
+  "at": "2026-09-27T06:02:32.776Z"
+}

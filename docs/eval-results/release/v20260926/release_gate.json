@@ -1,0 +1,52 @@
+{
+  "version": "v20260926",
+  "at": "2026-09-26T16:38:47.083Z",
+  "pass": true,
+  "checks": [
+    {
+      "name": "L2 gate 全量断言",
+      "ok": true,
+      "detail": "12/12 项"
+    },
+    {
+      "name": "证据规模≥5 用例",
+      "ok": true,
+      "detail": "32 用例"
+    },
+    {
+      "name": "done率≥90%",
+      "ok": true,
+      "detail": "96.9%"
+    },
+    {
+      "name": "产物达成≥90%",
+      "ok": true,
+      "detail": "96.9%"
+    },
+    {
+      "name": "客观判分 resolved≥80%",
+      "ok": true,
+      "detail": "83.3%（6 判分用例）"
+    },
+    {
+      "name": "版本归档",
+      "ok": true,
+      "detail": "E:\\Codes\\ABC\\work-duo\\docs\\eval-results\\release\\v20260926"
+    },
+    {
+      "name": "环比 done率",
+      "ok": true,
+      "detail": "prev 96.9% → cur 96.9%（降幅 0pt，阈值 5pt）"
+    },
+    {
+      "name": "环比 产物达成",
+      "ok": true,
+      "detail": "prev 96.9% → cur 96.9%（降幅 0pt，阈值 5pt）"
+    },
+    {
+      "name": "环比 resolved",
+      "ok": true,
+      "detail": "prev 83.3% → cur 83.3%（降幅 0pt，阈值 5pt）"
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "id": "py-cross-auth",
+  "tier": "cross-file",
+  "lang": "python",
+  "targetDir": "auth-proj",
+  "title": "跨文件签名契约修复（签发/校验两侧）",
+  "testCmd": "python -m pytest test_auth.py -v",
+  "prompt": "工作空间子目录 auth-proj/ 的令牌签发/校验两侧**都偏离了契约**（roundtrip 测试红）：契约 = token 格式 `<user_id>:<expire>.<sig>`，其中 `sig = HMAC_SHA256(SECRET, payload)`（SECRET 为 auth.py 顶部的字节串）。请：\n1) 跑 pytest 定位两侧各自偏离了什么\n2) 【技术栈锁定】auth.py（签发算法对齐契约）与 verify.py（分割符/算法对齐契约）**两个文件都要修**，禁止改测试、禁止换语言重写\n3) 修到 pytest 全绿\n4) SELFTEST.md：两侧问题清单 + 修复说明 + 最终 pytest 摘要；开修前先建骨架，修完回填\n完成后列出文件。\n⚠️ 最终交付物核对（缺一不可）：auth-proj/SELFTEST.md 与 auth-proj/README.md（逐字一致；auth.py 与 verify.py 都在且已修复）。",
+  "artifacts": ["auth-proj/SELFTEST.md", "auth-proj/README.md"]
+}

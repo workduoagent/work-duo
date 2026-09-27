@@ -1,0 +1,30 @@
+{
+  "caseId": "D2-1",
+  "dim": "D2",
+  "title": "简单目标 1-2 步",
+  "status": "done",
+  "autoPass": true,
+  "autoScore": 1,
+  "durationMs": 63429,
+  "asserts": [
+    {
+      "name": "status_done",
+      "ok": true,
+      "detail": "done"
+    },
+    {
+      "name": "todo_exists",
+      "ok": true,
+      "detail": "E:\\Codes\\ABC\\work-duo\\eval-workspace\\capability\\D2-1\\notes\\todo.md"
+    },
+    {
+      "name": "steps_le_2",
+      "ok": true,
+      "detail": "steps=1"
+    }
+  ],
+  "counts": {},
+  "runId": null,
+  "notes": "",
+  "at": "2026-09-26T11:54:42.894Z"
+}

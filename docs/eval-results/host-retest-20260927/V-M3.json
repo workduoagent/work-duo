@@ -1,0 +1,227 @@
+{
+  "caseId": "V-M3",
+  "slot": 0,
+  "scene": "V",
+  "kind": "M",
+  "title": "SFTP 只读+/tmp 小文件往返（授权真机）",
+  "model": "7b1ccf8d-283c-47cb-ad9c-460a791acf17",
+  "workspace": "E:/Codes/ABC/work-duo/eval-workspace/eval-V-M3",
+  "startedAt": "2026-09-27T10:37:39.591Z",
+  "status": "timeout",
+  "runId": "run-1790505459741-1",
+  "durationMs": 301424,
+  "artifacts": [],
+  "artifactCheck": [
+    {
+      "artifact": "host-sftp-report.md",
+      "ok": false
+    },
+    {
+      "artifact": "wd-sftp-e2e.txt",
+      "ok": true
+    },
+    {
+      "artifact": "wd-sftp-e2e-back.txt",
+      "ok": true
+    }
+  ],
+  "traceCounts": {
+    "completion_tokens": 0,
+    "events": 175,
+    "prompt_tokens": 0,
+    "reply_chars": 0,
+    "thinking_chars": 3002
+  },
+  "replyLen": 0,
+  "kbHits": 0,
+  "recoveries": 0,
+  "error": null,
+  "metrics": {
+    "ha": {
+      "terminal": false,
+      "status": "timeout"
+    },
+    "perf": {
+      "durationMs": 301424
+    },
+    "heal": {
+      "replyLen": 0
+    }
+  },
+  "files": [
+    {
+      "rel": ".wd_mem/.gitignore",
+      "size": 310,
+      "mtime": 1790503789045.2637
+    },
+    {
+      "rel": ".wd_mem/graph/edges.jsonl",
+      "size": 4825,
+      "mtime": 1790505549675.4138
+    },
+    {
+      "rel": ".wd_mem/graph/nodes.jsonl",
+      "size": 242105,
+      "mtime": 1790505692299.0383
+    },
+    {
+      "rel": ".wd_mem/graph/sessions/00911c7e-29f1-4064-82e9-a30bc906911a.json",
+      "size": 9625,
+      "mtime": 1790504777579.217
+    },
+    {
+      "rel": ".wd_mem/graph/sessions/14bd4316-57a6-4c97-a8f0-0998a987e583.json",
+      "size": 5251,
+      "mtime": 1790504268752.6016
+    },
+    {
+      "rel": ".wd_mem/graph/sessions/25b415f5-f102-42ba-8b5e-2ddba2fa77e3.json",
+      "size": 9904,
+      "mtime": 1790505380013.9268
+    },
+    {
+      "rel": ".wd_mem/graph/sessions/f94be7d7-d662-4b95-8d6c-ea13d5964d1d.json",
+      "size": 3339,
+      "mtime": 1790503808949.115
+    },
+    {
+      "rel": ".wd_mem/graph/_index.json",
+      "size": 6661,
+      "mtime": 1790505692299.0383
+    },
+    {
+      "rel": ".wd_mem/knowledge/MEMORY.md",
+      "size": 133,
+      "mtime": 1790503789045.2637
+    },
+    {
+      "rel": ".wd_mem/README.md",
+      "size": 1378,
+      "mtime": 1790503789045.2637
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/auto_run_1790504198196.mjs",
+      "size": 102,
+      "mtime": 1790504198196.1758
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/auto_run_1790504213814.py",
+      "size": 102,
+      "mtime": 1790504213815.1755
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/auto_run_1790504747833.mjs",
+      "size": 329,
+      "mtime": 1790504747833.4473
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/auto_run_1790505283981.mjs",
+      "size": 91,
+      "mtime": 1790505283982.0469
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/auto_run_1790505287520.py",
+      "size": 102,
+      "mtime": 1790505287529.8298
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/auto_run_1790505311999.mjs",
+      "size": 132,
+      "mtime": 1790505311999.5288
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/auto_run_1790505344941.mjs",
+      "size": 91,
+      "mtime": 1790505344942.667
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/auto_run_1790505531484.mjs",
+      "size": 91,
+      "mtime": 1790505531485.6565
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/injected_auto_run_1790504213814.py",
+      "size": 164,
+      "mtime": 1790505542154.502
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/injected_timestamp.mjs",
+      "size": 159,
+      "mtime": 1790505322848.746
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/timestamp.mjs",
+      "size": 91,
+      "mtime": 1790504755381.2493
+    },
+    {
+      "rel": "wd-sftp-e2e-back.txt",
+      "size": 28,
+      "mtime": 1790505545000
+    },
+    {
+      "rel": "wd-sftp-e2e.txt",
+      "size": 28,
+      "mtime": 1790505545601.1824
+    }
+  ],
+  "agentId": "705676d5-f180-4646-a96a-ed4c7d055b7b",
+  "agentIdentifier": "l2-v-m3-mujopymw-5zjt89",
+  "modelName": "GPT-6-Luna",
+  "seedTier": null,
+  "seedId": null,
+  "sessionId": "da9f08ca-3478-46ff-88d5-10b7b2580f55",
+  "reply": "",
+  "thinkingLen": 3002,
+  "eventCount": 175,
+  "kbCalls": 0,
+  "signals": {
+    "hasPlanGenerated": true,
+    "planSteps": 5,
+    "toolCalls": [
+      "host__list_servers",
+      "native__read_file",
+      "native__read_file",
+      "native__run_node_sandbox",
+      "native__read_file",
+      "native__run_python_sandbox",
+      "native__write_file",
+      "host__list",
+      "host__upload",
+      "custom__cap-test-pl-py-mujew5hr",
+      "host__list",
+      "host__upload",
+      "host__list",
+      "host__upload",
+      "host__list",
+      "host__list",
+      "host__upload",
+      "host__list",
+      "host__list",
+      "host__list",
+      "host__list",
+      "native__query_graph",
+      "native__path_exists",
+      "native__path_exists",
+      "host__status",
+      "host__list",
+      "native__query_graph",
+      "native__query_graph",
+      "native__query_graph",
+      "native__query_graph",
+      "native__query_graph",
+      "native__query_graph",
+      "host__list",
+      "native__query_graph",
+      "native__query_graph",
+      "native__query_graph",
+      "host__download",
+      "native__read_file",
+      "native__read_file"
+    ],
+    "writeCount": 1,
+    "sensitiveCount": 9,
+    "errorCount": 2
+  },
+  "artifactScore": 0.6666666666666666
+}
