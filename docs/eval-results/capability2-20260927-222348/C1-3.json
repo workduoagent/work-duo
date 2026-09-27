@@ -1,0 +1,38 @@
+{
+  "caseId": "C1-3",
+  "dim": "C对话",
+  "title": "结构化 JSON 输出遵循",
+  "status": "done",
+  "autoPass": true,
+  "autoScore": 1,
+  "durationMs": 6050,
+  "asserts": [
+    {
+      "name": "status_done",
+      "ok": true,
+      "detail": "done"
+    },
+    {
+      "name": "json_parseable",
+      "ok": true,
+      "detail": "{\"name\":\"WorkDuo\",\"features\":[\"任务协作\",\"团队沟通\",\"进度管理\",\"文件共享\"],\"score\":8}"
+    },
+    {
+      "name": "schema_fields",
+      "ok": true,
+      "detail": "name=WorkDuo feats=4 score=8"
+    },
+    {
+      "name": "feat_len_ok",
+      "ok": true,
+      "detail": "任务协作|团队沟通|进度管理|文件共享"
+    }
+  ],
+  "counts": {
+    "prompt": 1101,
+    "completion": 66
+  },
+  "runId": "run-1790519028499-0",
+  "notes": "",
+  "at": "2026-09-27T14:23:54.528Z"
+}
