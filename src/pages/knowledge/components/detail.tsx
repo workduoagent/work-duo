@@ -22,10 +22,9 @@ import {
   DatabaseZap,
   Tags,
 } from 'lucide-react'
-// Modal 保留 antd 直用：此处用 antd Modal API（onOk/confirmLoading/onCancel），
-// ui 层 Modal 是行为包装（onOpenChange 体系）不兼容，改写调用点属行为变更，随 S12 后续批次处理。
-import { Modal } from 'antd'
-import { Button, Input, Field, FieldLabel, Empty, Progress, Spin } from '@/components/ui'
+// 台账 S12 ① 收官：原 antd Modal（onOk/confirmLoading 体系）已迁 ui Modal
+// 确认式底栏（confirm-footer 能力扩展，见 ui/Modal.tsx），页面域 antd 直用至此清零。
+import { Button, Input, Field, FieldLabel, Empty, Modal, Progress, Spin } from '@/components/ui'
 import { useNotify } from '@/components/ui/notify'
 import { isTauri } from '@/core/config'
 import { invoke } from '@tauri-apps/api/core'
@@ -691,7 +690,9 @@ export default function KnowledgeDetailPage() {
         open={folderOpen}
         onOk={doCreateFolder}
         confirmLoading={busy}
-        onCancel={() => setFolderOpen(false)}
+        onOpenChange={(o) => {
+          if (!o) setFolderOpen(false)
+        }}
         title="新建文件夹"
         okText="创建"
         cancelText="取消"
@@ -706,7 +707,9 @@ export default function KnowledgeDetailPage() {
         open={mdOpen}
         onOk={doCreateMarkdown}
         confirmLoading={busy}
-        onCancel={() => setMdOpen(false)}
+        onOpenChange={(o) => {
+          if (!o) setMdOpen(false)
+        }}
         title="新建 Markdown 文件"
         okText="创建"
         cancelText="取消"

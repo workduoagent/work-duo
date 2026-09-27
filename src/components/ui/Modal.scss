@@ -11,3 +11,11 @@
   margin-top: 2px;
   line-height: 1.5;
 }
+
+/* 确认式底栏（台账 S12 ①）：取消 | 确定，右对齐，间距与 antd 底栏一致 */
+.app-modal__confirm-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 4px;
+}
