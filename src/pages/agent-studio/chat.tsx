@@ -34,21 +34,13 @@ import { Modal } from '@/components/ui'
 import { getNotifyApi } from '@/components/ui/notifyBridge'
 import { useNotify } from '@/components/ui/notify'
 
-import { getAgent, listAgentMcpTools, listAgentSkills } from '@/core/mapper/agent-mapper'
-import { listSkills } from '@/core/mapper/skill-mapper'
-import { listPlugins } from '@/core/mapper/plugin-mapper'
-import { listAgentPlugins } from '@/core/mapper/plugin-mapper'
-import type { UserPluginTool } from '@/core/file/plugin-file'
-import { listMcps, listMcpTools } from '@/core/mapper/mcp-mapper'
-import { getModel } from '@/core/mapper/model-mapper'
-import { listSessions } from '@/core/mapper/agent-session-mapper'
 import { isAgentRunning } from './session/runtimeStore'
-import { listProjects } from '@/core/mapper/agent-project-mapper'
 import { isTauri } from '@/core/config'
 import { useAgentSession } from './session/useAgentSession'
+import { useAgentProfile } from './chat/useAgentProfile'
 import { useMentionSuggest } from './chat/useMentionSuggest'
 import { useAttachments } from './chat/useAttachments'
-import { SLASH_COMMANDS, resolveWorkspaceDir } from './chat/terminal-bridge'
+import { SLASH_COMMANDS } from './chat/terminal-bridge'
 import { useFollowScroll } from './chat/useFollowScroll'
 import { useRightPanel } from './chat/useRightPanel'
 import { useChatRun } from './chat/useChatRun'
@@ -57,10 +49,8 @@ import { SessionSidebar } from './chat/SessionSidebar'
 import { MessageList } from './chat/MessageList'
 import { ChatComposer } from './chat/ChatComposer'
 import type { ContextCompactedPayload, ToolStep } from './session/types'
-import type { AgentInfo, AgentConversationSession, AgentProject } from '@/types/core'
-import type { SkillInfo } from '@/core/file/skill-file'
-import type { McpToolDefinition } from '@/core/file/mcp-file'
-import type { BoundMcpServer, ChatMessage, SpeechLike } from './chat/types'
+import type { AgentConversationSession, AgentProject } from '@/types/core'
+import type { ChatMessage, SpeechLike } from './chat/types'
 import { RightPanel } from './chat/RightPanel'
 import {
   useTypewriter,
@@ -74,36 +64,42 @@ export default function AgentChatPage() {
 
   // 当前会话 id 必须先于状态机声明：状态机按会话 id 绑定该会话自己的运行态（TDZ）。
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
+  // 会话/工程列表：useAgentProfile 与 useSessionWorkspace 都要写，先于二者声明（TDZ）。
+  const [sessions, setSessions] = useState<AgentConversationSession[]>([])
+  const [projects, setProjects] = useState<AgentProject[]>([])
   // 会话状态机（必须早于任何引用 session.* 的回调/依赖数组，否则 TDZ）。
   const session = useAgentSession(activeSessionId)
   const { toolSteps, segments, lastLlmUsage, streamingText, isStreaming, statusText, thoughts, isRunning, pendingApproval, run, submitDecision, reset, cancel, lastTaskUsage, liveTokenUsage, taskError, recovery, pendingChoice, planApproval, kbSources } =
     session
 
-  const [agent, setAgent] = useState<AgentInfo | undefined>()
+  // ---- 智能体档案加载（台账 S1：hook 化 → chat/useAgentProfile）----
+  const {
+    agent,
+    loading,
+    toolCount,
+    skillCount,
+    isMultimodal,
+    hasStt,
+    contextLength,
+    boundMcps,
+    boundSkills,
+    boundPlugins,
+    allSkills,
+    allMcps,
+    allPlugins,
+    defaultWorkspaceDir,
+  } = useAgentProfile({ id, message, setSessions, setProjects })
   // 本智能体是否有任务在跑（含当前查看会话）。切到历史会话时输入框 / 发送按钮仍应保持
   // 「任务进行中」的禁用态——否则按钮会被解锁，点下去要被后端「已有任务正在运行」闸门锁掉。
   const agentBusy = isRunning || isAgentRunning(agent?.id)
-  const [loading, setLoading] = useState(true)
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [input, setInput] = useState('')
   // 输入框高度（px）：默认 48，用户可从顶部拖拽手柄向上扩展，发送后复位。
   const [inputHeight, setInputHeight] = useState(48)
-  const [toolCount, setToolCount] = useState(0)
-  const [skillCount, setSkillCount] = useState(0)
-
-  // 能力：多模态 / STT
-  const [isMultimodal, setIsMultimodal] = useState(false)
-  const [hasStt, setHasStt] = useState(false)
-
-  // 底部工具条展示用：MCP 服务（含其工具）/ 技能 / 工作空间
-  const [boundMcps, setBoundMcps] = useState<BoundMcpServer[]>([])
   // 当前会话内临时移除的 MCP 服务 id（内存态，不写库；切换/重开会话即复位）
   const [removedMcpIds, setRemovedMcpIds] = useState<Set<string>>(new Set())
   // 当前会话内临时关闭的单个 MCP 工具 id（内存态，不写库）。键为 mcp_tool_definition.id
   const [disabledMcpToolIds, setDisabledMcpToolIds] = useState<Set<string>>(new Set())
-  const [boundSkills, setBoundSkills] = useState<SkillInfo[]>([])
-  // 底部工具条展示用：已挂载的本地插件（P2 新增）
-  const [boundPlugins, setBoundPlugins] = useState<UserPluginTool[]>([])
   /** 临时取消/恢复挂载某个插件（仅当前会话，不写库；随 disabled_plugin_ids 生效）。 */
   const togglePlugin = useCallback((pluginId: string) => {
     setRemovedPluginIds((prev) => {
@@ -113,11 +109,6 @@ export default function AgentChatPage() {
       return next
     })
   }, [])
-  // @提及 候选全集（全量技能 / MCP 服务，不限于本智能体绑定），供输入框随时引用
-  const [allSkills, setAllSkills] = useState<SkillInfo[]>([])
-  const [allMcps, setAllMcps] = useState<Awaited<ReturnType<typeof listMcps>>>([])
-  // 全量插件缓存（P2 新增）：供输入框 @提及 候选（不局限于本智能体绑定项）
-  const [allPlugins, setAllPlugins] = useState<Awaited<ReturnType<typeof listPlugins>>>([])
   // 输入框 @提及 / /指令 浮层状态
   const [helpOpen, setHelpOpen] = useState(false)
   // @提及 选中的标签（chip）：独立维护，发送时序列化为「@标签」前缀，从文本框剥离避免歧义
@@ -130,12 +121,8 @@ export default function AgentChatPage() {
   const [removedPluginIds, setRemovedPluginIds] = useState<Set<string>>(new Set())
   // 工作空间：默认解析路径（单人调试）+ 当前会话绑定的工程（智能工作空间绑定）。
   // pendingProjectId 非空时，workspaceDir 取该工程 root_path；否则取默认解析路径。
-  // 注意：projects 必须声明在 workspaceDir 之前（useMemo 依赖引用，避免 TDZ 编译报错）。
-  const [projects, setProjects] = useState<AgentProject[]>([])
-  const [defaultWorkspaceDir, setDefaultWorkspaceDir] = useState<string | null>(null)
+  // （projects / sessions state 已上移至 activeSessionId 附近：useAgentProfile 先于此处使用其 setter。）
   const [pendingProjectId, setPendingProjectId] = useState<string | null>(null)
-  // 会话列表（树 memo / chatMod 注入在 useSessionWorkspace，state 留组件防 TDZ）
-  const [sessions, setSessions] = useState<AgentConversationSession[]>([])
   const workspaceDir = useMemo(() => {
     if (pendingProjectId) {
       const p = projects.find((x) => x.id === pendingProjectId)
@@ -143,8 +130,6 @@ export default function AgentChatPage() {
     }
     return defaultWorkspaceDir
   }, [pendingProjectId, projects, defaultWorkspaceDir])
-  // 绑定 LLM 的上下文窗口（token），用于环形图占比分母
-  const [contextLength, setContextLength] = useState<number | undefined>()
 
   // ---- 右栏 UI 态（台账 S1：hook 化 → chat/useRightPanel）----
   const {
@@ -255,108 +240,6 @@ export default function AgentChatPage() {
   // 气泡正文打字机（非 segments 旧分支/FilePathCards 消费）：30ms/字（≈33 字/秒，肉眼单字节奏），
   // 积压按比例追赶——原默认 10ms/字（100 字/秒）对长回复过快，用户反馈「一句句往外刷」。
   const displayedContent = useTypewriter(lastAgentContent, isStreaming, 30)
-
-  // 加载智能体 + 工具/技能计数 + 能力判定 + 工作空间 + 会话列表
-  useEffect(() => {
-    let alive = true
-    void (async () => {
-      try {
-        const [a, mcp, skills, plugins] = await Promise.all([
-          getAgent(id),
-          listAgentMcpTools(id),
-          listAgentSkills(id),
-          listAgentPlugins(id),
-        ])
-        if (!alive) return
-        if (!a) {
-          message.error('智能体不存在或已被删除')
-          navigate('/agent-studio', { replace: true })
-          return
-        }
-        setToolCount(mcp.length)
-        setSkillCount(skills.length)
-        setAgent(a)
-
-        // 多模态判定：绑定 LLM 的 category === 'multimodal'
-        if (a.llmId) {
-          const m = await getModel(a.llmId)
-          if (alive) setIsMultimodal(m?.category === 'multimodal')
-          if (alive) {
-            const cl = m ? (m.text?.contextLength ?? m.multimodal?.contextLength) : undefined
-            setContextLength(typeof cl === 'number' ? cl : undefined)
-          }
-        } else if (alive) {
-          setIsMultimodal(false)
-          setContextLength(undefined)
-        }
-        if (alive) setHasStt(!!a.sttId)
-
-        // MCP 服务（含其绑定工具）+ 技能（底部工具条展示）
-        const [allMcps, allSkills, allPlugins] = await Promise.all([listMcps(), listSkills(), listPlugins()])
-        // 智能体绑定的 MCP 工具引用：每个 ref 对应一个 mcp_tool_definition
-        const serverIds = [...new Set(mcp.map((r) => r.mcpId))]
-        // 逐个 MCP 拉取其全部工具定义，按 ref 匹配出「本智能体实际绑定」的工具
-        const toolsByMcp: Record<string, McpToolDefinition[]> = {}
-        await Promise.all(
-          serverIds.map(async (mid) => {
-            toolsByMcp[mid] = await listMcpTools(mid)
-          }),
-        )
-        const bound: BoundMcpServer[] = serverIds
-          .map((mid) => {
-            const info = allMcps.find((m) => m.id === mid)
-            const tools = mcp
-              .filter((r) => r.mcpId === mid)
-              .map((r) => {
-                const def = (toolsByMcp[mid] ?? []).find((t) => t.id === r.toolId)
-                return {
-                  toolId: r.toolId,
-                  toolCode: def?.toolCode ?? '',
-                  displayName: def?.displayName,
-                  description: def?.description,
-                }
-              })
-            return {
-              mcpId: mid,
-              name: info?.aliasName || info?.mcpName || mid,
-              tools,
-            }
-          })
-          .filter((m) => m.tools.length > 0)
-        const matched = skills
-          .map((s) => allSkills.find((x) => x.id === s.skillId))
-          .filter((s): s is NonNullable<typeof s> => !!s)
-        if (alive) {
-          setBoundMcps(bound)
-          setBoundSkills(matched)
-          // 已挂载插件（P2 新增）：底部工具条罗列
-          setBoundPlugins(plugins)
-          // 全量技能 / MCP 服务 / 插件缓存，供输入框 @提及 候选（不局限于本智能体绑定项）
-          setAllSkills(allSkills)
-          setAllMcps(allMcps)
-          setAllPlugins(allPlugins)
-        }
-
-        // 工作空间：解析默认路径（单人调试不自定义）
-        const ws = await resolveWorkspaceDir(a)
-        if (alive) setDefaultWorkspaceDir(ws)
-
-        // 会话列表
-        const list = await listSessions(a.identifier)
-        if (alive) setSessions(list)
-        // 工程列表（智能工作空间绑定：新建向导 / 树状分组 / 目录回显）
-        if (alive) setProjects(await listProjects())
-      } catch (e) {
-        message.error(`加载失败：${e instanceof Error ? e.message : String(e)}`)
-      } finally {
-        if (alive) setLoading(false)
-      }
-    })()
-    return () => {
-      alive = false
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id])
 
   // 首条欢迎语（agent 就绪后注入）
   useEffect(() => {
