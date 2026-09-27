@@ -201,7 +201,7 @@ pub fn stage_abort(stage_id: &str) {
 ///
 /// 设计要点：text/file 附件统一拼回纯文本块——仅当存在图片时才改写为多模态数组，
 /// 从而**非多模态模型也能消费文本/文件附件**（纯字符串 content 兼容）。
-fn inject_attachments(
+pub(crate) fn inject_attachments(
     messages: &mut Vec<Value>,
     attachments: &[AttachmentInput],
     workspace: &Option<String>,
@@ -237,11 +237,25 @@ fn inject_attachments(
                 }
                 "file" => {
                     let name = a.name.clone().unwrap_or_else(|| "未命名文件".into());
-                    // 已分片落盘的附件直接复用暂存路径，避免重复写盘；否则由 base64 解码落盘。
+                    // 已分片落盘的附件直接复用暂存路径，避免重复写盘；否则取 base64 落盘。
+                    // 来源优先级：path → content（base64）→ dataUrl（data:…;base64,…，
+                    // capability-v2 F4：此前只认 content，dataUrl 形态载荷落盘为空，
+                    // .attachments 永不生成 → C1-6 三断言同败）。
                     let landed = if let Some(p) = &a.path {
                         Ok(p.clone())
                     } else {
-                        persist_file(workspace, &name, a.content.as_deref().unwrap_or(""))
+                        let b64 = a
+                            .content
+                            .as_deref()
+                            .filter(|s| !s.is_empty())
+                            .or_else(|| {
+                                a.data_url
+                                    .strip_prefix("data:")
+                                    .and_then(|rest| rest.split_once(";base64,"))
+                                    .map(|(_, b64)| b64)
+                            })
+                            .unwrap_or("");
+                        persist_file(workspace, &name, b64)
                     };
                     match landed {
                         Ok(path) => {

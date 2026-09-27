@@ -129,6 +129,9 @@ pub struct AttachmentInput {
     #[serde(rename = "type")]
     pub kind: String,
     /// 多模态图片的 data URL（`data:image/<ext>;base64,...`）；仅 `kind=image` 使用。
+    /// （2026-09-27 改为可选：text/file 型载荷不携带 dataUrl，必填曾致 C1-2/E9-4 类
+    /// 调用被 400 拒收——capability-v2 F3。）
+    #[serde(default)]
     pub data_url: String,
     /// 文本内容（`kind=text`）或 base64 数据（`kind=file`）。
     #[serde(default)]

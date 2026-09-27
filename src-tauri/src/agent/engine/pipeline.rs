@@ -1105,6 +1105,10 @@ async fn run_subtask(
             "content": user_content
         }),
     ];
+    // 台账 F4（2026-09-27）：复合任务的当轮附件在此注入——build_context_messages 只覆盖
+    // simple_chat 路径，pipeline 子任务此前整体丢附件（C1-2/C1-6/E9-4 三例同源：附件数=1
+    // 却永不落盘 .attachments）。每个子任务都注入（仅路径提示块，体积小）。
+    crate::agent::engine::context::inject_attachments(&mut messages, &cfg.attachments, &cfg.workspace);
 
     let tools = registry.get_tools_for_llm();
     let mut usage: (u64, u64) = (0, 0);
