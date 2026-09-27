@@ -784,7 +784,7 @@ KB 若不足则先 kb_add_file 补文档再检索。完成后列出文件。`,
   'V-M3': {
     scene: 'V', kind: 'M', title: 'SFTP 只读+/tmp 小文件往返（授权真机）',
     dims: ['ha'],
-    waitMs: 180000,
+    waitMs: 300000, // 2026-09-27 真机实测：180s 不够走完 upload→list→download→report 全程（HostAuthz 审批轮转耗时）
     prompt: `对已绑定的默认服务器执行文件往返验证，红线：只允许 /tmp 下新建文件，禁止删除/覆盖任何既有文件：
 1) host__list_servers 取真实 server_id
 2) 在本地工作空间创建 wd-sftp-e2e.txt（内容：workduo-l2-e2e-<当前毫秒时间戳>）
@@ -861,7 +861,7 @@ export async function enumerateCapabilities() {
   return out
 }
 
-export async function createEvalAgent({ tag, modelId, kbIds = null, pluginIds = null, skillIds = null, mcpTools = null, bindAll = true }) {
+export async function createEvalAgent({ tag, modelId, kbIds = null, pluginIds = null, skillIds = null, mcpTools = null, bindAll = true, bindServerId = null }) {
   const models = asRows(await callTool('agent_list_models', {}))
   const model = models.find((m) => m.id === modelId) || models.find((m) => m.id === MODELS.fast)
   if (!model) throw new Error('找不到可用模型 ' + modelId)
@@ -903,7 +903,25 @@ export async function createEvalAgent({ tag, modelId, kbIds = null, pluginIds = 
     mcpTools: _mcpTools,
   } }, { timeoutMs: 30000 }))
   if (!ag?.id) throw new Error('agent_ui_create 失败: ' + JSON.stringify(ag).slice(0, 160))
+  // 台账 S9/P0-2（2026-09-27 增强）：host__* 工具来自「服务器绑定」（agent_server_bind），
+  // 不在 kb/plugin/skill/mcp 装配内——场景 V 必须显式绑定已验证的测试服务器，否则 agent
+  // 无 host 工具可调（此前 V-M3 曾因此只落了本地文件、从未连上 SSH）。
+  if (bindServerId) {
+    try {
+      await callTool('agent_server_bind', { agentId: ag.id, serverIds: [bindServerId] }, { timeoutMs: 20000 })
+    } catch (e) { console.log('  [warn] agent_server_bind 失败:', e.message.slice(0, 100)) }
+  }
   return { id: ag.id, identifier: ident, modelId: model.id, modelName: model.name || model.model_name }
+}
+
+/** 场景 V 默认服务器：env L2_SERVER_ID 优先，否则取 server_host_list 首个档案。 */
+export async function defaultServerId() {
+  if (process.env.L2_SERVER_ID) return process.env.L2_SERVER_ID
+  try {
+    const rows = await callTool('server_host_list', {})
+    const arr = Array.isArray(rows) ? rows : (rows?.servers || rows?.rows || [])
+    return arr[0]?.id ?? null
+  } catch { return null }
 }
 
 export async function deleteEvalAgent(id) {
@@ -1312,7 +1330,9 @@ export async function runOneCase(caseId, {
   try {
     // C1 泛化（2026-09-23）：seedId → 种子包播种；prompt/artifacts 由 seed.json 覆盖 CASES 缺省。
     if (spec?.seedId) seedManifest = seedRepo(ws, spec.seedId)
-    const ag = agent || (createdAgent = await createEvalAgent({ tag: caseId.toLowerCase(), modelId }))
+    // 台账 S9/P0-2：场景 V 自动绑定默认服务器（env L2_SERVER_ID 可覆盖）。
+    const bindServerId = spec?.scene === 'V' ? await defaultServerId() : null
+    const ag = agent || (createdAgent = await createEvalAgent({ tag: caseId.toLowerCase(), modelId, bindServerId }))
     rec.agentId = ag.id
     rec.agentIdentifier = ag.identifier
     rec.modelName = ag.modelName
