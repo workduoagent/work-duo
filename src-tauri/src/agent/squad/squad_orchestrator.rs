@@ -23,6 +23,7 @@ use crate::agent::engine::native;
 use crate::agent::engine::planner;
 use crate::agent::engine::pipeline;
 use crate::agent::engine::graph::KnowledgeGraph;
+use crate::agent::engine::llm::extract_llm_content;
 use crate::agent::hitl::recovery::RecoveryHub;
 use crate::agent::engine::tools::ToolContext;
 use crate::agent::engine::tools::ToolRegistry;
@@ -333,15 +334,9 @@ async fn plan_squad_delegation(
     ];
     match crate::agent::engine::runtime::call_llm(leader_cfg, &messages, &[], None).await {
         Ok((resp, _)) => {
-            let content = resp
-                .get("choices")
-                .and_then(|c| c.get(0))
-                .and_then(|c| c.get("message"))
-                .and_then(|m| m.get("content"))
-                .and_then(|c| c.as_str())
-                .unwrap_or("")
-                .trim()
-                .to_string();
+            // 台账 G10：call_llm 返回归一化层（顶层 content），必须走唯一事实源取文本——
+            // 原地钻信封 choices[0].message.content 永远取空，委派 JSON 解析必败。
+            let content = extract_llm_content(&resp);
             parse_delegation(&content)
         }
         Err(e) => {
@@ -406,15 +401,7 @@ async fn summarize(leader_cfg: &AgentRuntimeConfig, prompt: &str, context: &str)
     ];
     match crate::agent::engine::runtime::call_llm(leader_cfg, &messages, &[], None).await {
         Ok((resp, _)) => {
-            let c = resp
-                .get("choices")
-                .and_then(|c| c.get(0))
-                .and_then(|c| c.get("message"))
-                .and_then(|m| m.get("content"))
-                .and_then(|c| c.as_str())
-                .unwrap_or("")
-                .trim()
-                .to_string();
+            let c = extract_llm_content(&resp);
             if c.is_empty() {
                 None
             } else {
@@ -861,7 +848,7 @@ async fn run_squad_chat(
                 json!({ "role": "user", "content": user }),
             ];
             let content = match crate::agent::engine::runtime::call_llm(&member.agent, &messages, &[], None).await {
-                Ok((resp, _)) => extract_llm_text(&resp),
+                Ok((resp, _)) => extract_llm_content(&resp),
                 Err(e) => {
                     tracing::warn!("[squad] chat 成员 {} 第 {} 轮发言失败：{e}", member.agent.agent_id, r + 1);
                     format!("（成员 {} 发言失败：{e}）", member.agent.agent_id)
@@ -930,7 +917,7 @@ async fn run_squad_chat(
     ];
     let summary = match crate::agent::engine::runtime::call_llm(sum_cfg, &messages, &[], None).await {
         Ok((resp, _)) => {
-            let s = extract_llm_text(&resp);
+            let s = extract_llm_content(&resp);
             if s.is_empty() {
                 blackboard.clone()
             } else {
@@ -990,15 +977,5 @@ async fn run_squad_chat(
         speakers.len()
     );
 }
-
-/// 从 OpenAI 风格 LLM 响应中提取助手文本内容（choices[0].message.content）。
-fn extract_llm_text(resp: &Value) -> String {
-    resp.get("choices")
-        .and_then(|c| c.get(0))
-        .and_then(|c| c.get("message"))
-        .and_then(|m| m.get("content"))
-        .and_then(|c| c.as_str())
-        .unwrap_or("")
-        .trim()
-        .to_string()
-}
+// 台账 G10：本地 extract_llm_text（钻信封层，永远取空）已删除——统一走
+// llm::extract_llm_content（归一化层优先 + 信封兜底，见 engine/llm.rs）。
