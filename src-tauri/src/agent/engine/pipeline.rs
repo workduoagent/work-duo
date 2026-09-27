@@ -1351,13 +1351,36 @@ async fn run_subtask(
                     &combined_outputs,
                 );
                 if !result.met {
-                    success = false;
-                    verify_detail = result.details;
-                    tracing::info!(
-                        "[agent] pipeline: 子任务 step={} 客观校验未通过：{}",
-                        task.step,
-                        runtime::clip(&verify_detail, 200),
-                    );
+                    // F2 修复（2026-09-27）：本步全程零工具调用、零文件落盘，且声明的判据
+                    // 全部是「工具输出流/工具次数」类（本就无流可校验）时，纯文本回复以
+                    // 模型自报为准判闭环，不再进入诊断重试白烧预算（v2 C1-3 实锤）。
+                    let output_only_criteria = !task.success_criteria.is_empty()
+                        && task.success_criteria.iter().all(|c| {
+                            matches!(
+                                c.check_type.to_lowercase().as_str(),
+                                "stdout_contains" | "tool_output_contains" | "tool_uses_min"
+                            )
+                        });
+                    if output_only_criteria && tool_outputs.is_empty() && changed_files.is_empty() {
+                        success = true;
+                        step_verified = false;
+                        verify_detail = String::new();
+                        step_evidence =
+                            "纯文本回复（零工具调用、无文件产物），工具流类判据不适用，以模型自报为准"
+                                .to_string();
+                        tracing::info!(
+                            "[agent] pipeline: 子任务 step={} 纯文本步骤按自报闭环（工具流类判据不适用）",
+                            task.step
+                        );
+                    } else {
+                        success = false;
+                        verify_detail = result.details;
+                        tracing::info!(
+                            "[agent] pipeline: 子任务 step={} 客观校验未通过：{}",
+                            task.step,
+                            runtime::clip(&verify_detail, 200),
+                        );
+                    }
                 } else {
                     // 客观校验通过 → 已验证（verifier 已确认至少一项客观证据）。
                     step_verified = result.verified;

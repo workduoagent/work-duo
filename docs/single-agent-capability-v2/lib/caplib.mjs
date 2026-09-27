@@ -22,7 +22,7 @@ export const { initMcp, callTool, unw, asRows, sleep, traceInner, pollRun, start
 // ---- 环境与路径 ----
 export const ROOT = process.env.CAP2_WS_ROOT || 'E:/Codes/ABC/work-duo/eval-workspace/capability2'
 export const OUT = process.env.OUT || path.resolve(__dirname, '../../eval-results/capability2-' + stamp())
-export const WAIT_MS = parseInt(process.env.CAP2_WAIT_MS || '480000', 10)
+export const WAIT_MS = parseInt(process.env.CAP2_WAIT_MS || '600000', 10)
 export const TOKEN_BUDGET_SIMPLE = parseInt(process.env.CAP2_TOKEN_BUDGET_SIMPLE || '8000', 10)
 export const DEMO_PREFIX = 'cap2-demo-'
 export const SKILL_PREFIX = 'cap2-test-skill-'

@@ -111,7 +111,10 @@ export const CASES = {
       const brokenSeen = (fileText(ws, 'config.json') || '').includes('v2-broken')
       const snaps = unw(await callTool('agent_snapshot_list', { agentId: ag.id }, { timeoutMs: 15000 }))
       const list = snaps?.snapshots || []
-      const target = list[0] // 最近一份快照 = run2 开始前（即 run1 完好状态）
+      // F3 修复（2026-09-27）：agent_snapshot_list 返回旧→新排序，list[0] 是「run1 开始前
+      // 的空工作区」快照——回滚到它会把 config.json 清没（首跑 restored_v1 误败实锤）。
+      // 改按 stamp 降序取真正最新的一份（= run2 开始前的 run1 完好状态）。
+      const target = [...list].sort((a, b) => String(b.stamp).localeCompare(String(a.stamp)))[0]
       let rolled = false
       if (target?.stamp) {
         const rb = unw(await callTool('agent_snapshot_rollback', { agentId: ag.id, stamp: target.stamp, workspace: ws }, { timeoutMs: 60000 }))

@@ -76,6 +76,23 @@ pub async fn classify_intent(
         tracing::info!("[agent] intent: 规则短路 → SIMPLE_CHAT（len={len} 无强/弱工具信号）");
         return profile("SIMPLE_CHAT", "规则短路：短消息且无工具关键词", prompt);
     }
+    // 短路 1.5（v2-F2，2026-09-27）：纯输出格式约束问答 → SIMPLE_CHAT。
+    // 用户明确「只输出 X、禁止解释」且全句无文件/执行动词时，句中的 json/代码 等
+    // 强词只是**答案格式**而非任务信号——不适用 COMPOSITE 短路（C1-3 实锤误判）。
+    let wants_pure_output = ["只输出", "仅输出", "只回复", "直接输出", "只要输出", "只给"]
+        .iter()
+        .any(|k| lower.contains(k))
+        && ["禁止", "不要", "不得", "无需"].iter().any(|k| lower.contains(k));
+    let mentions_file_or_exec = [
+        "写入", "保存", "创建", "落盘", "生成文件", "读取", "读一下", "抓取", "下载", "安装",
+        "卸载", "执行", "运行", "删除", "移除", "部署", "修复", "截图", "上传", "编辑",
+    ]
+    .iter()
+    .any(|k| lower.contains(k));
+    if wants_pure_output && !mentions_file_or_exec {
+        tracing::info!("[agent] intent: 规则短路 → SIMPLE_CHAT（纯输出格式问答，无文件/执行动词）");
+        return profile("SIMPLE_CHAT", "规则短路：纯输出格式问答（无文件/执行动词）", prompt);
+    }
     // 短路 2：命中强工具信号且描述较长 → 明显复合任务，直接判。
     if has_strong && len >= 30 {
         tracing::info!("[agent] intent: 规则短路 → COMPOSITE_TASK（命中强工具关键词）");
