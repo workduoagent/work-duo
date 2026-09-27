@@ -1332,6 +1332,14 @@ pub async fn run_squad_task(app: AppHandle, input: RunSquadTaskInput) -> Result<
     Ok(())
 }
 
+/// 取消指定小分队的全部活跃会话（小分队 S0-3 取消穿线）：置位 squad 级取消标志，
+/// 成员 pipeline / build_plan / 编排侧 call_llm 三层即时生效；返回取消的会话数。
+#[tauri::command]
+#[tracing::instrument(skip_all)]
+pub async fn cancel_squad_task(_app: AppHandle, squad_id: String) -> Result<usize, String> {
+    Ok(crate::agent::squad::squad_orchestrator::cancel_squad_sessions(&squad_id))
+}
+
 /* ------------------------------------------------------------------ *
  * 小分队 API 触发服务配置（存于 app_config）
  * ------------------------------------------------------------------ */

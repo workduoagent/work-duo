@@ -31,6 +31,98 @@ use crate::agent::types::AgentRuntimeConfig;
 use crate::agent::types::SquadMemberConfig;
 use crate::agent::types::SquadRuntimeConfig;
 
+/// squad 级取消注册表：session_id → (squad_id, 取消标志)。
+///
+/// run_squad_task 建会话后注册（SquadCancelGuard Drop 时回收），cancel_squad_sessions
+/// 按 squad_id 置位——成员 pipeline / build_plan / 编排侧 call_llm 三层共用同一标志，
+/// 取消在调用级（≤180s）与节点级（检测点即时）生效。
+static SQUAD_CANCELS: std::sync::Mutex<Option<std::collections::HashMap<String, (String, std::sync::Arc<AtomicBool>)>>> =
+    std::sync::Mutex::new(None);
+
+/// Drop 守卫：任务任意出口（正常 / 取消 / 失败）自动从注册表移除，不残留孤儿标志。
+struct SquadCancelGuard(String);
+impl Drop for SquadCancelGuard {
+    fn drop(&mut self) {
+        let mut g = SQUAD_CANCELS.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(map) = g.as_mut() {
+            {
+                map.remove(&self.0);
+            }
+        }
+    }
+}
+
+/// 取消指定小分队的全部活跃会话（S0-3 取消穿线对外入口，cancel_squad_task 命令调用）。
+/// 返回置位的活跃会话数。
+pub fn cancel_squad_sessions(squad_id: &str) -> usize {
+    let mut cancelled = 0usize;
+    let mut g = SQUAD_CANCELS.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(map) = g.as_mut() {
+        {
+            for (sid, (sq, flag)) in map.iter() {
+                if sq == squad_id {
+                    flag.store(true, std::sync::atomic::Ordering::SeqCst);
+                    tracing::info!("[squad] 取消信号已置位：session={sid} squad={squad_id}");
+                    cancelled += 1;
+                }
+            }
+        }
+    }
+    cancelled
+}
+
+/// 统一收尾：会话状态落库（done/cancelled/failed）+ 系统 round + done 事件。
+/// S0-3 新路径（取消 / 失败 / 早退）使用；既有 done 收尾保持原样（最小 diff）。
+async fn finish_squad_session(
+    app: &AppHandle,
+    pool: &sqlx::SqlitePool,
+    squad_id: &str,
+    session_id: &str,
+    status: &str,
+    summary: &str,
+) {
+    let _ = sqlx::query(
+        "UPDATE agent_squad_session SET status=?, snapshot=?, updated_at=? WHERE id=?",
+    )
+    .bind(status)
+    .bind(summary)
+    .bind(now_ms())
+    .bind(session_id)
+    .execute(pool)
+    .await;
+    let _ = sqlx::query(
+        "INSERT INTO agent_squad_round (id, squad_id, session_id, speaker_agent_id, role, content, kind, created_at) \
+         VALUES (?, ?, ?, NULL, '系统', ?, 'system', ?)",
+    )
+    .bind(format!("sqr_{}", now_ms()))
+    .bind(squad_id)
+    .bind(session_id)
+    .bind(summary)
+    .bind(now_ms())
+    .execute(pool)
+    .await;
+    events::emit_squad_round(
+        app,
+        &events::SquadRoundPayload {
+            squad_id: squad_id.to_string(),
+            session_id: session_id.to_string(),
+            speaker_agent_id: None,
+            role: "系统".into(),
+            kind: "summary".into(),
+            content: summary.to_string(),
+        },
+    );
+    events::emit_squad_session_done(
+        app,
+        &events::SquadSessionDonePayload {
+            squad_id: squad_id.to_string(),
+            session_id: session_id.to_string(),
+            summary: summary.to_string(),
+        },
+    );
+    tracing::info!("[squad] 会话 {} 终态：{}", session_id, status);
+}
+
 fn now_ms() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -84,6 +176,15 @@ pub async fn run_squad_task(app: &AppHandle, squad: SquadRuntimeConfig, prompt: 
     };
 
     let session_id = format!("sqs_{}", now_ms());
+    // S0-3 取消穿线：注册 squad 级取消标志（guard Drop 回收；cancel_squad_sessions 置位）。
+    let squad_cancel = Arc::new(AtomicBool::new(false));
+    {
+        let mut g = SQUAD_CANCELS.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(map) = g.as_mut() {
+            map.insert(session_id.clone(), (squad.squad_id.clone(), squad_cancel.clone()));
+        }
+    }
+    let _cancel_guard = SquadCancelGuard(session_id.clone());
     let title = prompt.chars().take(120).collect::<String>();
     let mode = squad.mode.clone();
     let _ = sqlx::query(
@@ -111,11 +212,11 @@ pub async fn run_squad_task(app: &AppHandle, squad: SquadRuntimeConfig, prompt: 
     // 按协作模式分派：pipeline / chat 走专用路径，其余默认编排式（orchestrator）。
     match squad.mode.as_str() {
         "pipeline" => {
-            run_squad_pipeline(app, &squad, &prompt, &pool, &session_id).await;
+            run_squad_pipeline(app, &squad, &prompt, &pool, &session_id, &squad_cancel).await;
             return;
         }
         "chat" => {
-            run_squad_chat(app, &squad, &prompt, &pool, &session_id).await;
+            run_squad_chat(app, &squad, &prompt, &pool, &session_id, &squad_cancel).await;
             return;
         }
         _ => {}
@@ -138,13 +239,14 @@ pub async fn run_squad_task(app: &AppHandle, squad: SquadRuntimeConfig, prompt: 
     let leader = match leader {
         Some(l) => l,
         None => {
-            tracing::info!("[squad] run_squad_task: 无可用主管成员");
+            tracing::warn!("[squad] run_squad_task: 无可用主管成员，会话按失败收尾");
+            finish_squad_session(app, &pool, &squad.squad_id, &session_id, "failed", "无可用主管成员，任务无法执行").await;
             return;
         }
     };
 
     // 主管规划委派。
-    let delegated = plan_squad_delegation(&leader.agent, &prompt, &squad.members).await;
+    let delegated = plan_squad_delegation(&leader.agent, &prompt, &squad.members, &squad_cancel).await;
     if !delegated.is_empty() {
         let plan_text = delegated
             .iter()
@@ -170,6 +272,11 @@ pub async fn run_squad_task(app: &AppHandle, squad: SquadRuntimeConfig, prompt: 
     // P2-3 模式感知恢复（与 run_squad_pipeline 同源）：schedule/api 视为无人值守。
     let unattended = matches!(squad.run_strategy.execution_mode.as_str(), "schedule" | "api");
     for task in &delegated {
+        // S0-3 取消检测点：squad 级取消 → 立即收尾（status=cancelled，成员 pipeline 自身也会被同一标志中断）。
+        if squad_cancel.load(std::sync::atomic::Ordering::SeqCst) {
+            finish_squad_session(app, &pool, &squad.squad_id, &session_id, "cancelled", "任务已被用户取消").await;
+            return;
+        }
         // 按角色 / agent_id 匹配成员；匹配不到则退回主管。
         let member = match_member(&squad.members, &task.assignee).unwrap_or(&leader);
         let ws =
@@ -186,7 +293,7 @@ pub async fn run_squad_task(app: &AppHandle, squad: SquadRuntimeConfig, prompt: 
         let mut output = String::new();
         let mut last_err: Option<String> = None;
         for attempt in 0..retry {
-            match run_member_subtask(app, &member.agent, &subtask_prompt, &ws, unattended).await {
+            match run_member_subtask(app, &member.agent, &subtask_prompt, &ws, unattended, Some(&squad_cancel)).await {
                 Ok(t) => {
                     output = t;
                     break;
@@ -240,7 +347,7 @@ pub async fn run_squad_task(app: &AppHandle, squad: SquadRuntimeConfig, prompt: 
     }
 
     // 汇总：交给主管总结（若无产出则取最后上下文）。
-    let summary = summarize(&leader.agent, &prompt, &context)
+    let summary = summarize(&leader.agent, &prompt, &context, &squad_cancel)
         .await
         .unwrap_or_else(|| context.clone());
 
@@ -314,6 +421,7 @@ async fn plan_squad_delegation(
     leader_cfg: &AgentRuntimeConfig,
     prompt: &str,
     members: &[SquadMemberConfig],
+    cancel: &Arc<AtomicBool>,
 ) -> Vec<DelegatedTask> {
     let roster = members
         .iter()
@@ -332,7 +440,7 @@ async fn plan_squad_delegation(
         json!({ "role": "system", "content": sys }),
         json!({ "role": "user", "content": user }),
     ];
-    match crate::agent::engine::runtime::call_llm(leader_cfg, &messages, &[], None).await {
+    match crate::agent::engine::runtime::call_llm(leader_cfg, &messages, &[], Some(cancel)).await {
         Ok((resp, _)) => {
             // 台账 G10：call_llm 返回归一化层（顶层 content），必须走唯一事实源取文本——
             // 原地钻信封 choices[0].message.content 永远取空，委派 JSON 解析必败。
@@ -386,7 +494,7 @@ fn parse_delegation(content: &str) -> Vec<DelegatedTask> {
 }
 
 /// 主管汇总各成员产出为最终结论。
-async fn summarize(leader_cfg: &AgentRuntimeConfig, prompt: &str, context: &str) -> Option<String> {
+async fn summarize(leader_cfg: &AgentRuntimeConfig, prompt: &str, context: &str, cancel: &Arc<AtomicBool>) -> Option<String> {
     if context.trim().is_empty() {
         return None;
     }
@@ -399,7 +507,7 @@ async fn summarize(leader_cfg: &AgentRuntimeConfig, prompt: &str, context: &str)
         json!({ "role": "system", "content": sys }),
         json!({ "role": "user", "content": user }),
     ];
-    match crate::agent::engine::runtime::call_llm(leader_cfg, &messages, &[], None).await {
+    match crate::agent::engine::runtime::call_llm(leader_cfg, &messages, &[], Some(cancel)).await {
         Ok((resp, _)) => {
             let c = extract_llm_content(&resp);
             if c.is_empty() {
@@ -424,6 +532,8 @@ async fn run_member_subtask(
     // P2-3 无人值守模式（schedule/api）：子任务恢复等待超时自动取消整条流水线，防止卡死；
     // manual 模式恒为 false，恢复等待保持永久阻塞（行为不变）。
     unattended: bool,
+    // S0-3 取消穿线：squad 级取消标志（编排式主循环传 Some；直接调用方可传 None 保持旧行为）。
+    squad_cancel: Option<&Arc<AtomicBool>>,
 ) -> Result<String, String> {
     let mut cfg = member_cfg.clone();
     cfg.workspace = Some(workspace.to_string());
@@ -432,7 +542,7 @@ async fn run_member_subtask(
 
     // 台账 S6：注册链与能力大纲同源——成员子任务规划与单 Agent run_task 共用 build_full_registry。
     let registry = crate::agent::engine::runtime::build_full_registry(app, &cfg);
-    let (plan, _, _) = planner::build_plan(&cfg, prompt, Some(workspace), None, &registry, None).await;
+    let (plan, _, _) = planner::build_plan(&cfg, prompt, Some(workspace), squad_cancel, &registry, None).await;
 
     // 图驱动：为每个成员子任务打开独立实体图（按 workspace + 成员 id 区分会话），
     // 规划写入图，运行时状态由图承载，与单 Agent 路径一致。
@@ -471,7 +581,9 @@ async fn run_member_subtask(
 
     let approval = ApprovalManager::new();
     let recovery = RecoveryHub::new();
-    let cancel = Arc::new(AtomicBool::new(false));
+    // S0-3 取消穿线：pipeline 直接监听 squad 级取消标志（squad 取消 = 成员子任务取消，
+    // 单一标志三层贯通；此前局部标志不接 squad 信号，squad 取消时成员 pipeline 继续烧 token）。
+    let cancel = squad_cancel.cloned().unwrap_or_else(|| Arc::new(AtomicBool::new(false)));
 
     let result = pipeline::run_pipeline(
         app,
@@ -562,12 +674,13 @@ async fn run_pipeline_node(
     session_id: &str,
     // P2-3 无人值守模式透传。
     unattended: bool,
+    cancel: &Arc<AtomicBool>,
 ) -> String {
     let ws = squad_member_workspace(workspace, squad_id, &member.agent.agent_id);
     let mut output = String::new();
     let mut last_err: Option<String> = None;
     for attempt in 0..retry {
-        match run_member_subtask(app, &member.agent, &prompt.to_string(), &ws, unattended).await {
+        match run_member_subtask(app, &member.agent, &prompt.to_string(), &ws, unattended, Some(cancel)).await {
             Ok(t) => {
                 output = t;
                 break;
@@ -630,6 +743,7 @@ async fn run_squad_pipeline(
     prompt: &str,
     pool: &sqlx::SqlitePool,
     session_id: &str,
+    cancel: &Arc<AtomicBool>,
 ) {
     let retry = squad.run_strategy.retry_count.max(1) as usize;
     // P2-3 模式感知恢复：schedule / api 模式视为无人值守 → 子任务失败恢复超时自动取消；
@@ -689,6 +803,11 @@ async fn run_squad_pipeline(
     let mut outputs: Vec<String> = vec![String::new(); squad.members.len()];
 
     for (pos, &mi) in plan.order.iter().enumerate() {
+        // S0-3 取消检测点：squad 级取消 → 立即收尾。
+        if cancel.load(std::sync::atomic::Ordering::SeqCst) {
+            finish_squad_session(app, pool, &squad.squad_id, session_id, "cancelled", "任务已被用户取消").await;
+            return;
+        }
         let member = &squad.members[mi];
         let upstream = plan.inputs[pos]
             .iter()
@@ -705,7 +824,7 @@ async fn run_squad_pipeline(
                 prompt, upstream
             )
         };
-        let out = run_pipeline_node(app, &squad.squad_id, &squad.workspace, member, &node_prompt, retry, pool, session_id, unattended).await;
+        let out = run_pipeline_node(app, &squad.squad_id, &squad.workspace, member, &node_prompt, retry, pool, session_id, unattended, cancel).await;
         outputs[mi] = out;
     }
 
@@ -800,6 +919,7 @@ async fn run_squad_chat(
     prompt: &str,
     pool: &sqlx::SqlitePool,
     session_id: &str,
+    cancel: &Arc<AtomicBool>,
 ) {
     let max_rounds = if squad.chat_config.max_rounds == 0 {
         8
@@ -829,6 +949,11 @@ async fn run_squad_chat(
 
     let mut blackboard = String::new();
     for r in 0..max_rounds {
+        // S0-3 取消检测点：squad 级取消 → 立即收尾。
+        if cancel.load(std::sync::atomic::Ordering::SeqCst) {
+            finish_squad_session(app, pool, &squad.squad_id, session_id, "cancelled", "任务已被用户取消").await;
+            return;
+        }
         for member in speakers.clone() {
             let sys = format!(
                 "你是小分队「{}」圆桌讨论的参与者，角色为「{}」。请基于讨论目标与其他成员的发言，给出你的专业见解（简洁、针对目标、可回应他人观点）。",
