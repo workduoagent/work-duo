@@ -44,8 +44,6 @@ use regex::Regex;
 // HTTP 请求工具（首梯队补全）：重定向次数上限 5。
 // SSRF 防御：自定义 DNS 解析器（reqwest::dns::Resolve），在连接前拦截环回 / 私有 / 链路本地等受限地址。
 
-/// 宿主命令绝对硬超时（秒）。超时即显式 Kill 子进程，严防阻塞型命令挂死 Tokio 运行时。
-const COMMAND_TIMEOUT_SECS: u64 = 60;
 /// read_file 体积上限（问题 6 修复）：超过该值的文件不读入内存，直接拒绝并引导改用沙箱分段处理。
 /// 2MB 读入内存可接受（返回值再由 truncate_tool_output 截到约 15KB）；再大则为截断而全读不值得。
 const MAX_READ_FILE_BYTES: u64 = 2 * 1024 * 1024;

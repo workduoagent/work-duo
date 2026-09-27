@@ -44,18 +44,8 @@ use crate::bun_manager::run_node_in_sandbox;
 
 /// 宿主命令绝对硬超时（秒）。超时即显式 Kill 子进程，严防阻塞型命令挂死 Tokio 运行时。
 const COMMAND_TIMEOUT_SECS: u64 = 60;
-/// read_file 体积上限（问题 6 修复）：超过该值的文件不读入内存，直接拒绝并引导改用沙箱分段处理。
-/// 2MB 读入内存可接受（返回值再由 truncate_tool_output 截到约 15KB）；再大则为截断而全读不值得。
-const MAX_READ_FILE_BYTES: u64 = 2 * 1024 * 1024;
 
-/// zip 打包总大小上限（与 zip_extract 的 500MB 解体对称）：待打包源文件累计超过该值直接拒绝，防磁盘写满。
-const MAX_ZIP_TOTAL_BYTES: u64 = 1024 * 1024 * 1024; // 1GB
-/// grep_files 遍历深度上限：防符号链接环 / 极端嵌套导致的无限递归。
-const MAX_GREP_DEPTH: usize = 20;
 
-/// zip 解压防御上限（防 zip 炸弹）：单包条目数 / 解压后总大小。
-const MAX_ZIP_ENTRIES: usize = 10_000;
-const MAX_ZIP_EXTRACT_BYTES: u64 = 500 * 1024 * 1024;
 
 /// 构造标准 function-calling 定义骨架。
 
