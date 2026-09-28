@@ -25,7 +25,7 @@ use serde_json;
 static RUN_ID_SEQ: AtomicU64 = AtomicU64::new(0);
 
 /// 生成自测运行 id（如 `run-1715223456789-0`）。
-fn next_run_id() -> String {
+pub(crate) fn next_run_id() -> String {
     let ts = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis())

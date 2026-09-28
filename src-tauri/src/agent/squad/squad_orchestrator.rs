@@ -6,12 +6,79 @@
 //! 流水线 / 群聊模式在 Phase 4 / Phase 5 复用并扩展本文件的运行骨架。
 
 use std::collections::BTreeMap;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::Arc;
+
+/// S0-4a：squad 会话 id 进程内序号（叠加纳秒时间戳，进程内严格唯一）。
+static SQUAD_SESSION_SEQ: AtomicU64 = AtomicU64::new(0);
+
+/// S0-4d（2026-09-28）：per-session metrics 累加器（tokens/wall/memberStats 最小集）。
+/// 注册表模式同 SQUAD_CANCELS：run_squad_task 注册（session_id 键），终态落 metrics round
+/// 后移除；编排侧 call_llm 与成员 pipeline 双源累加。落库形态：round 表 kind='metrics' 行，
+/// content = JSON（零 DDL 变更，前端按 kind 过滤或忽略）。
+#[derive(serde::Serialize)]
+struct SquadMemberStat {
+    agent_id: String,
+    role: String,
+    prompt_tokens: u64,
+    completion_tokens: u64,
+    wall_ms: u64,
+}
+#[derive(Default, serde::Serialize)]
+struct SquadMetricsAcc {
+    prompt_tokens: u64,
+    completion_tokens: u64,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    members: Vec<SquadMemberStat>,
+}
+static SQUAD_METRICS: std::sync::Mutex<Option<std::collections::HashMap<String, SquadMetricsAcc>>> =
+    std::sync::Mutex::new(None);
+
+fn squad_metrics_add_usage(session_id: &str, usage: (u64, u64)) {
+    if usage.0 == 0 && usage.1 == 0 {
+        return;
+    }
+    let mut g = SQUAD_METRICS.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(map) = g.as_mut() {
+        let acc = map.entry(session_id.to_string()).or_default();
+        acc.prompt_tokens += usage.0;
+        acc.completion_tokens += usage.1;
+    }
+}
+fn squad_metrics_add_member(session_id: &str, stat: SquadMemberStat) {
+    let mut g = SQUAD_METRICS.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(map) = g.as_mut() {
+        map.entry(session_id.to_string()).or_default().members.push(stat);
+    }
+}
+async fn write_metrics_round(app: &AppHandle, pool: &sqlx::SqlitePool, squad_id: &str, session_id: &str) {
+    let Some(acc) = squad_metrics_take(session_id) else { return };
+    if acc.prompt_tokens == 0 && acc.completion_tokens == 0 && acc.members.is_empty() {
+        return;
+    }
+    let payload = serde_json::to_string(&acc).unwrap_or_default();
+    let _ = sqlx::query(
+        "INSERT INTO agent_squad_round (id, squad_id, session_id, speaker_agent_id, role, content, kind, created_at) \
+         VALUES (?, ?, ?, NULL, '系统', ?, 'metrics', ?)")
+    .bind(format!("sqr_{}", now_ms()))
+    .bind(squad_id)
+    .bind(session_id)
+    .bind(&payload)
+    .bind(now_ms())
+    .execute(pool)
+    .await;
+    tracing::info!("[squad] 会话 {session_id} metrics 已落盘（prompt={} completion={} members={}）", acc.prompt_tokens, acc.completion_tokens, acc.members.len());
+}
+
+fn squad_metrics_take(session_id: &str) -> Option<SquadMetricsAcc> {
+    let mut g = SQUAD_METRICS.lock().unwrap_or_else(|e| e.into_inner());
+    g.as_mut().and_then(|map| map.remove(session_id))
+}
 
 use serde_json::json;
 use serde_json::Value;
 use tauri::AppHandle;
+use tauri::Emitter;
 use tauri::Manager;
 use tauri_plugin_sql::DbInstances;
 use tauri_plugin_sql::DbPool;
@@ -48,6 +115,12 @@ impl Drop for SquadCancelGuard {
             {
                 map.remove(&self.0);
             }
+        }
+        // S0-4d 兜底：正常路径终态已 take 并落 metrics round；异常路径（panic/提前 return）
+        // 残留的累加器在此清理，防跨 run 串账。
+        let mut m = SQUAD_METRICS.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(map) = m.as_mut() {
+            map.remove(&self.0);
         }
     }
 }
@@ -175,7 +248,13 @@ pub async fn run_squad_task(app: &AppHandle, squad: SquadRuntimeConfig, prompt: 
         }
     };
 
-    let session_id = format!("sqs_{}", now_ms());
+    // S0-4a（2026-09-28）：会话 id 去时戳化——纳秒精度 + 进程内序号，消除「同毫秒并发建队」
+    // 的 session_id 碰撞面（v1.4 §11：原 format!("sqs_{now_ms}") 同毫秒即撞）。
+    let session_id = format!(
+        "sqs_{}_{}",
+        chrono::Utc::now().timestamp_nanos_opt().unwrap_or(now_ms()),
+        SQUAD_SESSION_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    );
     // S0-3 取消穿线：注册 squad 级取消标志（guard Drop 回收；cancel_squad_sessions 置位）。
     let squad_cancel = Arc::new(AtomicBool::new(false));
     {
@@ -246,7 +325,7 @@ pub async fn run_squad_task(app: &AppHandle, squad: SquadRuntimeConfig, prompt: 
     };
 
     // 主管规划委派。
-    let delegated = plan_squad_delegation(&leader.agent, &prompt, &squad.members, &squad_cancel).await;
+    let delegated = plan_squad_delegation(&leader.agent, &prompt, &squad.members, &squad_cancel, &session_id).await;
     if !delegated.is_empty() {
         let plan_text = delegated
             .iter()
@@ -293,7 +372,7 @@ pub async fn run_squad_task(app: &AppHandle, squad: SquadRuntimeConfig, prompt: 
         let mut output = String::new();
         let mut last_err: Option<String> = None;
         for attempt in 0..retry {
-            match run_member_subtask(app, &member.agent, &subtask_prompt, &ws, unattended, Some(&squad_cancel)).await {
+            match run_member_subtask(app, &member.agent, &member.role, &session_id, &subtask_prompt, &ws, unattended, Some(&squad_cancel)).await {
                 Ok(t) => {
                     output = t;
                     break;
@@ -347,7 +426,7 @@ pub async fn run_squad_task(app: &AppHandle, squad: SquadRuntimeConfig, prompt: 
     }
 
     // 汇总：交给主管总结（若无产出则取最后上下文）。
-    let summary = summarize(&leader.agent, &prompt, &context, &squad_cancel)
+    let summary = summarize(&leader.agent, &prompt, &context, &squad_cancel, &session_id)
         .await
         .unwrap_or_else(|| context.clone());
 
@@ -371,6 +450,7 @@ pub async fn run_squad_task(app: &AppHandle, squad: SquadRuntimeConfig, prompt: 
     .bind(&session_id)
     .execute(&pool)
     .await;
+    write_metrics_round(app, &pool, &squad.squad_id, &session_id).await; // S0-4d metrics 落盘
 
     events::emit_squad_round(
         app,
@@ -422,6 +502,7 @@ async fn plan_squad_delegation(
     prompt: &str,
     members: &[SquadMemberConfig],
     cancel: &Arc<AtomicBool>,
+    metrics_session: &str,
 ) -> Vec<DelegatedTask> {
     let roster = members
         .iter()
@@ -441,7 +522,8 @@ async fn plan_squad_delegation(
         json!({ "role": "user", "content": user }),
     ];
     match crate::agent::engine::runtime::call_llm(leader_cfg, &messages, &[], Some(cancel)).await {
-        Ok((resp, _)) => {
+        Ok((resp, usage)) => {
+            squad_metrics_add_usage(metrics_session, usage);
             // 台账 G10：call_llm 返回归一化层（顶层 content），必须走唯一事实源取文本——
             // 原地钻信封 choices[0].message.content 永远取空，委派 JSON 解析必败。
             let content = extract_llm_content(&resp);
@@ -494,7 +576,7 @@ fn parse_delegation(content: &str) -> Vec<DelegatedTask> {
 }
 
 /// 主管汇总各成员产出为最终结论。
-async fn summarize(leader_cfg: &AgentRuntimeConfig, prompt: &str, context: &str, cancel: &Arc<AtomicBool>) -> Option<String> {
+async fn summarize(leader_cfg: &AgentRuntimeConfig, prompt: &str, context: &str, cancel: &Arc<AtomicBool>, metrics_session: &str) -> Option<String> {
     if context.trim().is_empty() {
         return None;
     }
@@ -508,7 +590,8 @@ async fn summarize(leader_cfg: &AgentRuntimeConfig, prompt: &str, context: &str,
         json!({ "role": "user", "content": user }),
     ];
     match crate::agent::engine::runtime::call_llm(leader_cfg, &messages, &[], Some(cancel)).await {
-        Ok((resp, _)) => {
+        Ok((resp, usage)) => {
+            squad_metrics_add_usage(metrics_session, usage);
             let c = extract_llm_content(&resp);
             if c.is_empty() {
                 None
@@ -527,6 +610,9 @@ async fn summarize(leader_cfg: &AgentRuntimeConfig, prompt: &str, context: &str,
 async fn run_member_subtask(
     app: &AppHandle,
     member_cfg: &AgentRuntimeConfig,
+    member_role: &str,
+    // S0-4d：metrics 归属的 squad 会话 id（成员自身的 graph session 与此不同）。
+    metrics_session: &str,
     prompt: &str,
     workspace: &str,
     // P2-3 无人值守模式（schedule/api）：子任务恢复等待超时自动取消整条流水线，防止卡死；
@@ -539,6 +625,28 @@ async fn run_member_subtask(
     cfg.workspace = Some(workspace.to_string());
     cfg.session_id = None;
     cfg.round_id = None;
+    let member_wall = std::time::Instant::now(); // S0-4d：成员墙钟
+
+    // S0-4c（2026-09-28）：成员 run_id 贯穿 + member 事件透出——与单 Agent 同源 next_run_id，
+    // 成员 pipeline 包 with_run_id_scope（事件/轨迹落自己的 run 桶，agent_get_run_trace 可查）；
+    // member-started/finished 广播给 UI 运行控制台（v1.4 §7 状态映射）。
+    let run_id = crate::agent::commands::next_run_id();
+    let member_event = |phase: &str, ok: bool, summary: &str| {
+        let payload = json!({
+            "kind": "squad-member",
+            "phase": phase,
+            "memberAgentId": cfg.agent_id,
+            "memberRole": member_role,
+            "runId": run_id,
+            "ok": ok,
+            "summary": summary,
+        });
+        crate::agent::events::push_event("squad-member-event", &payload);
+        if let Err(e) = app.emit("squad-member-event", &payload) {
+            tracing::warn!("[squad] member 事件广播失败：{e}");
+        }
+    };
+    member_event("started", true, prompt);
 
     // 台账 S6：注册链与能力大纲同源——成员子任务规划与单 Agent run_task 共用 build_full_registry。
     let registry = crate::agent::engine::runtime::build_full_registry(app, &cfg);
@@ -573,7 +681,7 @@ async fn run_member_subtask(
         sandbox_enabled: cfg.allow_sandbox,
         agent_id: cfg.agent_id.clone(),
         session_id: None,
-        run_id: None,
+        run_id: Some(run_id.clone()),
         http_allowed_hosts: cfg.http_allowed_hosts.clone(),
         run_outcomes: Default::default(),
         call_id: None,
@@ -581,26 +689,96 @@ async fn run_member_subtask(
 
     let approval = ApprovalManager::new();
     let recovery = RecoveryHub::new();
+
+    // S0-4b（2026-09-28）：成员执行过 per-agent 锁（v1.4 §11/§9）——此前成员 pipeline 完全
+    // 绕锁，成员 agent 若同时被单 Agent 任务占用会并发互踩（tasks 图/审批/恢复）。
+    // 语义：占用等待（每 2s 重试，默认最多 30s，`WD_SQUAD_MEMBER_LOCK_WAIT_SECS` 可调），
+    // 取消感知（squad 取消立即放弃等待），超时报「成员忙」——**超时改派**需任务重分配
+    // 基础设施，落 S1 Wave 并行调度（那里有 assignee 重分配）。
+    let _run_guard = {
+        let runtime = app.state::<crate::agent::engine::runtime::AgentRuntime>();
+        let wait_cap = std::env::var("WD_SQUAD_MEMBER_LOCK_WAIT_SECS")
+            .ok()
+            .and_then(|s| s.trim().parse::<u64>().ok())
+            .unwrap_or(30);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(wait_cap);
+        let mut guard = None;
+        loop {
+            if let Some(c) = squad_cancel {
+                if c.load(std::sync::atomic::Ordering::Relaxed) {
+                    return Err("子任务被取消：等待成员锁期间 squad 已取消".into());
+                }
+            }
+            match runtime.try_acquire_run_lock(&cfg.agent_id) {
+                Some(pair) => {
+                    guard = Some(pair.1);
+                    break;
+                }
+                None => {
+                    if std::time::Instant::now() >= deadline {
+                        return Err(format!(
+                            "成员 agent {} 忙（运行锁占用超过 {wait_cap}s）——请稍后重试或停止该成员的当前任务",
+                            cfg.agent_id
+                        ));
+                    }
+                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                }
+            }
+        }
+        guard
+    };
+
     // S0-3 取消穿线：pipeline 直接监听 squad 级取消标志（squad 取消 = 成员子任务取消，
     // 单一标志三层贯通；此前局部标志不接 squad 信号，squad 取消时成员 pipeline 继续烧 token）。
     let cancel = squad_cancel.cloned().unwrap_or_else(|| Arc::new(AtomicBool::new(false)));
 
-    let result = pipeline::run_pipeline(
-        app,
-        &cfg,
-        &registry,
-        &ctx,
-        &approval,
-        &mut graph,
-        &session_id,
-        &cancel,
-        &recovery,
-        unattended,
-        // 小分队无授权集（15007）：策略不适用，维持旧行为
-        None,
+    // S0-4e（2026-09-28）：成员子任务 run 级墙钟——与单 Agent 对齐（WD_RUN_MAX_SECS 同源，
+    // 成员可用 WD_SQUAD_MEMBER_RUN_MAX_SECS 单独覆盖；默认 1800s）。超时强制终止（硬杀），
+    // 与单 Agent「软窗口协作收尾 + 墙钟强杀」的最外层兜底等价；graph.snapshot 在超时分支
+    // 跳过（pipeline 内部每步已落库，图快照损失可接受）。
+    let member_run_limit: u64 = std::env::var("WD_SQUAD_MEMBER_RUN_MAX_SECS")
+        .ok()
+        .and_then(|s| s.trim().parse::<u64>().ok())
+        .or_else(|| std::env::var("WD_RUN_MAX_SECS").ok().and_then(|s| s.trim().parse::<u64>().ok()))
+        .filter(|v| *v > 0)
+        .unwrap_or(1800);
+    let result = match tokio::time::timeout(
+        std::time::Duration::from_secs(member_run_limit),
+        crate::agent::events::with_run_id_scope(
+            run_id.clone(),
+            pipeline::run_pipeline(
+                app,
+                &cfg,
+                &registry,
+                &ctx,
+                &approval,
+                &mut graph,
+                &session_id,
+                &cancel,
+                &recovery,
+                unattended,
+                // 小分队无授权集（15007）：策略不适用，维持旧行为
+                None,
+            ),
+        ),
     )
-    .await;
+    .await
+    {
+        Ok(r) => r,
+        Err(_) => {
+            let err = format!(
+                "成员子任务运行超时（{member_run_limit}s），已强制终止——可加大 WD_SQUAD_MEMBER_RUN_MAX_SECS / WD_RUN_MAX_SECS 或拆分任务"
+            );
+            member_event("finished", false, &err);
+            tracing::warn!("[squad] 成员 {} {err}", cfg.agent_id);
+            return Err(err);
+        }
+    };
     graph.snapshot(&session_id);
+
+    // S0-4c：member-finished（success 由 pipeline 客观校验给出；summary 取终文截断）
+    let summary = result.final_text.chars().take(200).collect::<String>();
+    member_event("finished", result.success, &summary);
 
     if result.cancelled {
         // 问题 1 配套：若取消带系统原因（无人值守超时），一并带入错误串，便于 squad 上层区分。
@@ -610,8 +788,20 @@ async fn run_member_subtask(
         };
         return Err(err.into());
     }
-    Ok(result.final_text)
-}
+    // S0-4d：成员 token/墙钟入 per-session 累加器（返回类型保持 String，调用方只消费文本）
+    let member_wall_ms = member_wall.elapsed().as_millis() as u64;
+    squad_metrics_add_usage(metrics_session, result.usage);
+    squad_metrics_add_member(
+        metrics_session,
+        SquadMemberStat {
+            agent_id: cfg.agent_id.clone(),
+            role: member_role.to_string(),
+            prompt_tokens: result.usage.0,
+            completion_tokens: result.usage.1,
+            wall_ms: member_wall_ms,
+        },
+    );
+    Ok(result.final_text)}
 
 /// 流水线执行计划：拓扑顺序 + 每个节点的上游输入（成员下标）。
 struct DagPlan {
@@ -680,7 +870,7 @@ async fn run_pipeline_node(
     let mut output = String::new();
     let mut last_err: Option<String> = None;
     for attempt in 0..retry {
-        match run_member_subtask(app, &member.agent, &prompt.to_string(), &ws, unattended, Some(cancel)).await {
+        match run_member_subtask(app, &member.agent, &member.role, session_id, &prompt.to_string(), &ws, unattended, Some(cancel)).await {
             Ok(t) => {
                 output = t;
                 break;
@@ -776,6 +966,7 @@ async fn run_squad_pipeline(
                 .bind(session_id)
                 .execute(pool)
                 .await;
+                write_metrics_round(app, &pool, &squad.squad_id, &session_id).await; // S0-4d metrics 落盘
                 events::emit_squad_session_done(
                     app,
                     &events::SquadSessionDonePayload {
@@ -879,6 +1070,7 @@ async fn run_squad_pipeline(
     .bind(session_id)
     .execute(pool)
     .await;
+    write_metrics_round(app, &pool, &squad.squad_id, &session_id).await; // S0-4d metrics 落盘
 
     events::emit_squad_round(
         app,
@@ -972,8 +1164,8 @@ async fn run_squad_chat(
                 json!({ "role": "system", "content": sys }),
                 json!({ "role": "user", "content": user }),
             ];
-            let content = match crate::agent::engine::runtime::call_llm(&member.agent, &messages, &[], None).await {
-                Ok((resp, _)) => extract_llm_content(&resp),
+            let content = match crate::agent::engine::runtime::call_llm(&member.agent, &messages, &[], Some(cancel)).await {
+                Ok((resp, usage)) => { squad_metrics_add_usage(session_id, usage); extract_llm_content(&resp) }
                 Err(e) => {
                     tracing::warn!("[squad] chat 成员 {} 第 {} 轮发言失败：{e}", member.agent.agent_id, r + 1);
                     format!("（成员 {} 发言失败：{e}）", member.agent.agent_id)
@@ -1040,8 +1232,9 @@ async fn run_squad_chat(
         json!({ "role": "system", "content": sys }),
         json!({ "role": "user", "content": user }),
     ];
-    let summary = match crate::agent::engine::runtime::call_llm(sum_cfg, &messages, &[], None).await {
-        Ok((resp, _)) => {
+    let summary = match crate::agent::engine::runtime::call_llm(sum_cfg, &messages, &[], Some(cancel)).await {
+        Ok((resp, usage)) => {
+            squad_metrics_add_usage(session_id, usage);
             let s = extract_llm_content(&resp);
             if s.is_empty() {
                 blackboard.clone()
@@ -1075,6 +1268,7 @@ async fn run_squad_chat(
     .bind(session_id)
     .execute(pool)
     .await;
+    write_metrics_round(app, &pool, &squad.squad_id, &session_id).await; // S0-4d metrics 落盘
 
     events::emit_squad_round(
         app,
