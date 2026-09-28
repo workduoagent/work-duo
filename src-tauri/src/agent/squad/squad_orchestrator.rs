@@ -38,18 +38,19 @@ fn squad_metrics_add_usage(session_id: &str, usage: (u64, u64)) {
     if usage.0 == 0 && usage.1 == 0 {
         return;
     }
-    let mut g = SQUAD_METRICS.lock().unwrap_or_else(|e| e.into_inner());
-    if let Some(map) = g.as_mut() {
-        let acc = map.entry(session_id.to_string()).or_default();
-        acc.prompt_tokens += usage.0;
-        acc.completion_tokens += usage.1;
-    }
+    let g = SQUAD_METRICS.lock().unwrap_or_else(|e| e.into_inner());
+    let acc = g.get_or_insert_with(std::collections::HashMap::new)
+        .entry(session_id.to_string())
+        .or_default();
+    acc.prompt_tokens += usage.0;
+    acc.completion_tokens += usage.1;
 }
 fn squad_metrics_add_member(session_id: &str, stat: SquadMemberStat) {
-    let mut g = SQUAD_METRICS.lock().unwrap_or_else(|e| e.into_inner());
-    if let Some(map) = g.as_mut() {
-        map.entry(session_id.to_string()).or_default().members.push(stat);
-    }
+    let g = SQUAD_METRICS.lock().unwrap_or_else(|e| e.into_inner());
+    g.get_or_insert_with(std::collections::HashMap::new)
+        .entry(session_id.to_string())
+        .or_default()
+        .members.push(stat);
 }
 async fn write_metrics_round(_app: &AppHandle, pool: &sqlx::SqlitePool, squad_id: &str, session_id: &str) {
     let taken = squad_metrics_take(session_id);
@@ -74,7 +75,7 @@ async fn write_metrics_round(_app: &AppHandle, pool: &sqlx::SqlitePool, squad_id
 
 fn squad_metrics_take(session_id: &str) -> Option<SquadMetricsAcc> {
     let mut g = SQUAD_METRICS.lock().unwrap_or_else(|e| e.into_inner());
-    g.as_mut().and_then(|map| map.remove(session_id))
+    g.get_or_insert_with(std::collections::HashMap::new).remove(session_id)
 }
 
 use serde_json::json;
