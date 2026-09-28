@@ -242,6 +242,7 @@ fn squad_member_workspace(workspace: &Option<String>, squad_id: &str, agent_id: 
 /// 每个成员运行在独立私有的 `.wd_mem/squads/{squad_id}/{agent_id}/` 工作区，互不干扰。
 #[tracing::instrument(skip_all)]
 pub async fn run_squad_task(app: &AppHandle, squad: SquadRuntimeConfig, prompt: String) {
+    tracing::info!("[squad] 代码指纹 F4：run_squad_task 启动（应含 S0-4 全部：锁/事件/metrics/墙钟）");
     let pool = match get_pool(app).await {
         Ok(p) => p,
         Err(e) => {
@@ -623,6 +624,7 @@ async fn run_member_subtask(
     // S0-3 取消穿线：squad 级取消标志（编排式主循环传 Some；直接调用方可传 None 保持旧行为）。
     squad_cancel: Option<&Arc<AtomicBool>>,
 ) -> Result<String, String> {
+    tracing::info!("[squad] run_member_subtask 进入：member={} metrics_session={metrics_session}", member_cfg.agent_id);
     let mut cfg = member_cfg.clone();
     cfg.workspace = Some(workspace.to_string());
     cfg.session_id = None;
@@ -788,6 +790,12 @@ async fn run_member_subtask(
     // S0-4d：成员 token/墙钟入 per-session 累加器（返回类型保持 String，调用方只消费文本）
     let member_wall_ms = member_wall.elapsed().as_millis() as u64;
     squad_metrics_add_usage(metrics_session, result.usage);
+    tracing::info!(
+        "[squad] 成员 metrics 入账：{} usage=({},{})",
+        member_role,
+        result.usage.0,
+        result.usage.1
+    );
     squad_metrics_add_member(
         metrics_session,
         SquadMemberStat {
