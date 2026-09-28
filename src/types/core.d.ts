@@ -543,6 +543,8 @@ export interface SquadSession {
   mode: SquadMode
   status: string
   snapshot?: string | null
+  /** S1：黑板 L2 状态板快照（任务状态机 + 产物索引 + 决策卡），JSON 串。 */
+  boardJson?: string
   createdAt: string
   updatedAt: string
 }

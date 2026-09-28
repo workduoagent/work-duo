@@ -1455,9 +1455,54 @@ function roundTagMeta(kind: string): { label: string; color: string } {
 }
 
 /** 复用的讨论黑板渲染（运行控制台实时流 / 历史回显共用）。 */
-function RoundBoard({rounds, summary}: { rounds: BoardRound[]; summary?: string }) {
+/** S1：黑板 L2 状态板视图（board_json 解析后的展示形态）。 */
+interface SquadBoardView {
+    tasks: Array<{taskId: string; title: string; assignee: string; status: string}>
+    artifactsIndex?: string[]
+    decisions?: Array<{kind: string; text: string}>
+}
+
+/** 任务状态 → Tag 颜色。 */
+const BOARD_STATUS_META: Record<string, {color: string; label: string}> = {
+    pending: {color: 'default', label: '待执行'},
+    running: {color: 'processing', label: '进行中'},
+    done: {color: 'success', label: '已完成'},
+    failed: {color: 'error', label: '受阻'},
+    skipped: {color: 'warning', label: '已跳过'},
+}
+
+function RoundBoard({rounds, summary, board}: { rounds: BoardRound[]; summary?: string; board?: SquadBoardView | null }) {
     return (
         <div className="squad-console__board">
+            {board && (board.tasks.length > 0 || (board.decisions && board.decisions.length > 0)) && (
+                <div className="squad-round squad-round--board">
+                    <div className="squad-round__head">
+                        <Tag color="geekblue">任务状态板</Tag>
+                    </div>
+                    <div className="squad-round__content">
+                        {board.tasks.map((t) => {
+                            const meta = BOARD_STATUS_META[t.status] ?? {color: 'default', label: t.status}
+                            return (
+                                <div key={t.taskId} style={{display: 'flex', alignItems: 'center', gap: 6, padding: '2px 0'}}>
+                                    <Tag color={meta.color} style={{marginInlineEnd: 0}}>{meta.label}</Tag>
+                                    <span>{t.title}</span>
+                                    <span style={{color: 'var(--color-text-tertiary, #999)'}}>· {t.assignee}</span>
+                                </div>
+                            )
+                        })}
+                        {board.decisions && board.decisions.length > 0 && (
+                            <div style={{marginTop: 6, borderTop: '1px dashed var(--color-border, #eee)', paddingTop: 6}}>
+                                {board.decisions.map((d, i) => (
+                                    <div key={i} style={{display: 'flex', alignItems: 'center', gap: 6, padding: '2px 0'}}>
+                                        <Tag color="purple" style={{marginInlineEnd: 0}}>{d.kind}</Tag>
+                                        <span>{d.text}</span>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                </div>
+            )}
             {rounds.length === 0 && !summary && (
                 <div className="squad-console__empty">暂无内容</div>
             )}
@@ -1668,6 +1713,7 @@ function SquadHistoryPanel({
     const [sessions, setSessions] = useState<SquadSession[]>([])
     const [activeId, setActiveId] = useState<string | null>(null)
     const [rounds, setRounds] = useState<BoardRound[]>([])
+    const [board, setBoard] = useState<SquadBoardView | null>(null)
     const [summary, setSummary] = useState('')
 
     const reloadSessions = useCallback(async () => {
@@ -1683,6 +1729,7 @@ function SquadHistoryPanel({
         else {
             setActiveId(null)
             setRounds([])
+            setBoard(null)
             setSummary('')
         }
     }, [open, reloadSessions])
@@ -1695,6 +1742,12 @@ function SquadHistoryPanel({
                 rs.map((r) => ({role: r.role, kind: r.kind, content: r.content, speakerAgentId: r.speakerAgentId})),
             )
             setSummary(s.snapshot ?? '')
+            // S1：解析黑板状态板（任务进度 + 决策卡）；解析失败静默降级为不显示。
+            try {
+                setBoard(s.boardJson ? (JSON.parse(s.boardJson) as SquadBoardView) : null)
+            } catch {
+                setBoard(null)
+            }
         } catch (e) {
             message.error(`读取轮次失败：${e instanceof Error ? e.message : String(e)}`)
         }
@@ -1734,7 +1787,7 @@ function SquadHistoryPanel({
                 </div>
                 <div className="squad-hist__board">
                     {activeId ? (
-                        <RoundBoard rounds={rounds} summary={summary}/>
+                        <RoundBoard rounds={rounds} summary={summary} board={board}/>
                     ) : (
                         <div className="squad-console__empty">选择左侧会话查看讨论黑板。</div>
                     )}
