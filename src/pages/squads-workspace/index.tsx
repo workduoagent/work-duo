@@ -1272,6 +1272,7 @@ function SquadRunConsole({
     const [running, setRunning] = useState(false)
     const [rounds, setRounds] = useState<SquadRoundView[]>([])
     const [summary, setSummary] = useState('')
+    const [planPending, setPlanPending] = useState(false)
     const sessionIdRef = useRef<string | null>(null)
     const unlistenRef = useRef<UnlistenFn[]>([])
 
@@ -1286,6 +1287,7 @@ function SquadRunConsole({
             setRounds([])
             setSummary('')
             setRunning(false)
+            setPlanPending(false)
             sessionIdRef.current = null
         }
     }, [open, cleanup])
@@ -1320,6 +1322,7 @@ function SquadRunConsole({
                 const pl = e.payload
                 if (pl.squadId !== squad.id) return
                 if (sessionIdRef.current && pl.sessionId !== sessionIdRef.current) return
+                if (pl.kind === 'plan') setPlanPending(true)
                 setRounds((r) => [...r, {
                     role: pl.role,
                     kind: pl.kind,
@@ -1407,6 +1410,26 @@ function SquadRunConsole({
                                 <div className="squad-round__content">{r.content}</div>
                             </div>
                         ))}
+                    {planPending && (
+                        <div className="squad-round squad-round--system" style={{border: '1px solid var(--color-warning, #faad14)'}}>
+                            <div className="squad-round__head"><Tag color="orange">L1 计划门禁</Tag></div>
+                            <div className="squad-round__content">委派计划已生成，等待你的批准。</div>
+                            <div style={{display: 'flex', gap: 8, marginTop: 8}}>
+                                <Button variant="solid" onClick={() => {
+                                    setPlanPending(false)
+                                    void invoke<{ok: boolean}>('squad_plan_approve', { sessionId: sessionIdRef.current, approved: true })
+                                }}>
+                                    批准执行
+                                </Button>
+                                <Button variant="ghost" onClick={() => {
+                                    setPlanPending(false)
+                                    void invoke('squad_plan_approve', { sessionId: sessionIdRef.current, approved: false })
+                                }}>
+                                    拒绝
+                                </Button>
+                            </div>
+                        </div>
+                    )}
                     </Spin>
                     {summary && (
                         <div className="squad-round squad-round--summary squad-round--final">
@@ -1449,6 +1472,14 @@ function roundTagMeta(kind: string): { label: string; color: string } {
             return {label: '发言', color: 'green'}
         case 'system':
             return {label: '系统', color: 'default'}
+        case 'plan':
+            return {label: '计划门禁', color: 'orange'}
+        case 'handoff':
+            return {label: '交接', color: 'cyan'}
+        case 'metrics':
+            return {label: '花费账目', color: 'geekblue'}
+        case 'checkpoint':
+            return {label: '检查点', color: 'orange'}
         default:
             return {label: '交付', color: 'green'}
     }

@@ -92,6 +92,7 @@ async fn run_due_squads(app: &AppHandle) {
                 schedule_cron: None,
                 schedule_prompt: None,
                 retry_count: 3,
+                budget_tokens: 0,
             });
 
         if rs.execution_mode != "schedule" {

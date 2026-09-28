@@ -140,6 +140,7 @@ pub fn run() {
             agent::commands::wait_task,
             agent::commands::run_squad_task,
             agent::commands::cancel_squad_task,
+            agent::commands::squad_plan_approve,
             agent::commands::anchor_squad_memory,
             agent::commands::list_squad_memories,
             agent::commands::delete_squad_memory,

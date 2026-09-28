@@ -82,6 +82,7 @@ pub async fn load_squad(app: &AppHandle, squad_id: &str) -> Result<SquadRuntimeC
             schedule_cron: None,
             retry_count: 3,
             schedule_prompt: None,
+            budget_tokens: 0,
         });
 
     // 成员任职：按 pipeline_order 升序（无序号者排前），保证流水线模式工序顺序稳定。

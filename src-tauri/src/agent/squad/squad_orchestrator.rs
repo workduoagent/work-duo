@@ -30,6 +30,44 @@ struct SquadMetricsAcc {
     completion_tokens: u64,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     members: Vec<SquadMemberStat>,
+    /// S2：token 总预算（0=不限），注册时固化；用于 80% 告警 / 100% 软熔断。
+    #[serde(skip_serializing_if = "Budget::is_zero", default)]
+    budget: Budget,
+}
+
+#[derive(Default, Clone, Copy, serde::Serialize, serde::Deserialize)]
+struct Budget(u64);
+
+impl Budget {
+    fn is_zero(&self) -> bool {
+        self.0 == 0
+    }
+}
+
+/// S2：会话级预算注册（run_squad_task 开头调用；budget=0 表示不限）。
+fn squad_metrics_register_budget(session_id: &str, budget_tokens: u64) {
+    let mut g = SQUAD_METRICS.lock().unwrap_or_else(|e| e.into_inner());
+    g.get_or_insert_with(std::collections::HashMap::new)
+        .entry(session_id.to_string())
+        .or_default()
+        .budget = Budget(budget_tokens);
+}
+
+/// S2：预算状态查询 —— (已用 tokens, 预算, 已告警)。告警去重由调用方处理。
+fn squad_metrics_used(session_id: &str) -> u64 {
+    let g = SQUAD_METRICS.lock().unwrap_or_else(|e| e.into_inner());
+    g.as_ref()
+        .and_then(|m| m.get(session_id))
+        .map(|a| a.prompt_tokens + a.completion_tokens)
+        .unwrap_or(0)
+}
+
+fn squad_metrics_budget(session_id: &str) -> u64 {
+    let g = SQUAD_METRICS.lock().unwrap_or_else(|e| e.into_inner());
+    g.as_ref()
+        .and_then(|m| m.get(session_id))
+        .map(|a| a.budget.0)
+        .unwrap_or(0)
 }
 static SQUAD_METRICS: std::sync::Mutex<Option<std::collections::HashMap<String, SquadMetricsAcc>>> =
     std::sync::Mutex::new(None);
@@ -146,6 +184,193 @@ pub fn cancel_squad_sessions(squad_id: &str) -> usize {
 
 /// 统一收尾：会话状态落库（done/cancelled/failed）+ 系统 round + done 事件。
 /// S0-3 新路径（取消 / 失败 / 早退）使用；既有 done 收尾保持原样（最小 diff）。
+/// S2（§4.8）：Delivery Pack——会话终态证据包（合同 + 成员执行证据 + 产物索引 + 决策卡 + 成本）。
+/// 落 session.pack_json（前端/导出读取）+ 导出人类可读 Markdown 到交接箱 shared/。
+#[derive(Debug, Default, serde::Serialize)]
+struct DeliveryPack {
+    squad_id: String,
+    session_id: String,
+    /// done | partial | failed | cancelled
+    status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    contract: Option<serde_json::Value>,
+    summary: String,
+    /// 成员执行证据（来自 handoff 表聚合）
+    member_runs: Vec<serde_json::Value>,
+    /// 产物总目录（board.artifactsIndex）
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    deliverables: Vec<String>,
+    /// 决策卡
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    decisions: Vec<BoardDecision>,
+    cost: CostSummary,
+}
+
+#[derive(Debug, Default, serde::Serialize)]
+struct CostSummary {
+    prompt_tokens: u64,
+    completion_tokens: u64,
+}
+
+/// 组装并落库 Delivery Pack（finish_squad_session 内调用；尽力而为，失败不阻塞终态）。
+async fn build_and_persist_pack(
+    pool: &sqlx::SqlitePool,
+    app: &AppHandle,
+    squad_id: &str,
+    session_id: &str,
+    status: &str,
+    summary: &str,
+) {
+    let pack = build_delivery_pack(pool, squad_id, session_id, status, summary).await;
+    // 1) pack_json 落库
+    if let Ok(json) = serde_json::to_string(&pack) {
+        let _ = sqlx::query("UPDATE agent_squad_session SET pack_json=? WHERE id=?")
+            .bind(json)
+            .bind(session_id)
+            .execute(pool)
+            .await;
+    }
+    // 2) 人类可读 Markdown 导出到交接箱 shared/
+    let md = render_pack_markdown(&pack);
+    let dir = squad_shared_inbox(squad_id).replace("/inbox", ""); // shared 根
+    let path = std::path::Path::new(&dir).join(format!("delivery-pack-{}.md", &session_id[4..12]));
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    match std::fs::write(&path, &md) {
+        Ok(_) => tracing::info!("[squad] 交付包已导出：{}", path.display()),
+        Err(e) => tracing::warn!("[squad] 交付包 Markdown 导出失败：{e}"),
+    }
+    let _ = app;
+}
+
+async fn build_delivery_pack(
+    pool: &sqlx::SqlitePool,
+    squad_id: &str,
+    session_id: &str,
+    status: &str,
+    summary: &str,
+) -> DeliveryPack {
+    let mut pack = DeliveryPack {
+        squad_id: squad_id.into(),
+        session_id: session_id.into(),
+        status: status.into(),
+        summary: summary.chars().take(2000).collect(),
+        ..Default::default()
+    };
+    // 合同
+    if let Ok(Some((cj,))) =
+        sqlx::query_as::<_, (Option<String>,)>("SELECT contract_json FROM agent_squad_session WHERE id=?")
+            .bind(session_id)
+            .fetch_optional(pool)
+            .await
+    {
+        pack.contract = cj.and_then(|s| serde_json::from_str(&s).ok());
+    }
+    // 成员执行证据（handoff 表聚合）
+    if let Ok(rows) = sqlx::query_as::<_, (String, String, String)>(
+        "SELECT task_id, status, bundle_json FROM agent_squad_handoff WHERE session_id=? ORDER BY created",
+    )
+    .bind(session_id)
+    .fetch_all(pool)
+    .await
+    {
+        for (task_id, hstatus, bundle_json) in rows {
+            let bundle: Option<HandoffBundle> = serde_json::from_str(&bundle_json).ok();
+            pack.member_runs.push(serde_json::json!({
+                "taskId": task_id,
+                "status": hstatus,
+                "role": bundle.as_ref().map(|b| b.from_role.clone()).unwrap_or_default(),
+                "artifacts": bundle.as_ref().map(|b| b.artifacts.len()).unwrap_or(0),
+                "openQuestions": bundle.as_ref().map(|b| b.open_questions.clone()).unwrap_or_default(),
+                "tokens": bundle.as_ref().map(|b| { let m = &b.metrics; vec![m.prompt_tokens, m.completion_tokens] }),
+                "durationMs": bundle.as_ref().map(|b| b.metrics.duration_ms).unwrap_or(0),
+            }));
+        }
+    }
+    // board（产物索引 + 决策卡）
+    if let Ok(Some((bj,))) =
+        sqlx::query_as::<_, (Option<String>,)>("SELECT board_json FROM agent_squad_session WHERE id=?")
+            .bind(session_id)
+            .fetch_optional(pool)
+            .await
+    {
+        if let Some(b) = bj.and_then(|s| serde_json::from_str::<BoardState>(&s).ok()) {
+            pack.deliverables = b.artifacts_index.clone();
+            pack.decisions = b.decisions.clone();
+        }
+    }
+    // 成本（metrics round 行，终态时 SQUAD_METRICS 已 take）
+    if let Ok(Some((content,))) = sqlx::query_as::<_, (String,)>(
+        "SELECT content FROM agent_squad_round WHERE session_id=? AND kind='metrics' ORDER BY created_at DESC LIMIT 1",
+    )
+    .bind(session_id)
+    .fetch_optional(pool)
+    .await
+    {
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&content) {
+            pack.cost.prompt_tokens = v["prompt_tokens"].as_u64().unwrap_or(0);
+            pack.cost.completion_tokens = v["completion_tokens"].as_u64().unwrap_or(0);
+        }
+    }
+    pack
+}
+
+/// 人类可读 Markdown 版交付包。
+fn render_pack_markdown(pack: &DeliveryPack) -> String {
+    let mut s = String::new();
+    s.push_str(&format!("# 交付包 · {} · {}\n\n", pack.squad_id, &pack.session_id[4..12]));
+    s.push_str(&format!("- 状态：**{}**\n- 成本：prompt {} / completion {} tokens\n\n", pack.status, pack.cost.prompt_tokens, pack.cost.completion_tokens));
+    s.push_str(&format!("## 任务结论\n\n{}\n\n", pack.summary));
+    if let Some(c) = &pack.contract {
+        s.push_str("## 任务合同（Mission Contract）\n\n");
+        if let Some(tasks) = c.get("tasks").and_then(|t| t.as_array()) {
+            for t in tasks {
+                s.push_str(&format!(
+                    "- [{}] {} → {}（依赖 {:?}，期望产物 {:?}）\n",
+                    t.get("taskId").and_then(|v| v.as_str()).unwrap_or("-"),
+                    t.get("title").and_then(|v| v.as_str()).unwrap_or("-"),
+                    t.get("assignee").and_then(|v| v.as_str()).unwrap_or("-"),
+                    t.get("dependsOn").cloned().unwrap_or(serde_json::json!([])),
+                    t.get("expectedArtifacts").cloned().unwrap_or(serde_json::json!([])),
+                ));
+            }
+        }
+        s.push('\n');
+    }
+    if !pack.member_runs.is_empty() {
+        s.push_str("## 成员执行证据\n\n| 任务 | 角色 | 状态 | 产物数 | tokens | 用时 |\n|---|---|---|---|---|---|\n");
+        for r in &pack.member_runs {
+            let tk = r.get("tokens").cloned().unwrap_or(serde_json::json!([0, 0]));
+            s.push_str(&format!(
+                "| {} | {} | {} | {} | {}/{} | {}ms |\n",
+                r.get("taskId").and_then(|v| v.as_str()).unwrap_or("-"),
+                r.get("role").and_then(|v| v.as_str()).unwrap_or("-"),
+                r.get("status").and_then(|v| v.as_str()).unwrap_or("-"),
+                r.get("artifacts").and_then(|v| v.as_u64()).unwrap_or(0),
+                tk[0].as_u64().unwrap_or(0),
+                tk[1].as_u64().unwrap_or(0),
+                r.get("durationMs").and_then(|v| v.as_u64()).unwrap_or(0),
+            ));
+        }
+        s.push('\n');
+    }
+    if !pack.deliverables.is_empty() {
+        s.push_str("## 产物索引\n\n");
+        for d in &pack.deliverables {
+            s.push_str(&format!("- {d}\n"));
+        }
+        s.push('\n');
+    }
+    if !pack.decisions.is_empty() {
+        s.push_str("## 决策卡\n\n");
+        for d in &pack.decisions {
+            s.push_str(&format!("- [{}] {}\n", d.kind, d.text));
+        }
+    }
+    s
+}
+
 async fn finish_squad_session(
     app: &AppHandle,
     pool: &sqlx::SqlitePool,
@@ -193,6 +418,8 @@ async fn finish_squad_session(
             summary: summary.to_string(),
         },
     );
+    // S2：终态组装 Delivery Pack（证据链 + 成本 + 产物索引），尽力而为不阻塞终态。
+    build_and_persist_pack(pool, app, squad_id, session_id, status, summary).await;
     tracing::info!("[squad] 会话 {} 终态：{}", session_id, status);
 }
 
@@ -467,6 +694,58 @@ fn render_handoff_section(idx: usize, total: usize, bundle: &HandoffBundle, deli
     }
     s.push_str("\n请基于以上交接继续你的任务；若交接不足，先读文件或说明缺口，不要臆造。");
     s
+}
+
+/// S2（§4.6）：团队计划门禁（L1）——manual 模式下委派计划生成后挂起等用户批准。
+/// 注册表模式同 SQUAD_CANCELS：run_squad_task 注册，squad_plan_approve 命令决议，等待循环消费。
+static SQUAD_PLAN_GATES: std::sync::Mutex<Option<std::collections::HashMap<String, PlanGate>>> =
+    std::sync::Mutex::new(None);
+
+struct PlanGate {
+    squad_id: String,
+    plan_json: serde_json::Value,
+    approved: Arc<AtomicBool>,
+}
+
+/// 用户决议入口（Tauri 命令 squad_plan_approve 调用）。返回是否命中注册表。
+pub fn resolve_plan_gate(session_id: &str, approved: bool) -> bool {
+    let mut g = SQUAD_PLAN_GATES.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(map) = g.as_mut() else { return false };
+    if let Some(gate) = map.remove(session_id) {
+        gate.approved.store(approved, std::sync::atomic::Ordering::SeqCst);
+        true
+    } else {
+        false
+    }
+}
+
+/// 挂起等待计划批准（manual 专用；每 2s 轮询批准/取消，永久等待与单 Agent 恢复语义一致）。
+async fn wait_plan_gate(
+    session_id: &str,
+    squad_cancel: &Arc<AtomicBool>,
+) -> bool {
+    loop {
+        if squad_cancel.load(std::sync::atomic::Ordering::SeqCst) {
+            return false;
+        }
+        let approved = {
+            let g = SQUAD_PLAN_GATES.lock().unwrap_or_else(|e| e.into_inner());
+            g.as_ref().and_then(|m| m.get(session_id)).map(|gate| gate.approved.load(std::sync::atomic::Ordering::SeqCst))
+        };
+        match approved {
+            Some(true) => return true,
+            Some(false) => tokio::time::sleep(std::time::Duration::from_secs(2)).await,
+            None => return false, // gate 已被移除（异常路径）：视为批准放行，防卡死
+        }
+    }
+}
+
+/// 清理 gate（会话收尾防泄漏）。
+fn remove_plan_gate(session_id: &str) {
+    let mut g = SQUAD_PLAN_GATES.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(map) = g.as_mut() {
+        map.remove(session_id);
+    }
 }
 
 /// round 主键进程内序号（并行 Wave 下 now_ms 同毫秒会撞主键，叠序号保唯一）。
@@ -781,6 +1060,92 @@ pub async fn run_squad_task(app: &AppHandle, squad: SquadRuntimeConfig, prompt: 
     // P2-3 模式感知恢复（与 run_squad_pipeline 同源）：schedule/api 视为无人值守。
     let unattended = matches!(squad.run_strategy.execution_mode.as_str(), "schedule" | "api");
 
+    // ===== S2（§4.6 L1）：团队计划门禁——manual 模式下委派计划挂起等用户批准 =====
+    if !delegated.is_empty() && !unattended {
+        let plan_text = delegated
+            .iter()
+            .enumerate()
+            .map(|(i, t)| format!("{}. [{}] {}", i + 1, t.assignee, t.title))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let plan_json = serde_json::json!(delegated
+            .iter()
+            .enumerate()
+            .map(|(i, t)| serde_json::json!({
+                "taskId": format!("t{}", i + 1),
+                "title": t.title,
+                "assignee": t.assignee,
+                "instruction": t.instruction,
+                "dependsOn": t.depends_on,
+            }))
+            .collect::<Vec<_>>());
+        SQUAD_PLAN_GATES.lock().unwrap_or_else(|e| e.into_inner())
+            .get_or_insert_with(std::collections::HashMap::new)
+            .insert(
+                session_id.clone(),
+                PlanGate {
+                    squad_id: squad.squad_id.clone(),
+                    plan_json: plan_json.clone(),
+                    approved: Arc::new(AtomicBool::new(false)),
+                },
+            );
+        let plan_note = format!(
+            "⏸️ 计划待批准（L1 计划门禁）：\n{}\n\n请在运行控制台批准或拒绝本次委派计划。",
+            plan_text
+        );
+        let _ = sqlx::query(
+            "INSERT INTO agent_squad_round (id, squad_id, session_id, speaker_agent_id, role, content, kind, created_at) VALUES (?, ?, ?, ?, ?, ?, 'plan', ?)",
+        )
+        .bind(round_id())
+        .bind(&squad.squad_id)
+        .bind(&session_id)
+        .bind(&leader.agent.agent_id)
+        .bind(&leader.role)
+        .bind(&plan_note)
+        .bind(now_ms())
+        .execute(&pool)
+        .await;
+        events::emit_squad_round(
+            app,
+            &events::SquadRoundPayload {
+                squad_id: squad.squad_id.clone(),
+                session_id: session_id.clone(),
+                speaker_agent_id: Some(leader.agent.agent_id.clone()),
+                role: leader.role.clone(),
+                kind: "plan".into(),
+                content: plan_note,
+            },
+        );
+        let ok = wait_plan_gate(&session_id, &squad_cancel).await;
+        remove_plan_gate(&session_id);
+        if !ok {
+            // 用户拒绝（或取消）：委派计划未获批准，会话以 cancelled 收尾。
+            finish_squad_session(app, &pool, &squad.squad_id, &session_id, "cancelled", "委派计划未获批准，协作已取消").await;
+            return;
+        }
+        let _ = sqlx::query(
+            "INSERT INTO agent_squad_round (id, squad_id, session_id, speaker_agent_id, role, content, kind, created_at) VALUES (?, ?, ?, NULL, '系统', ?, 'system', ?)",
+        )
+        .bind(round_id())
+        .bind(&squad.squad_id)
+        .bind(&session_id)
+        .bind("✅ 计划已批准，开始执行。")
+        .bind(now_ms())
+        .execute(&pool)
+        .await;
+        events::emit_squad_round(
+            app,
+            &events::SquadRoundPayload {
+                squad_id: squad.squad_id.clone(),
+                session_id: session_id.clone(),
+                speaker_agent_id: None,
+                role: "系统".into(),
+                kind: "system".into(),
+                content: "✅ 计划已批准，开始执行。".into(),
+            },
+        );
+    }
+
     // ===== S1（设计方案 v1.4 §4.4.3）：HandoffBundle 交接 + dependsOn 拓扑 + Wave 并行 =====
     // 感知机制由调度器做（不是模型做）：任务 done 后扫描依赖解锁，下游启动时注入上游交接段。
     let n = delegated.len();
@@ -815,11 +1180,47 @@ pub async fn run_squad_task(app: &AppHandle, squad: SquadRuntimeConfig, prompt: 
     let mut done = vec![false; n];
     let mut skipped = vec![false; n];
     let mut handoffs: Vec<Option<HandoffBundle>> = vec![None; n];
+    let mut budget_warned = false;
     loop {
         // S0-3 取消检测点：squad 级取消 → 立即收尾（status=cancelled，成员 pipeline 自身也会被同一标志中断）。
         if squad_cancel.load(std::sync::atomic::Ordering::SeqCst) {
             finish_squad_session(app, &pool, &squad.squad_id, &session_id, "cancelled", "任务已被用户取消").await;
             return;
+        }
+        // S2 预算闸门：≥80% 告警一次；≥100% 软熔断（不再启动新 Wave，已完成产物保留）。
+        let budget = squad_metrics_budget(&session_id);
+        if budget > 0 {
+            let used = squad_metrics_used(&session_id);
+            if used * 100 >= budget * 80 && !budget_warned {
+                budget_warned = true;
+                let note = format!("⚠️ 预算告警：已用 {used} / {budget} tokens（≥80%），请关注成本。");
+                let _ = sqlx::query(
+                    "INSERT INTO agent_squad_round (id, squad_id, session_id, speaker_agent_id, role, content, kind, created_at) VALUES (?, ?, ?, NULL, '系统', ?, 'system', ?)",
+                )
+                .bind(round_id())
+                .bind(&squad.squad_id)
+                .bind(&session_id)
+                .bind(&note)
+                .bind(now_ms())
+                .execute(&pool)
+                .await;
+                events::emit_squad_round(
+                    app,
+                    &events::SquadRoundPayload {
+                        squad_id: squad.squad_id.clone(),
+                        session_id: session_id.clone(),
+                        speaker_agent_id: None,
+                        role: "系统".into(),
+                        kind: "system".into(),
+                        content: note,
+                    },
+                );
+            }
+            if used >= budget {
+                let note = format!("🛑 预算耗尽软熔断：已用 {used} ≥ 预算 {budget} tokens，停止启动新子任务，已完成产物保留。");
+                finish_squad_session(app, &pool, &squad.squad_id, &session_id, "done", &note).await;
+                return;
+            }
         }
         // 就绪集合：pending 且依赖全部完成。
         let ready: Vec<usize> = (0..n)
@@ -1599,6 +2000,7 @@ async fn run_squad_pipeline(
     // P2-3 模式感知恢复：schedule / api 模式视为无人值守 → 子任务失败恢复超时自动取消；
     // manual 模式保持永久等待用户决策。execution_mode 取值即 SquadRunStrategy 既有字段。
     let unattended = matches!(squad.run_strategy.execution_mode.as_str(), "schedule" | "api");
+    squad_metrics_register_budget(session_id, squad.run_strategy.budget_tokens);
     let use_dag = squad.members.iter().any(|m| !m.depends_on.is_empty());
 
     // 执行计划：执行顺序 + 每个节点的上游输入来源（成员下标）。
@@ -1698,10 +2100,18 @@ async fn run_squad_pipeline(
         level[mi] = l;
     }
     let max_level = level.iter().copied().max().unwrap_or(0);
+    let mut _budget_warned = false;
     for lv in 0..=max_level {
         // S0-3 取消检测点：squad 级取消 → 立即收尾。
         if cancel.load(std::sync::atomic::Ordering::SeqCst) {
             finish_squad_session(app, pool, &squad.squad_id, session_id, "cancelled", "任务已被用户取消").await;
+            return;
+        }
+        // S2 预算闸门：≥100% 软熔断（不再启动新层，已完成产物保留）。
+        let budget = squad_metrics_budget(session_id);
+        if budget > 0 && squad_metrics_used(session_id) >= budget {
+            let note = format!("🛑 预算耗尽软熔断：已用 {} ≥ 预算 {budget} tokens，停止启动新节点，已完成产物保留。", squad_metrics_used(session_id));
+            finish_squad_session(app, pool, &squad.squad_id, session_id, "done", &note).await;
             return;
         }
         let wave: Vec<(usize, usize)> = plan

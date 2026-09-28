@@ -1340,6 +1340,21 @@ pub async fn cancel_squad_task(_app: AppHandle, squad_id: String) -> Result<usiz
     Ok(crate::agent::squad::squad_orchestrator::cancel_squad_sessions(&squad_id))
 }
 
+/// S2（§4.6 L1）：计划门禁决议——用户批准 / 拒绝 manual 协作的委派计划。
+/// 批准 → 协作继续；拒绝 → 会话以 cancelled 收尾。返回是否命中挂起的门禁。
+#[tauri::command]
+#[tracing::instrument(skip_all)]
+pub async fn squad_plan_approve(
+    _app: AppHandle,
+    session_id: String,
+    approved: bool,
+) -> Result<bool, String> {
+    Ok(crate::agent::squad::squad_orchestrator::resolve_plan_gate(
+        &session_id,
+        approved,
+    ))
+}
+
 /* ------------------------------------------------------------------ *
  * 小分队 API 触发服务配置（存于 app_config）
  * ------------------------------------------------------------------ */

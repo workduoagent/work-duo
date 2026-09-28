@@ -631,3 +631,6 @@ CREATE TABLE IF NOT EXISTS agent_squad_decision
     FOREIGN KEY(session_id) REFERENCES agent_squad_session(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_squad_decision_session ON agent_squad_decision(session_id, created_at);
+
+-- ---------- v35：小分队 S2 可验证——Delivery Pack 落库（设计方案 v1.4 §4.8） ----------
+ALTER TABLE agent_squad_session ADD COLUMN pack_json TEXT;   -- Delivery Pack 快照（证据链+成本+产物索引）

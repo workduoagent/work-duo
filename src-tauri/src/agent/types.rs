@@ -517,6 +517,10 @@ pub struct SquadRunStrategy {
     /// schedule_prompt 会静默丢字段 → API 触发的任务内容为空，成员全部在「澄清目标」空转）。
     #[serde(default, alias = "schedule_prompt")]
     pub schedule_prompt: Option<String>,
+    /// S2：本次协作的 token 总预算（prompt+completion；0=不限）。
+    /// 累计用量 ≥80% 发告警轮，≥100% 软熔断（不再启动新子任务，当前跑完即收尾）。
+    #[serde(default, alias = "budget_tokens")]
+    pub budget_tokens: u64,
 }
 
 /// 群聊协商专属配置（agent_squad_chat_config）。
