@@ -702,8 +702,6 @@ static SQUAD_PLAN_GATES: std::sync::Mutex<Option<std::collections::HashMap<Strin
     std::sync::Mutex::new(None);
 
 struct PlanGate {
-    squad_id: String,
-    plan_json: serde_json::Value,
     approved: Arc<AtomicBool>,
 }
 
@@ -1069,24 +1067,11 @@ pub async fn run_squad_task(app: &AppHandle, squad: SquadRuntimeConfig, prompt: 
             .map(|(i, t)| format!("{}. [{}] {}", i + 1, t.assignee, t.title))
             .collect::<Vec<_>>()
             .join("\n");
-        let plan_json = serde_json::json!(delegated
-            .iter()
-            .enumerate()
-            .map(|(i, t)| serde_json::json!({
-                "taskId": format!("t{}", i + 1),
-                "title": t.title,
-                "assignee": t.assignee,
-                "instruction": t.instruction,
-                "dependsOn": t.depends_on,
-            }))
-            .collect::<Vec<_>>());
         SQUAD_PLAN_GATES.lock().unwrap_or_else(|e| e.into_inner())
             .get_or_insert_with(std::collections::HashMap::new)
             .insert(
                 session_id.clone(),
                 PlanGate {
-                    squad_id: squad.squad_id.clone(),
-                    plan_json: plan_json.clone(),
                     approved: Arc::new(AtomicBool::new(false)),
                 },
             );
