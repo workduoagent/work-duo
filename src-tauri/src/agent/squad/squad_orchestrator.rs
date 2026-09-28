@@ -38,7 +38,7 @@ fn squad_metrics_add_usage(session_id: &str, usage: (u64, u64)) {
     if usage.0 == 0 && usage.1 == 0 {
         return;
     }
-    let g = SQUAD_METRICS.lock().unwrap_or_else(|e| e.into_inner());
+    let mut g = SQUAD_METRICS.lock().unwrap_or_else(|e| e.into_inner());
     let acc = g.get_or_insert_with(std::collections::HashMap::new)
         .entry(session_id.to_string())
         .or_default();
@@ -46,7 +46,7 @@ fn squad_metrics_add_usage(session_id: &str, usage: (u64, u64)) {
     acc.completion_tokens += usage.1;
 }
 fn squad_metrics_add_member(session_id: &str, stat: SquadMemberStat) {
-    let g = SQUAD_METRICS.lock().unwrap_or_else(|e| e.into_inner());
+    let mut g = SQUAD_METRICS.lock().unwrap_or_else(|e| e.into_inner());
     g.get_or_insert_with(std::collections::HashMap::new)
         .entry(session_id.to_string())
         .or_default()
