@@ -283,6 +283,75 @@ async fn route(
         };
     }
 
+    // S2（§4.6）：三门禁外部决议入口——body JSON {sessionId?, gate, decision}。
+    // gate：plan（L1 计划，decision=approve|reject）| checkpoint（L2 检查点，decision=continue|rework）|
+    // delivery（L4 交付确认，decision=approve|reject）。sessionId 缺省取该小分队最新会话。
+    if method == "POST" && path.starts_with("/api/squads/") && path.ends_with("/resolve") {
+        let id = &path["/api/squads/".len()..path.len() - "/resolve".len()];
+        if id.is_empty() {
+            return (400, err_json("squad id 为空"));
+        }
+        let Some(raw) = body else {
+            return (400, err_json("missing JSON body"));
+        };
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(raw) else {
+            return (400, err_json("invalid JSON body"));
+        };
+        let gate = v.get("gate").and_then(|x| x.as_str()).unwrap_or("").trim().to_string();
+        let decision = v
+            .get("decision")
+            .map(|d| {
+                if d.is_boolean() {
+                    if d.as_bool().unwrap_or(false) { "approve".to_string() } else { "reject".to_string() }
+                } else {
+                    d.as_str().unwrap_or("").trim().to_string()
+                }
+            })
+            .unwrap_or_default();
+        if gate.is_empty() || decision.is_empty() {
+            return (400, err_json("gate / decision 为空"));
+        }
+        let pool = match get_pool(app).await {
+            Ok(p) => p,
+            Err(e) => return (500, err_json(&e)),
+        };
+        let resolved = match resolve_squad_id(&pool, id).await {
+            Some(rid) => rid,
+            None => return (404, err_json("squad not found")),
+        };
+        let session_id = match v
+            .get("sessionId")
+            .and_then(|x| x.as_str())
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+        {
+            Some(sid) => sid,
+            None => {
+                match sqlx::query_scalar::<_, String>(
+                    "SELECT id FROM agent_squad_session WHERE squad_id = ? ORDER BY created_at DESC LIMIT 1",
+                )
+                .bind(&resolved)
+                .fetch_optional(&pool)
+                .await
+                .ok()
+                .flatten()
+                {
+                    Some(sid) => sid,
+                    None => return (404, err_json("no session for squad")),
+                }
+            }
+        };
+        use crate::agent::squad::squad_orchestrator as orch;
+        let hit = match gate.as_str() {
+            "plan" => orch::resolve_plan_gate(&session_id, decision == "approve"),
+            "checkpoint" => orch::resolve_squad_checkpoint(&session_id, &decision),
+            "delivery" => orch::resolve_squad_delivery(&session_id, decision == "approve"),
+            other => return (400, err_json(&format!("未知 gate：{other}"))),
+        };
+        tracing::info!("[api] /resolve：session={session_id} gate={gate} decision={decision} hit={hit}");
+        return (200, format!("{{\"ok\":true,\"resolved\":{hit}}}"));
+    }
+
     (404, "{\"ok\":false,\"error\":\"not found\"}".to_string())
 }
 
