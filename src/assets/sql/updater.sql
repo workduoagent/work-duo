@@ -616,3 +616,18 @@ CREATE TABLE IF NOT EXISTS agent_squad_handoff
     FOREIGN KEY(session_id) REFERENCES agent_squad_session(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_squad_handoff_session ON agent_squad_handoff(session_id, created_at);
+
+-- ---------- v34：小分队 S1 批次2——Contract 落库 + 群聊决策卡（设计方案 v1.4 §4.3/§4.4.5） ----------
+ALTER TABLE agent_squad_session ADD COLUMN contract_json TEXT;   -- Mission Contract：任务分工/依赖/期望产物快照
+-- 黑板决策卡（L2）：群聊共识 / 关键决定结构化落下，供后续生产波继承（§4.4.5）。
+CREATE TABLE IF NOT EXISTS agent_squad_decision
+(
+    id         TEXT    PRIMARY KEY,
+    squad_id   TEXT    NOT NULL,
+    session_id TEXT    NOT NULL,
+    kind       TEXT    NOT NULL,              -- plan | risk | scope | handoff
+    content    TEXT    NOT NULL,
+    created_at INTEGER NOT NULL,
+    FOREIGN KEY(session_id) REFERENCES agent_squad_session(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_squad_decision_session ON agent_squad_decision(session_id, created_at);
