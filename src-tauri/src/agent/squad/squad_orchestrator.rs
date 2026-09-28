@@ -51,7 +51,7 @@ fn squad_metrics_add_member(session_id: &str, stat: SquadMemberStat) {
         map.entry(session_id.to_string()).or_default().members.push(stat);
     }
 }
-async fn write_metrics_round(app: &AppHandle, pool: &sqlx::SqlitePool, squad_id: &str, session_id: &str) {
+async fn write_metrics_round(_app: &AppHandle, pool: &sqlx::SqlitePool, squad_id: &str, session_id: &str) {
     let Some(acc) = squad_metrics_take(session_id) else { return };
     if acc.prompt_tokens == 0 && acc.completion_tokens == 0 && acc.members.is_empty() {
         return;
@@ -702,7 +702,6 @@ async fn run_member_subtask(
             .and_then(|s| s.trim().parse::<u64>().ok())
             .unwrap_or(30);
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(wait_cap);
-        let mut guard = None;
         loop {
             if let Some(c) = squad_cancel {
                 if c.load(std::sync::atomic::Ordering::Relaxed) {
@@ -710,10 +709,7 @@ async fn run_member_subtask(
                 }
             }
             match runtime.try_acquire_run_lock(&cfg.agent_id) {
-                Some(pair) => {
-                    guard = Some(pair.1);
-                    break;
-                }
+                Some((_, pair)) => break pair,
                 None => {
                     if std::time::Instant::now() >= deadline {
                         return Err(format!(
@@ -725,7 +721,6 @@ async fn run_member_subtask(
                 }
             }
         }
-        guard
     };
 
     // S0-3 取消穿线：pipeline 直接监听 squad 级取消标志（squad 取消 = 成员子任务取消，
