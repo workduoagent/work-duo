@@ -269,7 +269,7 @@ async fn build_delivery_pack(
     }
     // 成员执行证据（handoff 表聚合）
     if let Ok(rows) = sqlx::query_as::<_, (String, String, String)>(
-        "SELECT task_id, status, bundle_json FROM agent_squad_handoff WHERE session_id=? ORDER BY created",
+        "SELECT task_id, status, bundle_json FROM agent_squad_handoff WHERE session_id=? ORDER BY created_at",
     )
     .bind(session_id)
     .fetch_all(pool)
@@ -1465,8 +1465,8 @@ pub async fn run_squad_task(app: &AppHandle, squad: SquadRuntimeConfig, prompt: 
     .bind(&session_id)
     .execute(&pool)
     .await;
-    build_and_persist_pack(&pool, app, &squad.squad_id, &session_id, "done", &summary).await; // S2 交付包落库
     write_metrics_round(app, &pool, &squad.squad_id, &session_id).await; // S0-4d metrics 落盘
+    build_and_persist_pack(&pool, app, &squad.squad_id, &session_id, "done", &summary).await; // S2 交付包落库
 
     events::emit_squad_round(
         app,
@@ -2029,8 +2029,8 @@ async fn run_squad_pipeline(
                 .bind(session_id)
                 .execute(pool)
                 .await;
-                build_and_persist_pack(pool, app, &squad.squad_id, session_id, "failed", &e).await; // S2 交付包落库
                 write_metrics_round(app, &pool, &squad.squad_id, &session_id).await; // S0-4d metrics 落盘
+                build_and_persist_pack(pool, app, &squad.squad_id, session_id, "failed", &e).await; // S2 交付包落库
                 events::emit_squad_session_done(
                     app,
                     &events::SquadSessionDonePayload {
@@ -2297,8 +2297,8 @@ async fn run_squad_pipeline(
     .bind(session_id)
     .execute(pool)
     .await;
-    build_and_persist_pack(&pool, app, &squad.squad_id, &session_id, "done", &summary).await; // S2 交付包落库
     write_metrics_round(app, &pool, &squad.squad_id, &session_id).await; // S0-4d metrics 落盘
+    build_and_persist_pack(&pool, app, &squad.squad_id, &session_id, "done", &summary).await; // S2 交付包落库
     // S1 批次2（§4.4.5）：决策卡——汇总文本中的【squad-decisions】尾块结构化落表。
     let decisions = parse_squad_decisions(&summary);
     persist_decisions(pool, app, &squad.squad_id, session_id, &decisions).await;
@@ -2499,8 +2499,8 @@ async fn run_squad_chat(
     .bind(session_id)
     .execute(pool)
     .await;
-    build_and_persist_pack(&pool, app, &squad.squad_id, &session_id, "done", &summary).await; // S2 交付包落库
     write_metrics_round(app, &pool, &squad.squad_id, &session_id).await; // S0-4d metrics 落盘
+    build_and_persist_pack(&pool, app, &squad.squad_id, &session_id, "done", &summary).await; // S2 交付包落库
     // S1 批次2（§4.4.5）：决策卡——汇总文本中的【squad-decisions】尾块结构化落表。
     let decisions = parse_squad_decisions(&summary);
     persist_decisions(pool, app, &squad.squad_id, session_id, &decisions).await;
