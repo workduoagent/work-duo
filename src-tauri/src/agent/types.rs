@@ -503,13 +503,13 @@ impl SubTaskOutput {
 #[serde(rename_all = "camelCase")]
 pub struct SquadRunStrategy {
     /// 执行方式：manual（UI 点启动）/ schedule（定时）/ api（外部调用）。
-    #[serde(default = "default_execution_mode")]
+    #[serde(default = "default_execution_mode", alias = "execution_mode")]
     pub execution_mode: String,
     /// 定时表达式（execution_mode=schedule 时使用）。
     #[serde(default)]
     pub schedule_cron: Option<String>,
     /// 节点失败重试次数（包裹每次成员 run_task 调用，默认 3）。
-    #[serde(default = "default_retry_count")]
+    #[serde(default = "default_retry_count", alias = "retry_count")]
     pub retry_count: u32,
     /// 定时 / API 模式触发时使用的默认任务指令（执行模式非 manual 时由调度器 / API 服务读取，
     /// UI 点启动 manual 运行时仍用用户即时输入）。
