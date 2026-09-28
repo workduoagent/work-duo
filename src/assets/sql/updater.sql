@@ -634,3 +634,23 @@ CREATE INDEX IF NOT EXISTS idx_squad_decision_session ON agent_squad_decision(se
 
 -- ---------- v35：小分队 S2 可验证——Delivery Pack 落库（设计方案 v1.4 §4.8） ----------
 ALTER TABLE agent_squad_session ADD COLUMN pack_json TEXT;   -- Delivery Pack 快照（证据链+成本+产物索引）
+
+-- ---------- v36：小分队 S2 批次2——打断说话信箱（设计方案 v1.4 §4.11/§5） ----------
+-- 插话审计唯一事实源：运行中打断（Live inject）/ 等待中搭话（pre_talk）统一落表；
+-- task_id = 编排式任务 id / 流水线节点 id / 群聊成员 agent_id；status: queued → delivered | dropped。
+CREATE TABLE IF NOT EXISTS agent_squad_inject
+(
+    id           TEXT    PRIMARY KEY,
+    squad_id     TEXT    NOT NULL,
+    session_id   TEXT    NOT NULL,
+    task_id      TEXT    NOT NULL,
+    run_id       TEXT,
+    source       TEXT    NOT NULL,           -- user | leader | system
+    mode         TEXT    NOT NULL,           -- soft | hard | pre_talk
+    content      TEXT    NOT NULL,
+    status       TEXT    NOT NULL,           -- queued | delivered | dropped
+    created_at   INTEGER NOT NULL,
+    delivered_at INTEGER,
+    FOREIGN KEY(session_id) REFERENCES agent_squad_session(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_squad_inject_session ON agent_squad_inject(session_id, created_at);

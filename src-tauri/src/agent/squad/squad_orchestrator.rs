@@ -379,6 +379,8 @@ async fn finish_squad_session(
     status: &str,
     summary: &str,
 ) {
+    // S2（§4.11）：终态即止——仍未消费的插话标记 dropped（§4.11.6「节点已结束」）。
+    squad_inject_flush_session(app, pool, squad_id, session_id).await;
     let _ = sqlx::query(
         "UPDATE agent_squad_session SET status=?, snapshot=?, updated_at=? WHERE id=?",
     )
@@ -702,18 +704,23 @@ static SQUAD_PLAN_GATES: std::sync::Mutex<Option<std::collections::HashMap<Strin
     std::sync::Mutex::new(None);
 
 struct PlanGate {
-    approved: Arc<AtomicBool>,
+    /// None=待决议；Some(true)=批准；Some(false)=拒绝。
+    /// （2026-09-28 修复：旧版 resolve 先 remove 再置位 AtomicBool，等待循环看到「gate 已不在
+    /// 注册表」一律按拒绝处理——批准也会走取消收尾；tri-state 化后 resolve 置值不摘除，
+    /// 摘除统一由 remove_plan_gate 在等待返回后收尾。）
+    approved: Arc<std::sync::Mutex<Option<bool>>>,
 }
 
 /// 用户决议入口（Tauri 命令 squad_plan_approve 调用）。返回是否命中注册表。
 pub fn resolve_plan_gate(session_id: &str, approved: bool) -> bool {
-    let mut g = SQUAD_PLAN_GATES.lock().unwrap_or_else(|e| e.into_inner());
-    let Some(map) = g.as_mut() else { return false };
-    if let Some(gate) = map.remove(session_id) {
-        gate.approved.store(approved, std::sync::atomic::Ordering::SeqCst);
-        true
-    } else {
-        false
+    let g = SQUAD_PLAN_GATES.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(map) = g.as_ref() else { return false };
+    match map.get(session_id) {
+        Some(gate) => {
+            *gate.approved.lock().unwrap_or_else(|e| e.into_inner()) = Some(approved);
+            true
+        }
+        None => false,
     }
 }
 
@@ -726,14 +733,17 @@ async fn wait_plan_gate(
         if squad_cancel.load(std::sync::atomic::Ordering::SeqCst) {
             return false;
         }
-        let approved = {
+        // gate 缺失（未注册/已被清理的异常路径）→ 视为批准放行，防卡死。
+        let decision = {
             let g = SQUAD_PLAN_GATES.lock().unwrap_or_else(|e| e.into_inner());
-            g.as_ref().and_then(|m| m.get(session_id)).map(|gate| gate.approved.load(std::sync::atomic::Ordering::SeqCst))
+            match g.as_ref().and_then(|m| m.get(session_id)) {
+                None => Some(true),
+                Some(gate) => gate.approved.lock().unwrap_or_else(|e| e.into_inner()).clone(),
+            }
         };
-        match approved {
-            Some(true) => return true,
-            Some(false) => tokio::time::sleep(std::time::Duration::from_secs(2)).await,
-            None => return false, // gate 已被移除（异常路径）：视为批准放行，防卡死
+        match decision {
+            Some(v) => return v,
+            None => tokio::time::sleep(std::time::Duration::from_secs(2)).await,
         }
     }
 }
@@ -744,6 +754,594 @@ fn remove_plan_gate(session_id: &str) {
     if let Some(map) = g.as_mut() {
         map.remove(session_id);
     }
+}
+
+/* ------------------------------------------------------------------ *
+ * S2（§4.11）打断说话信箱（InjectMailbox）
+ *
+ * 注册表模式同 SQUAD_CANCELS：run_squad_task 建会话后注册（SquadInjectGuard
+ * Drop 兜底回收），squad_inject_send 命令 / API 入队，消费点两处：
+ *   - 任务启动前（pre_talk / 提前入队的全部待达插话）→ 预嘱段合并进成员 prompt；
+ *   - 成员 pipeline 工具轮边界安全点（live inject）→ user 消息注入下一轮。
+ * 审计唯一事实源在 agent_squad_inject 表（queued → delivered | dropped）。
+ * ------------------------------------------------------------------ */
+
+/// 一条待投递插话（内存信箱元素；DB 行为审计源）。
+#[derive(Debug, Clone)]
+struct InjectNote {
+    id: String,
+    /// soft | hard | pre_talk（MVP 中 soft/hard 均在下一安全点注入，hard 仅 UI 强调）。
+    mode: String,
+    content: String,
+}
+
+/// 会话级信箱集合：按「目标键」取信箱（编排式任务 id / 流水线节点 id / 群聊成员 agent_id /
+/// 成员 role——同一名成员的多个别名键共享同一个 Arc 信箱，发送方用任意键都能命中）。
+#[derive(Default)]
+struct SessionInjectMailbox {
+    /// 无人值守（schedule/api）会话：拒绝一切插话（§4.11.8 三路统一策略）。
+    unattended: bool,
+    /// 频率限制：目标键 → 最近一次入队毫秒（单目标 ≥2s，防刷屏打断）。
+    last_send_ms: std::collections::HashMap<String, i64>,
+    /// 目标键 → 共享信箱。
+    targets: std::collections::HashMap<String, Arc<std::sync::Mutex<Vec<InjectNote>>>>,
+}
+
+static SQUAD_INJECTS: std::sync::Mutex<Option<std::collections::HashMap<String, SessionInjectMailbox>>> =
+    std::sync::Mutex::new(None);
+
+/// Drop 守卫：会话任意出口自动摘除注册表条目（DB 层 dropped 兜底由显式 flush 完成）。
+struct SquadInjectGuard(String);
+impl Drop for SquadInjectGuard {
+    fn drop(&mut self) {
+        let mut g = SQUAD_INJECTS.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(map) = g.as_mut() {
+            map.remove(&self.0);
+        }
+    }
+}
+
+/// 会话启动时注册信箱集合（run_squad_task 建会话后调用）。
+fn squad_inject_register_session(session_id: &str, unattended: bool) {
+    let mut g = SQUAD_INJECTS.lock().unwrap_or_else(|e| e.into_inner());
+    g.get_or_insert_with(std::collections::HashMap::new).insert(
+        session_id.to_string(),
+        SessionInjectMailbox {
+            unattended,
+            ..Default::default()
+        },
+    );
+}
+
+/// 绑定目标键到信箱。primary 键（成员 agent_id）查找/创建信箱；别名键（task_id 等）
+/// 仅在未绑定时挂到该信箱（or_insert）——同一成员多任务共享一个信箱（per-agent 键本就
+/// 串行执行），且绝不把不同成员误并到一个队列（角色名可能重复，故不用 role 作键）。
+fn squad_inject_bind(
+    session_id: &str,
+    primary: &str,
+    aliases: &[&str],
+) -> Arc<std::sync::Mutex<Vec<InjectNote>>> {
+    let mut g = SQUAD_INJECTS.lock().unwrap_or_else(|e| e.into_inner());
+    let entry = g.get_or_insert_with(std::collections::HashMap::new)
+        .entry(session_id.to_string())
+        .or_default();
+    let mailbox = entry
+        .targets
+        .get(primary)
+        .cloned()
+        .unwrap_or_else(|| {
+            let mb: Arc<std::sync::Mutex<Vec<InjectNote>>> = Default::default();
+            entry.targets.insert(primary.to_string(), mb.clone());
+            mb
+        });
+    for k in aliases {
+        entry.targets.entry((*k).to_string()).or_insert_with(|| mailbox.clone());
+    }
+    mailbox
+}
+
+/// 排空单个信箱（FIFO；消费点调用）。
+fn squad_inject_take_mailbox(mailbox: &Arc<std::sync::Mutex<Vec<InjectNote>>>) -> Vec<InjectNote> {
+    let mut m = mailbox.lock().unwrap_or_else(|e| e.into_inner());
+    std::mem::take(&mut *m)
+}
+
+/// 按目标键排空（预嘱 / 群聊插话消费点）。
+fn squad_inject_take(session_id: &str, target: &str) -> Vec<InjectNote> {
+    let g = SQUAD_INJECTS.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(entry) = g.as_ref().and_then(|m| m.get(session_id)) else {
+        return Vec::new();
+    };
+    match entry.targets.get(target) {
+        Some(mailbox) => squad_inject_take_mailbox(mailbox),
+        None => Vec::new(),
+    }
+}
+
+/// 入参校验：内容非空且 ≤2000 字（§4.11.8），mode 归一化（未知值宽容归 soft）。返回归一化 mode。
+fn validate_inject_input(content: &str, mode: &str) -> Result<String, String> {
+    let trimmed = content.trim();
+    if trimmed.is_empty() {
+        return Err("插话内容不能为空".into());
+    }
+    if trimmed.chars().count() > 2000 {
+        return Err("插话过长（单条 ≤2000 字，超出请拆分或贴附件）".into());
+    }
+    let mode = match mode.trim() {
+        "hard" => "hard",
+        "pre_talk" | "preTalk" | "pre-talk" => "pre_talk",
+        _ => "soft",
+    };
+    Ok(mode.to_string())
+}
+
+/// 注入形态（§4.11.3，对齐单 Agent takeover）：user 消息 + 稳定指令（§4.11.8 优先级约定）。
+fn format_inject_user_msg(content: &str) -> String {
+    format!(
+        "（用户打断补充：{content}\n以上为用户运行中插入的补充指示，优先级高于原任务指令中与之冲突的部分；若与既有做法冲突，先列出待改点再继续执行。）"
+    )
+}
+
+/// 预嘱段渲染（任务启动前合并进 prompt，优先级最高段）。
+fn render_pre_talk_section(notes: &[InjectNote]) -> String {
+    let mut s = String::from("## 用户预嘱（任务启动前补充，优先级最高）\n");
+    for n in notes {
+        s.push_str(&format!("- {}\n", n.content));
+    }
+    s
+}
+
+/// 群聊插话段渲染（成员发言前合并进 user 消息）。
+fn render_inject_section(notes: &[InjectNote]) -> String {
+    let mut s = String::from("## 用户插话（运行中打断，请优先回应）\n");
+    for n in notes {
+        s.push_str(&format!("- {}\n", n.content));
+    }
+    s
+}
+
+fn squad_inject_event_payload(
+    inject_id: &str,
+    squad_id: &str,
+    session_id: &str,
+    task_id: &str,
+    mode: &str,
+) -> events::SquadInjectEventPayload {
+    events::SquadInjectEventPayload {
+        inject_id: inject_id.to_string(),
+        squad_id: squad_id.to_string(),
+        session_id: session_id.to_string(),
+        task_id: task_id.to_string(),
+        mode: mode.to_string(),
+    }
+}
+
+/// DB 层：插话标记已投递（消费点异步回调，尽力而为不阻塞成员执行）。
+async fn squad_inject_mark_delivered(
+    app: &AppHandle,
+    pool: &sqlx::SqlitePool,
+    squad_id: &str,
+    session_id: &str,
+    target: &str,
+    notes: &[InjectNote],
+) {
+    for n in notes {
+        let _ = sqlx::query(
+            "UPDATE agent_squad_inject SET status='delivered', delivered_at=? WHERE id=?",
+        )
+        .bind(now_ms())
+        .bind(&n.id)
+        .execute(pool)
+        .await;
+        events::emit_squad_inject_delivered(
+            app,
+            &squad_inject_event_payload(&n.id, squad_id, session_id, target, &n.mode),
+        );
+    }
+}
+
+/// DB 层：会话收尾时把仍未消费的插话标记 dropped（终态不可达即未送达，§4.11.6）。
+/// 同时摘除注册表条目（幂等：SquadInjectGuard Drop 再摘一次无副作用）。
+async fn squad_inject_flush_session(
+    app: &AppHandle,
+    pool: &sqlx::SqlitePool,
+    squad_id: &str,
+    session_id: &str,
+) {
+    // 同一信箱可能挂多个别名键：排空后按 note id 去重，防重复标记。
+    let remaining: Vec<(String, Vec<InjectNote>)> = {
+        let g = SQUAD_INJECTS.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(entry) = g.as_ref().and_then(|m| m.get(session_id)) else {
+            return;
+        };
+        entry
+            .targets
+            .iter()
+            .map(|(k, m)| (k.clone(), squad_inject_take_mailbox(m)))
+            .filter(|(_, notes)| !notes.is_empty())
+            .collect()
+    };
+    let mut seen = std::collections::HashSet::new();
+    for (target, notes) in remaining {
+        for n in &notes {
+            if !seen.insert(n.id.clone()) {
+                continue;
+            }
+            let _ = sqlx::query("UPDATE agent_squad_inject SET status='dropped' WHERE id=?")
+                .bind(&n.id)
+                .execute(pool)
+                .await;
+            events::emit_squad_inject_dropped(
+                app,
+                &squad_inject_event_payload(&n.id, squad_id, session_id, &target, &n.mode),
+            );
+        }
+    }
+    let mut g = SQUAD_INJECTS.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(map) = g.as_mut() {
+        map.remove(session_id);
+    }
+}
+
+/// 用户插话入口（Tauri 命令 squad_inject_send / API /inject 共用）。
+/// 校验（无人值守拒绝 / 频率 ≥2s / 长度 ≤2000）→ 落表（queued）→ 落 round（kind='inject'）→ 入信箱。
+/// 返回 inject_id。
+pub async fn squad_inject_send(
+    app: &AppHandle,
+    pool: &sqlx::SqlitePool,
+    squad_id: &str,
+    session_id: &str,
+    target: &str,
+    content: &str,
+    mode: &str,
+) -> Result<String, String> {
+    let target = target.trim();
+    if target.is_empty() {
+        return Err("缺少插话目标（任务 / 成员）".into());
+    }
+    let mode = validate_inject_input(content, mode)?;
+    let content = content.trim().to_string();
+
+    let mailbox = {
+        let mut g = SQUAD_INJECTS.lock().unwrap_or_else(|e| e.into_inner());
+        let entry = g
+            .get_or_insert_with(std::collections::HashMap::new)
+            .get_mut(session_id)
+            .ok_or_else(|| "协作会话未在运行，无法插话".to_string())?;
+        // §4.11.8：无人值守（schedule/api）默认忽略全部说话路径——统一拒绝。
+        if entry.unattended {
+            return Err("无人值守会话（schedule/api）不支持插话".into());
+        }
+        // 频率限制：单目标 ≥2s。
+        let now = now_ms();
+        if let Some(last) = entry.last_send_ms.get(target) {
+            if now - *last < 2000 {
+                return Err("插话太频繁（单目标间隔 ≥2 秒）".into());
+            }
+        }
+        entry.last_send_ms.insert(target.to_string(), now);
+        // 目标不存在（未绑定的任务/成员）→ 拒绝，防「以为送达了」。
+        if !entry.targets.contains_key(target) {
+            return Err(format!("插话目标「{target}」不存在或未在运行"));
+        }
+        entry
+            .targets
+            .get(target)
+            .cloned()
+            .unwrap_or_default()
+    };
+
+    let inject_id = format!(
+        "sqij_{}_{:05}",
+        now_ms(),
+        ROUND_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    );
+    // 审计落表（queued）。
+    let _ = sqlx::query(
+        "INSERT INTO agent_squad_inject (id, squad_id, session_id, task_id, run_id, source, mode, content, status, created_at, delivered_at) \
+         VALUES (?, ?, ?, ?, NULL, 'user', ?, ?, 'queued', ?, NULL)",
+    )
+    .bind(&inject_id)
+    .bind(squad_id)
+    .bind(session_id)
+    .bind(target)
+    .bind(&mode)
+    .bind(&content)
+    .bind(now_ms())
+    .execute(pool)
+    .await;
+
+    // 审计链：round 流水（kind='inject'）。
+    let mode_label = match mode.as_str() {
+        "hard" => "打断",
+        "pre_talk" => "预嘱",
+        _ => "补充",
+    };
+    let round_note = format!("→ {target}（用户{mode_label}）：{content}");
+    let _ = sqlx::query(
+        "INSERT INTO agent_squad_round (id, squad_id, session_id, speaker_agent_id, role, content, kind, created_at) \
+         VALUES (?, ?, ?, NULL, '用户插话', ?, 'inject', ?)",
+    )
+    .bind(round_id())
+    .bind(squad_id)
+    .bind(session_id)
+    .bind(&round_note)
+    .bind(now_ms())
+    .execute(pool)
+    .await;
+    events::emit_squad_round(
+        app,
+        &events::SquadRoundPayload {
+            squad_id: squad_id.to_string(),
+            session_id: session_id.to_string(),
+            speaker_agent_id: None,
+            role: "用户插话".into(),
+            kind: "inject".into(),
+            content: round_note,
+        },
+    );
+    events::emit_squad_inject_queued(
+        app,
+        &squad_inject_event_payload(&inject_id, squad_id, session_id, target, &mode),
+    );
+
+    // 最后入信箱（校验全部通过后才可见，消费者不会看到校验失败的插话）。
+    mailbox.lock().unwrap_or_else(|e| e.into_inner()).push(InjectNote {
+        id: inject_id.clone(),
+        mode,
+        content,
+    });
+    tracing::info!("[squad] 插话入队：session={session_id} target={target} inject={inject_id}");
+    Ok(inject_id)
+}
+
+/* ------------------------------------------------------------------ *
+ * S2（§4.6 L2）检查点：manual 模式每个 Wave 完成后挂起等决议（继续 / 返工）。
+ * ------------------------------------------------------------------ */
+
+struct CheckpointGate {
+    /// None=待决议；Some("continue"|"rework")=已决议（resolve 置值不摘除，摘除统一收尾）。
+    decision: Arc<std::sync::Mutex<Option<String>>>,
+}
+
+static SQUAD_CHECKPOINTS: std::sync::Mutex<Option<std::collections::HashMap<String, CheckpointGate>>> =
+    std::sync::Mutex::new(None);
+
+/// 决议归一化：rework（返工）之外的值一律视为 continue（宽容，防前端拼写差异卡死）。
+fn normalize_checkpoint_decision(decision: &str) -> &'static str {
+    if decision.trim().eq_ignore_ascii_case("rework") {
+        "rework"
+    } else {
+        "continue"
+    }
+}
+
+/// 用户决议入口（Tauri 命令 squad_checkpoint_resolve 调用）。返回是否命中挂起的检查点。
+pub fn resolve_squad_checkpoint(session_id: &str, decision: &str) -> bool {
+    let normalized = normalize_checkpoint_decision(decision).to_string();
+    let g = SQUAD_CHECKPOINTS.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(map) = g.as_ref() else { return false };
+    match map.get(session_id) {
+        Some(gate) => {
+            *gate.decision.lock().unwrap_or_else(|e| e.into_inner()) = Some(normalized);
+            true
+        }
+        None => false,
+    }
+}
+
+/// 挂起等待检查点决议（manual 专用；每 2s 轮询）。取消 → None；正常返回 Some(decision)。
+async fn wait_checkpoint_gate(
+    session_id: &str,
+    squad_cancel: &Arc<AtomicBool>,
+) -> Option<String> {
+    loop {
+        if squad_cancel.load(std::sync::atomic::Ordering::SeqCst) {
+            return None;
+        }
+        let decision = {
+            let g = SQUAD_CHECKPOINTS.lock().unwrap_or_else(|e| e.into_inner());
+            g.as_ref()
+                .and_then(|m| m.get(session_id))
+                .and_then(|gate| gate.decision.lock().unwrap_or_else(|e| e.into_inner()).clone())
+        };
+        match decision {
+            Some(d) => return Some(d),
+            None => tokio::time::sleep(std::time::Duration::from_secs(2)).await,
+        }
+    }
+}
+
+/// 清理检查点 gate（决议读取后收尾防泄漏）。
+fn remove_checkpoint_gate(session_id: &str) {
+    let mut g = SQUAD_CHECKPOINTS.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(map) = g.as_mut() {
+        map.remove(session_id);
+    }
+}
+
+/// 挂起一个检查点：落 checkpoint round + 事件 → 等决议 → 决议 system round + 事件。
+/// 返回 Some("continue"|"rework")；取消返回 None（调用方按取消收尾）。
+async fn squad_checkpoint_hang(
+    app: &AppHandle,
+    pool: &sqlx::SqlitePool,
+    squad_id: &str,
+    session_id: &str,
+    note: &str,
+    squad_cancel: &Arc<AtomicBool>,
+) -> Option<String> {
+    SQUAD_CHECKPOINTS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get_or_insert_with(std::collections::HashMap::new)
+        .insert(
+            session_id.to_string(),
+            CheckpointGate {
+                decision: Arc::new(std::sync::Mutex::new(None)),
+            },
+        );
+    let _ = sqlx::query(
+        "INSERT INTO agent_squad_round (id, squad_id, session_id, speaker_agent_id, role, content, kind, created_at) VALUES (?, ?, ?, NULL, '系统', ?, 'checkpoint', ?)",
+    )
+    .bind(round_id())
+    .bind(squad_id)
+    .bind(session_id)
+    .bind(note)
+    .bind(now_ms())
+    .execute(pool)
+    .await;
+    events::emit_squad_round(
+        app,
+        &events::SquadRoundPayload {
+            squad_id: squad_id.to_string(),
+            session_id: session_id.to_string(),
+            speaker_agent_id: None,
+            role: "系统".into(),
+            kind: "checkpoint".into(),
+            content: note.to_string(),
+        },
+    );
+    let decision = match wait_checkpoint_gate(session_id, squad_cancel).await {
+        Some(d) => d,
+        // 取消路径也要摘除 gate，防注册表残留（session_id 每次 run 都新建，残留即永久泄漏）。
+        None => {
+            remove_checkpoint_gate(session_id);
+            return None;
+        }
+    };
+    remove_checkpoint_gate(session_id);
+    let decision_normalized = normalize_checkpoint_decision(&decision);
+    let follow = if decision_normalized == "rework" {
+        "↩️ 检查点决议：返工本波任务。"
+    } else {
+        "✅ 检查点决议：继续执行。"
+    };
+    let _ = sqlx::query(
+        "INSERT INTO agent_squad_round (id, squad_id, session_id, speaker_agent_id, role, content, kind, created_at) VALUES (?, ?, ?, NULL, '系统', ?, 'system', ?)",
+    )
+    .bind(round_id())
+    .bind(squad_id)
+    .bind(session_id)
+    .bind(follow)
+    .bind(now_ms())
+    .execute(pool)
+    .await;
+    events::emit_squad_round(
+        app,
+        &events::SquadRoundPayload {
+            squad_id: squad_id.to_string(),
+            session_id: session_id.to_string(),
+            speaker_agent_id: None,
+            role: "系统".into(),
+            kind: "system".into(),
+            content: follow.to_string(),
+        },
+    );
+    Some(decision_normalized.to_string())
+}
+
+/* ------------------------------------------------------------------ *
+ * S2（§4.6 L4）交付确认：Delivery Pack 生成后 manual 模式挂起等确认。
+ * ------------------------------------------------------------------ */
+
+struct DeliveryGate {
+    /// None=待决议；Some(true)=确认交付；Some(false)=要求修订。
+    approved: Arc<std::sync::Mutex<Option<bool>>>,
+}
+
+static SQUAD_DELIVERY_GATES: std::sync::Mutex<Option<std::collections::HashMap<String, DeliveryGate>>> =
+    std::sync::Mutex::new(None);
+
+/// 用户决议入口（Tauri 命令 squad_delivery_resolve 调用）。返回是否命中挂起的交付门禁。
+pub fn resolve_squad_delivery(session_id: &str, approved: bool) -> bool {
+    let g = SQUAD_DELIVERY_GATES.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(map) = g.as_ref() else { return false };
+    match map.get(session_id) {
+        Some(gate) => {
+            *gate.approved.lock().unwrap_or_else(|e| e.into_inner()) = Some(approved);
+            true
+        }
+        None => false,
+    }
+}
+
+/// 挂起等待交付确认。取消 → false。
+async fn wait_delivery_gate(
+    session_id: &str,
+    squad_cancel: &Arc<AtomicBool>,
+) -> bool {
+    loop {
+        if squad_cancel.load(std::sync::atomic::Ordering::SeqCst) {
+            return false;
+        }
+        // gate 缺失（异常路径）→ 视为确认放行，防卡死。
+        let decision = {
+            let g = SQUAD_DELIVERY_GATES.lock().unwrap_or_else(|e| e.into_inner());
+            match g.as_ref().and_then(|m| m.get(session_id)) {
+                None => Some(true),
+                Some(gate) => gate.approved.lock().unwrap_or_else(|e| e.into_inner()).clone(),
+            }
+        };
+        match decision {
+            Some(v) => return v,
+            None => tokio::time::sleep(std::time::Duration::from_secs(2)).await,
+        }
+    }
+}
+
+/// 交付确认门禁（三模式 done 收尾前调用，manual 专用）：
+/// session 置 awaiting_delivery → 落 delivery round + 事件 → 等决议 → 清理。
+/// 返回 true=确认交付（继续 done 收尾）；false=要求修订 / 取消（调用方按取消收尾）。
+async fn gate_delivery_confirm(
+    app: &AppHandle,
+    pool: &sqlx::SqlitePool,
+    squad_id: &str,
+    session_id: &str,
+    squad_cancel: &Arc<AtomicBool>,
+) -> bool {
+    let _ = sqlx::query("UPDATE agent_squad_session SET status='awaiting_delivery', updated_at=? WHERE id=?")
+        .bind(now_ms())
+        .bind(session_id)
+        .execute(pool)
+        .await;
+    SQUAD_DELIVERY_GATES
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get_or_insert_with(std::collections::HashMap::new)
+        .insert(
+            session_id.to_string(),
+            DeliveryGate {
+                approved: Arc::new(std::sync::Mutex::new(None)),
+            },
+        );
+    let note = "📦 Delivery Pack 已生成，等待交付确认（确认交付 / 要求修订）。";
+    let _ = sqlx::query(
+        "INSERT INTO agent_squad_round (id, squad_id, session_id, speaker_agent_id, role, content, kind, created_at) VALUES (?, ?, ?, NULL, '系统', ?, 'delivery', ?)",
+    )
+    .bind(round_id())
+    .bind(squad_id)
+    .bind(session_id)
+    .bind(note)
+    .bind(now_ms())
+    .execute(pool)
+    .await;
+    events::emit_squad_round(
+        app,
+        &events::SquadRoundPayload {
+            squad_id: squad_id.to_string(),
+            session_id: session_id.to_string(),
+            speaker_agent_id: None,
+            role: "系统".into(),
+            kind: "delivery".into(),
+            content: note.to_string(),
+        },
+    );
+    let approved = wait_delivery_gate(session_id, squad_cancel).await;
+    let mut g = SQUAD_DELIVERY_GATES.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(map) = g.as_mut() {
+        map.remove(session_id);
+    }
+    approved
 }
 
 /// round 主键进程内序号（并行 Wave 下 now_ms 同毫秒会撞主键，叠序号保唯一）。
@@ -951,6 +1549,10 @@ pub async fn run_squad_task(app: &AppHandle, squad: SquadRuntimeConfig, prompt: 
         );
     }
     let _cancel_guard = SquadCancelGuard(session_id.clone());
+    // S2（§4.11）：打断说话信箱注册——无人值守（schedule/api）会话拒绝一切插话（§4.11.8 三路统一）。
+    let unattended = matches!(squad.run_strategy.execution_mode.as_str(), "schedule" | "api");
+    squad_inject_register_session(&session_id, unattended);
+    let _inject_guard = SquadInjectGuard(session_id.clone());
     let title = prompt.chars().take(120).collect::<String>();
     let mode = squad.mode.clone();
     let _ = sqlx::query(
@@ -1057,7 +1659,7 @@ pub async fn run_squad_task(app: &AppHandle, squad: SquadRuntimeConfig, prompt: 
     let mut context = String::new();
     let retry = squad.run_strategy.retry_count.max(1) as usize;
     // P2-3 模式感知恢复（与 run_squad_pipeline 同源）：schedule/api 视为无人值守。
-    let unattended = matches!(squad.run_strategy.execution_mode.as_str(), "schedule" | "api");
+    // （S2：unattended 已在会话注册段提前计算——信箱注册需要它；此处不再重复。）
 
     // ===== S2（§4.6 L1）：团队计划门禁——manual 模式下委派计划挂起等用户批准 =====
     if !delegated.is_empty() && !unattended {
@@ -1072,7 +1674,7 @@ pub async fn run_squad_task(app: &AppHandle, squad: SquadRuntimeConfig, prompt: 
             .insert(
                 session_id.clone(),
                 PlanGate {
-                    approved: Arc::new(AtomicBool::new(false)),
+                    approved: Arc::new(std::sync::Mutex::new(None)),
                 },
             );
         let plan_note = format!(
@@ -1163,10 +1765,18 @@ pub async fn run_squad_task(app: &AppHandle, squad: SquadRuntimeConfig, prompt: 
     }
     persist_board(&pool, &session_id, &board).await;
 
+    // S2（§4.11）：会话启动即为全部任务绑定信箱——pre_talk 才能投递给「还没开始」的任务。
+    // primary=成员 agent_id（同成员多任务共享信箱，per-agent 键本就串行），task_id 作别名键。
+    for (i, t) in delegated.iter().enumerate() {
+        let member = match_member(&squad.members, &t.assignee).unwrap_or(&leader);
+        squad_inject_bind(&session_id, &member.agent.agent_id, &[&format!("t{}", i + 1)]);
+    }
+
     let mut done = vec![false; n];
     let mut skipped = vec![false; n];
     let mut handoffs: Vec<Option<HandoffBundle>> = vec![None; n];
     let mut budget_warned = false;
+    let mut wave_count = 0usize; // L2 检查点文案用（完成的波数）
     loop {
         // S0-3 取消检测点：squad 级取消 → 立即收尾（status=cancelled，成员 pipeline 自身也会被同一标志中断）。
         if squad_cancel.load(std::sync::atomic::Ordering::SeqCst) {
@@ -1229,7 +1839,8 @@ pub async fn run_squad_task(app: &AppHandle, squad: SquadRuntimeConfig, prompt: 
         }
 
         // 波次准备：上游投递 + 注入段构造（主协程做——board 单写者 + 磁盘拷贝串行无竞争）。
-        let mut wave: Vec<(usize, String, String, String, AgentRuntimeConfig, String)> = Vec::new(); // (idx, task_id, prompt, ws, member_cfg, role)
+        let mut wave: Vec<(usize, String, String, String, AgentRuntimeConfig, String, Arc<std::sync::Mutex<Vec<InjectNote>>>)> = Vec::new(); // (idx, task_id, prompt, ws, member_cfg, role, inject_mailbox)
+        let mut wave_tasks: Vec<(usize, String)> = Vec::new(); // (idx, task_id)——L2 检查点返工回退用
         for &i in &ready {
             let task = &delegated[i];
             let member = match_member(&squad.members, &task.assignee).unwrap_or(&leader);
@@ -1257,19 +1868,54 @@ pub async fn run_squad_task(app: &AppHandle, squad: SquadRuntimeConfig, prompt: 
                     task.instruction, context
                 )
             };
+            // S2（§4.11）：绑定信箱（primary=agent_id，task_id 别名；会话启动已绑过，此处幂等）+
+            // 预嘱注入——任务启动前排空该信箱全部待达插话，合并为最高优先级段。
+            let inject_mailbox = squad_inject_bind(&session_id, &member.agent.agent_id, &[&task_id]);
+            let pre_notes = squad_inject_take_mailbox(&inject_mailbox);
+            let subtask_prompt = if pre_notes.is_empty() {
+                subtask_prompt
+            } else {
+                tracing::info!("[squad] 任务 {task_id} 启动前注入用户预嘱 {} 条", pre_notes.len());
+                squad_inject_mark_delivered(app, &pool, &squad.squad_id, &session_id, &task_id, &pre_notes).await;
+                format!("{}\n\n{}", subtask_prompt, render_pre_talk_section(&pre_notes))
+            };
             if let Some(b) = board.tasks.get_mut(&task_id) {
                 b.status = "running".into();
             }
-            wave.push((i, task_id, subtask_prompt, ws, member.agent.clone(), member.role.clone()));
+            wave_tasks.push((i, task_id.clone()));
+            wave.push((i, task_id, subtask_prompt, ws, member.agent.clone(), member.role.clone(), inject_mailbox));
         }
         persist_board(&pool, &session_id, &board).await;
 
         // Wave 并行执行（同成员多任务由 per-agent 锁排队串行；不同成员真并行）。
         let mut futs = Vec::with_capacity(wave.len());
-        for (i, task_id, prompt_s, ws, agent_cfg, role) in wave {
+        for (i, task_id, prompt_s, ws, agent_cfg, role, inject_mailbox) in wave {
             // clone 在 move 块外完成（async move 会先 move 原值再 clone，跨迭代即 E0382）。
             let cancel_c = squad_cancel.clone();
             let session_c = session_id.clone();
+            // S2（§4.11）：Live inject 安全点钩子——成员 pipeline 工具轮边界排空信箱注入 user
+            // 消息；DB delivered 标记经 spawn 异步回写（钩子保持同步，不阻塞执行轮）。
+            let inject_hook: pipeline::InjectHook = {
+                let app_c = app.clone();
+                let pool_c = pool.clone();
+                let sq_c = squad.squad_id.clone();
+                let sid_c = session_id.clone();
+                let tid_c = task_id.clone();
+                let mb_c = inject_mailbox.clone();
+                Arc::new(move || {
+                    let notes = squad_inject_take_mailbox(&mb_c);
+                    if notes.is_empty() {
+                        return Vec::new();
+                    }
+                    let msgs: Vec<String> = notes.iter().map(|n| format_inject_user_msg(&n.content)).collect();
+                    let (app2, pool2) = (app_c.clone(), pool_c.clone());
+                    let (sq2, sid2, tid2) = (sq_c.clone(), sid_c.clone(), tid_c.clone());
+                    tauri::async_runtime::spawn(async move {
+                        squad_inject_mark_delivered(&app2, &pool2, &sq2, &sid2, &tid2, &notes).await;
+                    });
+                    msgs
+                })
+            };
             futs.push(async move {
                 let mut out = MemberRunOutput {
                     text: String::new(),
@@ -1288,6 +1934,7 @@ pub async fn run_squad_task(app: &AppHandle, squad: SquadRuntimeConfig, prompt: 
                         &ws,
                         unattended,
                         Some(&cancel_c),
+                        Some(inject_hook.clone()),
                     )
                     .await
                     {
@@ -1424,6 +2071,42 @@ pub async fn run_squad_task(app: &AppHandle, squad: SquadRuntimeConfig, prompt: 
             handoffs[i] = Some(bundle);
         }
         persist_board(&pool, &session_id, &board).await;
+
+        // ===== S2（§4.6 L2）：检查点——manual 模式每个 Wave 完成后挂起（仍有剩余任务时）=====
+        // 决议：继续 → 进入下一波；返工 → 本波任务状态回 pending 重新执行（其上游 handoff 保留）；
+        // 取消 → 会话 cancelled 收尾。unattended 自动放行（§4.6）。
+        wave_count += 1;
+        if !unattended && (0..n).any(|i| !done[i] && !skipped[i]) {
+            let wave_titles = wave_tasks
+                .iter()
+                .map(|(_, tid)| {
+                    format!(
+                        "{tid}「{}」",
+                        board.tasks.get(tid).map(|b| b.title.as_str()).unwrap_or("")
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("、");
+            let note = format!(
+                "⏸️ 检查点（L2）：第 {wave_count} 波（{wave_titles}）已完成，等待决议（继续 / 返工）。"
+            );
+            match squad_checkpoint_hang(app, &pool, &squad.squad_id, &session_id, &note, &squad_cancel).await {
+                Some(d) if d == "rework" => {
+                    for (i, tid) in wave_tasks.iter() {
+                        done[*i] = false;
+                        if let Some(b) = board.tasks.get_mut(tid.as_str()) {
+                            b.status = "pending".into();
+                        }
+                    }
+                    persist_board(&pool, &session_id, &board).await;
+                }
+                Some(_) => {}
+                None => {
+                    finish_squad_session(app, &pool, &squad.squad_id, &session_id, "cancelled", "检查点等待期间任务被取消").await;
+                    return;
+                }
+            }
+        }
     }
 
     // 汇总：交给主管总结（若无产出则取最后上下文）。
@@ -1443,6 +2126,18 @@ pub async fn run_squad_task(app: &AppHandle, squad: SquadRuntimeConfig, prompt: 
     .execute(&pool)
     .await;
 
+    write_metrics_round(app, &pool, &squad.squad_id, &session_id).await; // S0-4d metrics 落盘
+    build_and_persist_pack(&pool, app, &squad.squad_id, &session_id, "done", &summary).await; // S2 交付包落库
+    // ===== S2（§4.6 L4）：交付确认门禁——manual 模式 Pack 生成后挂起等用户确认 =====
+    // 确认 → done 收尾；要求修订/取消 → cancelled 收尾（Pack 与产物保留在交接箱）。
+    if !unattended {
+        if !gate_delivery_confirm(app, &pool, &squad.squad_id, &session_id, &squad_cancel).await {
+            finish_squad_session(app, &pool, &squad.squad_id, &session_id, "cancelled", "用户要求修订，会话按取消收尾（已完成产物保留在交接箱）").await;
+            return;
+        }
+    }
+    squad_inject_flush_session(app, &pool, &squad.squad_id, &session_id).await; // S2 插话兜底清账
+
     let _ = sqlx::query(
         "UPDATE agent_squad_session SET status='done', snapshot=?, updated_at=? WHERE id=?",
     )
@@ -1451,8 +2146,6 @@ pub async fn run_squad_task(app: &AppHandle, squad: SquadRuntimeConfig, prompt: 
     .bind(&session_id)
     .execute(&pool)
     .await;
-    write_metrics_round(app, &pool, &squad.squad_id, &session_id).await; // S0-4d metrics 落盘
-    build_and_persist_pack(&pool, app, &squad.squad_id, &session_id, "done", &summary).await; // S2 交付包落库
 
     events::emit_squad_round(
         app,
@@ -1656,6 +2349,8 @@ async fn run_member_subtask(
     unattended: bool,
     // S0-3 取消穿线：squad 级取消标志（编排式主循环传 Some；直接调用方可传 None 保持旧行为）。
     squad_cancel: Option<&Arc<AtomicBool>>,
+    // S2（§4.11）：Live inject 安全点钩子（编排器按任务构造；None=无信箱，行为不变）。
+    inject_hook: Option<pipeline::InjectHook>,
 ) -> Result<MemberRunOutput, String> {
     tracing::info!("[squad] run_member_subtask 进入：member={} metrics_session={metrics_session}", member_cfg.agent_id);
     let mut cfg = member_cfg.clone();
@@ -1791,6 +2486,7 @@ async fn run_member_subtask(
                 unattended,
                 // 小分队无授权集（15007）：策略不适用，维持旧行为
                 None,
+                inject_hook.as_ref(),
             ),
         ),
     )
@@ -1896,6 +2592,7 @@ fn build_dag_plan(members: &[SquadMemberConfig]) -> Result<DagPlan, String> {
 
 /// 执行单个流水线节点（带重试），落库并推送 round 事件，返回该成员最终产出文本。
 /// 上游成员产出由调用方已折叠进 `prompt`（实现「前步产出→后步输入」的自动串联）。
+#[allow(clippy::too_many_arguments)]
 async fn run_pipeline_node(
     app: &AppHandle,
     squad_id: &str,
@@ -1908,6 +2605,8 @@ async fn run_pipeline_node(
     // P2-3 无人值守模式透传。
     unattended: bool,
     cancel: &Arc<AtomicBool>,
+    // S2（§4.11）：Live inject 安全点钩子（本节点信箱；None=无）。
+    inject_hook: Option<pipeline::InjectHook>,
 ) -> MemberRunOutput {
     let ws = squad_member_workspace(workspace, squad_id, &member.agent.agent_id);
     let mut out = MemberRunOutput {
@@ -1918,7 +2617,7 @@ async fn run_pipeline_node(
     };
     let mut last_err: Option<String> = None;
     for attempt in 0..retry {
-        match run_member_subtask(app, &member.agent, &member.role, session_id, &prompt.to_string(), &ws, unattended, Some(cancel)).await {
+        match run_member_subtask(app, &member.agent, &member.role, session_id, &prompt.to_string(), &ws, unattended, Some(cancel), inject_hook.clone()).await {
             Ok(o) => {
                 out = o;
                 break;
@@ -2017,6 +2716,7 @@ async fn run_squad_pipeline(
                 .await;
                 write_metrics_round(app, &pool, &squad.squad_id, &session_id).await; // S0-4d metrics 落盘
                 build_and_persist_pack(pool, app, &squad.squad_id, session_id, "failed", &e).await; // S2 交付包落库
+                squad_inject_flush_session(app, pool, &squad.squad_id, session_id).await; // S2 插话兜底清账（失败早退）
                 events::emit_squad_session_done(
                     app,
                     &events::SquadSessionDonePayload {
@@ -2081,6 +2781,11 @@ async fn run_squad_pipeline(
     }
     persist_board(pool, session_id, &board).await;
 
+    // S2（§4.11）：会话启动即为全部节点绑定信箱（primary=agent_id，节点 id 别名）——pre_talk 可投给未启动节点。
+    for (i, m) in squad.members.iter().enumerate() {
+        squad_inject_bind(session_id, &m.agent.agent_id, &[&format!("n{}", i + 1)]);
+    }
+
     // ===== S1 批次2（§4.4.4）：DAG 同层并行——层内 join_all，层间等待（线性模式每层 1 节点，行为不变） =====
     let mut level = vec![0usize; squad.members.len()];
     for (pos, &mi) in plan.order.iter().enumerate() {
@@ -2089,7 +2794,9 @@ async fn run_squad_pipeline(
     }
     let max_level = level.iter().copied().max().unwrap_or(0);
     let mut _budget_warned = false;
-    for lv in 0..=max_level {
+    // S2（§4.6 L2）：L2 检查点「返工」需重跑本层——for 改 while（返工分支不递增 lv）。
+    let mut lv: usize = 0;
+    while lv <= max_level {
         // S0-3 取消检测点：squad 级取消 → 立即收尾。
         if cancel.load(std::sync::atomic::Ordering::SeqCst) {
             finish_squad_session(app, pool, &squad.squad_id, session_id, "cancelled", "任务已被用户取消").await;
@@ -2110,7 +2817,8 @@ async fn run_squad_pipeline(
             .map(|(pos, &mi)| (pos, mi))
             .collect();
         // 主协程准备（board 单写者）：running + 上游投递 + 注入段构造。
-        let mut preps: Vec<(usize, String, String, String)> = Vec::new(); // (mi, task_id, node_prompt, node_ws)
+        let mut preps: Vec<(usize, String, String, String, Arc<std::sync::Mutex<Vec<InjectNote>>>)> = Vec::new(); // (mi, task_id, node_prompt, node_ws, inject_mailbox)
+        let mut level_tasks: Vec<(usize, String)> = Vec::new(); // (mi, task_id)——L2 检查点返工回退用
         for &(pos, mi) in &wave {
             let member = &squad.members[mi];
             let node_ws =
@@ -2150,14 +2858,47 @@ async fn run_squad_pipeline(
                     prompt, upstream
                 )
             };
-            preps.push((mi, task_id, node_prompt, node_ws));
+            // S2（§4.11）：绑定信箱（primary=agent_id，节点 id 别名；会话启动已绑过，幂等）+ 预嘱注入。
+            let inject_mailbox = squad_inject_bind(session_id, &member.agent.agent_id, &[&task_id]);
+            let pre_notes = squad_inject_take_mailbox(&inject_mailbox);
+            let node_prompt = if pre_notes.is_empty() {
+                node_prompt
+            } else {
+                tracing::info!("[squad] 节点 {task_id} 启动前注入用户预嘱 {} 条", pre_notes.len());
+                squad_inject_mark_delivered(app, pool, &squad.squad_id, session_id, &task_id, &pre_notes).await;
+                format!("{}\n\n{}", node_prompt, render_pre_talk_section(&pre_notes))
+            };
+            level_tasks.push((mi, task_id.clone()));
+            preps.push((mi, task_id, node_prompt, node_ws, inject_mailbox));
         }
         persist_board(pool, session_id, &board).await;
 
         // Wave 并行执行（同成员由 per-agent 锁排队；不同成员真并行）。
         let mut futs = Vec::with_capacity(preps.len());
-        for (_mi, _task_id, node_prompt, _node_ws) in preps {
+        for (_mi, _task_id, node_prompt, _node_ws, inject_mailbox) in preps {
             let member = &squad.members[_mi];
+            // S2（§4.11）：Live inject 安全点钩子（同编排式；DB 回写 spawn 异步）。
+            let inject_hook: pipeline::InjectHook = {
+                let app_c = app.clone();
+                let pool_c = pool.clone();
+                let sq_c = squad.squad_id.clone();
+                let sid_c = session_id.to_string();
+                let tid_c = _task_id.clone();
+                let mb_c = inject_mailbox.clone();
+                Arc::new(move || {
+                    let notes = squad_inject_take_mailbox(&mb_c);
+                    if notes.is_empty() {
+                        return Vec::new();
+                    }
+                    let msgs: Vec<String> = notes.iter().map(|n| format_inject_user_msg(&n.content)).collect();
+                    let (app2, pool2) = (app_c.clone(), pool_c.clone());
+                    let (sq2, sid2, tid2) = (sq_c.clone(), sid_c.clone(), tid_c.clone());
+                    tauri::async_runtime::spawn(async move {
+                        squad_inject_mark_delivered(&app2, &pool2, &sq2, &sid2, &tid2, &notes).await;
+                    });
+                    msgs
+                })
+            };
             futs.push(async move {
                 run_pipeline_node(
                     app,
@@ -2170,6 +2911,7 @@ async fn run_squad_pipeline(
                     session_id,
                     unattended,
                     cancel,
+                    Some(inject_hook),
                 )
                 .await
             });
@@ -2230,6 +2972,44 @@ async fn run_squad_pipeline(
             handoffs[mi] = Some(bundle);
         }
         persist_board(pool, session_id, &board).await;
+
+        // ===== S2（§4.6 L2）：检查点——manual 模式每层完成后挂起（仍有后续层时）=====
+        // 返工 → 本层节点回 pending，不递增 lv 重跑本层；继续 → lv += 1；取消 → cancelled 收尾。
+        if !unattended && lv < max_level {
+            let level_titles = level_tasks
+                .iter()
+                .map(|(_, tid)| {
+                    format!(
+                        "{tid}「{}」",
+                        board.tasks.get(tid.as_str()).map(|b| b.title.as_str()).unwrap_or("")
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("、");
+            let note = format!(
+                "⏸️ 检查点（L2）：第 {} 层（{}）已完成，等待决议（继续 / 返工）。",
+                lv + 1,
+                level_titles
+            );
+            match squad_checkpoint_hang(app, pool, &squad.squad_id, session_id, &note, cancel).await {
+                Some(d) if d == "rework" => {
+                    for (mi, tid) in level_tasks.iter() {
+                        outputs[*mi].clear();
+                        if let Some(b) = board.tasks.get_mut(tid.as_str()) {
+                            b.status = "pending".into();
+                        }
+                    }
+                    persist_board(pool, session_id, &board).await;
+                    continue;
+                }
+                Some(_) => {}
+                None => {
+                    finish_squad_session(app, pool, &squad.squad_id, session_id, "cancelled", "检查点等待期间任务被取消").await;
+                    return;
+                }
+            }
+        }
+        lv += 1;
     }
 
     // 最终汇总：DAG 取所有「汇点」（无任何下游依赖的节点）产出；线性取末序节点产出。
@@ -2275,6 +3055,20 @@ async fn run_squad_pipeline(
     .execute(pool)
     .await;
 
+    write_metrics_round(app, &pool, &squad.squad_id, &session_id).await; // S0-4d metrics 落盘
+    build_and_persist_pack(&pool, app, &squad.squad_id, &session_id, "done", &summary).await; // S2 交付包落库
+    // S1 批次2（§4.4.5）：决策卡——汇总文本中的【squad-decisions】尾块结构化落表。
+    let decisions = parse_squad_decisions(&summary);
+    persist_decisions(pool, app, &squad.squad_id, session_id, &decisions).await;
+    // ===== S2（§4.6 L4）：交付确认门禁——manual 模式 Pack 生成后挂起等用户确认 =====
+    if !unattended {
+        if !gate_delivery_confirm(app, pool, &squad.squad_id, session_id, cancel).await {
+            finish_squad_session(app, pool, &squad.squad_id, session_id, "cancelled", "用户要求修订，会话按取消收尾（已完成产物保留在交接箱）").await;
+            return;
+        }
+    }
+    squad_inject_flush_session(app, pool, &squad.squad_id, session_id).await; // S2 插话兜底清账
+
     let _ = sqlx::query(
         "UPDATE agent_squad_session SET status='done', snapshot=?, updated_at=? WHERE id=?",
     )
@@ -2283,11 +3077,6 @@ async fn run_squad_pipeline(
     .bind(session_id)
     .execute(pool)
     .await;
-    write_metrics_round(app, &pool, &squad.squad_id, &session_id).await; // S0-4d metrics 落盘
-    build_and_persist_pack(&pool, app, &squad.squad_id, &session_id, "done", &summary).await; // S2 交付包落库
-    // S1 批次2（§4.4.5）：决策卡——汇总文本中的【squad-decisions】尾块结构化落表。
-    let decisions = parse_squad_decisions(&summary);
-    persist_decisions(pool, app, &squad.squad_id, session_id, &decisions).await;
 
     events::emit_squad_round(
         app,
@@ -2356,6 +3145,11 @@ async fn run_squad_chat(
         participants
     };
 
+    // S2（§4.11）：群聊插话信箱——每个成员绑定（primary=agent_id），发言前排空注入。
+    for m in &squad.members {
+        squad_inject_bind(session_id, &m.agent.agent_id, &[]);
+    }
+
     let mut blackboard = String::new();
     for r in 0..max_rounds {
         // S0-3 取消检测点：squad 级取消 → 立即收尾。
@@ -2373,10 +3167,24 @@ async fn run_squad_chat(
             } else {
                 blackboard.clone()
             };
-            let user = format!(
-                "讨论目标：\n{}\n\n## 当前讨论黑板（所有成员历史发言）\n{}\n\n请给出你第 {} 轮发言。",
-                prompt, history, r + 1
-            );
+            // S2（§4.11）：用户插话注入——成员发言前排空其信箱（运行中打断，圆桌无 pipeline 安全点）。
+            let inject_notes = squad_inject_take(session_id, &member.agent.agent_id);
+            let user = if inject_notes.is_empty() {
+                format!(
+                    "讨论目标：\n{}\n\n## 当前讨论黑板（所有成员历史发言）\n{}\n\n请给出你第 {} 轮发言。",
+                    prompt, history, r + 1
+                )
+            } else {
+                tracing::info!("[squad] chat 成员 {} 第 {} 轮注入用户插话 {} 条", member.agent.agent_id, r + 1, inject_notes.len());
+                squad_inject_mark_delivered(app, pool, &squad.squad_id, session_id, &member.agent.agent_id, &inject_notes).await;
+                format!(
+                    "讨论目标：\n{}\n\n## 当前讨论黑板（所有成员历史发言）\n{}\n\n{}\n\n请给出你第 {} 轮发言。",
+                    prompt,
+                    history,
+                    render_inject_section(&inject_notes),
+                    r + 1
+                )
+            };
             let messages = vec![
                 json!({ "role": "system", "content": sys }),
                 json!({ "role": "user", "content": user }),
@@ -2477,6 +3285,23 @@ async fn run_squad_chat(
     .execute(pool)
     .await;
 
+    write_metrics_round(app, &pool, &squad.squad_id, &session_id).await; // S0-4d metrics 落盘
+    build_and_persist_pack(&pool, app, &squad.squad_id, &session_id, "done", &summary).await; // S2 交付包落库
+    // S1 批次2（§4.4.5）：决策卡——汇总文本中的【squad-decisions】尾块结构化落表。
+    let decisions = parse_squad_decisions(&summary);
+    persist_decisions(pool, app, &squad.squad_id, session_id, &decisions).await;
+    // ===== S2（§4.6 L4）：交付确认门禁——manual 模式 Pack 生成后挂起等用户确认 =====
+    {
+        let unattended = matches!(squad.run_strategy.execution_mode.as_str(), "schedule" | "api");
+        if !unattended {
+            if !gate_delivery_confirm(app, pool, &squad.squad_id, session_id, cancel).await {
+                finish_squad_session(app, pool, &squad.squad_id, session_id, "cancelled", "用户要求修订，会话按取消收尾（已完成产物保留在交接箱）").await;
+                return;
+            }
+        }
+    }
+    squad_inject_flush_session(app, pool, &squad.squad_id, session_id).await; // S2 插话兜底清账
+
     let _ = sqlx::query(
         "UPDATE agent_squad_session SET status='done', snapshot=?, updated_at=? WHERE id=?",
     )
@@ -2485,11 +3310,6 @@ async fn run_squad_chat(
     .bind(session_id)
     .execute(pool)
     .await;
-    write_metrics_round(app, &pool, &squad.squad_id, &session_id).await; // S0-4d metrics 落盘
-    build_and_persist_pack(&pool, app, &squad.squad_id, &session_id, "done", &summary).await; // S2 交付包落库
-    // S1 批次2（§4.4.5）：决策卡——汇总文本中的【squad-decisions】尾块结构化落表。
-    let decisions = parse_squad_decisions(&summary);
-    persist_decisions(pool, app, &squad.squad_id, session_id, &decisions).await;
 
     events::emit_squad_round(
         app,
@@ -2629,5 +3449,122 @@ mod s1_tests {
         );
         assert!(bundle.open_questions.iter().any(|q| q.contains("missing.md")));
         std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    /* ================= S2 批次2 ================= */
+
+    /// S2：插话入参校验——空内容/超长拒绝；mode 归一化（宽容，未知值归 soft）。
+    #[test]
+    fn inject_input_validation() {
+        assert!(validate_inject_input("", "soft").is_err());
+        assert!(validate_inject_input("   ", "soft").is_err());
+        let long = "长".repeat(2001);
+        assert!(validate_inject_input(&long, "soft").is_err());
+        assert_eq!(validate_inject_input("用 JWT 不要 session", "hard").unwrap(), "hard");
+        assert_eq!(validate_inject_input("先想清楚", "pre-talk").unwrap(), "pre_talk");
+        assert_eq!(validate_inject_input("补充说明", "whatever").unwrap(), "soft");
+    }
+
+    /// S2：注入形态——user 消息带稳定指令（用户补充指示优先级高于冲突部分）。
+    #[test]
+    fn inject_message_format() {
+        let msg = format_inject_user_msg("鉴权用 JWT");
+        assert!(msg.contains("用户打断补充"));
+        assert!(msg.contains("鉴权用 JWT"));
+        assert!(msg.contains("优先级高于原任务指令"));
+        // 预嘱段 / 群聊插话段渲染
+        let notes = vec![
+            InjectNote { id: "i1".into(), mode: "pre_talk".into(), content: "接口用 snake_case".into() },
+            InjectNote { id: "i2".into(), mode: "soft".into(), content: "补一句".into() },
+        ];
+        let pre = render_pre_talk_section(&notes);
+        assert!(pre.starts_with("## 用户预嘱"));
+        assert!(pre.contains("- 接口用 snake_case"));
+        let inj = render_inject_section(&notes);
+        assert!(inj.starts_with("## 用户插话"));
+        assert!(inj.contains("- 补一句"));
+    }
+
+    /// S2：检查点决议归一化——rework 之外一律 continue（宽容防卡死）。
+    #[test]
+    fn checkpoint_decision_normalize() {
+        assert_eq!(normalize_checkpoint_decision("rework"), "rework");
+        assert_eq!(normalize_checkpoint_decision(" REWORK "), "rework");
+        assert_eq!(normalize_checkpoint_decision("continue"), "continue");
+        assert_eq!(normalize_checkpoint_decision(" nonsense "), "continue");
+    }
+
+    /// S2：信箱多别名键共享——primary（agent_id）与别名键（task_id）排空的是同一个队列；
+    /// 未绑定的别名键走独立信箱互不干扰。
+    #[test]
+    fn inject_mailbox_alias_keys_share_queue() {
+        let sid = "sqs_test_alias";
+        squad_inject_register_session(sid, false);
+        let mb = squad_inject_bind(sid, "agent-a", &["t1"]);
+        mb.lock().unwrap().push(InjectNote { id: "n1".into(), mode: "soft".into(), content: "x".into() });
+        // 另一个目标键：独立信箱
+        let mb2 = squad_inject_bind(sid, "agent-b", &[]);
+        assert_eq!(squad_inject_take(sid, "t1").len(), 1, "别名键命中同一信箱");
+        assert!(squad_inject_take(sid, "agent-a").is_empty(), "排空后不再重复");
+        assert!(squad_inject_take(sid, "agent-b").is_empty(), "独立信箱互不干扰");
+        mb2.lock().unwrap().push(InjectNote { id: "n2".into(), mode: "soft".into(), content: "y".into() });
+        assert_eq!(squad_inject_take_mailbox(&mb2).len(), 1);
+        // 清理：守卫式摘除等价物
+        let mut g = SQUAD_INJECTS.lock().unwrap();
+        g.as_mut().unwrap().remove(sid);
+    }
+
+    /// S2 回归：计划门禁批准必须放行（2026-09-28 真 bug——resolve 先 remove 再置位，
+    /// 等待循环读不到 Some(true) 把批准当拒绝，批准也走取消收尾）。
+    #[test]
+    fn plan_gate_approve_resolves_true() {
+        let sid = "sqs_test_plan_gate";
+        SQUAD_PLAN_GATES
+            .lock()
+            .unwrap()
+            .get_or_insert_with(std::collections::HashMap::new)
+            .insert(sid.to_string(), PlanGate { approved: Arc::new(std::sync::Mutex::new(None)) });
+        assert!(resolve_plan_gate(sid, true), "应命中挂起的 gate");
+        {
+            let g = SQUAD_PLAN_GATES.lock().unwrap();
+            let gate = g.as_ref().unwrap().get(sid).unwrap();
+            assert_eq!(*gate.approved.lock().unwrap(), Some(true), "决议应保留在 gate 上供等待循环读取");
+        }
+        remove_plan_gate(sid);
+        assert!(!resolve_plan_gate(sid, true), "清理后不应再命中");
+    }
+
+    /// S2：检查点 / 交付门禁决议入口——命中置值；未注册返回 false。
+    #[test]
+    fn checkpoint_and_delivery_resolve() {
+        let sid_cp = "sqs_test_checkpoint";
+        SQUAD_CHECKPOINTS
+            .lock()
+            .unwrap()
+            .get_or_insert_with(std::collections::HashMap::new)
+            .insert(sid_cp.to_string(), CheckpointGate { decision: Arc::new(std::sync::Mutex::new(None)) });
+        assert!(resolve_squad_checkpoint(sid_cp, "rework"));
+        {
+            let g = SQUAD_CHECKPOINTS.lock().unwrap();
+            let gate = g.as_ref().unwrap().get(sid_cp).unwrap();
+            assert_eq!(gate.decision.lock().unwrap().as_deref(), Some("rework"));
+        }
+        remove_checkpoint_gate(sid_cp);
+        assert!(!resolve_squad_checkpoint(sid_cp, "continue"));
+
+        let sid_dl = "sqs_test_delivery";
+        SQUAD_DELIVERY_GATES
+            .lock()
+            .unwrap()
+            .get_or_insert_with(std::collections::HashMap::new)
+            .insert(sid_dl.to_string(), DeliveryGate { approved: Arc::new(std::sync::Mutex::new(None)) });
+        assert!(resolve_squad_delivery(sid_dl, false), "要求修订也应命中");
+        {
+            let g = SQUAD_DELIVERY_GATES.lock().unwrap();
+            let gate = g.as_ref().unwrap().get(sid_dl).unwrap();
+            assert_eq!(*gate.approved.lock().unwrap(), Some(false));
+        }
+        let mut g = SQUAD_DELIVERY_GATES.lock().unwrap();
+        g.as_mut().unwrap().remove(sid_dl);
     }
 }

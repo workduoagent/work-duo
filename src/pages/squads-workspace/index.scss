@@ -619,6 +619,17 @@
     font-size: 13px;
     color: var(--color-foreground-muted);
   }
+
+  /* S2（§4.11）：插话输入行——目标 / 模式 / 内容 / 送达 */
+  &__inject {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+
+    > :nth-child(3) {
+      flex: 1;
+    }
+  }
 }
 
 .squad-round {

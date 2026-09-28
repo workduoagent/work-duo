@@ -1156,6 +1156,41 @@ pub fn emit_squad_memory_anchored(app: &AppHandle, item: &SquadMemoryItem) {
     );
 }
 
+// ---- S2（§4.11）打断说话生命周期事件：queued（入队）/ delivered（已注入成员下一轮）/ dropped（节点已终态） ----
+
+pub const EVT_SQUAD_INJECT_QUEUED: &str = "agent-squad-inject-queued";
+pub const EVT_SQUAD_INJECT_DELIVERED: &str = "agent-squad-inject-delivered";
+pub const EVT_SQUAD_INJECT_DROPPED: &str = "agent-squad-inject-dropped";
+
+/// 插话生命周期载荷（camelCase）。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SquadInjectEventPayload {
+    pub inject_id: String,
+    pub squad_id: String,
+    pub session_id: String,
+    /// 目标键：编排式任务 id / 流水线节点 id / 群聊成员 agent_id。
+    pub task_id: String,
+    /// soft | hard | pre_talk。
+    pub mode: String,
+}
+
+fn emit_squad_inject_event(app: &AppHandle, event: &str, payload: &SquadInjectEventPayload) {
+    emit(app, event, payload);
+}
+
+pub fn emit_squad_inject_queued(app: &AppHandle, payload: &SquadInjectEventPayload) {
+    emit_squad_inject_event(app, EVT_SQUAD_INJECT_QUEUED, payload);
+}
+
+pub fn emit_squad_inject_delivered(app: &AppHandle, payload: &SquadInjectEventPayload) {
+    emit_squad_inject_event(app, EVT_SQUAD_INJECT_DELIVERED, payload);
+}
+
+pub fn emit_squad_inject_dropped(app: &AppHandle, payload: &SquadInjectEventPayload) {
+    emit_squad_inject_event(app, EVT_SQUAD_INJECT_DROPPED, payload);
+}
+
 /// 记忆向量回填进度载荷（#20260918004）。
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]

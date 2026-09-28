@@ -319,6 +319,10 @@ export async function listSquadSessions(squadId: string): Promise<SquadSession[]
     mode: (r.mode as SquadSession['mode']) || 'orchestrator',
     status: r.status,
     snapshot: r.snapshot ?? undefined,
+    // S1/S2：黑板状态板 / Mission Contract / Delivery Pack 快照（此前 SELECT * 取了但映射丢弃）。
+    boardJson: r.board_json ?? undefined,
+    contractJson: r.contract_json ?? undefined,
+    packJson: r.pack_json ?? undefined,
     createdAt: safeIso(r.created_at),
     updatedAt: safeIso(r.updated_at),
   }))

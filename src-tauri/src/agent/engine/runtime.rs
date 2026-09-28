@@ -560,6 +560,8 @@ impl AgentRuntime {
             &task.recovery,
             false,
             Some(&task.approval_grants),
+            // S2（§4.11）：单 Agent 路径无小分队插话信箱，None=安全点钩子不生效。
+            None,
         )
         .await;
         // 收尾：保存会话子图快照（完整子图，供后续检索/复盘）。

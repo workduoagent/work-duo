@@ -1355,6 +1355,60 @@ pub async fn squad_plan_approve(
     ))
 }
 
+/// S2（§4.11）打断说话：向运行中的协作会话目标（任务 id / 成员 agent_id / 角色）插入用户发言。
+/// mode：soft（默认，下一安全点生效）| hard（尽快注入，UI 强调）| pre_talk（未启动任务的预嘱）。
+/// 返回 inject_id（审计主键，agent_squad_inject 表）。
+#[tauri::command]
+#[tracing::instrument(skip_all)]
+pub async fn squad_inject_send(
+    app: AppHandle,
+    squad_id: String,
+    session_id: String,
+    task_id: String,
+    content: String,
+    mode: Option<String>,
+) -> Result<String, String> {
+    let pool = get_api_pool(&app).await?;
+    crate::agent::squad::squad_orchestrator::squad_inject_send(
+        &app,
+        &pool,
+        &squad_id,
+        &session_id,
+        &task_id,
+        &content,
+        mode.as_deref().unwrap_or("soft"),
+    )
+    .await
+}
+
+/// S2（§4.6 L2）：检查点决议——Wave 完成后挂起时用户选择继续（continue）或返工（rework）。
+#[tauri::command]
+#[tracing::instrument(skip_all)]
+pub async fn squad_checkpoint_resolve(
+    _app: AppHandle,
+    session_id: String,
+    decision: String,
+) -> Result<bool, String> {
+    Ok(crate::agent::squad::squad_orchestrator::resolve_squad_checkpoint(
+        &session_id,
+        &decision,
+    ))
+}
+
+/// S2（§4.6 L4）：交付确认——Delivery Pack 生成后用户确认交付（true）或要求修订（false，会话按取消收尾）。
+#[tauri::command]
+#[tracing::instrument(skip_all)]
+pub async fn squad_delivery_resolve(
+    _app: AppHandle,
+    session_id: String,
+    approved: bool,
+) -> Result<bool, String> {
+    Ok(crate::agent::squad::squad_orchestrator::resolve_squad_delivery(
+        &session_id,
+        approved,
+    ))
+}
+
 /* ------------------------------------------------------------------ *
  * 小分队 API 触发服务配置（存于 app_config）
  * ------------------------------------------------------------------ */

@@ -2,7 +2,7 @@
 -- Work Duo 本地数据库初始化脚本（DDL 单一事实源）
 -- 当前 schema 版本（台账 S11）：每次 DDL 变更时同步递增（与 updater.sql 末段版本号一致），
 -- SqlService.updateTables 读取此标记作为 user_version 封存目标。
--- SCHEMA_VERSION: 35
+-- SCHEMA_VERSION: 36
 -- 由 InitContext 在「每次启动」时幂等执行：
 --   - CREATE TABLE IF NOT EXISTS：表已存在则跳过，不会重建/丢数据；
 --   - INSERT OR IGNORE：种子已存在则跳过，不会重复插入。
@@ -644,6 +644,28 @@ CREATE TABLE IF NOT EXISTS agent_squad_decision
     FOREIGN KEY(session_id) REFERENCES agent_squad_session(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_squad_decision_session ON agent_squad_decision(session_id, created_at);
+
+-- ============ 小分队打断说话信箱（agent_squad_inject，S2 §4.11） ============
+-- 插话审计唯一事实源：运行中打断（Live inject）/ 等待中搭话（pre_talk）统一落表。
+--   task_id  目标键：编排式任务 id（t1/t2…）/ 流水线节点 id（n1/n2…）/ 群聊成员 agent_id；
+--   mode     soft | hard | pre_talk（MVP 中 soft/hard 均在下一安全点注入，hard 仅 UI 强调）；
+--   status   queued → delivered | dropped（会话终态未消费即 dropped）。
+CREATE TABLE IF NOT EXISTS agent_squad_inject
+(
+    id           TEXT    PRIMARY KEY,
+    squad_id     TEXT    NOT NULL,
+    session_id   TEXT    NOT NULL,
+    task_id      TEXT    NOT NULL,
+    run_id       TEXT,
+    source       TEXT    NOT NULL,           -- user | leader | system
+    mode         TEXT    NOT NULL,           -- soft | hard | pre_talk
+    content      TEXT    NOT NULL,
+    status       TEXT    NOT NULL,           -- queued | delivered | dropped
+    created_at   INTEGER NOT NULL,
+    delivered_at INTEGER,
+    FOREIGN KEY(session_id) REFERENCES agent_squad_session(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_squad_inject_session ON agent_squad_inject(session_id, created_at);
 
 -- ============ 小分队协作轮次表（agent_squad_round） ============
 -- 协作过程中每一条发言/产物（讨论黑板）：

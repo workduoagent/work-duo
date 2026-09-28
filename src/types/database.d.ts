@@ -209,8 +209,9 @@ export interface AgentSquadChatConfigRow {
 }
 
 /** 小分队协作运行表（agent_squad_session）行映射。
- * - squad_id：所属团队；mode：协作模式快照；status：运行状态；
- * - snapshot：运行态快照（JSON，可空）。
+ * - squad_id：所属团队；mode：协作模式快照；status：运行状态（running/done/cancelled/failed/awaiting_delivery）；
+ * - snapshot：运行态快照（JSON，可空）；
+ * - board_json / contract_json / pack_json：S1/S2 增量列（黑板状态板 / Mission Contract / Delivery Pack）。
  */
 export interface AgentSquadSessionRow {
   id: string
@@ -219,8 +220,29 @@ export interface AgentSquadSessionRow {
   mode: string
   status: string
   snapshot: string | null
+  board_json: string | null
+  contract_json: string | null
+  pack_json: string | null
   created_at: number
   updated_at: number
+}
+
+/** 小分队打断说话信箱表（agent_squad_inject，S2 §4.11）行映射。
+ * - task_id：目标键（编排式任务 id / 流水线节点 id / 群聊成员 agent_id）；
+ * - mode：soft | hard | pre_talk；status：queued → delivered | dropped。
+ */
+export interface AgentSquadInjectRow {
+  id: string
+  squad_id: string
+  session_id: string
+  task_id: string
+  run_id: string | null
+  source: string
+  mode: string
+  content: string
+  status: string
+  created_at: number
+  delivered_at: number | null
 }
 
 /** 小分队协作轮次表（agent_squad_round）行映射（讨论黑板）。

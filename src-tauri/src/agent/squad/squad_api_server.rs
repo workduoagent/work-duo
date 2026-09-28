@@ -9,7 +9,7 @@
 //! 开关 `squad_api_enabled`、端口 `squad_api_port`、令牌 `squad_api_token` 均存于 app_config，
 //! 每次请求实时读取 —— 改令牌/开关无需重启（端口变更需重启服务）。
 
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpListener;
 use std::net::TcpStream;
 use std::time::Duration;
@@ -106,6 +106,7 @@ fn handle_conn(mut stream: TcpStream, app: AppHandle) {
         let path = parts[1].to_string();
 
         let mut auth: Option<String> = None;
+        let mut content_length: usize = 0;
         loop {
             let mut line = String::new();
             if reader.read_line(&mut line).is_err() {
@@ -118,13 +119,27 @@ fn handle_conn(mut stream: TcpStream, app: AppHandle) {
             if let Some(rest) = l.strip_prefix("Authorization:") {
                 auth = Some(rest.trim().to_string());
             }
+            if let Some(rest) = l.strip_prefix("Content-Length:") {
+                content_length = rest.trim().parse::<usize>().unwrap_or(0);
+            }
         }
-        (method, path, auth)
+        // S2：读请求体（/inject 需要 JSON body；上限 64KB 防滥用）。
+        let body = if content_length > 0 && content_length <= 64 * 1024 {
+            let mut buf = vec![0u8; content_length];
+            if reader.read_exact(&mut buf).is_ok() {
+                Some(String::from_utf8_lossy(&buf).to_string())
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        (method, path, auth, body)
     };
     // reader 离开作用域，释放对 stream 的借用，随后可写回。
 
     let (status, body) = tauri::async_runtime::block_on(async {
-        route(&app, &request.0, &request.1, request.2.as_deref()).await
+        route(&app, &request.0, &request.1, request.2.as_deref(), request.3.as_deref()).await
     });
 
     let resp = format!(
@@ -140,6 +155,7 @@ async fn route(
     method: &str,
     path: &str,
     auth: Option<&str>,
+    body: Option<&str>,
 ) -> (u16, String) {
     if method == "GET" && path == "/api/health" {
         return (200, "{\"ok\":true}".to_string());
@@ -203,6 +219,68 @@ async fn route(
         };
         let n = crate::agent::squad::squad_orchestrator::cancel_squad_sessions(&resolved);
         return (200, format!("{{\"ok\":true,\"cancelled_sessions\":{n}}}"));
+    }
+
+    // S2（§4.11）：外部插话入口——body JSON {sessionId?, taskId, content, mode?}。
+    // sessionId 缺省时解析该小分队最新的 running 会话；鉴权口径与 /cancel 一致（本机回环）。
+    if method == "POST" && path.starts_with("/api/squads/") && path.ends_with("/inject") {
+        let id = &path["/api/squads/".len()..path.len() - "/inject".len()];
+        if id.is_empty() {
+            return (400, err_json("squad id 为空"));
+        }
+        let Some(raw) = body else {
+            return (400, err_json("missing JSON body"));
+        };
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(raw) else {
+            return (400, err_json("invalid JSON body"));
+        };
+        let task_id = v.get("taskId").and_then(|x| x.as_str()).unwrap_or("").trim().to_string();
+        let content = v.get("content").and_then(|x| x.as_str()).unwrap_or("").to_string();
+        let mode = v.get("mode").and_then(|x| x.as_str()).unwrap_or("soft").to_string();
+        if task_id.is_empty() {
+            return (400, err_json("taskId 为空"));
+        }
+        let pool = match get_pool(app).await {
+            Ok(p) => p,
+            Err(e) => return (500, err_json(&e)),
+        };
+        let resolved = match resolve_squad_id(&pool, id).await {
+            Some(rid) => rid,
+            None => return (404, err_json("squad not found")),
+        };
+        let session_id = match v
+            .get("sessionId")
+            .and_then(|x| x.as_str())
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+        {
+            Some(sid) => sid,
+            None => {
+                match sqlx::query_scalar::<_, String>(
+                    "SELECT id FROM agent_squad_session WHERE squad_id = ? AND status = 'running' ORDER BY created_at DESC LIMIT 1",
+                )
+                .bind(&resolved)
+                .fetch_optional(&pool)
+                .await
+                .ok()
+                .flatten()
+                {
+                    Some(sid) => sid,
+                    None => return (404, err_json("no running session for squad")),
+                }
+            }
+        };
+        return match crate::agent::squad::squad_orchestrator::squad_inject_send(
+            app, &pool, &resolved, &session_id, &task_id, &content, &mode,
+        )
+        .await
+        {
+            Ok(inject_id) => (
+                200,
+                format!("{{\"ok\":true,\"injectId\":\"{inject_id}\",\"sessionId\":\"{session_id}\"}}"),
+            ),
+            Err(e) => (400, err_json(&e)),
+        };
     }
 
     (404, "{\"ok\":false,\"error\":\"not found\"}".to_string())

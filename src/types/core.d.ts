@@ -462,6 +462,8 @@ export interface SquadRunStrategy {
   retryCount: number
   /** 定时 / API 模式触发时使用的默认任务指令。 */
   schedulePrompt?: string | null
+  /** S2：本次协作的 token 总预算（prompt+completion；0=不限）。 */
+  budgetTokens?: number
 }
 
 /** 群聊专属配置（agent_squad_chat_config）。 */
@@ -545,6 +547,10 @@ export interface SquadSession {
   snapshot?: string | null
   /** S1：黑板 L2 状态板快照（任务状态机 + 产物索引 + 决策卡），JSON 串。 */
   boardJson?: string
+  /** S2：Mission Contract 快照（任务分工/依赖/期望产物），JSON 串。 */
+  contractJson?: string
+  /** S2：Delivery Pack 证据包（合同 + 成员证据 + 产物索引 + 成本），JSON 串。 */
+  packJson?: string
   createdAt: string
   updatedAt: string
 }
@@ -556,6 +562,12 @@ export type SquadRoundKind =
   | 'message'
   | 'summary'
   | 'system'
+  | 'plan'
+  | 'handoff'
+  | 'metrics'
+  | 'checkpoint'
+  | 'delivery'
+  | 'inject'
 
 export interface SquadRound {
   id?: string

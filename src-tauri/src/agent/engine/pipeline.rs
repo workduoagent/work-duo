@@ -90,6 +90,10 @@ fn looks_like_repair_task(task: &PlanSubTask) -> bool {
     KEYWORDS.iter().any(|k| hay.contains(k))
 }
 
+/// S2（§4.11）：InjectMailbox 安全点钩子——工具轮边界调用一次，返回待注入的 user 消息文本
+/// （小分队编排器构造；DB/事件回写在钩子闭包内异步完成，本模块只负责注入不感知信箱）。
+pub type InjectHook = std::sync::Arc<dyn Fn() -> Vec<String> + Send + Sync>;
+
 /// 流水线执行结果。
 pub struct PipelineResult {
     pub final_text: String,
@@ -183,6 +187,9 @@ pub async fn run_pipeline(
     unattended: bool,
     // 15007 边审批策略授权集（主 Agent 传入；小分队等无授权集场景传 None → 策略不适用，维持旧行为）。
     grants: Option<&crate::agent::engine::policy::ApprovalGrants>,
+    // S2（§4.11）InjectMailbox 安全点钩子：小分队成员执行时由编排器传入——每个工具轮边界
+    // 调用一次，返回要注入的 user 消息文本（已含稳定指令包装）；单 Agent 路径传 None 行为不变。
+    inject_hook: Option<&InjectHook>,
 ) -> PipelineResult {
     // D' 产物回滚（2026-09-24）：run 前对工作空间业务文件做快照（尽力而为，失败仅告警）。
     // 回滚入口：MCP `agent:snapshot_list` / `agent:snapshot_rollback`。
@@ -310,6 +317,7 @@ pub async fn run_pipeline(
                 &background,
                 &session_tool_outputs,
                 grants,
+                inject_hook,
             )
         });
         let results = join_all(futures).await;
@@ -933,6 +941,8 @@ async fn run_subtask(
     session_tool_outputs: &Arc<Mutex<Vec<RunOutcome>>>,
     // 15007 边审批策略授权集（None=策略不适用，如小分队）。
     grants: Option<&crate::agent::engine::policy::ApprovalGrants>,
+    // S2（§4.11）InjectMailbox 安全点钩子（见 run_pipeline 注释）。
+    inject_hook: Option<&InjectHook>,
 ) -> (SubTaskOutput, (u64, u64)) {
     // 认知上下文绝对隔离：崭新的 messages，0 历史包袱。
     let t0 = Instant::now(); // 子任务级耗时基准（闭环日志用）
@@ -1146,6 +1156,16 @@ async fn run_subtask(
                 },
                 usage,
             );
+        }
+        // S2（§4.11）：InjectMailbox 安全点消费——工具轮边界（上一轮工具结果已齐、下一轮 LLM
+        // 调用前）注入用户插话为 user 消息；绝不撕裂工具调用（无「强杀当前工具」），注入后
+        // 随后的 sanitize_message_sequence 自然保证协议安全（§4.11.3 安全点表主路径）。
+        if let Some(hook) = inject_hook {
+            for text in hook() {
+                if !text.is_empty() {
+                    messages.push(json!({ "role": "user", "content": text }));
+                }
+            }
         }
         round += 1;
         // 协议安全过滤：每次调用前无条件执行配对自检（彻底防 400）。

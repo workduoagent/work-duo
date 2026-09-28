@@ -60,6 +60,7 @@ import type {
 import {listen, type UnlistenFn} from '@tauri-apps/api/event'
 import { useTauriEvent } from '@/hooks/useTauriEvent'
 import {invoke} from '@tauri-apps/api/core'
+import {saveTextFile} from '@/core/file/export-file'
 import {open as openDialog} from '@tauri-apps/plugin-dialog'
 import {
     ReactFlow,
@@ -144,6 +145,8 @@ interface EditorState {
     schedulePrompt: string
     maxRounds: number
     summarizerAgentId: string
+    /** S2：协作 token 总预算（prompt+completion；0=不限），读写 run_strategy.budget_tokens。 */
+    budgetTokens: number
     members: SquadMemberInput[]
 }
 
@@ -165,6 +168,7 @@ function blankState(): EditorState {
         schedulePrompt: '',
         maxRounds: 8,
         summarizerAgentId: '',
+        budgetTokens: 0,
         members: [],
     }
 }
@@ -188,6 +192,7 @@ function fromSquad(s: SquadInfo): EditorState {
         schedulePrompt: s.runStrategy.schedulePrompt ?? '',
         maxRounds: s.chatConfig.maxRounds,
         summarizerAgentId: s.chatConfig.summarizerAgentId ?? '',
+        budgetTokens: s.runStrategy.budgetTokens ?? 0,
         members: s.members.map((m) => ({
             agentId: m.agentId,
             role: m.role,
@@ -697,6 +702,8 @@ function SquadEditorModal({
                     retryCount: state.retryCount,
                     scheduleCron: state.scheduleCron.trim() || null,
                     schedulePrompt: state.schedulePrompt.trim() || null,
+                    // S2：0=不限（后端 budget_tokens: u64，0 走「无预算闸门」分支）
+                    budgetTokens: state.budgetTokens > 0 ? state.budgetTokens : 0,
                 },
                 members,
                 chatConfig: {maxRounds: state.maxRounds, summarizerAgentId},
@@ -1163,6 +1170,24 @@ function SquadEditorModal({
                                             </div>
                                         </Field>
 
+                                        <Field className="squad-editor__row">
+                                            <FieldLabel>
+                                                Token 总预算
+                                                <Tooltip title="整个协作过程（含编排侧与全部成员）的 token 消耗上限；达到 80% 告警一次，达到 100% 停止启动新任务并收尾保留产物。0 表示不限。">
+                                                    <Info size={13} style={{marginLeft: 4, cursor: 'help'}}/>
+                                                </Tooltip>
+                                            </FieldLabel>
+                                            <div className="squad-editor__strategy-line">
+                                                <InputNumber
+                                                    min={0}
+                                                    step={1000}
+                                                    value={state.budgetTokens}
+                                                    onChange={(v) => setState((s) => ({...s, budgetTokens: v ?? 0}))}
+                                                />
+                                                <span>{state.budgetTokens > 0 ? 'tokens（80% 告警 / 100% 软熔断）' : '（0 = 不限制）'}</span>
+                                            </div>
+                                        </Field>
+
                                         {state.mode === 'chat' && (
                                             <Field className="squad-editor__row">
                                                 <FieldLabel>Token 防洪堤</FieldLabel>
@@ -1273,6 +1298,13 @@ function SquadRunConsole({
     const [rounds, setRounds] = useState<SquadRoundView[]>([])
     const [summary, setSummary] = useState('')
     const [planPending, setPlanPending] = useState(false)
+    const [checkpointPending, setCheckpointPending] = useState(false)
+    const [deliveryPending, setDeliveryPending] = useState(false)
+    // S2：插话输入（打断 / 预嘱）
+    const [injectTarget, setInjectTarget] = useState('')
+    const [injectMode, setInjectMode] = useState<'soft' | 'hard' | 'pre_talk'>('soft')
+    const [injectText, setInjectText] = useState('')
+    const [injectBusy, setInjectBusy] = useState(false)
     const sessionIdRef = useRef<string | null>(null)
     const unlistenRef = useRef<UnlistenFn[]>([])
 
@@ -1288,6 +1320,10 @@ function SquadRunConsole({
             setSummary('')
             setRunning(false)
             setPlanPending(false)
+            setCheckpointPending(false)
+            setDeliveryPending(false)
+            setInjectTarget('')
+            setInjectText('')
             sessionIdRef.current = null
         }
     }, [open, cleanup])
@@ -1323,6 +1359,8 @@ function SquadRunConsole({
                 if (pl.squadId !== squad.id) return
                 if (sessionIdRef.current && pl.sessionId !== sessionIdRef.current) return
                 if (pl.kind === 'plan') setPlanPending(true)
+                if (pl.kind === 'checkpoint') setCheckpointPending(true)
+                if (pl.kind === 'delivery') setDeliveryPending(true)
                 setRounds((r) => [...r, {
                     role: pl.role,
                     kind: pl.kind,
@@ -1345,6 +1383,40 @@ function SquadRunConsole({
             message.error(`启动失败：${e instanceof Error ? e.message : String(e)}`)
             setRunning(false)
             cleanup()
+        }
+    }
+
+    async function handleInject() {
+        const text = injectText.trim()
+        if (!text) {
+            message.error('请输入要补充的内容')
+            return
+        }
+        if (!injectTarget) {
+            message.error('请选择插话目标（成员）')
+            return
+        }
+        if (!sessionIdRef.current) {
+            message.error('协作尚未开始，无法插话')
+            return
+        }
+        const targetMember = squad.members.find((m) => m.agentId === injectTarget)
+        setInjectBusy(true)
+        try {
+            await invoke<string>('squad_inject_send', {
+                squadId: squad.id,
+                sessionId: sessionIdRef.current,
+                taskId: injectTarget,
+                content: text,
+                mode: injectMode,
+            })
+            const modeLabel = injectMode === 'pre_talk' ? '预嘱已入队，将在其任务启动时生效' : '已打断，将在该成员下一轮生效'
+            message.success(`已送达 ${targetMember?.role || injectTarget}：${modeLabel}`)
+            setInjectText('')
+        } catch (e) {
+            message.error(`插话失败：${e instanceof Error ? e.message : String(e)}`)
+        } finally {
+            setInjectBusy(false)
         }
     }
 
@@ -1381,35 +1453,22 @@ function SquadRunConsole({
                         <div className="squad-console__empty">运行后将在此显示成员讨论 / 子任务交付与最终汇总</div>
                     )}
                     <Spin spinning={running && rounds.length === 0}>
-                        {rounds.map((r, i) => (
-                            <div className={`squad-round squad-round--${r.kind}`} key={i}>
-                                <div className="squad-round__head">
-                                    <Tag
-                                        color={
-                                            r.kind === 'summary'
-                                                ? 'gold'
-                                                : r.kind === 'delegation'
-                                                    ? 'blue'
-                                                    : r.kind === 'system'
-                                                        ? 'default'
-                                                        : 'green'
-                                        }
-                                    >
-                                        {r.kind === 'summary'
-                                            ? '汇总'
-                                            : r.kind === 'delegation'
-                                                ? '委派规划'
-                                                : r.kind === 'system'
-                                                    ? '系统'
-                                                    : r.kind === 'message'
-                                                        ? '发言'
-                                                        : '交付'}
-                                    </Tag>
-                                    <span className="squad-round__role">{r.role}</span>
+                        {rounds.map((r, i) => {
+                            const meta = roundTagMeta(r.kind)
+                            return (
+                                <div className={`squad-round squad-round--${r.kind}`} key={i}>
+                                    <div className="squad-round__head">
+                                        <Tag color={meta.color}>{meta.label}</Tag>
+                                        <span className="squad-round__role">{r.role}</span>
+                                    </div>
+                                    {r.kind === 'metrics' ? (
+                                        <MetricsRoundView content={r.content}/>
+                                    ) : (
+                                        <div className="squad-round__content">{r.content}</div>
+                                    )}
                                 </div>
-                                <div className="squad-round__content">{r.content}</div>
-                            </div>
-                        ))}
+                            )
+                        })}
                     {planPending && (
                         <div className="squad-round squad-round--system" style={{border: '1px solid var(--color-warning, #faad14)'}}>
                             <div className="squad-round__head"><Tag color="orange">L1 计划门禁</Tag></div>
@@ -1430,6 +1489,46 @@ function SquadRunConsole({
                             </div>
                         </div>
                     )}
+                    {checkpointPending && (
+                        <div className="squad-round squad-round--system" style={{border: '1px solid var(--color-warning, #faad14)'}}>
+                            <div className="squad-round__head"><Tag color="orange">L2 检查点</Tag></div>
+                            <div className="squad-round__content">本波任务已完成，等待你的决议。返工将重跑本波全部任务（其上游交接保留）。</div>
+                            <div style={{display: 'flex', gap: 8, marginTop: 8}}>
+                                <Button variant="solid" onClick={() => {
+                                    setCheckpointPending(false)
+                                    void invoke<{ok: boolean}>('squad_checkpoint_resolve', { sessionId: sessionIdRef.current, decision: 'continue' })
+                                }}>
+                                    继续
+                                </Button>
+                                <Button variant="ghost" onClick={() => {
+                                    setCheckpointPending(false)
+                                    void invoke('squad_checkpoint_resolve', { sessionId: sessionIdRef.current, decision: 'rework' })
+                                }}>
+                                    返工本波
+                                </Button>
+                            </div>
+                        </div>
+                    )}
+                    {deliveryPending && (
+                        <div className="squad-round squad-round--system" style={{border: '1px solid var(--color-primary, #1677ff)'}}>
+                            <div className="squad-round__head"><Tag color="gold">L4 交付确认</Tag></div>
+                            <div className="squad-round__content">Delivery Pack 已生成（含成员执行证据与成本账目）。确认后协作收尾；要求修订将按取消收尾（产物保留在交接箱）。</div>
+                            <div style={{display: 'flex', gap: 8, marginTop: 8}}>
+                                <Button variant="solid" onClick={() => {
+                                    setDeliveryPending(false)
+                                    void invoke<{ok: boolean}>('squad_delivery_resolve', { sessionId: sessionIdRef.current, approved: true })
+                                }}>
+                                    确认交付
+                                </Button>
+                                <Button variant="ghost" onClick={() => {
+                                    setDeliveryPending(false)
+                                    void invoke('squad_delivery_resolve', { sessionId: sessionIdRef.current, approved: false })
+                                }}>
+                                    要求修订
+                                </Button>
+                            </div>
+                        </div>
+                    )}
                     </Spin>
                     {summary && (
                         <div className="squad-round squad-round--summary squad-round--final">
@@ -1439,6 +1538,37 @@ function SquadRunConsole({
                             <div className="squad-round__content">{summary}</div>
                         </div>
                     )}
+                </div>
+
+                {/* S2（§4.11）：插话输入——运行中打断 / 未启动预嘱；目标为小分队成员 */}
+                <div className="squad-console__inject">
+                    <Select
+                        style={{minWidth: 150}}
+                        placeholder="插话目标"
+                        value={injectTarget || undefined}
+                        onChange={(v) => setInjectTarget(v)}
+                        options={squad.members.map((m) => ({value: m.agentId, label: m.role || m.agentId}))}
+                    />
+                    <Segmented
+                        value={injectMode}
+                        onChange={(v) => setInjectMode(v as 'soft' | 'hard' | 'pre_talk')}
+                        options={[
+                            {value: 'soft', label: '打断'},
+                            {value: 'hard', label: '强打断'},
+                            {value: 'pre_talk', label: '预嘱'},
+                        ]}
+                    />
+                    <Input
+                        autoComplete="off"
+                        placeholder={injectMode === 'pre_talk' ? '任务启动前要交代的要求…' : '运行中要补充 / 纠偏的话…'}
+                        value={injectText}
+                        maxLength={2000}
+                        onChange={(e) => setInjectText(e.target.value)}
+                        onPressEnter={() => void handleInject()}
+                    />
+                    <Button variant="soft" onClick={() => void handleInject()} disabled={injectBusy || !running}>
+                        送达
+                    </Button>
                 </div>
             </div>
         </Modal>
@@ -1480,9 +1610,71 @@ function roundTagMeta(kind: string): { label: string; color: string } {
             return {label: '花费账目', color: 'geekblue'}
         case 'checkpoint':
             return {label: '检查点', color: 'orange'}
+        case 'delivery':
+            return {label: '交付确认', color: 'gold'}
+        case 'inject':
+            return {label: '用户插话', color: 'purple'}
         default:
             return {label: '交付', color: 'green'}
     }
+}
+
+/** S2：metrics round 的 content（后端 SquadMetricsAcc JSON，snake_case 字段）。 */
+interface SquadMetricsAccView {
+    prompt_tokens?: number
+    completion_tokens?: number
+    budget?: number
+    members?: Array<{
+        agent_id?: string
+        role?: string
+        prompt_tokens?: number
+        completion_tokens?: number
+        wall_ms?: number
+    }>
+}
+
+/** S2：花费账目渲染——总用量 + 预算水位 + 成员级明细（解析失败降级纯文本）。 */
+function MetricsRoundView({content}: { content: string }) {
+    let acc: SquadMetricsAccView | null = null
+    try {
+        acc = JSON.parse(content) as SquadMetricsAccView
+    } catch {
+        acc = null
+    }
+    if (!acc || (acc.prompt_tokens === undefined && acc.completion_tokens === undefined)) {
+        return <div className="squad-round__content">{content}</div>
+    }
+    const prompt = acc.prompt_tokens ?? 0
+    const completion = acc.completion_tokens ?? 0
+    const total = prompt + completion
+    const budget = acc.budget ?? 0
+    const pct = budget > 0 ? Math.min(100, Math.round((total / budget) * 100)) : null
+    return (
+        <div className="squad-round__content">
+            <div style={{display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center'}}>
+                <Tag color="geekblue" style={{marginInlineEnd: 0}}>总 tokens {total.toLocaleString()}</Tag>
+                <Tag style={{marginInlineEnd: 0}}>输入 {prompt.toLocaleString()}</Tag>
+                <Tag style={{marginInlineEnd: 0}}>输出 {completion.toLocaleString()}</Tag>
+                {budget > 0 && (
+                    <Tag color={pct && pct >= 100 ? 'red' : pct && pct >= 80 ? 'orange' : 'green'} style={{marginInlineEnd: 0}}>
+                        预算 {total.toLocaleString()} / {budget.toLocaleString()}（{pct}%）
+                    </Tag>
+                )}
+            </div>
+            {acc.members && acc.members.length > 0 && (
+                <div style={{marginTop: 6, borderTop: '1px dashed var(--color-border, #eee)', paddingTop: 6}}>
+                    {acc.members.map((m, i) => (
+                        <div key={i} style={{display: 'flex', alignItems: 'center', gap: 8, padding: '2px 0', fontSize: 12}}>
+                            <span style={{minWidth: 90}}>{m.role || m.agent_id || '成员'}</span>
+                            <span style={{color: 'var(--color-text-tertiary, #999)'}}>
+                                tokens {(m.prompt_tokens ?? 0) + (m.completion_tokens ?? 0)} · 用时 {Math.round((m.wall_ms ?? 0) / 1000)}s
+                            </span>
+                        </div>
+                    ))}
+                </div>
+            )}
+        </div>
+    )
 }
 
 /** 复用的讨论黑板渲染（运行控制台实时流 / 历史回显共用）。 */
@@ -1545,7 +1737,11 @@ function RoundBoard({rounds, summary, board}: { rounds: BoardRound[]; summary?: 
                             <Tag color={meta.color}>{meta.label}</Tag>
                             <span className="squad-round__role">{r.role}</span>
                         </div>
-                        <div className="squad-round__content">{r.content}</div>
+                        {r.kind === 'metrics' ? (
+                            <MetricsRoundView content={r.content}/>
+                        ) : (
+                            <div className="squad-round__content">{r.content}</div>
+                        )}
                     </div>
                 )
             })}
@@ -1746,6 +1942,7 @@ function SquadHistoryPanel({
     const [rounds, setRounds] = useState<BoardRound[]>([])
     const [board, setBoard] = useState<SquadBoardView | null>(null)
     const [summary, setSummary] = useState('')
+    const [packJson, setPackJson] = useState<string | null>(null)
 
     const reloadSessions = useCallback(async () => {
         try {
@@ -1762,6 +1959,7 @@ function SquadHistoryPanel({
             setRounds([])
             setBoard(null)
             setSummary('')
+            setPackJson(null)
         }
     }, [open, reloadSessions])
 
@@ -1779,8 +1977,26 @@ function SquadHistoryPanel({
             } catch {
                 setBoard(null)
             }
+            // S2：Delivery Pack（有则亮出导出按钮）。
+            setPackJson(s.packJson ?? null)
         } catch (e) {
             message.error(`读取轮次失败：${e instanceof Error ? e.message : String(e)}`)
+        }
+    }
+
+    async function handleExportPack() {
+        if (!packJson) return
+        try {
+            const pretty = JSON.stringify(JSON.parse(packJson), null, 2)
+            const sid8 = (activeId ?? 'session').replace(/[^a-zA-Z0-9]/g, '').slice(-8)
+            const ok = await saveTextFile(
+                `delivery-pack-${sid8}.json`,
+                pretty,
+                [{name: 'JSON', extensions: ['json']}],
+            )
+            if (ok) message.success('交付包已导出')
+        } catch (e) {
+            message.error(`导出失败：${e instanceof Error ? e.message : String(e)}`)
         }
     }
 
@@ -1818,7 +2034,16 @@ function SquadHistoryPanel({
                 </div>
                 <div className="squad-hist__board">
                     {activeId ? (
-                        <RoundBoard rounds={rounds} summary={summary} board={board}/>
+                        <>
+                            {packJson && (
+                                <div style={{display: 'flex', justifyContent: 'flex-end', marginBottom: 8}}>
+                                    <Button variant="soft" size="sm" onClick={() => void handleExportPack()}>
+                                        <FolderOpen size={14}/> 导出交付包
+                                    </Button>
+                                </div>
+                            )}
+                            <RoundBoard rounds={rounds} summary={summary} board={board}/>
+                        </>
                     ) : (
                         <div className="squad-console__empty">选择左侧会话查看讨论黑板。</div>
                     )}
