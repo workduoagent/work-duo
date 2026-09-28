@@ -598,3 +598,21 @@ CREATE TABLE IF NOT EXISTS agent_run_trace
 );
 CREATE INDEX IF NOT EXISTS idx_agent_run_trace_session ON agent_run_trace (session_id, started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_agent_run_trace_agent ON agent_run_trace (agent_id, started_at DESC);
+
+-- ---------- v33：小分队 S1 交接与并行（设计方案 v1.4 §4.4/§4.5/§5） ----------
+-- L2 状态板快照列（单写者=调度协程；成员不直接 UPDATE session 行）。
+ALTER TABLE agent_squad_session ADD COLUMN board_json TEXT;
+-- 交接箱登记：HandoffBundle 唯一 source of truth（§5 单源约定）。
+CREATE TABLE IF NOT EXISTS agent_squad_handoff
+(
+    id            TEXT    PRIMARY KEY,
+    squad_id      TEXT    NOT NULL,
+    session_id    TEXT    NOT NULL,
+    task_id       TEXT    NOT NULL,
+    from_agent_id TEXT    NOT NULL,
+    status        TEXT    NOT NULL,
+    bundle_json   TEXT    NOT NULL,
+    created_at    INTEGER NOT NULL,
+    FOREIGN KEY(session_id) REFERENCES agent_squad_session(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_squad_handoff_session ON agent_squad_handoff(session_id, created_at);

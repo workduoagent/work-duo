@@ -218,6 +218,294 @@ struct DelegatedTask {
     title: String,
     assignee: String,
     instruction: String,
+    /// S1：前置依赖（引用其他子任务的 title）；空 = 无依赖。
+    depends_on: Vec<String>,
+    /// S1：期望产物文件名（如 report.md）；生成 Handoff 时对照，缺失记入 open_questions。
+    expected_artifacts: Vec<String>,
+}
+
+/// S1（设计方案 v1.4 §4.4.2）：结构化交接包——Agent 间不传聊天全文，传「摘要 + 产物索引 + 未决点」。
+/// 全文留在磁盘（成员私有区 + squad 级交接箱），下游按需 read_file。
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct HandoffBundle {
+    from_agent_id: String,
+    from_role: String,
+    task_id: String,
+    /// ok | partial | failed（失败也强制产出，不允许静默消失）
+    status: String,
+    /// ≤800 字的结论 + 做了什么，给人和下游看
+    summary: String,
+    artifacts: Vec<HandoffArtifact>,
+    #[serde(default)]
+    open_questions: Vec<String>,
+    #[serde(default)]
+    metrics: HandoffMetrics,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct HandoffArtifact {
+    /// 交接箱内相对路径（shared/inbox/{task_id}/{...}）
+    path: String,
+    /// file | dir | text
+    kind: String,
+    bytes: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    preview: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    label: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+struct HandoffMetrics {
+    #[serde(default)]
+    prompt_tokens: u64,
+    #[serde(default)]
+    completion_tokens: u64,
+    #[serde(default)]
+    duration_ms: u64,
+}
+
+/// 交接箱目录（squad 级共享）：`.wd_mem/squads/{squad_id}/shared/inbox/{task_id}/`。
+/// 成员私有区产物在此留档（审计/Delivery Pack 用），投递下游时再拷进下游私有区 inbox。
+fn squad_shared_inbox(squad_id: &str) -> String {
+    let rel = format!(".wd_mem/squads/{}/shared/inbox", squad_id);
+    if std::path::Path::new(&rel).is_absolute() {
+        return rel;
+    }
+    match std::env::current_dir() {
+        Ok(cwd) => cwd.join(&rel).to_string_lossy().to_string(),
+        Err(_) => rel,
+    }
+}
+
+/// 判断产物扫描时是否跳过该路径段（引擎内部结构 / 构建产物）。
+fn is_ignored_segment(name: &str) -> bool {
+    matches!(
+        name,
+        ".wd_mem" | "node_modules" | "__pycache__" | ".git" | "target" | ".venv" | ".pytest_cache"
+    )
+}
+
+/// 递归收集工作空间产物文件（相对路径 + 字节量），排除引擎内部结构；上限 200 个防爆炸。
+fn collect_artifacts(ws: &str) -> Vec<(String, u64)> {
+    let mut out = Vec::new();
+    let root = std::path::PathBuf::from(ws);
+    fn walk(dir: &std::path::Path, rel: &str, out: &mut Vec<(String, u64)>) {
+        if out.len() >= 200 {
+            return;
+        }
+        let Ok(rd) = std::fs::read_dir(dir) else {
+            return;
+        };
+        let mut entries: Vec<_> = rd.flatten().collect();
+        entries.sort_by_key(|e| e.file_name());
+        for e in entries {
+            let name = e.file_name().to_string_lossy().to_string();
+            if is_ignored_segment(&name) {
+                continue;
+            }
+            let child_rel = if rel.is_empty() { name.clone() } else { format!("{rel}/{name}") };
+            match e.file_type() {
+                Ok(t) if t.is_dir() => walk(&e.path(), &child_rel, out),
+                Ok(t) if t.is_file() => {
+                    let bytes = e.metadata().map(|m| m.len()).unwrap_or(0);
+                    out.push((child_rel, bytes));
+                }
+                _ => {}
+            }
+            if out.len() >= 200 {
+                return;
+            }
+        }
+    }
+    walk(&root, "", &mut out);
+    out
+}
+
+/// 读取文本产物前 2KB 作为 preview（二进制内容截断后可能乱码，调用方按扩展名跳过）。
+fn read_preview(ws: &str, rel: &str) -> Option<String> {
+    let p = std::path::Path::new(ws).join(rel);
+    const TEXT_EXT: &[&str] = &[
+        "md", "txt", "json", "csv", "py", "js", "ts", "tsx", "jsx", "html", "css", "rs", "go",
+        "java", "yaml", "yml", "toml", "xml", "sql", "sh", "log",
+    ];
+    let ext = p
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase());
+    let ext = ext.as_deref()?;
+    if !TEXT_EXT.contains(&ext) {
+        return None;
+    }
+    let mut buf = Vec::new();
+    let f = std::fs::File::open(&p).ok()?;
+    use std::io::Read;
+    f.take(2048).read_to_end(&mut buf).ok()?;
+    Some(String::from_utf8_lossy(&buf).to_string())
+}
+
+/// 成员子任务终态生成 HandoffBundle（成功/失败都产出——设计 §4.4.2「不允许静默消失」）。
+/// 产物 = 成员工作空间内排除内部结构后的文件；同时把产物**留档到 squad 级交接箱**
+/// （`.wd_mem/squads/{squad_id}/shared/inbox/{task_id}/`），投递下游由调度器执行。
+fn build_handoff_bundle(
+    ws: &str,
+    squad_id: &str,
+    member_agent_id: &str,
+    member_role: &str,
+    task_id: &str,
+    final_text: &str,
+    status: &str,
+    usage: (u64, u64),
+    wall_ms: u64,
+    expected: &[String],
+) -> HandoffBundle {
+    let _ = squad_id; // 交接箱落档由调用方（有 pool 上下文）完成；此处仅组装 bundle
+    let files = collect_artifacts(ws);
+    let mut artifacts = Vec::new();
+    for (rel, bytes) in &files {
+        artifacts.push(HandoffArtifact {
+            path: rel.clone(),
+            kind: "file".into(),
+            bytes: *bytes,
+            preview: read_preview(ws, rel),
+            label: None,
+        });
+    }
+    // expectedArtifacts 对照：点名要的产物缺失 → 记入 open_questions（§13「做了活不交件」对策第一层）
+    let mut open_questions: Vec<String> = Vec::new();
+    if status == "ok" {
+        for exp in expected {
+            let hit = files.iter().any(|(rel, _)| {
+                rel == exp || rel.ends_with(&format!("/{exp}")) || rel.ends_with(exp.as_str())
+            });
+            if !hit {
+                open_questions.push(format!("期望产物「{exp}」未在工作空间找到"));
+            }
+        }
+    }
+    // 失败/部分：final_text 为空时给错误占位摘要
+    let mut summary = final_text.trim().chars().take(800).collect::<String>();
+    if summary.is_empty() {
+        summary = if status == "failed" {
+            "（子任务失败：无终文输出，详见会话错误记录）".into()
+        } else {
+            "（子任务完成但无文本输出；产物见下方列表）".into()
+        };
+    }
+    HandoffBundle {
+        from_agent_id: member_agent_id.into(),
+        from_role: member_role.into(),
+        task_id: task_id.into(),
+        status: status.into(),
+        summary,
+        artifacts,
+        open_questions,
+        metrics: HandoffMetrics {
+            prompt_tokens: usage.0,
+            completion_tokens: usage.1,
+            duration_ms: wall_ms,
+        },
+    }
+}
+
+/// 把 bundle 的产物从成员私有区**留档**到 squad 级交接箱（shared/inbox/{task_id}/）。
+fn archive_handoff_to_inbox(ws: &str, inbox_root: &str, task_id: &str, bundle: &HandoffBundle) {
+    for art in &bundle.artifacts {
+        let src = std::path::Path::new(ws).join(&art.path);
+        let dst = std::path::Path::new(inbox_root).join(task_id).join(&art.path);
+        if let Some(parent) = dst.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        if std::fs::copy(&src, &dst).is_err() {
+            tracing::warn!("[squad] 交接箱留档失败：{} → {}", src.display(), dst.display());
+        }
+    }
+}
+
+/// 把上游 Handoff 的产物**投递**到下游成员工作空间 `inbox/{task_id}/`（调度器代投，
+/// PathGuard 天然放行——文件在下游自己的工作空间内）。返回注入用的展示路径列表。
+fn deliver_handoff_to_downstream(
+    inbox_root: &str,
+    downstream_ws: &str,
+    task_id: &str,
+    bundle: &HandoffBundle,
+) -> Vec<String> {
+    let mut shown = Vec::new();
+    for art in &bundle.artifacts {
+        let src = std::path::Path::new(inbox_root).join(task_id).join(&art.path);
+        let dst = std::path::Path::new(downstream_ws)
+            .join("inbox")
+            .join(task_id)
+            .join(&art.path);
+        if let Some(parent) = dst.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        if std::fs::copy(&src, &dst).is_ok() {
+            shown.push(format!("inbox/{}/{}（{} bytes）", task_id, art.path, art.bytes));
+        }
+    }
+    shown
+}
+
+/// 按 §4.4.3 注入模板渲染单个上游交接段（只注入摘要+产物索引+未决点，不注入全文）。
+fn render_handoff_section(idx: usize, total: usize, bundle: &HandoffBundle, delivered: &[String]) -> String {
+    let mut s = format!(
+        "## 上游交接 {}/{}（来自 {}·{}，任务 {}）\n状态：{}\n摘要：\n{}\n",
+        idx, total, bundle.from_role, bundle.from_agent_id, bundle.task_id, bundle.status, bundle.summary
+    );
+    if !delivered.is_empty() {
+        s.push_str("\n可用产物（已投递到你的工作空间，需要全文用 read_file 读相对路径）：\n");
+        for d in delivered {
+            s.push_str(&format!("- {d}\n"));
+        }
+    }
+    if !bundle.open_questions.is_empty() {
+        s.push_str("\n未决点：\n");
+        for q in &bundle.open_questions {
+            s.push_str(&format!("- {q}\n"));
+        }
+    }
+    s.push_str("\n请基于以上交接继续你的任务；若交接不足，先读文件或说明缺口，不要臆造。");
+    s
+}
+
+/// round 主键进程内序号（并行 Wave 下 now_ms 同毫秒会撞主键，叠序号保唯一）。
+static ROUND_SEQ: AtomicU64 = AtomicU64::new(0);
+fn round_id() -> String {
+    format!("sqr_{}_{:05}", now_ms(), ROUND_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
+}
+
+/// S1（§4.5）：黑板 L2 状态板（board_json 列）——任务状态机 + handoff 引用 + 全队产物索引。
+/// 单写者=调度协程；Wave 内并行成员不直接 UPDATE session 行（读-改-写会丢更新）。
+#[derive(Debug, Default, serde::Serialize)]
+struct BoardTask {
+    title: String,
+    assignee: String,
+    /// pending | running | done | failed | skipped
+    status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    handoff_id: Option<String>,
+}
+
+#[derive(Debug, Default, serde::Serialize)]
+struct BoardState {
+    /// task_id（t1/t2/...）→ 任务状态
+    tasks: BTreeMap<String, BoardTask>,
+    /// 全队产物总目录（交接箱相对路径 shared/inbox/{task_id}/{...}）
+    artifacts_index: Vec<String>,
+}
+
+async fn persist_board(pool: &sqlx::SqlitePool, session_id: &str, board: &BoardState) {
+    match serde_json::to_string(board) {
+        Ok(json) => {
+            let _ = sqlx::query("UPDATE agent_squad_session SET board_json=? WHERE id=?")
+                .bind(json)
+                .bind(session_id)
+                .execute(pool)
+                .await;
+        }
+        Err(e) => tracing::warn!("[squad] board_json 序列化失败：{e}"),
+    }
 }
 
 /// 计算某成员的运行工作目录。
@@ -362,79 +650,263 @@ pub async fn run_squad_task(app: &AppHandle, squad: SquadRuntimeConfig, prompt: 
     let retry = squad.run_strategy.retry_count.max(1) as usize;
     // P2-3 模式感知恢复（与 run_squad_pipeline 同源）：schedule/api 视为无人值守。
     let unattended = matches!(squad.run_strategy.execution_mode.as_str(), "schedule" | "api");
-    for task in &delegated {
+
+    // ===== S1（设计方案 v1.4 §4.4.3）：HandoffBundle 交接 + dependsOn 拓扑 + Wave 并行 =====
+    // 感知机制由调度器做（不是模型做）：任务 done 后扫描依赖解锁，下游启动时注入上游交接段。
+    let n = delegated.len();
+    let dep_idx: Vec<Vec<usize>> = delegated
+        .iter()
+        .map(|t| {
+            t.depends_on
+                .iter()
+                .filter_map(|d| {
+                    delegated
+                        .iter()
+                        .position(|x| x.title == *d && x.title != t.title)
+                })
+                .collect()
+        })
+        .collect();
+    let inbox_root = squad_shared_inbox(&squad.squad_id);
+    let mut board = BoardState::default();
+    for (i, t) in delegated.iter().enumerate() {
+        board.tasks.insert(
+            format!("t{}", i + 1),
+            BoardTask {
+                title: t.title.clone(),
+                assignee: t.assignee.clone(),
+                status: "pending".into(),
+                handoff_id: None,
+            },
+        );
+    }
+    persist_board(&pool, &session_id, &board).await;
+
+    let mut done = vec![false; n];
+    let mut skipped = vec![false; n];
+    let mut handoffs: Vec<Option<HandoffBundle>> = vec![None; n];
+    loop {
         // S0-3 取消检测点：squad 级取消 → 立即收尾（status=cancelled，成员 pipeline 自身也会被同一标志中断）。
         if squad_cancel.load(std::sync::atomic::Ordering::SeqCst) {
             finish_squad_session(app, &pool, &squad.squad_id, &session_id, "cancelled", "任务已被用户取消").await;
             return;
         }
-        // 按角色 / agent_id 匹配成员；匹配不到则退回主管。
-        let member = match_member(&squad.members, &task.assignee).unwrap_or(&leader);
-        let ws =
-            squad_member_workspace(&squad.workspace, &squad.squad_id, &member.agent.agent_id);
-        let subtask_prompt = if context.is_empty() {
-            task.instruction.clone()
-        } else {
-            format!(
-                "{}\n\n## 前序成员产出（仅供参考，可引用其结论）\n{}",
-                task.instruction, context
-            )
-        };
-
-        let mut output = String::new();
-        let mut last_err: Option<String> = None;
-        for attempt in 0..retry {
-            match run_member_subtask(app, &member.agent, &member.role, &session_id, &subtask_prompt, &ws, unattended, Some(&squad_cancel)).await {
-                Ok(t) => {
-                    output = t;
-                    break;
+        // 就绪集合：pending 且依赖全部完成。
+        let ready: Vec<usize> = (0..n)
+            .filter(|&i| !done[i] && !skipped[i] && dep_idx[i].iter().all(|&d| done[d]))
+            .collect();
+        if ready.is_empty() {
+            // 死锁（循环依赖/依赖失败未解除）：剩余任务全部标 skipped，带说明。
+            let remaining: Vec<usize> = (0..n).filter(|&i| !done[i] && !skipped[i]).collect();
+            for i in remaining {
+                skipped[i] = true;
+                if let Some(b) = board.tasks.get_mut(&format!("t{}", i + 1)) {
+                    b.status = "skipped".into();
                 }
-                Err(e) => {
-                    last_err = Some(e.clone());
-                    tracing::info!(
-                        "[squad] 成员 {} 子任务第 {} 次失败：{}",
-                        member.agent.agent_id,
-                        attempt + 1,
-                        e
-                    );
+                context.push_str(&format!(
+                    "\n\n[{}] （子任务「{}」因依赖无法满足未执行）\n",
+                    delegated[i].assignee, delegated[i].title
+                ));
+            }
+            break;
+        }
+
+        // 波次准备：上游投递 + 注入段构造（主协程做——board 单写者 + 磁盘拷贝串行无竞争）。
+        let mut wave: Vec<(usize, String, String, String, AgentRuntimeConfig, String)> = Vec::new(); // (idx, task_id, prompt, ws, member_cfg, role)
+        for &i in &ready {
+            let task = &delegated[i];
+            let member = match_member(&squad.members, &task.assignee).unwrap_or(&leader);
+            let ws = squad_member_workspace(&squad.workspace, &squad.squad_id, &member.agent.agent_id);
+            let task_id = format!("t{}", i + 1);
+            // 直接上游的 Handoff 投递到本成员私有区 inbox（PathGuard 天然放行）。
+            let ups = &dep_idx[i];
+            let mut sections = String::new();
+            for (k, &u) in ups.iter().enumerate() {
+                if let Some(b) = &handoffs[u] {
+                    let delivered =
+                        deliver_handoff_to_downstream(&inbox_root, &ws, &format!("t{}", u + 1), b);
+                    sections.push_str(&render_handoff_section(k + 1, ups.len(), b, &delivered));
+                    sections.push('\n');
                 }
             }
+            // 注入优先 Handoff；全部上游无 Handoff（旧 schema/失败空产）→ 回退文本拼接兼容路径。
+            let subtask_prompt = if !sections.is_empty() {
+                format!("{}\n\n{sections}", task.instruction)
+            } else if context.is_empty() {
+                task.instruction.clone()
+            } else {
+                format!(
+                    "{}\n\n## 前序成员产出（仅供参考，可引用其结论）\n{}",
+                    task.instruction, context
+                )
+            };
+            if let Some(b) = board.tasks.get_mut(&task_id) {
+                b.status = "running".into();
+            }
+            wave.push((i, task_id, subtask_prompt, ws, member.agent.clone(), member.role.clone()));
         }
-        if output.is_empty() {
-            output = format!(
-                "（成员 {} 子任务执行失败：{}）",
-                member.agent.agent_id,
-                last_err.unwrap_or_default()
+        persist_board(&pool, &session_id, &board).await;
+
+        // Wave 并行执行（同成员多任务由 per-agent 锁排队串行；不同成员真并行）。
+        let mut futs = Vec::with_capacity(wave.len());
+        for (i, task_id, prompt_s, ws, agent_cfg, role) in wave {
+            // clone 在 move 块外完成（async move 会先 move 原值再 clone，跨迭代即 E0382）。
+            let cancel_c = squad_cancel.clone();
+            let session_c = session_id.clone();
+            futs.push(async move {
+                let mut out = MemberRunOutput {
+                    text: String::new(),
+                    usage: (0, 0),
+                    wall_ms: 0,
+                    success: false,
+                };
+                let mut last_err = String::new();
+                for attempt in 0..retry {
+                    match run_member_subtask(
+                        app,
+                        &agent_cfg,
+                        &role,
+                        session_c.as_str(),
+                        &prompt_s,
+                        &ws,
+                        unattended,
+                        Some(&cancel_c),
+                    )
+                    .await
+                    {
+                        Ok(o) => {
+                            out = o;
+                            break;
+                        }
+                        Err(e) => {
+                            last_err = e.clone();
+                            tracing::info!(
+                                "[squad] 成员 {} 子任务 {task_id} 第 {} 次失败：{}",
+                                agent_cfg.agent_id,
+                                attempt + 1,
+                                e
+                            );
+                        }
+                    }
+                }
+                if out.text.is_empty() {
+                    out.text = format!("（成员 {} 子任务执行失败：{}）", agent_cfg.agent_id, last_err);
+                }
+                (i, task_id, out, ws)
+            });
+        }
+        let results = futures_util::future::join_all(futs).await;
+
+        // 波次收尾（单写者）：round 落库 + Handoff 生成/留档/落表 + 黑板更新。
+        for (i, task_id, out, ws) in results {
+            let task = &delegated[i];
+            let member = match_member(&squad.members, &task.assignee).unwrap_or(&leader);
+            let status = if out.success { "ok" } else { "partial" };
+
+            let _ = sqlx::query(
+                "INSERT INTO agent_squad_round (id, squad_id, session_id, speaker_agent_id, role, content, kind, created_at) \
+                 VALUES (?, ?, ?, ?, ?, ?, 'subtask', ?)",
+            )
+            .bind(round_id())
+            .bind(&squad.squad_id)
+            .bind(&session_id)
+            .bind(&member.agent.agent_id)
+            .bind(&member.role)
+            .bind(&out.text)
+            .bind(now_ms())
+            .execute(&pool)
+            .await;
+
+            events::emit_squad_round(
+                app,
+                &events::SquadRoundPayload {
+                    squad_id: squad.squad_id.clone(),
+                    session_id: session_id.clone(),
+                    speaker_agent_id: Some(member.agent.agent_id.clone()),
+                    role: member.role.clone(),
+                    kind: "subtask".into(),
+                    content: out.text.clone(),
+                },
             );
+
+            // HandoffBundle 强制产出（失败也产出，§4.4.2「不允许静默消失」）。
+            let bundle = build_handoff_bundle(
+                &ws,
+                &squad.squad_id,
+                &member.agent.agent_id,
+                &member.role,
+                &task_id,
+                &out.text,
+                status,
+                out.usage,
+                out.wall_ms,
+                &task.expected_artifacts,
+            );
+            archive_handoff_to_inbox(&ws, &inbox_root, &task_id, &bundle);
+            let handoff_row_id = format!("sqdh_{}_{:05}", now_ms(), ROUND_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
+            let bundle_json = serde_json::to_string(&bundle).unwrap_or_default();
+            let _ = sqlx::query(
+                "INSERT INTO agent_squad_handoff (id, squad_id, session_id, task_id, from_agent_id, status, bundle_json, created_at) \
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            )
+            .bind(&handoff_row_id)
+            .bind(&squad.squad_id)
+            .bind(&session_id)
+            .bind(&task_id)
+            .bind(&member.agent.agent_id)
+            .bind(status)
+            .bind(&bundle_json)
+            .bind(now_ms())
+            .execute(&pool)
+            .await;
+            // handoff round（UI 可见交接事件）
+            let handoff_note = format!(
+                "「{}」{}：{}（产物 {} 项已入交接箱）",
+                task.title,
+                if status == "ok" { "完成" } else { "受阻" },
+                bundle.summary.chars().take(160).collect::<String>(),
+                bundle.artifacts.len()
+            );
+            let _ = sqlx::query(
+                "INSERT INTO agent_squad_round (id, squad_id, session_id, speaker_agent_id, role, content, kind, created_at) \
+                 VALUES (?, ?, ?, ?, ?, ?, 'handoff', ?)",
+            )
+            .bind(round_id())
+            .bind(&squad.squad_id)
+            .bind(&session_id)
+            .bind(&member.agent.agent_id)
+            .bind(&member.role)
+            .bind(&handoff_note)
+            .bind(now_ms())
+            .execute(&pool)
+            .await;
+            events::emit_squad_round(
+                app,
+                &events::SquadRoundPayload {
+                    squad_id: squad.squad_id.clone(),
+                    session_id: session_id.clone(),
+                    speaker_agent_id: Some(member.agent.agent_id.clone()),
+                    role: member.role.clone(),
+                    kind: "handoff".into(),
+                    content: handoff_note,
+                },
+            );
+
+            if let Some(b) = board.tasks.get_mut(&task_id) {
+                b.status = if status == "ok" { "done".into() } else { "failed".into() };
+                b.handoff_id = Some(handoff_row_id);
+            }
+            for art in &bundle.artifacts {
+                board
+                    .artifacts_index
+                    .push(format!("shared/inbox/{task_id}/{}", art.path));
+            }
+            // 兼容路径：文本拼接供 summarize / 无 Handoff 注入回退。
+            context.push_str(&format!("\n\n[{}] {}\n", member.role, out.text));
+            done[i] = true;
+            handoffs[i] = Some(bundle);
         }
-
-        let _ = sqlx::query(
-            "INSERT INTO agent_squad_round (id, squad_id, session_id, speaker_agent_id, role, content, kind, created_at) \
-             VALUES (?, ?, ?, ?, ?, ?, 'subtask', ?)",
-        )
-        .bind(format!("sqr_{}", now_ms()))
-        .bind(&squad.squad_id)
-        .bind(&session_id)
-        .bind(&member.agent.agent_id)
-        .bind(&member.role)
-        .bind(&output)
-        .bind(now_ms())
-        .execute(&pool)
-        .await;
-
-        events::emit_squad_round(
-            app,
-            &events::SquadRoundPayload {
-                squad_id: squad.squad_id.clone(),
-                session_id: session_id.clone(),
-                speaker_agent_id: Some(member.agent.agent_id.clone()),
-                role: member.role.clone(),
-                kind: "subtask".into(),
-                content: output.clone(),
-            },
-        );
-
-        context.push_str(&format!("\n\n[{}] {}\n", member.role, output));
+        persist_board(&pool, &session_id, &board).await;
     }
 
     // 汇总：交给主管总结（若无产出则取最后上下文）。
@@ -522,9 +994,11 @@ async fn plan_squad_delegation(
         .collect::<Vec<_>>()
         .join("\n");
     let sys = "你是小分队的主管智能体，负责把用户的任务拆解成若干子任务，并委派给合适的成员。\
-每个子任务必须指定一个 assignee（填成员的角色名，如「后端开发」），并给出清晰的 instruction。\
+每个子任务必须指定一个 assignee（填成员的角色名，如「后端开发」），并给出清晰的 instruction（含该成员需要的全部上下文与期望产物）。\
+子任务之间有先后依赖时，用 dependsOn 标注前置子任务的 title（无依赖则省略该字段）——无依赖关系的子任务会并行执行。\
+可给 expectedArtifacts 列出该子任务必须产出的文件名（如 report.md）。\
 只输出一个 JSON 数组，不要任何额外解释，格式严格为：\
-[{\"title\":\"子任务标题\",\"assignee\":\"成员角色\",\"instruction\":\"交给该成员的具体指令\"}]";
+[{\"title\":\"子任务标题\",\"assignee\":\"成员角色\",\"instruction\":\"交给该成员的具体指令\",\"dependsOn\":[\"前置子任务标题\"],\"expectedArtifacts\":[\"期望产物文件名\"]}]";
     let user = format!(
         "用户任务：\n{}\n\n可用成员：\n{}\n\n请拆解并委派。",
         prompt, roster
@@ -578,10 +1052,33 @@ fn parse_delegation(content: &str) -> Vec<DelegatedTask> {
             if title.is_empty() || assignee.is_empty() {
                 return None;
             }
+            // S1：dependsOn / expectedArtifacts（可省略字段，宽容解析）
+            let depends_on = item
+                .get("dependsOn")
+                .and_then(|d| d.as_array())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|x| x.as_str().map(|s| s.trim().to_string()))
+                        .filter(|s| !s.is_empty())
+                        .collect()
+                })
+                .unwrap_or_default();
+            let expected_artifacts = item
+                .get("expectedArtifacts")
+                .and_then(|d| d.as_array())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|x| x.as_str().map(|s| s.trim().to_string()))
+                        .filter(|s| !s.is_empty())
+                        .collect()
+                })
+                .unwrap_or_default();
             Some(DelegatedTask {
                 title,
                 assignee,
                 instruction,
+                depends_on,
+                expected_artifacts,
             })
         })
         .collect()
@@ -619,6 +1116,15 @@ async fn summarize(leader_cfg: &AgentRuntimeConfig, prompt: &str, context: &str,
 }
 
 /// 以独立 `AgentRuntimeConfig` 运行单个成员的子任务，复用现有 planner + pipeline 路径。
+/// S1：成员子任务结构化产出（调度层据此生成 HandoffBundle）。
+#[derive(Debug, Clone)]
+struct MemberRunOutput {
+    text: String,
+    usage: (u64, u64),
+    wall_ms: u64,
+    success: bool,
+}
+
 async fn run_member_subtask(
     app: &AppHandle,
     member_cfg: &AgentRuntimeConfig,
@@ -632,7 +1138,7 @@ async fn run_member_subtask(
     unattended: bool,
     // S0-3 取消穿线：squad 级取消标志（编排式主循环传 Some；直接调用方可传 None 保持旧行为）。
     squad_cancel: Option<&Arc<AtomicBool>>,
-) -> Result<String, String> {
+) -> Result<MemberRunOutput, String> {
     tracing::info!("[squad] run_member_subtask 进入：member={} metrics_session={metrics_session}", member_cfg.agent_id);
     let mut cfg = member_cfg.clone();
     cfg.workspace = Some(workspace.to_string());
@@ -815,7 +1321,12 @@ async fn run_member_subtask(
             wall_ms: member_wall_ms,
         },
     );
-    Ok(result.final_text)}
+    Ok(MemberRunOutput {
+        text: result.final_text,
+        usage: result.usage,
+        wall_ms: member_wall_ms,
+        success: result.success,
+    })}
 
 /// 流水线执行计划：拓扑顺序 + 每个节点的上游输入（成员下标）。
 struct DagPlan {
@@ -879,14 +1390,19 @@ async fn run_pipeline_node(
     // P2-3 无人值守模式透传。
     unattended: bool,
     cancel: &Arc<AtomicBool>,
-) -> String {
+) -> MemberRunOutput {
     let ws = squad_member_workspace(workspace, squad_id, &member.agent.agent_id);
-    let mut output = String::new();
+    let mut out = MemberRunOutput {
+        text: String::new(),
+        usage: (0, 0),
+        wall_ms: 0,
+        success: false,
+    };
     let mut last_err: Option<String> = None;
     for attempt in 0..retry {
         match run_member_subtask(app, &member.agent, &member.role, session_id, &prompt.to_string(), &ws, unattended, Some(cancel)).await {
-            Ok(t) => {
-                output = t;
+            Ok(o) => {
+                out = o;
                 break;
             }
             Err(e) => {
@@ -900,8 +1416,8 @@ async fn run_pipeline_node(
             }
         }
     }
-    if output.is_empty() {
-        output = format!(
+    if out.text.is_empty() {
+        out.text = format!(
             "（成员 {} 子任务执行失败：{}）",
             member.agent.agent_id,
             last_err.unwrap_or_default()
@@ -911,12 +1427,12 @@ async fn run_pipeline_node(
         "INSERT INTO agent_squad_round (id, squad_id, session_id, speaker_agent_id, role, content, kind, created_at) \
          VALUES (?, ?, ?, ?, ?, ?, 'subtask', ?)",
     )
-    .bind(format!("sqr_{}", now_ms()))
+    .bind(round_id())
     .bind(squad_id)
     .bind(session_id)
     .bind(&member.agent.agent_id)
     .bind(&member.role)
-    .bind(&output)
+    .bind(&out.text)
     .bind(now_ms())
     .execute(pool)
     .await;
@@ -928,10 +1444,10 @@ async fn run_pipeline_node(
             speaker_agent_id: Some(member.agent.agent_id.clone()),
             role: member.role.clone(),
             kind: "subtask".into(),
-            content: output.clone(),
+            content: out.text.clone(),
         },
     );
-    output
+    out
 }
 
 /// 流水线（pipeline）：成员按 `pipeline_order` 线性串流，前序工序的 `final_text` 作为后序工序的
@@ -1006,6 +1522,22 @@ async fn run_squad_pipeline(
 
     // 各成员产出缓存（按下标索引）。
     let mut outputs: Vec<String> = vec![String::new(); squad.members.len()];
+    // ===== S1（§4.4.4）：pipeline 节点 Handoff 链——直接上游交接包投递 + 注入，文本拼接降级为兼容 =====
+    let inbox_root = squad_shared_inbox(&squad.squad_id);
+    let mut handoffs: Vec<Option<HandoffBundle>> = vec![None; squad.members.len()];
+    let mut board = BoardState::default();
+    for i in 0..squad.members.len() {
+        board.tasks.insert(
+            format!("n{}", i + 1),
+            BoardTask {
+                title: squad.members[i].role.clone(),
+                assignee: squad.members[i].role.clone(),
+                status: "pending".into(),
+                handoff_id: None,
+            },
+        );
+    }
+    persist_board(pool, session_id, &board).await;
 
     for (pos, &mi) in plan.order.iter().enumerate() {
         // S0-3 取消检测点：squad 级取消 → 立即收尾。
@@ -1014,14 +1546,32 @@ async fn run_squad_pipeline(
             return;
         }
         let member = &squad.members[mi];
+        let node_ws = squad_member_workspace(&squad.workspace, &squad.squad_id, &member.agent.agent_id);
+        let task_id = format!("n{}", mi + 1);
+        if let Some(b) = board.tasks.get_mut(&task_id) {
+            b.status = "running".into();
+        }
+        persist_board(pool, session_id, &board).await;
+        // 直接上游 Handoff 投递到本节点私有区 inbox + 注入段。
+        let ups = &plan.inputs[pos];
+        let mut sections = String::new();
+        for (k, &u) in ups.iter().enumerate() {
+            if let Some(b) = &handoffs[u] {
+                let delivered =
+                    deliver_handoff_to_downstream(&inbox_root, &node_ws, &format!("n{}", u + 1), b);
+                sections.push_str(&render_handoff_section(k + 1, ups.len(), b, &delivered));
+                sections.push('\n');
+            }
+        }
+        // 兼容路径：上游文本拼接（无 Handoff 的旧数据时回退）。
         let upstream = plan.inputs[pos]
             .iter()
             .map(|&up| outputs[up].clone())
             .collect::<Vec<_>>()
             .join("\n\n");
-        // 上游成员产出折叠进本节点 prompt：实现「前步产出→后步输入」的自动串联
-        // （原 run_pipeline 的 initial_context 已移除，改为在 prompt 层串联，行为等价）。
-        let node_prompt = if upstream.trim().is_empty() {
+        let node_prompt = if !sections.is_empty() {
+            format!("{}\n\n{sections}", prompt)
+        } else if upstream.trim().is_empty() {
             prompt.to_string()
         } else {
             format!(
@@ -1030,7 +1580,49 @@ async fn run_squad_pipeline(
             )
         };
         let out = run_pipeline_node(app, &squad.squad_id, &squad.workspace, member, &node_prompt, retry, pool, session_id, unattended, cancel).await;
-        outputs[mi] = out;
+        outputs[mi] = out.text.clone();
+        // 节点 Handoff：生成/留档/落表/round（成功与失败都产出）。
+        let status = if out.success { "ok" } else { "partial" };
+        let bundle = build_handoff_bundle(
+            &node_ws,
+            &squad.squad_id,
+            &member.agent.agent_id,
+            &member.role,
+            &task_id,
+            &out.text,
+            status,
+            out.usage,
+            out.wall_ms,
+            &[],
+        );
+        archive_handoff_to_inbox(&node_ws, &inbox_root, &task_id, &bundle);
+        let handoff_row_id = format!("sqdh_{}_{:05}", now_ms(), ROUND_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
+        let bundle_json = serde_json::to_string(&bundle).unwrap_or_default();
+        let _ = sqlx::query(
+            "INSERT INTO agent_squad_handoff (id, squad_id, session_id, task_id, from_agent_id, status, bundle_json, created_at) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(&handoff_row_id)
+        .bind(&squad.squad_id)
+        .bind(session_id)
+        .bind(&task_id)
+        .bind(&member.agent.agent_id)
+        .bind(status)
+        .bind(&bundle_json)
+        .bind(now_ms())
+        .execute(pool)
+        .await;
+        if let Some(b) = board.tasks.get_mut(&task_id) {
+            b.status = if status == "ok" { "done".into() } else { "failed".into() };
+            b.handoff_id = Some(handoff_row_id);
+        }
+        for art in &bundle.artifacts {
+            board
+                .artifacts_index
+                .push(format!("shared/inbox/{task_id}/{}", art.path));
+        }
+        persist_board(pool, session_id, &board).await;
+        handoffs[mi] = Some(bundle);
     }
 
     // 最终汇总：DAG 取所有「汇点」（无任何下游依赖的节点）产出；线性取末序节点产出。
@@ -1312,3 +1904,97 @@ async fn run_squad_chat(
 }
 // 台账 G10：本地 extract_llm_text（钻信封层，永远取空）已删除——统一走
 // llm::extract_llm_content（归一化层优先 + 信封兜底，见 engine/llm.rs）。
+
+#[cfg(test)]
+mod s1_tests {
+    use super::*;
+
+    /// S1：委派解析支持 dependsOn / expectedArtifacts（可省略字段宽容解析）。
+    #[test]
+    fn parse_delegation_with_deps() {
+        let json = r#"[
+            {"title":"调研竞品","assignee":"调研员","instruction":"调研 A/B","expectedArtifacts":["notes.md"]},
+            {"title":"写报告","assignee":"执行员","instruction":"写 report.md","dependsOn":["调研竞品","不存在的任务"]}
+        ]"#;
+        let tasks = parse_delegation(json);
+        assert_eq!(tasks.len(), 2);
+        assert!(tasks[0].depends_on.is_empty());
+        assert_eq!(tasks[0].expected_artifacts, vec!["notes.md".to_string()]);
+        assert_eq!(tasks[1].depends_on, vec!["调研竞品".to_string(), "不存在的任务".to_string()]);
+        // 旧 schema（无新字段）兼容
+        let legacy = r#"[{"title":"t","assignee":"a","instruction":"i"}]"#;
+        let legacy_tasks = parse_delegation(legacy);
+        assert_eq!(legacy_tasks.len(), 1);
+        assert!(legacy_tasks[0].depends_on.is_empty() && legacy_tasks[0].expected_artifacts.is_empty());
+    }
+
+    /// S1：交接段渲染——含状态/摘要/产物索引/未决点（§4.4.3 注入模板）。
+    #[test]
+    fn render_handoff_section_shape() {
+        let bundle = HandoffBundle {
+            from_agent_id: "agent-1".into(),
+            from_role: "调研员".into(),
+            task_id: "t1".into(),
+            status: "ok".into(),
+            summary: "已完成调研".into(),
+            artifacts: vec![HandoffArtifact {
+                path: "notes.md".into(),
+                kind: "file".into(),
+                bytes: 1024,
+                preview: None,
+                label: None,
+            }],
+            open_questions: vec!["C 企业版价格需登录".into()],
+            metrics: HandoffMetrics::default(),
+        };
+        let s = render_handoff_section(1, 2, &bundle, &["inbox/t1/notes.md（1024 bytes）".to_string()]);
+        assert!(s.contains("上游交接 1/2"));
+        assert!(s.contains("调研员"));
+        assert!(s.contains("已完成调研"));
+        assert!(s.contains("inbox/t1/notes.md"));
+        assert!(s.contains("C 企业版价格需登录"));
+        assert!(s.contains("不要臆造"));
+    }
+
+    /// S1：HandoffBundle serde 往返（落表 bundle_json 的编解码一致性）。
+    #[test]
+    fn handoff_bundle_serde_roundtrip() {
+        let bundle = HandoffBundle {
+            from_agent_id: "a".into(),
+            from_role: "r".into(),
+            task_id: "t1".into(),
+            status: "failed".into(),
+            summary: "s".into(),
+            artifacts: vec![],
+            open_questions: vec![],
+            metrics: HandoffMetrics { prompt_tokens: 10, completion_tokens: 2, duration_ms: 500 },
+        };
+        let json = serde_json::to_string(&bundle).unwrap();
+        let back: HandoffBundle = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.status, "failed");
+        assert_eq!(back.metrics.prompt_tokens, 10);
+    }
+
+    /// S1：产物扫描排除引擎内部结构；expectedArtifacts 对照进 open_questions。
+    #[test]
+    fn collect_artifacts_and_expected_check() {
+        let tmp = std::env::temp_dir().join(format!("wd_s1_test_{}", std::process::id()));
+        let sub = tmp.join("sub");
+        std::fs::create_dir_all(&sub).unwrap();
+        std::fs::write(tmp.join("report.md"), "hello").unwrap();
+        std::fs::write(sub.join("data.csv"), "a,b").unwrap();
+        std::fs::create_dir_all(tmp.join(".wd_mem")).unwrap();
+        std::fs::write(tmp.join(".wd_mem").join("internal.json"), "{}").unwrap();
+        let files = collect_artifacts(tmp.to_str().unwrap());
+        assert_eq!(files.len(), 2, "应排除 .wd_mem 内部结构");
+        // preview：md/csv 可读，未知扩展名跳过
+        assert!(read_preview(tmp.to_str().unwrap(), "report.md").is_some());
+        // expected 对照：缺失产物进 open_questions（走 build_handoff_bundle）
+        let bundle = build_handoff_bundle(
+            tmp.to_str().unwrap(), "sqd", "agent", "角色", "t1", "完成", "ok",
+            (1, 1), 100, &["missing.md".to_string()],
+        );
+        assert!(bundle.open_questions.iter().any(|q| q.contains("missing.md")));
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+}

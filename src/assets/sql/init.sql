@@ -2,7 +2,7 @@
 -- Work Duo 本地数据库初始化脚本（DDL 单一事实源）
 -- 当前 schema 版本（台账 S11）：每次 DDL 变更时同步递增（与 updater.sql 末段版本号一致），
 -- SqlService.updateTables 读取此标记作为 user_version 封存目标。
--- SCHEMA_VERSION: 32
+-- SCHEMA_VERSION: 33
 -- 由 InitContext 在「每次启动」时幂等执行：
 --   - CREATE TABLE IF NOT EXISTS：表已存在则跳过，不会重建/丢数据；
 --   - INSERT OR IGNORE：种子已存在则跳过，不会重复插入。
@@ -606,11 +606,29 @@ CREATE TABLE IF NOT EXISTS agent_squad_session
     mode        TEXT    NOT NULL,
     status      TEXT    NOT NULL DEFAULT 'RUNNING',
     snapshot    TEXT,
+    board_json  TEXT,
     created_at  INTEGER NOT NULL,
     updated_at  INTEGER NOT NULL,
     FOREIGN KEY(squad_id) REFERENCES agent_squad(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_squad_session_squad ON agent_squad_session(squad_id, created_at DESC);
+
+-- ============ 小分队交接箱（agent_squad_handoff，S1 设计方案 v1.4 §5） ============
+-- HandoffBundle 的唯一 source of truth（§5 单源约定）：成员子任务终态强制产出，
+-- board_json 只存 handoff id 引用，防双源漂移。artifacts 明细在 bundle_json 内。
+CREATE TABLE IF NOT EXISTS agent_squad_handoff
+(
+    id            TEXT    PRIMARY KEY,
+    squad_id      TEXT    NOT NULL,
+    session_id    TEXT    NOT NULL,
+    task_id       TEXT    NOT NULL,
+    from_agent_id TEXT    NOT NULL,
+    status        TEXT    NOT NULL,              -- ok | partial | failed
+    bundle_json   TEXT    NOT NULL,              -- 完整 HandoffBundle JSON
+    created_at    INTEGER NOT NULL,
+    FOREIGN KEY(session_id) REFERENCES agent_squad_session(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_squad_handoff_session ON agent_squad_handoff(session_id, created_at);
 
 -- ============ 小分队协作轮次表（agent_squad_round） ============
 -- 协作过程中每一条发言/产物（讨论黑板）：
