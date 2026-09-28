@@ -1465,6 +1465,7 @@ pub async fn run_squad_task(app: &AppHandle, squad: SquadRuntimeConfig, prompt: 
     .bind(&session_id)
     .execute(&pool)
     .await;
+    build_and_persist_pack(&pool, app, &squad.squad_id, &session_id, "done", &summary).await; // S2 交付包落库
     write_metrics_round(app, &pool, &squad.squad_id, &session_id).await; // S0-4d metrics 落盘
 
     events::emit_squad_round(
@@ -2028,6 +2029,7 @@ async fn run_squad_pipeline(
                 .bind(session_id)
                 .execute(pool)
                 .await;
+                build_and_persist_pack(pool, app, &squad.squad_id, session_id, "failed", &e).await; // S2 交付包落库
                 write_metrics_round(app, &pool, &squad.squad_id, &session_id).await; // S0-4d metrics 落盘
                 events::emit_squad_session_done(
                     app,
@@ -2295,6 +2297,7 @@ async fn run_squad_pipeline(
     .bind(session_id)
     .execute(pool)
     .await;
+    build_and_persist_pack(&pool, app, &squad.squad_id, &session_id, "done", &summary).await; // S2 交付包落库
     write_metrics_round(app, &pool, &squad.squad_id, &session_id).await; // S0-4d metrics 落盘
     // S1 批次2（§4.4.5）：决策卡——汇总文本中的【squad-decisions】尾块结构化落表。
     let decisions = parse_squad_decisions(&summary);
@@ -2496,6 +2499,7 @@ async fn run_squad_chat(
     .bind(session_id)
     .execute(pool)
     .await;
+    build_and_persist_pack(&pool, app, &squad.squad_id, &session_id, "done", &summary).await; // S2 交付包落库
     write_metrics_round(app, &pool, &squad.squad_id, &session_id).await; // S0-4d metrics 落盘
     // S1 批次2（§4.4.5）：决策卡——汇总文本中的【squad-decisions】尾块结构化落表。
     let decisions = parse_squad_decisions(&summary);
