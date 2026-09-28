@@ -164,6 +164,12 @@ impl ToolRegistry {
         self.tools.keys().cloned().collect()
     }
 
+    /// S2（§4.2）角色工具面：按谓词裁剪注册表（allowlist/denylist 的能力层落点）。
+    /// 裁剪必须发生在成员规划之前——planner_digest 从本表派生（S6），大纲与能力自动同源。
+    pub fn retain(&mut self, keep: impl Fn(&str) -> bool) {
+        self.tools.retain(|name, _| keep(name));
+    }
+
     /// 生成给 LLM 的 tools 数组（OpenAI function-calling 格式）。
     pub fn get_tools_for_llm(&self) -> Vec<serde_json::Value> {
         self.tools

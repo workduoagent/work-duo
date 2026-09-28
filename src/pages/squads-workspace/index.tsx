@@ -200,6 +200,7 @@ function fromSquad(s: SquadInfo): EditorState {
             pipelineOrder: m.pipelineOrder ?? null,
             dependsOn: m.dependsOn ?? [],
             isLeader: m.isLeader,
+            toolProfile: m.toolProfile,
         })),
     }
 }
@@ -497,7 +498,19 @@ function SquadEditorModal({
     const [apiOpen, setApiOpen] = useState(false)
     const [mcps, setMcps] = useState<McpInfo[]>([])
     const [mcpToolsMap, setMcpToolsMap] = useState<Record<string, McpToolDefinition[]>>({})
+    // S2（§4.2）：成员工具面目录缓存（agentId → 原生/MCP 工具全名；能力层实时真相）
+    const [toolCatalogs, setToolCatalogs] = useState<Record<string, {nativeTools: string[]; mcpTools: string[]}>>({})
     const logoInputRef = useRef<HTMLInputElement>(null)
+
+    const ensureToolCatalog = useCallback(async (agentId: string) => {
+        if (!agentId || toolCatalogs[agentId]) return
+        try {
+            const cat = await invoke<{nativeTools: string[]; mcpTools: string[]}>('list_squad_tool_catalog', {agentId})
+            setToolCatalogs((c) => ({...c, [agentId]: cat}))
+        } catch {
+            /* 目录拉取失败不阻塞编辑（chips 显示为空可选） */
+        }
+    }, [toolCatalogs])
 
     useEffect(() => {
         if (open) {
@@ -520,6 +533,17 @@ function SquadEditorModal({
                 .catch(() => setMcps([]))
         }
     }, [open, initial])
+
+    // S2：编辑器打开时，为已配置工具面的成员拉取工具目录
+    useEffect(() => {
+        if (!open) return
+        for (const m of state.members) {
+            if (m.toolProfile && m.toolProfile.mode !== 'inherit' && m.agentId) {
+                void ensureToolCatalog(m.agentId)
+            }
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [open])
 
     const allAgentOptions = useMemo(
         () => agents.map((a) => ({value: a.id, label: <AgentOptionNode a={a}/>})),
@@ -1093,6 +1117,15 @@ function SquadEditorModal({
                                                                 onChange={(v) => patchMember(idx, {role: (v as string) ?? ''})}
                                                             />
                                                         )}
+                                                        {/* S2（§4.2）：工具面摘要 chips */}
+                                                        {m.toolProfile && m.toolProfile.mode !== 'inherit' && (
+                                                            <Tooltip title={(m.toolProfile.nativeTools ?? []).concat(m.toolProfile.mcpTools ?? []).join('\n')}>
+                                                                <Tag color="purple" style={{marginInlineEnd: 0, cursor: 'default'}}>
+                                                                    {m.toolProfile.mode === 'allowlist' ? '允许' : '禁用'}{' '}
+                                                                    {(m.toolProfile.nativeTools?.length ?? 0) + (m.toolProfile.mcpTools?.length ?? 0)} 项
+                                                                </Tag>
+                                                            </Tooltip>
+                                                        )}
                                                         <Button
                                                             variant="ghost"
                                                             size="icon-sm"
@@ -1110,6 +1143,60 @@ function SquadEditorModal({
                                                         onChange={(e) => patchMember(idx, {personaOverride: e.target.value})}
                                                         className="squad-editor__member-prompt"
                                                     />
+                                                    {/* S2（§4.2）：角色工具面——能力层裁剪（CRITIC 禁写这类约束由这里保证） */}
+                                                    <div className="squad-editor__toolface">
+                                                        <div className="squad-editor__toolface-head">
+                                                            <span>工具面</span>
+                                                            <Segmented
+                                                                value={m.toolProfile?.mode ?? 'inherit'}
+                                                                onChange={(v) => {
+                                                                    const mode = v as 'inherit' | 'allowlist' | 'denylist'
+                                                                    if (mode !== 'inherit' && m.agentId) void ensureToolCatalog(m.agentId)
+                                                                    patchMember(idx, {
+                                                                        toolProfile: mode === 'inherit'
+                                                                            ? undefined
+                                                                            : {
+                                                                                mode,
+                                                                                nativeTools: m.toolProfile?.nativeTools ?? [],
+                                                                                mcpTools: m.toolProfile?.mcpTools ?? [],
+                                                                            },
+                                                                    })
+                                                                }}
+                                                                options={[
+                                                                    {value: 'inherit', label: '继承'},
+                                                                    {value: 'allowlist', label: '白名单'},
+                                                                    {value: 'denylist', label: '黑名单'},
+                                                                ]}
+                                                            />
+                                                        </div>
+                                                        {m.toolProfile && m.toolProfile.mode !== 'inherit' && (
+                                                            <div className="squad-editor__toolface-body">
+                                                                <Select
+                                                                    mode="multiple"
+                                                                    allowClear
+                                                                    placeholder="原生工具（native__*）"
+                                                                    value={m.toolProfile.nativeTools}
+                                                                    options={(toolCatalogs[m.agentId]?.nativeTools ?? []).map((n) => ({value: n, label: n}))}
+                                                                    onChange={(vs) => patchMember(idx, {
+                                                                        toolProfile: {...m.toolProfile!, nativeTools: vs as string[]},
+                                                                    })}
+                                                                />
+                                                                <Select
+                                                                    mode="multiple"
+                                                                    allowClear
+                                                                    placeholder="MCP 工具（mcp__服务__工具）"
+                                                                    value={m.toolProfile.mcpTools}
+                                                                    options={(toolCatalogs[m.agentId]?.mcpTools ?? []).map((n) => ({value: n, label: n}))}
+                                                                    onChange={(vs) => patchMember(idx, {
+                                                                        toolProfile: {...m.toolProfile!, mcpTools: vs as string[]},
+                                                                    })}
+                                                                />
+                                                                {(!toolCatalogs[m.agentId] || toolCatalogs[m.agentId].mcpTools.length === 0) && (
+                                                                    <span className="squad-editor__toolface-hint">该智能体未挂载 MCP 工具或目录未就绪</span>
+                                                                )}
+                                                            </div>
+                                                        )}
+                                                    </div>
                                                 </div>
                                             ))}
                                         </div>

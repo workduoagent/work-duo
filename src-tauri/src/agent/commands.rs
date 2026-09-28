@@ -1409,6 +1409,45 @@ pub async fn squad_delivery_resolve(
     ))
 }
 
+/// S2（§4.2）小分队成员工具面目录：原生工具全名清单 + 指定智能体实际挂载的 MCP 工具全名。
+/// 编辑器工具面 chips 的候选数据源——能力层实时真相，避免前端硬编码工具名漂移。
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SquadToolCatalogView {
+    pub native_tools: Vec<String>,
+    pub mcp_tools: Vec<String>,
+}
+
+#[tauri::command]
+#[tracing::instrument(skip_all)]
+pub async fn list_squad_tool_catalog(
+    app: AppHandle,
+    agent_id: Option<String>,
+) -> Result<SquadToolCatalogView, String> {
+    // 原生工具：注册一次取真名。宿主集与沙箱集各注册一遍取并集（重名覆盖无害），
+    // memory_mode 传 active 让 anchor_memory 进入候选；此处仅为候选目录，成员实际可用
+    // 集仍由其自身配置 + 工具面裁剪决定。
+    let mut reg = crate::agent::engine::tools::ToolRegistry::new();
+    crate::agent::engine::native::register_native_tools(&mut reg, &app, false, "active");
+    crate::agent::engine::native::register_native_tools(&mut reg, &app, true, "active");
+    let mut native_tools = reg.tool_names();
+    native_tools.sort();
+    // MCP 工具：该智能体（含全局并入）实际挂载的清单，给全名 mcp__{server}__{tool}。
+    let mut mcp_tools: Vec<String> = Vec::new();
+    if let Some(aid) = agent_id.as_deref().filter(|s| !s.trim().is_empty()) {
+        let cfg = crate::agent::engine::config_loader::load_config(
+            &app, aid, None, None, None, None, None, None, None, None, None, None, None, None, None,
+        )
+        .await?;
+        for t in &cfg.mcp_tools {
+            mcp_tools.push(format!("mcp__{}__{}", t.mcp_id, t.tool_name));
+        }
+    }
+    mcp_tools.sort();
+    mcp_tools.dedup();
+    Ok(SquadToolCatalogView { native_tools, mcp_tools })
+}
+
 /* ------------------------------------------------------------------ *
  * 小分队 API 触发服务配置（存于 app_config）
  * ------------------------------------------------------------------ */

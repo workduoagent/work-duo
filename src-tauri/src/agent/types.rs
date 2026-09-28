@@ -532,6 +532,37 @@ pub struct SquadChatConfig {
     pub summarizer_agent_id: Option<String>,
 }
 
+/// S2（§4.2）成员角色工具面：能力层裁剪配置（非 prompt 空谈）。
+/// 存于 agent_squad_member.tool_profile_json；裁剪发生在成员规划之前，
+/// planner_digest 从裁剪后 registry 派生（S6）——能力大纲与实际工具自动同源。
+#[derive(Debug, Clone, Default, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct SquadToolProfile {
+    /// inherit（跟随智能体默认，不裁剪）| allowlist（仅允许列出工具）| denylist（禁用列出工具）。
+    /// 空列表的 allowlist 视为 inherit（防「白名单没配=零工具」误伤）。
+    pub mode: String,
+    /// 原生工具名全名清单（native__read_file / native__write_file / ...）。
+    #[serde(default, alias = "native_tools", skip_serializing_if = "Vec::is_empty")]
+    pub native_tools: Vec<String>,
+    /// MCP 工具名全名清单（mcp__{server}__{tool}）。
+    #[serde(default, alias = "mcp_tools", skip_serializing_if = "Vec::is_empty")]
+    pub mcp_tools: Vec<String>,
+    /// Skill 过滤（Skill 经 prompt 注入无独立能力层，本批仅落库透传，过滤归 S3）。
+    #[serde(default, alias = "skill_ids", skip_serializing_if = "Vec::is_empty")]
+    pub skill_ids: Vec<String>,
+}
+
+impl SquadToolProfile {
+    /// 是否不裁剪（inherit，或空列表的 allowlist 降级防「白名单没配=零工具」误伤）。
+    pub fn is_inherit(&self) -> bool {
+        match self.mode.as_str() {
+            "allowlist" => self.native_tools.is_empty() && self.mcp_tools.is_empty(),
+            "denylist" => false,
+            _ => true,
+        }
+    }
+}
+
 /// 小分队单个成员的运行配置：在 base agent 的 AgentRuntimeConfig 之上叠加 Squad 定制。
 ///
 /// `agent` 已由 `load_squad` 经 `load_config` 组装（含 LLM / MCP / Skill / 记忆 / 沙箱），
@@ -550,6 +581,8 @@ pub struct SquadMemberConfig {
     pub depends_on: Vec<String>,
     /// 是否为主管智能体（编排式 leader）。
     pub is_leader: bool,
+    /// S2（§4.2）角色工具面（能力层裁剪配置）。
+    pub tool_profile: SquadToolProfile,
 }
 
 /// 小分队运行配置：`load_squad` 的产物，供 orchestrator / pipeline / chat 三种协作引擎消费。

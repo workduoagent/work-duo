@@ -2,7 +2,7 @@
 -- Work Duo 本地数据库初始化脚本（DDL 单一事实源）
 -- 当前 schema 版本（台账 S11）：每次 DDL 变更时同步递增（与 updater.sql 末段版本号一致），
 -- SqlService.updateTables 读取此标记作为 user_version 封存目标。
--- SCHEMA_VERSION: 36
+-- SCHEMA_VERSION: 37
 -- 由 InitContext 在「每次启动」时幂等执行：
 --   - CREATE TABLE IF NOT EXISTS：表已存在则跳过，不会重建/丢数据；
 --   - INSERT OR IGNORE：种子已存在则跳过，不会重复插入。
@@ -564,7 +564,8 @@ CREATE INDEX IF NOT EXISTS idx_squad_mode ON agent_squad(mode);
 --   persona_override 人设定制（拼到该成员 system_prompt 末尾，不污染 base agent）；
 --   pipeline_order 流水线工序序号（pipeline 模式用，其余为 NULL）；
 --   is_leader     编排式主管标记（0/1，默认 0）；
---   depends_on    流水线 DAG 依赖（JSON 数组，存上游成员 agent_id；空=按 pipeline_order 线性）。
+--   depends_on    流水线 DAG 依赖（JSON 数组，存上游成员 agent_id；空=按 pipeline_order 线性）；
+--   tool_profile_json 角色工具面（S2 §4.2：{mode: inherit|allowlist|denylist, nativeTools, mcpTools}，能力层裁剪）。
 CREATE TABLE IF NOT EXISTS agent_squad_member
 (
     id              TEXT    PRIMARY KEY,
@@ -575,6 +576,7 @@ CREATE TABLE IF NOT EXISTS agent_squad_member
     pipeline_order  INTEGER,
     is_leader       INTEGER NOT NULL DEFAULT 0,
     depends_on      TEXT,
+    tool_profile_json TEXT,
     created_at      INTEGER NOT NULL,
     CONSTRAINT uk_squad_member UNIQUE (squad_id, agent_id),
     FOREIGN KEY(squad_id) REFERENCES agent_squad(id) ON DELETE CASCADE,

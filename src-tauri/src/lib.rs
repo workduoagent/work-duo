@@ -144,6 +144,7 @@ pub fn run() {
             agent::commands::squad_inject_send,
             agent::commands::squad_checkpoint_resolve,
             agent::commands::squad_delivery_resolve,
+            agent::commands::list_squad_tool_catalog,
             agent::commands::anchor_squad_memory,
             agent::commands::list_squad_memories,
             agent::commands::delete_squad_memory,

@@ -67,6 +67,8 @@ async function loadMembers(db: Awaited<ReturnType<typeof getDb>>, squadId: strin
     personaOverride: r.persona_override ?? undefined,
     pipelineOrder: r.pipeline_order ?? null,
     dependsOn: r.depends_on ? safeParse<string[]>(r.depends_on, []) : [],
+    // S2：角色工具面（NULL/坏 JSON → undefined = inherit 不裁剪）。
+    toolProfile: safeParse<SquadMember['toolProfile']>(r.tool_profile_json ?? null, undefined),
     isLeader: r.is_leader === 1,
     createdAt: safeIso(r.created_at),
   }))
@@ -257,8 +259,8 @@ export async function upsertSquad(input: SquadUpsertInput): Promise<SquadInfo[]>
   for (const m of input.members) {
     await db.execute(
       `INSERT INTO agent_squad_member
-         (id, squad_id, agent_id, role, persona_override, pipeline_order, depends_on, is_leader, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (id, squad_id, agent_id, role, persona_override, pipeline_order, depends_on, tool_profile_json, is_leader, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         crypto.randomUUID(),
         id,
@@ -267,6 +269,7 @@ export async function upsertSquad(input: SquadUpsertInput): Promise<SquadInfo[]>
         m.personaOverride ?? null,
         m.pipelineOrder && m.pipelineOrder > 0 ? m.pipelineOrder : null,
         toJson(m.dependsOn ?? []),
+        m.toolProfile ? toJson(m.toolProfile) : null,
         m.isLeader ? 1 : 0,
         t,
       ],

@@ -194,6 +194,8 @@ export interface AgentSquadMemberRow {
   persona_override: string | null
   pipeline_order: number | null
   depends_on: string | null // JSON 数组：上游成员 agent_id 列表（流水线 DAG 依赖）
+  /** S2 §4.2 角色工具面（JSON：{mode, nativeTools, mcpTools, skillIds}，能力层裁剪） */
+  tool_profile_json: string | null
   is_leader: number // SQLite 布尔：0 / 1
   created_at: number
 }

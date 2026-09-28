@@ -654,3 +654,8 @@ CREATE TABLE IF NOT EXISTS agent_squad_inject
     FOREIGN KEY(session_id) REFERENCES agent_squad_session(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_squad_inject_session ON agent_squad_inject(session_id, created_at);
+
+-- ---------- v37：小分队 S2 收尾——角色工具面（设计方案 v1.4 §4.2） ----------
+-- 成员工具面（能力层裁剪，非 prompt）：{mode: inherit|allowlist|denylist, nativeTools:[], mcpTools:[], skillIds:[]}。
+-- 裁剪发生在成员规划之前——planner_digest 从 registry 派生（S6），能力大纲与实际工具自动同源。
+ALTER TABLE agent_squad_member ADD COLUMN tool_profile_json TEXT;

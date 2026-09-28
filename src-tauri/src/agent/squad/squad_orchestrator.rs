@@ -1839,7 +1839,7 @@ pub async fn run_squad_task(app: &AppHandle, squad: SquadRuntimeConfig, prompt: 
         }
 
         // 波次准备：上游投递 + 注入段构造（主协程做——board 单写者 + 磁盘拷贝串行无竞争）。
-        let mut wave: Vec<(usize, String, String, String, AgentRuntimeConfig, String, Arc<std::sync::Mutex<Vec<InjectNote>>>)> = Vec::new(); // (idx, task_id, prompt, ws, member_cfg, role, inject_mailbox)
+        let mut wave: Vec<(usize, String, String, String, AgentRuntimeConfig, String, Arc<std::sync::Mutex<Vec<InjectNote>>>, crate::agent::types::SquadToolProfile)> = Vec::new(); // (idx, task_id, prompt, ws, member_cfg, role, inject_mailbox, tool_profile)
         let mut wave_tasks: Vec<(usize, String)> = Vec::new(); // (idx, task_id)——L2 检查点返工回退用
         for &i in &ready {
             let task = &delegated[i];
@@ -1883,13 +1883,13 @@ pub async fn run_squad_task(app: &AppHandle, squad: SquadRuntimeConfig, prompt: 
                 b.status = "running".into();
             }
             wave_tasks.push((i, task_id.clone()));
-            wave.push((i, task_id, subtask_prompt, ws, member.agent.clone(), member.role.clone(), inject_mailbox));
+            wave.push((i, task_id, subtask_prompt, ws, member.agent.clone(), member.role.clone(), inject_mailbox, member.tool_profile.clone()));
         }
         persist_board(&pool, &session_id, &board).await;
 
         // Wave 并行执行（同成员多任务由 per-agent 锁排队串行；不同成员真并行）。
         let mut futs = Vec::with_capacity(wave.len());
-        for (i, task_id, prompt_s, ws, agent_cfg, role, inject_mailbox) in wave {
+        for (i, task_id, prompt_s, ws, agent_cfg, role, inject_mailbox, tool_profile) in wave {
             // clone 在 move 块外完成（async move 会先 move 原值再 clone，跨迭代即 E0382）。
             let cancel_c = squad_cancel.clone();
             let session_c = session_id.clone();
@@ -1935,6 +1935,7 @@ pub async fn run_squad_task(app: &AppHandle, squad: SquadRuntimeConfig, prompt: 
                         unattended,
                         Some(&cancel_c),
                         Some(inject_hook.clone()),
+                        &tool_profile,
                     )
                     .await
                     {
@@ -2061,9 +2062,11 @@ pub async fn run_squad_task(app: &AppHandle, squad: SquadRuntimeConfig, prompt: 
                 b.handoff_id = Some(handoff_row_id);
             }
             for art in &bundle.artifacts {
-                board
-                    .artifacts_index
-                    .push(format!("shared/inbox/{task_id}/{}", art.path));
+                let entry = format!("shared/inbox/{task_id}/{}", art.path);
+                // 返工重跑会产生第二次 handoff：同一产物路径只记一条（09-29 真机验证发现的重复项）。
+                if !board.artifacts_index.contains(&entry) {
+                    board.artifacts_index.push(entry);
+                }
             }
             // 兼容路径：文本拼接供 summarize / 无 Handoff 注入回退。
             context.push_str(&format!("\n\n[{}] {}\n", member.role, out.text));
@@ -2326,6 +2329,45 @@ async fn summarize(leader_cfg: &AgentRuntimeConfig, prompt: &str, context: &str,
     }
 }
 
+/* ------------------------------------------------------------------ *
+ * S2（§4.2）角色工具面：能力层裁剪（allowlist / denylist）
+ * ------------------------------------------------------------------ */
+
+/// 单工具保留判定（纯函数，单测覆盖）：inherit 全留；allowlist 只留清单内；denylist 剔除清单内。
+/// MCP 工具以注册全名（mcp__{server}__{tool}）匹配，原生工具为 native__* 全名。
+fn tool_kept_by_profile(
+    name: &str,
+    profile: &crate::agent::types::SquadToolProfile,
+) -> bool {
+    if profile.is_inherit() {
+        return true;
+    }
+    let listed = |list: &[String]| list.iter().any(|t| t == name);
+    match profile.mode.as_str() {
+        "allowlist" => listed(&profile.native_tools) || listed(&profile.mcp_tools),
+        "denylist" => !listed(&profile.native_tools) && !listed(&profile.mcp_tools),
+        _ => true,
+    }
+}
+
+/// 对注册表应用工具面裁剪（规划侧与执行侧都应用，保证大纲与能力同源）。
+fn apply_tool_profile(
+    registry: &mut ToolRegistry,
+    profile: &crate::agent::types::SquadToolProfile,
+) {
+    if profile.is_inherit() {
+        return;
+    }
+    let before = registry.tool_names().len();
+    registry.retain(|name| tool_kept_by_profile(name, profile));
+    tracing::info!(
+        "[squad] 工具面裁剪（mode={}）：{} → {} 项",
+        profile.mode,
+        before,
+        registry.tool_names().len()
+    );
+}
+
 /// 以独立 `AgentRuntimeConfig` 运行单个成员的子任务，复用现有 planner + pipeline 路径。
 /// S1：成员子任务结构化产出（调度层据此生成 HandoffBundle）。
 #[derive(Debug, Clone)]
@@ -2351,6 +2393,8 @@ async fn run_member_subtask(
     squad_cancel: Option<&Arc<AtomicBool>>,
     // S2（§4.11）：Live inject 安全点钩子（编排器按任务构造；None=无信箱，行为不变）。
     inject_hook: Option<pipeline::InjectHook>,
+    // S2（§4.2）：角色工具面（能力层裁剪；inherit=不裁剪）。
+    tool_profile: &crate::agent::types::SquadToolProfile,
 ) -> Result<MemberRunOutput, String> {
     tracing::info!("[squad] run_member_subtask 进入：member={} metrics_session={metrics_session}", member_cfg.agent_id);
     let mut cfg = member_cfg.clone();
@@ -2381,8 +2425,10 @@ async fn run_member_subtask(
     member_event("started", true, prompt);
 
     // 台账 S6：注册链与能力大纲同源——成员子任务规划与单 Agent run_task 共用 build_full_registry。
-    let registry = crate::agent::engine::runtime::build_full_registry(app, &cfg);
-    let (plan, _, _) = planner::build_plan(&cfg, prompt, Some(workspace), squad_cancel, &registry, None).await;
+    // S2（§4.2）：规划侧注册表先过工具面裁剪——planner_digest 从本表派生，大纲与能力同源。
+    let mut plan_registry = crate::agent::engine::runtime::build_full_registry(app, &cfg);
+    apply_tool_profile(&mut plan_registry, tool_profile);
+    let (plan, _, _) = planner::build_plan(&cfg, prompt, Some(workspace), squad_cancel, &plan_registry, None).await;
 
     // 图驱动：为每个成员子任务打开独立实体图（按 workspace + 成员 id 区分会话），
     // 规划写入图，运行时状态由图承载，与单 Agent 路径一致。
@@ -2406,6 +2452,8 @@ async fn run_member_subtask(
     for (server, tools) in by_server {
         mcp_adapter::register_mcp_into(&mut base, &server, tools);
     }
+    // S2（§4.2）：执行侧注册表同款裁剪（与规划侧同一 profile，杜绝「大纲说可用、执行没工具」）。
+    apply_tool_profile(&mut base, tool_profile);
     let registry = base;
 
     let ctx = ToolContext {
@@ -2617,7 +2665,7 @@ async fn run_pipeline_node(
     };
     let mut last_err: Option<String> = None;
     for attempt in 0..retry {
-        match run_member_subtask(app, &member.agent, &member.role, session_id, &prompt.to_string(), &ws, unattended, Some(cancel), inject_hook.clone()).await {
+        match run_member_subtask(app, &member.agent, &member.role, session_id, &prompt.to_string(), &ws, unattended, Some(cancel), inject_hook.clone(), &member.tool_profile).await {
             Ok(o) => {
                 out = o;
                 break;
@@ -2965,9 +3013,11 @@ async fn run_squad_pipeline(
                 b.handoff_id = Some(handoff_row_id);
             }
             for art in &bundle.artifacts {
-                board
-                    .artifacts_index
-                    .push(format!("shared/inbox/{task_id}/{}", art.path));
+                let entry = format!("shared/inbox/{task_id}/{}", art.path);
+                // 返工重跑会产生第二次 handoff：同一产物路径只记一条（09-29 真机验证发现的重复项）。
+                if !board.artifacts_index.contains(&entry) {
+                    board.artifacts_index.push(entry);
+                }
             }
             handoffs[mi] = Some(bundle);
         }
@@ -3566,5 +3616,50 @@ mod s1_tests {
         }
         let mut g = SQUAD_DELIVERY_GATES.lock().unwrap();
         g.as_mut().unwrap().remove(sid_dl);
+    }
+
+    /// S2（§4.2）：工具面保留判定——inherit 全留 / denylist 剔除清单内 / allowlist 只留清单内；
+    /// 空 allowlist 降级为 inherit（防「白名单没配=零工具」误伤）。
+    #[test]
+    fn tool_profile_keeps_expected_tools() {
+        let inherit = crate::agent::types::SquadToolProfile::default();
+        assert!(inherit.is_inherit());
+        assert!(tool_kept_by_profile("native__write_file", &inherit));
+        assert!(tool_kept_by_profile("mcp__fs__read", &inherit));
+
+        let mut deny = crate::agent::types::SquadToolProfile::default();
+        deny.mode = "denylist".into();
+        deny.native_tools = vec!["native__write_file".into(), "native__edit_file".into()];
+        assert!(!deny.is_inherit());
+        assert!(!tool_kept_by_profile("native__write_file", &deny), "黑名单内被剔除");
+        assert!(tool_kept_by_profile("native__read_file", &deny), "黑名单外保留");
+        assert!(tool_kept_by_profile("mcp__fs__read", &deny), "未提及的 MCP 工具保留");
+
+        let mut allow = crate::agent::types::SquadToolProfile::default();
+        allow.mode = "allowlist".into();
+        allow.native_tools = vec!["native__read_file".into()];
+        allow.mcp_tools = vec!["mcp__kb__search".into()];
+        assert!(!allow.is_inherit());
+        assert!(tool_kept_by_profile("native__read_file", &allow));
+        assert!(tool_kept_by_profile("mcp__kb__search", &allow));
+        assert!(!tool_kept_by_profile("native__write_file", &allow), "白名单外被剔除");
+        assert!(!tool_kept_by_profile("mcp__fs__read", &allow));
+
+        // 空 allowlist 降级 inherit
+        let mut empty_allow = crate::agent::types::SquadToolProfile::default();
+        empty_allow.mode = "allowlist".into();
+        assert!(empty_allow.is_inherit());
+        assert!(tool_kept_by_profile("native__write_file", &empty_allow));
+
+        // serde 往返（camelCase 落库格式）
+        let json = serde_json::to_string(&allow).unwrap();
+        assert!(json.contains("nativeTools"));
+        let back: crate::agent::types::SquadToolProfile = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.native_tools, allow.native_tools);
+        // snake_case alias 兼容（教训①：外部 JSON 可能用 snake_case）
+        let snake: crate::agent::types::SquadToolProfile =
+            serde_json::from_str(r#"{"mode":"denylist","native_tools":["native__write_file"]}"#).unwrap();
+        assert_eq!(snake.mode, "denylist");
+        assert_eq!(snake.native_tools.len(), 1);
     }
 }

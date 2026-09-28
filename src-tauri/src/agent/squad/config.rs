@@ -156,6 +156,9 @@ pub async fn load_squad(app: &AppHandle, squad_id: &str) -> Result<SquadRuntimeC
         };
         let depends_on: Vec<String> = serde_json::from_str(&get_str(m, "depends_on"))
             .unwrap_or_default();
+        // S2（§4.2）：角色工具面（宽容解析——NULL/坏 JSON → inherit 不裁剪）。
+        let tool_profile: crate::agent::types::SquadToolProfile =
+            serde_json::from_str(&get_str(m, "tool_profile_json")).unwrap_or_default();
         members.push(SquadMemberConfig {
             agent: base,
             role,
@@ -163,6 +166,7 @@ pub async fn load_squad(app: &AppHandle, squad_id: &str) -> Result<SquadRuntimeC
             pipeline_order,
             depends_on,
             is_leader,
+            tool_profile,
         });
     }
 

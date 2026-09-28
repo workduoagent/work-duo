@@ -479,6 +479,18 @@ export interface SquadApiConfig {
   token: string
 }
 
+/** S2（§4.2）成员角色工具面（能力层裁剪，存 agent_squad_member.tool_profile_json）。 */
+export interface SquadToolProfile {
+  /** inherit=跟随智能体默认 / allowlist=仅允许列出工具 / denylist=禁用列出工具。 */
+  mode: 'inherit' | 'allowlist' | 'denylist'
+  /** 原生工具全名（native__read_file / native__write_file / ...）。 */
+  nativeTools?: string[]
+  /** MCP 工具全名（mcp__{server}__{tool}）。 */
+  mcpTools?: string[]
+  /** Skill 过滤（本批仅落库透传，过滤归 S3）。 */
+  skillIds?: string[]
+}
+
 /** 成员任职输入（新建 / 更新时提交）。 */
 export interface SquadMemberInput {
   agentId: string
@@ -488,6 +500,8 @@ export interface SquadMemberInput {
   /** 流水线 DAG 依赖：上游成员 agentId 列表（空 = 按 pipelineOrder 线性串流）。 */
   dependsOn?: string[]
   isLeader: boolean
+  /** S2：角色工具面（undefined=inherit 不裁剪）。 */
+  toolProfile?: SquadToolProfile
 }
 
 /** 新建 / 更新小分队的入参。 */

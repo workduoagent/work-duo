@@ -1212,3 +1212,35 @@
     padding: 0 4px;
   }
 }
+
+/* S2（§4.2）：角色工具面（编辑器成员卡内） */
+.squad-editor__toolface {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px dashed var(--color-border, #ddd);
+  border-radius: 8px;
+
+  &-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+
+    > span {
+      font-size: 12px;
+      color: var(--color-foreground-muted);
+    }
+  }
+
+  &-body {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  &-hint {
+    font-size: 12px;
+    color: var(--color-foreground-muted);
+  }
+}
