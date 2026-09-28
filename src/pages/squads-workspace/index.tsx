@@ -1174,6 +1174,21 @@ function SquadEditorModal({
                                                                 <Select
                                                                     mode="multiple"
                                                                     allowClear
+                                                                    placeholder="工具族（write=全部写路径含沙箱代码执行 / execute / network / destructive）"
+                                                                    value={m.toolProfile.families}
+                                                                    options={[
+                                                                        {value: 'write', label: 'write 写族（含沙箱代码执行）'},
+                                                                        {value: 'execute', label: 'execute 执行族'},
+                                                                        {value: 'network', label: 'network 网络族'},
+                                                                        {value: 'destructive', label: 'destructive 破坏族'},
+                                                                    ]}
+                                                                    onChange={(vs) => patchMember(idx, {
+                                                                        toolProfile: {...m.toolProfile!, families: vs as string[]},
+                                                                    })}
+                                                                />
+                                                                <Select
+                                                                    mode="multiple"
+                                                                    allowClear
                                                                     placeholder="原生工具（native__*）"
                                                                     value={m.toolProfile.nativeTools}
                                                                     options={(toolCatalogs[m.agentId]?.nativeTools ?? []).map((n) => ({value: n, label: n}))}
@@ -1770,6 +1785,17 @@ interface SquadBoardView {
     tasks: Array<{taskId: string; title: string; assignee: string; status: string}>
     artifactsIndex?: string[]
     decisions?: Array<{kind: string; text: string}>
+    /** S3（§4.9）Chat 2.0：行动项（汇总主笔产出，可转 Wave 执行）。 */
+    actions?: Array<{title: string; assignee?: string; detail?: string}>
+}
+
+/** 决策卡 kind → 中文标签/颜色（S3 增补 disagreement/action）。 */
+const DECISION_KIND_META: Record<string, {label: string; color: string}> = {
+    plan: {label: '计划', color: 'purple'},
+    risk: {label: '风险', color: 'orange'},
+    scope: {label: '范围', color: 'purple'},
+    disagreement: {label: '分歧', color: 'red'},
+    action: {label: '行动项', color: 'volcano'},
 }
 
 /** 任务状态 → Tag 颜色。 */
@@ -1784,7 +1810,7 @@ const BOARD_STATUS_META: Record<string, {color: string; label: string}> = {
 function RoundBoard({rounds, summary, board}: { rounds: BoardRound[]; summary?: string; board?: SquadBoardView | null }) {
     return (
         <div className="squad-console__board">
-            {board && (board.tasks.length > 0 || (board.decisions && board.decisions.length > 0)) && (
+            {board && (board.tasks.length > 0 || (board.decisions && board.decisions.length > 0) || (board.actions && board.actions.length > 0)) && (
                 <div className="squad-round squad-round--board">
                     <div className="squad-round__head">
                         <Tag color="geekblue">任务状态板</Tag>
@@ -1802,10 +1828,26 @@ function RoundBoard({rounds, summary, board}: { rounds: BoardRound[]; summary?: 
                         })}
                         {board.decisions && board.decisions.length > 0 && (
                             <div style={{marginTop: 6, borderTop: '1px dashed var(--color-border, #eee)', paddingTop: 6}}>
-                                {board.decisions.map((d, i) => (
+                                {board.decisions.map((d, i) => {
+                                    const dm = DECISION_KIND_META[d.kind] ?? {label: d.kind, color: 'purple'}
+                                    return (
+                                        <div key={i} style={{display: 'flex', alignItems: 'center', gap: 6, padding: '2px 0'}}>
+                                            <Tag color={dm.color} style={{marginInlineEnd: 0}}>{dm.label}</Tag>
+                                            <span>{d.text}</span>
+                                        </div>
+                                    )
+                                })}
+                            </div>
+                        )}
+                        {/* S3（§4.9）Chat 2.0：行动项 */}
+                        {board.actions && board.actions.length > 0 && (
+                            <div style={{marginTop: 6, borderTop: '1px dashed var(--color-border, #eee)', paddingTop: 6}}>
+                                <div style={{fontSize: 12, color: 'var(--color-text-tertiary, #999)', marginBottom: 2}}>行动项（可转 Wave 执行）</div>
+                                {board.actions.map((a, i) => (
                                     <div key={i} style={{display: 'flex', alignItems: 'center', gap: 6, padding: '2px 0'}}>
-                                        <Tag color="purple" style={{marginInlineEnd: 0}}>{d.kind}</Tag>
-                                        <span>{d.text}</span>
+                                        <Tag color="volcano" style={{marginInlineEnd: 0}}>{i + 1}</Tag>
+                                        <span>{a.title}</span>
+                                        {a.assignee && <span style={{color: 'var(--color-text-tertiary, #999)'}}>→ {a.assignee}</span>}
                                     </div>
                                 ))}
                             </div>

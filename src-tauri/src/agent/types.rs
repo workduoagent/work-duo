@@ -547,16 +547,49 @@ pub struct SquadToolProfile {
     /// MCP 工具名全名清单（mcp__{server}__{tool}）。
     #[serde(default, alias = "mcp_tools", skip_serializing_if = "Vec::is_empty")]
     pub mcp_tools: Vec<String>,
+    /// S3：工具族预设（write/execute/network/destructive）——按能力组合裁剪，
+    /// 免逐个列工具名。09-29 真机实证：只禁 write_file 会被 run_node_sandbox 绕过，
+    /// 「禁写」必须用 write 族（含沙箱代码执行的全部写路径）。
+    #[serde(default, alias = "families", skip_serializing_if = "Vec::is_empty")]
+    pub families: Vec<String>,
     /// Skill 过滤（Skill 经 prompt 注入无独立能力层，本批仅落库透传，过滤归 S3）。
     #[serde(default, alias = "skill_ids", skip_serializing_if = "Vec::is_empty")]
     pub skill_ids: Vec<String>,
+}
+
+/// 工具族 → 工具全名清单（原生工具静态映射；MCP 工具不进族，按全名单列）。
+pub fn tool_family_members(family: &str) -> &'static [&'static str] {
+    match family {
+        // 写族：一切能产出/修改文件内容的工具（含沙箱代码执行——写文件的旁路）
+        "write" => &[
+            "native__write_file",
+            "native__edit_file",
+            "native__regex_replace",
+            "native__zip_extract",
+            "native__run_python_sandbox",
+            "native__run_node_sandbox",
+            "native__execute_command",
+        ],
+        // 执行族：代码/命令运行（沙箱写文件即经由它）
+        "execute" => &[
+            "native__execute_command",
+            "native__run_python_sandbox",
+            "native__run_node_sandbox",
+        ],
+        "network" => &["native__http_request"],
+        // 破坏族：删除/移动（可覆盖既有产物）
+        "destructive" => &["native__delete_path", "native__move_path"],
+        _ => &[],
+    }
 }
 
 impl SquadToolProfile {
     /// 是否不裁剪（inherit，或空列表的 allowlist 降级防「白名单没配=零工具」误伤）。
     pub fn is_inherit(&self) -> bool {
         match self.mode.as_str() {
-            "allowlist" => self.native_tools.is_empty() && self.mcp_tools.is_empty(),
+            "allowlist" => {
+                self.native_tools.is_empty() && self.mcp_tools.is_empty() && self.families.is_empty()
+            }
             "denylist" => false,
             _ => true,
         }

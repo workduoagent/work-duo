@@ -487,6 +487,8 @@ export interface SquadToolProfile {
   nativeTools?: string[]
   /** MCP 工具全名（mcp__{server}__{tool}）。 */
   mcpTools?: string[]
+  /** S3：工具族（write=全部写路径含沙箱代码执行 / execute / network / destructive）。 */
+  families?: string[]
   /** Skill 过滤（本批仅落库透传，过滤归 S3）。 */
   skillIds?: string[]
 }

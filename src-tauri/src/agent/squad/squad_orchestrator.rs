@@ -1371,6 +1371,9 @@ struct BoardState {
     /// S1 决策卡（群聊共识 / 关键决定；agent_squad_decision 表的 board 挂载视图）
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     decisions: Vec<BoardDecision>,
+    /// S3（§4.9）Chat 2.0：行动项（汇总主笔产出，可转 Wave 执行；decision 表 kind='action' 的结构化视图）
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    actions: Vec<SquadAction>,
 }
 
 async fn persist_board(pool: &sqlx::SqlitePool, session_id: &str, board: &BoardState) {
@@ -1394,12 +1397,9 @@ struct BoardDecision {
 }
 
 /// 宽容解析汇总文本中的【squad-decisions】JSON 尾块；无标记/解析失败返回空（不报错）。
-fn parse_squad_decisions(summary: &str) -> Vec<BoardDecision> {
-    const MARK: &str = "【squad-decisions】";
-    let Some(idx) = summary.find(MARK) else {
-        return Vec::new();
-    };
-    let tail = summary[idx + MARK.len()..].trim();
+/// 提取 summary 中指定标记块后的 JSON 数组文本（宽容：剥代码围栏，无标记返回 None）。
+fn extract_squad_tail_block(summary: &str, mark: &str) -> Option<String> {    let idx = summary.find(mark)?;
+    let tail = summary[idx + mark.len()..].trim();
     // 去掉可能的代码围栏
     let json_str = tail
         .strip_prefix("```json")
@@ -1409,7 +1409,15 @@ fn parse_squad_decisions(summary: &str) -> Vec<BoardDecision> {
         .split("```")
         .next()
         .unwrap_or("");
-    let Ok(v) = serde_json::from_str::<serde_json::Value>(json_str.trim()) else {
+    Some(json_str.trim().to_string())
+}
+
+fn parse_squad_decisions(summary: &str) -> Vec<BoardDecision> {
+    const MARK: &str = "【squad-decisions】";
+    let Some(json_str) = extract_squad_tail_block(summary, MARK) else {
+        return Vec::new();
+    };
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(&json_str) else {
         return Vec::new();
     };
     v.as_array()
@@ -1425,7 +1433,8 @@ fn parse_squad_decisions(summary: &str) -> Vec<BoardDecision> {
                         .and_then(|k| k.as_str())
                         .unwrap_or("scope")
                         .to_string();
-                    let kind = matches!(kind.as_str(), "plan" | "risk" | "scope")
+                    // S3：disagreement（分歧点）进合法集——Chat 2.0 汇总结构化输出。
+                    let kind = matches!(kind.as_str(), "plan" | "risk" | "scope" | "disagreement")
                         .then_some(kind)
                         .unwrap_or_else(|| "scope".into());
                     Some(BoardDecision { kind, text })
@@ -1433,6 +1442,88 @@ fn parse_squad_decisions(summary: &str) -> Vec<BoardDecision> {
                 .collect()
         })
         .unwrap_or_default()
+}
+
+/// S3（§4.9）Chat 2.0：行动项（汇总主笔产出；可转 Wave 执行——chat→orchestrator 链式归后续批次）。
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct SquadAction {
+    title: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    assignee: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    detail: Option<String>,
+}
+
+/// 宽容解析汇总文本中的【squad-actions】JSON 尾块；无标记/坏 JSON/空 title 项丢弃。
+fn parse_squad_actions(summary: &str) -> Vec<SquadAction> {
+    const MARK: &str = "【squad-actions】";
+    let Some(json_str) = extract_squad_tail_block(summary, MARK) else {
+        return Vec::new();
+    };
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(&json_str) else {
+        return Vec::new();
+    };
+    v.as_array()
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|item| {
+                    let title = item.get("title")?.as_str()?.trim().to_string();
+                    if title.is_empty() {
+                        return None;
+                    }
+                    Some(SquadAction {
+                        title,
+                        assignee: item
+                            .get("assignee")
+                            .and_then(|a| a.as_str())
+                            .map(|s| s.trim().to_string())
+                            .filter(|s| !s.is_empty()),
+                        detail: item
+                            .get("detail")
+                            .and_then(|d| d.as_str())
+                            .map(|s| s.trim().to_string())
+                            .filter(|s| !s.is_empty()),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// S3（§4.9）共识判定verdict解析：从 Moderator 判定响应中宽容提取 {"new": bool}。
+/// None = 无法判定（响应缺 JSON/字段），调用方按「有新观点」保守处理，不误收口。
+fn parse_consensus_verdict(text: &str) -> Option<bool> {
+    let start = text.find('{')?;
+    let end = text[start..].find('}')? + start;
+    let v: serde_json::Value = serde_json::from_str(&text[start..=end]).ok()?;
+    v.get("new").and_then(|n| n.as_bool())
+}
+
+/// S3（§4.9）黑板渲染：近 keep 轮全文，更早轮次折叠为「首句要点」（防 token 爆炸，零额外 LLM 调用）。
+fn render_blackboard(entries: &[(usize, String, String)], keep_rounds: usize) -> String {
+    if entries.is_empty() {
+        return "（暂无，等待你的开场发言）".to_string();
+    }
+    let max_round = entries.iter().map(|(r, _, _)| *r).max().unwrap_or(0);
+    let fold_before = max_round.saturating_sub(keep_rounds); // 轮号 <= fold_before 的折叠
+    let mut s = String::new();
+    let mut folded = 0usize;
+    for (r, role, content) in entries {
+        if *r <= fold_before {
+            let first = content.replace('\n', " ");
+            let first = first.chars().take(60).collect::<String>();
+            s.push_str(&format!("\n\n[{}·{}] （折叠要点）{}", r, role, first));
+            folded += 1;
+        } else {
+            s.push_str(&format!("\n\n[{}·{}] {}", r, role, content));
+        }
+    }
+    if folded > 0 {
+        s.push_str(&format!(
+            "\n\n（以上 {folded} 条为更早发言的折叠要点，完整内容以近期轮次为准）"
+        ));
+    }
+    s
 }
 
 /// 决策卡落库（agent_squad_decision 表 + board_json.decisions 挂载）。
@@ -1480,6 +1571,54 @@ async fn persist_decisions(
         }
     }
     tracing::info!("[squad] 决策卡落盘：session={session_id} 共 {} 条", decisions.len());
+    let _ = app;
+}
+
+/// S3（§4.9）：行动项落盘——decision 表 kind='action'（content=结构化 JSON）+ board_json.actions 挂载。
+async fn persist_actions(
+    pool: &sqlx::SqlitePool,
+    app: &AppHandle,
+    squad_id: &str,
+    session_id: &str,
+    actions: &[SquadAction],
+) {
+    if actions.is_empty() {
+        return;
+    }
+    for a in actions {
+        let Ok(content) = serde_json::to_string(a) else { continue };
+        let _ = sqlx::query(
+            "INSERT INTO agent_squad_decision (id, squad_id, session_id, kind, content, created_at) VALUES (?, ?, ?, 'action', ?, ?)",
+        )
+        .bind(round_id())
+        .bind(squad_id)
+        .bind(session_id)
+        .bind(&content)
+        .bind(now_ms())
+        .execute(pool)
+        .await;
+    }
+    // board_json.actions 挂载（读-改-写：会话终态单点，无并发写者）
+    if let Ok(Some((bj,))) = sqlx::query_as::<_, (Option<String>,)>(
+        "SELECT board_json FROM agent_squad_session WHERE id=?",
+    )
+    .bind(session_id)
+    .fetch_optional(pool)
+    .await
+    {
+        let mut board: BoardState = bj
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default();
+        board.actions.extend(actions.iter().cloned());
+        if let Ok(json) = serde_json::to_string(&board) {
+            let _ = sqlx::query("UPDATE agent_squad_session SET board_json=? WHERE id=?")
+                .bind(json)
+                .bind(session_id)
+                .execute(pool)
+                .await;
+        }
+    }
+    tracing::info!("[squad] 行动项落盘：session={session_id} 共 {} 条", actions.len());
     let _ = app;
 }
 
@@ -2333,7 +2472,7 @@ async fn summarize(leader_cfg: &AgentRuntimeConfig, prompt: &str, context: &str,
  * S2（§4.2）角色工具面：能力层裁剪（allowlist / denylist）
  * ------------------------------------------------------------------ */
 
-/// 单工具保留判定（纯函数，单测覆盖）：inherit 全留；allowlist 只留清单内；denylist 剔除清单内。
+/// 单工具保留判定（纯函数，单测覆盖）：inherit 全留；allowlist 只留清单/族内；denylist 剔除清单/族内。
 /// MCP 工具以注册全名（mcp__{server}__{tool}）匹配，原生工具为 native__* 全名。
 fn tool_kept_by_profile(
     name: &str,
@@ -2343,9 +2482,14 @@ fn tool_kept_by_profile(
         return true;
     }
     let listed = |list: &[String]| list.iter().any(|t| t == name);
+    // S3：工具族展开——族内任一工具命中即视为「族命中」（write/execute/network/destructive）。
+    let family_hit = profile
+        .families
+        .iter()
+        .any(|f| crate::agent::types::tool_family_members(f).iter().any(|m| *m == name));
     match profile.mode.as_str() {
-        "allowlist" => listed(&profile.native_tools) || listed(&profile.mcp_tools),
-        "denylist" => !listed(&profile.native_tools) && !listed(&profile.mcp_tools),
+        "allowlist" => listed(&profile.native_tools) || listed(&profile.mcp_tools) || family_hit,
+        "denylist" => !listed(&profile.native_tools) && !listed(&profile.mcp_tools) && !family_hit,
         _ => true,
     }
 }
@@ -3110,6 +3254,9 @@ async fn run_squad_pipeline(
     // S1 批次2（§4.4.5）：决策卡——汇总文本中的【squad-decisions】尾块结构化落表。
     let decisions = parse_squad_decisions(&summary);
     persist_decisions(pool, app, &squad.squad_id, session_id, &decisions).await;
+    // S3（§4.9）：行动项结构化落盘（decision 表 kind='action' + board_json.actions）
+    let actions = parse_squad_actions(&summary);
+    persist_actions(pool, app, &squad.squad_id, session_id, &actions).await;
     // ===== S2（§4.6 L4）：交付确认门禁——manual 模式 Pack 生成后挂起等用户确认 =====
     if !unattended {
         if !gate_delivery_confirm(app, pool, &squad.squad_id, session_id, cancel).await {
@@ -3200,8 +3347,24 @@ async fn run_squad_chat(
         squad_inject_bind(session_id, &m.agent.agent_id, &[]);
     }
 
-    let mut blackboard = String::new();
-    for r in 0..max_rounds {
+    // ===== S3（§4.9）Chat 2.0：黑板条目化 + 共识收口 + 黑板裁剪 =====
+    let mut entries: Vec<(usize, String, String)> = Vec::new(); // (轮号, 角色, 发言)
+    let keep_rounds = std::env::var("WD_SQUAD_CHAT_KEEP_ROUNDS")
+        .ok()
+        .and_then(|s| s.trim().parse::<usize>().ok())
+        .filter(|v| *v > 0)
+        .unwrap_or(3);
+    let consensus_enabled = std::env::var("WD_SQUAD_CHAT_CONSENSUS").ok().as_deref() != Some("0");
+    let mut consecutive_no_new = 0usize;
+    let mut converged_round: Option<usize> = None;
+    // 共识判定人 = 汇总主笔（Moderator）；提前解析供轮间判定复用。
+    let summarizer_member: Option<&SquadMemberConfig> = summarizer_id
+        .as_ref()
+        .and_then(|id| squad.members.iter().find(|m| &m.agent.agent_id == id))
+        .or_else(|| squad.members.first());
+
+    let mut r = 0usize;
+    while r < max_rounds {
         // S0-3 取消检测点：squad 级取消 → 立即收尾。
         if cancel.load(std::sync::atomic::Ordering::SeqCst) {
             finish_squad_session(app, pool, &squad.squad_id, session_id, "cancelled", "任务已被用户取消").await;
@@ -3212,11 +3375,7 @@ async fn run_squad_chat(
                 "你是小分队「{}」圆桌讨论的参与者，角色为「{}」。请基于讨论目标与其他成员的发言，给出你的专业见解（简洁、针对目标、可回应他人观点）。",
                 squad.name, member.role
             );
-            let history = if blackboard.is_empty() {
-                "（暂无，等待你的开场发言）".to_string()
-            } else {
-                blackboard.clone()
-            };
+            let history = render_blackboard(&entries, keep_rounds);
             // S2（§4.11）：用户插话注入——成员发言前排空其信箱（运行中打断，圆桌无 pipeline 安全点）。
             let inject_notes = squad_inject_take(session_id, &member.agent.agent_id);
             let user = if inject_notes.is_empty() {
@@ -3273,16 +3432,78 @@ async fn run_squad_chat(
                 },
             );
 
-            blackboard.push_str(&format!("\n\n[{}·{}] {}", r + 1, member.role, content));
+            entries.push((r + 1, member.role.clone(), content));
+        }
+        r += 1;
+
+        // ===== S3（§4.9）：共识收口判定——Moderator 判断最近发言是否仍有新观点，连续 2 轮无 → 提前收口 =====
+        if consensus_enabled && r >= 2 && r < max_rounds {
+            if let Some(judge) = summarizer_member {
+                let sys = "你是圆桌讨论主持人。基于最近的讨论发言，判断讨论是否仍在产生新观点（新论据/新方案/新分歧）。只输出 JSON，不要输出其他文字：{\"new\": true} 表示仍有新观点，{\"new\": false} 表示已无新观点。";
+                let user = format!(
+                    "讨论目标：\n{}\n\n## 最近讨论（可能含折叠要点）\n{}\n\n讨论是否仍在产生新观点？",
+                    prompt,
+                    render_blackboard(&entries, 2)
+                );
+                let messages = vec![
+                    json!({ "role": "system", "content": sys }),
+                    json!({ "role": "user", "content": user }),
+                ];
+                match crate::agent::engine::runtime::call_llm(&judge.agent, &messages, &[], Some(cancel)).await {
+                    Ok((resp, usage)) => {
+                        squad_metrics_add_usage(session_id, usage);
+                        match parse_consensus_verdict(&extract_llm_content(&resp)) {
+                            Some(false) => consecutive_no_new += 1,
+                            Some(true) => consecutive_no_new = 0,
+                            // 判定失败按「有新观点」保守处理，不误收口
+                            None => consecutive_no_new = 0,
+                        }
+                        tracing::info!(
+                            "[squad] chat 共识判定：第 {} 轮后 no_new_streak={}",
+                            r, consecutive_no_new
+                        );
+                        if consecutive_no_new >= 2 {
+                            converged_round = Some(r);
+                            break;
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!("[squad] chat 共识判定调用失败（按有新观点处理）：{e}");
+                        consecutive_no_new = 0;
+                    }
+                }
+            }
         }
     }
+    if let Some(rr) = converged_round {
+        let note = format!("🤝 共识收口：连续 2 轮无新观点，第 {rr} 轮后提前结束讨论（上限 {max_rounds} 轮）。");
+        let _ = sqlx::query(
+            "INSERT INTO agent_squad_round (id, squad_id, session_id, speaker_agent_id, role, content, kind, created_at) \
+             VALUES (?, ?, ?, NULL, '系统', ?, 'system', ?)",
+        )
+        .bind(format!("sqr_{}", now_ms()))
+        .bind(&squad.squad_id)
+        .bind(session_id)
+        .bind(&note)
+        .bind(now_ms())
+        .execute(pool)
+        .await;
+        events::emit_squad_round(
+            app,
+            &events::SquadRoundPayload {
+                squad_id: squad.squad_id.clone(),
+                session_id: session_id.to_string(),
+                speaker_agent_id: None,
+                role: "系统".into(),
+                kind: "system".into(),
+                content: note,
+            },
+        );
+    }
+    let blackboard = render_blackboard(&entries, usize::MAX); // 汇总用完整黑板（终态一次，不受裁剪影响）
 
     // 汇总主笔收口：基于完整讨论黑板产出最终结论。
-    let summarizer = summarizer_id
-        .as_ref()
-        .and_then(|id| squad.members.iter().find(|m| &m.agent.agent_id == id))
-        .or_else(|| squad.members.first());
-    let sum_cfg = match summarizer {
+    let sum_cfg = match summarizer_member {
         Some(m) => &m.agent,
         None => {
             tracing::warn!("[squad] chat: 无可用汇总主笔");
@@ -3298,7 +3519,8 @@ async fn run_squad_chat(
         }
     };
 
-    let sys = "你是小分队圆桌讨论的主持人 / 汇总主笔。请基于讨论黑板，给出本次协作任务的最终汇总结论（可交付、简明、归纳各方共识与待决点）。\n\n输出末尾，若讨论达成了明确共识或决议，请单独追加一段（有才输出，没有则省略）：\n【squad-decisions】\n[{\"kind\":\"scope|plan|risk\",\"text\":\"决议内容一句话\"}]";
+    // S3（§4.9）：汇总结构化升级——决议 + 分歧点 + 行动项（宽容尾块，缺省省略）。
+    let sys = "你是小分队圆桌讨论的主持人 / 汇总主笔。请基于讨论黑板，给出本次协作任务的最终汇总结论（可交付、简明、归纳各方共识与待决点）。\n\n输出末尾，按需追加以下结构化块（有才输出，没有则省略；每块各占一段）：\n【squad-decisions】\n[{\"kind\":\"scope|plan|risk|disagreement\",\"text\":\"决议内容一句话（disagreement=未达成一致的分歧点）\"}]\n【squad-actions】\n[{\"title\":\"行动项标题\",\"assignee\":\"建议负责角色（可省略）\",\"detail\":\"一句话说明（可省略）\"}]";
     let user = format!(
         "讨论目标：\n{}\n\n## 讨论黑板\n{}\n\n请给出最终汇总。",
         prompt, blackboard
@@ -3340,6 +3562,9 @@ async fn run_squad_chat(
     // S1 批次2（§4.4.5）：决策卡——汇总文本中的【squad-decisions】尾块结构化落表。
     let decisions = parse_squad_decisions(&summary);
     persist_decisions(pool, app, &squad.squad_id, session_id, &decisions).await;
+    // S3（§4.9）：行动项结构化落盘（decision 表 kind='action' + board_json.actions）
+    let actions = parse_squad_actions(&summary);
+    persist_actions(pool, app, &squad.squad_id, session_id, &actions).await;
     // ===== S2（§4.6 L4）：交付确认门禁——manual 模式 Pack 生成后挂起等用户确认 =====
     {
         let unattended = matches!(squad.run_strategy.execution_mode.as_str(), "schedule" | "api");
@@ -3661,5 +3886,73 @@ mod s1_tests {
             serde_json::from_str(r#"{"mode":"denylist","native_tools":["native__write_file"]}"#).unwrap();
         assert_eq!(snake.mode, "denylist");
         assert_eq!(snake.native_tools.len(), 1);
+    }
+
+    /// S3：工具族——deny write 族同时挡住 write_file 与沙箱代码执行（09-29 真机绕过路径的回归钉）。
+    #[test]
+    fn tool_family_denies_sandbox_write_bypass() {
+        let mut p = crate::agent::types::SquadToolProfile::default();
+        p.mode = "denylist".into();
+        p.families = vec!["write".into()];
+        assert!(!p.is_inherit());
+        assert!(!tool_kept_by_profile("native__write_file", &p));
+        assert!(!tool_kept_by_profile("native__edit_file", &p));
+        assert!(!tool_kept_by_profile("native__regex_replace", &p));
+        assert!(!tool_kept_by_profile("native__run_node_sandbox", &p), "沙箱是写族旁路，必须同禁");
+        assert!(!tool_kept_by_profile("native__run_python_sandbox", &p));
+        assert!(!tool_kept_by_profile("native__execute_command", &p));
+        assert!(tool_kept_by_profile("native__read_file", &p), "读不受写族影响");
+        assert!(tool_kept_by_profile("mcp__kb__search", &p), "MCP 不进族，不受影响");
+        // allowlist 用族：只放行读相关（未列族=仍按清单）
+        let mut allow = crate::agent::types::SquadToolProfile::default();
+        allow.mode = "allowlist".into();
+        allow.families = vec!["network".into()];
+        assert!(tool_kept_by_profile("native__http_request", &allow));
+        assert!(!tool_kept_by_profile("native__read_file", &allow));
+        // serde 往返
+        let json = serde_json::to_string(&p).unwrap();
+        assert!(json.contains("families"));
+    }
+
+    /// S3：行动项宽容解析——正常/无标记/坏 JSON/缺 title 丢弃。
+    #[test]
+    fn parse_squad_actions_tolerant() {
+        let s = "汇总正文……\n\n【squad-actions】\n[{\"title\":\"出接口文档\",\"assignee\":\"执行员乙\",\"detail\":\"含鉴权\"},{\"title\":\"补测试\"}]";
+        let a = parse_squad_actions(s);
+        assert_eq!(a.len(), 2);
+        assert_eq!(a[0].assignee.as_deref(), Some("执行员乙"));
+        assert!(a[1].assignee.is_none());
+        assert!(parse_squad_actions("无标记纯文本").is_empty());
+        assert!(parse_squad_actions("【squad-actions】不是json").is_empty());
+        assert!(parse_squad_actions("【squad-actions】[{\"detail\":\"缺title\"}]").is_empty());
+    }
+
+    /// S3：共识判定宽容解析——JSON 提取成功/失败分支。
+    #[test]
+    fn parse_consensus_verdict_tolerant() {
+        assert_eq!(parse_consensus_verdict("{\"new\": false}"), Some(false));
+        assert_eq!(parse_consensus_verdict("前置说明 {\"new\":true} 后缀"), Some(true));
+        assert_eq!(parse_consensus_verdict("没有json"), None);
+        assert_eq!(parse_consensus_verdict("{\"other\": 1}"), None);
+    }
+
+    /// S3：黑板裁剪——近 keep 轮全文，更早轮折叠要点；空黑板占位。
+    #[test]
+    fn render_blackboard_trims_old_rounds() {
+        assert_eq!(render_blackboard(&[], 3), "（暂无，等待你的开场发言）");
+        let entries = vec![
+            (1usize, "甲".to_string(), format!("第一轮发言 {}", "长内容".repeat(30))),
+            (2, "乙".to_string(), "第二轮发言".to_string()),
+            (3, "甲".to_string(), "第三轮发言".to_string()),
+            (4, "乙".to_string(), "第四轮发言".to_string()),
+        ];
+        let s = render_blackboard(&entries, 2);
+        assert!(s.contains("（折叠要点）"), "第 1/2 轮应被折叠");
+        assert!(s.contains("[1·甲]"), "折叠条目仍保留轮次与角色");
+        assert!(s.contains("[3·甲] 第三轮发言"), "近 2 轮全文保留");
+        assert!(s.contains("以上 2 条为更早发言的折叠要点"));
+        // keep 覆盖全部轮次 → 无折叠
+        let full = render_blackboard(&entries, 10);
+        assert!(!full.contains("折叠要点"));
     }
 }
