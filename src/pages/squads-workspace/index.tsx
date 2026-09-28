@@ -750,7 +750,7 @@ function SquadEditorModal({
                                             <Input
                                                 id="squad-name"
                                                 autoComplete="off"
-                                                placeholder="例如：SUI 投研小队"
+                                                placeholder="例如：大A 投研小队"
                                                 value={state.name}
                                                 onChange={(e) => setState((s) => ({...s, name: e.target.value}))}
                                             />
@@ -1337,7 +1337,7 @@ function SquadRunConsole({
                 },
             )
             unlistenRef.current = [offStart, offRound, offDone]
-            await invoke('run_squad_task', {squadId: squad.id, prompt: p})
+            await invoke('run_squad_task', { input: { squad_id: squad.id, prompt: p } })
         } catch (e) {
             message.error(`启动失败：${e instanceof Error ? e.message : String(e)}`)
             setRunning(false)
