@@ -513,7 +513,9 @@ pub struct SquadRunStrategy {
     pub retry_count: u32,
     /// 定时 / API 模式触发时使用的默认任务指令（执行模式非 manual 时由调度器 / API 服务读取，
     /// UI 点启动 manual 运行时仍用用户即时输入）。
-    #[serde(default)]
+    /// alias 兼容 snake_case 写法（2026-09-28 真机实证：rename_all=camelCase 下写入
+    /// schedule_prompt 会静默丢字段 → API 触发的任务内容为空，成员全部在「澄清目标」空转）。
+    #[serde(default, alias = "schedule_prompt")]
     pub schedule_prompt: Option<String>,
 }
 
