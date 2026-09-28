@@ -114,11 +114,7 @@ struct SquadCancelGuard(String);
 impl Drop for SquadCancelGuard {
     fn drop(&mut self) {
         let mut g = SQUAD_CANCELS.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(map) = g.as_mut() {
-            {
-                map.remove(&self.0);
-            }
-        }
+        g.get_or_insert_with(std::collections::HashMap::new).remove(&self.0);
         // S0-4d 兜底：正常路径终态已 take 并落 metrics round；异常路径（panic/提前 return）
         // 残留的累加器在此清理，防跨 run 串账。
         let mut m = SQUAD_METRICS.lock().unwrap_or_else(|e| e.into_inner());
@@ -133,7 +129,8 @@ impl Drop for SquadCancelGuard {
 pub fn cancel_squad_sessions(squad_id: &str) -> usize {
     let mut cancelled = 0usize;
     let mut g = SQUAD_CANCELS.lock().unwrap_or_else(|e| e.into_inner());
-    if let Some(map) = g.as_mut() {
+    {
+        let map = g.get_or_insert_with(std::collections::HashMap::new);
         {
             for (sid, (sq, flag)) in map.iter() {
                 if sq == squad_id {
@@ -263,9 +260,10 @@ pub async fn run_squad_task(app: &AppHandle, squad: SquadRuntimeConfig, prompt: 
     let squad_cancel = Arc::new(AtomicBool::new(false));
     {
         let mut g = SQUAD_CANCELS.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(map) = g.as_mut() {
-            map.insert(session_id.clone(), (squad.squad_id.clone(), squad_cancel.clone()));
-        }
+        g.get_or_insert_with(std::collections::HashMap::new).insert(
+            session_id.clone(),
+            (squad.squad_id.clone(), squad_cancel.clone()),
+        );
     }
     let _cancel_guard = SquadCancelGuard(session_id.clone());
     let title = prompt.chars().take(120).collect::<String>();
