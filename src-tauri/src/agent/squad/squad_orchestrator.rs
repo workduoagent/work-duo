@@ -225,12 +225,22 @@ struct DelegatedTask {
 /// - 若 squad 配置了用户自选根目录（`workspace`，非空），成员工作区为 `{root}/{agent_id}`；
 /// - 否则回退默认隔离目录 `.wd_mem/squads/{squad_id}/{agent_id}`。
 fn squad_member_workspace(workspace: &Option<String>, squad_id: &str, agent_id: &str) -> String {
-    match workspace {
+    let rel = match workspace {
         Some(root) if !root.trim().is_empty() => {
             let trimmed = root.trim().trim_end_matches(['/', '\\']);
             format!("{}/{}", trimmed, agent_id)
         }
         _ => format!(".wd_mem/squads/{}/{}", squad_id, agent_id),
+    };
+    // S0 修复（2026-09-28 真机实证）：必须返回**绝对路径**——相对路径会让 PathGuard
+    // 的边界比对出现「相对目标 vs canonicalize 后的绝对工作空间」形态不一致，
+    // 成员所有 write/archive 全被误判「路径越界」，子任务预算耗尽被跳过。
+    if std::path::Path::new(&rel).is_absolute() {
+        return rel;
+    }
+    match std::env::current_dir() {
+        Ok(cwd) => cwd.join(&rel).to_string_lossy().to_string(),
+        Err(_) => rel,
     }
 }
 
