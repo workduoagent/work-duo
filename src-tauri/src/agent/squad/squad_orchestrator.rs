@@ -282,7 +282,7 @@ fn squad_shared_inbox(squad_id: &str) -> String {
 fn is_ignored_segment(name: &str) -> bool {
     matches!(
         name,
-        ".wd_mem" | "node_modules" | "__pycache__" | ".git" | "target" | ".venv" | ".pytest_cache"
+        ".wd_mem" | "node_modules" | "__pycache__" | ".git" | "target" | ".venv" | ".pytest_cache" | "inbox"
     )
 }
 
