@@ -52,7 +52,9 @@ fn squad_metrics_add_member(session_id: &str, stat: SquadMemberStat) {
     }
 }
 async fn write_metrics_round(_app: &AppHandle, pool: &sqlx::SqlitePool, squad_id: &str, session_id: &str) {
-    let Some(acc) = squad_metrics_take(session_id) else { return };
+    let taken = squad_metrics_take(session_id);
+    tracing::info!("[squad] write_metrics_round: session={session_id} acc_present={}", taken.is_some());
+    let Some(acc) = taken else { return };
     if acc.prompt_tokens == 0 && acc.completion_tokens == 0 && acc.members.is_empty() {
         return;
     }

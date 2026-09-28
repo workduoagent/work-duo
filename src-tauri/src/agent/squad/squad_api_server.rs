@@ -187,6 +187,24 @@ async fn route(
         };
     }
 
+    // S0-5（2026-09-28）：外部取消入口——对指定小分队的全部活跃会话置取消信号。
+    if method == "POST" && path.starts_with("/api/squads/") && path.ends_with("/cancel") {
+        let id = &path["/api/squads/".len()..path.len() - "/cancel".len()];
+        if id.is_empty() {
+            return (400, err_json("squad id 为空"));
+        }
+        let pool = match get_pool(app).await {
+            Ok(p) => p,
+            Err(e) => return (500, err_json(&e)),
+        };
+        let resolved = match resolve_squad_id(&pool, id).await {
+            Some(rid) => rid,
+            None => return (404, err_json("squad not found")),
+        };
+        let n = crate::agent::squad::squad_orchestrator::cancel_squad_sessions(&resolved);
+        return (200, format!("{{\"ok\":true,\"cancelled_sessions\":{n}}}"));
+    }
+
     (404, "{\"ok\":false,\"error\":\"not found\"}".to_string())
 }
 
