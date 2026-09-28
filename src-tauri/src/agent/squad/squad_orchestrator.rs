@@ -942,6 +942,7 @@ pub async fn run_squad_task(app: &AppHandle, squad: SquadRuntimeConfig, prompt: 
         chrono::Utc::now().timestamp_nanos_opt().unwrap_or(now_ms()),
         SQUAD_SESSION_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
     );
+    squad_metrics_register_budget(&session_id, squad.run_strategy.budget_tokens);
     // S0-3 取消穿线：注册 squad 级取消标志（guard Drop 回收；cancel_squad_sessions 置位）。
     let squad_cancel = Arc::new(AtomicBool::new(false));
     {
