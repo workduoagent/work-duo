@@ -2034,8 +2034,12 @@
   overflow-x: auto; white-space: pre;
 }
 
-/* 气泡内 Markdown 紧凑排版：`.sw .sw-md` 双类提权，压过全局 .md-body 的大间距（root.scss） */
-.sw .sw-md { font-size: 12px; line-height: 1.5; color: var(--color-foreground); overflow-wrap: break-word; }
+/* 气泡内 Markdown 紧凑排版：`.sw .sw-md` 双类提权，压过全局 .md-body 的大间距（root.scss）。
+   white-space: normal 是关键——外层 .sw-round__content 的 pre-wrap 会继承进来，把 react-markdown
+   保留在 DOM 里的每个软换行符（\n）渲染成真实换行，造成「字小了行距却不变」的假象；
+   markdown 的换行语义由渲染器处理，气泡内必须恢复正常折叠。 */
+.sw .sw-md { font-size: 12px; line-height: 1.5; color: var(--color-foreground); overflow-wrap: break-word; white-space: normal; }
+.sw .sw-md p, .sw .sw-md li { white-space: normal; }
 .sw .sw-md h1, .sw .sw-md h2, .sw .sw-md h3, .sw .sw-md h4, .sw .sw-md h5, .sw .sw-md h6 { margin: 6px 0 3px; font-size: 12.5px; font-weight: 650; line-height: 1.4; color: var(--color-foreground-intense); }
 .sw .sw-md p { margin: 0 0 4px; }
 .sw .sw-md ul, .sw .sw-md ol { margin: 0 0 4px; padding-left: 16px; }
