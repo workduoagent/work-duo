@@ -595,7 +595,8 @@ export default function SquadDetailPage() {
                 </main>
             </div>
 
-            <div className={`sw-aside-float${asideOpen ? ' is-open' : ''}`}>
+            {asideOpen && (
+            <div className="sw-aside-float">
                 <aside className="sw-panel sw-aside-panel">
                     <div className="sw-rtabs">
                         {([['members', '成员状态'], ['memory', '团队记忆'], ['decisions', '决策']] as const).map(([k, l]) => (
@@ -665,6 +666,7 @@ export default function SquadDetailPage() {
                     </div>
                 </aside>
             </div>
+            )}
             <button className="sw-aside-toggle" title={asideOpen ? '收起右栏' : '展开右栏'} onClick={() => setAsideOpen((v) => !v)}>{asideOpen ? '❮' : '❯'}</button>
         </div>
     )

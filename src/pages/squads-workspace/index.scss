@@ -1948,12 +1948,8 @@
   position: fixed; top: 64px; right: 14px; bottom: 14px;
   width: 300px; z-index: 40;
   display: flex; flex-direction: column;
-  transform: translateX(calc(100% + 20px));
-  visibility: hidden;
-  transition: transform .28s cubic-bezier(.2, .8, .3, 1), visibility .28s;
   filter: drop-shadow(-8px 0 28px rgba(0, 0, 0, .12));
 }
-.sw-aside-float.is-open { transform: translateX(0); visibility: visible; }
 .sw-aside-panel {
   flex: 1; min-height: 0; overflow: hidden;
   background: var(--color-background-subtle);
