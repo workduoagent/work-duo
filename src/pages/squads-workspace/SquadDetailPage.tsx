@@ -94,7 +94,7 @@ function sceneSVG(mode: string): string {
 
 /** 轮次内容渲染：metrics/handoff/JSON → 代码块；其余 → Markdown。 */
 function renderRoundContent(kind: string, text: string) {
-    const t = (text || '').trim()
+    const t = normalizeMd(text).trim()
     if (kind === 'metrics' || kind === 'handoff' || (t.startsWith('{') && t.endsWith('}'))) {
         try { return <pre className="sw-code">{JSON.stringify(JSON.parse(t), null, 2)}</pre> } catch { /* 非 JSON 走 markdown */ }
     }
@@ -108,11 +108,43 @@ function isStructuredRound(kind: string, text: string) {
 }
 
 /**
+ * LLM 输出的 Markdown 规范化：列表项之间的空行（loose list）会让渲染出 <li><p> 叠加结构、
+ * 气泡松散；这里去列表项间空行、收敛连续空行，``` 代码块内原样保留。
+ */
+function normalizeMd(src: string): string {
+    if (!src) return src
+    const lines = src.replace(/\r\n/g, '\n').split('\n')
+    const out: string[] = []
+    let inFence = false
+    let pendingBlank = 0
+    const bullet = /^\s*(?:[-*+]|\d+[.)])\s+/
+    for (const line of lines) {
+        if (/^\s*```/.test(line)) {
+            inFence = !inFence
+            for (let i = 0; i < pendingBlank; i++) out.push('')
+            pendingBlank = 0
+            out.push(line)
+            continue
+        }
+        if (inFence) { out.push(line); continue }
+        if (line.trim() === '') { pendingBlank = Math.min(pendingBlank + 1, 1); continue }
+        if (bullet.test(line) && out.length > 0 && bullet.test(out[out.length - 1])) {
+            pendingBlank = 0 // 列表项之间的空行：丢弃（loose list → tight list）
+        }
+        for (let i = 0; i < pendingBlank; i++) out.push('')
+        pendingBlank = 0
+        out.push(line)
+    }
+    for (let i = 0; i < pendingBlank; i++) out.push('')
+    return out.join('\n').trim()
+}
+
+/**
  * 打字机流式气泡：仅对「运行中由事件实时推来的新轮」（fresh）做逐字输出，
  * 历史回放轮直接整段渲染。打字阶段显示纯文本 + 光标，完成后切换 Markdown 渲染。
  */
 function TypewriterBubble({kind, text, fresh}: { kind: string; text: string; fresh: boolean }) {
-    const t = (text || '').trim()
+    const t = normalizeMd((text || '')).trim()
     const total = t.length
     // fresh 快照进初始 state：打字只由「新轮首次挂载」触发一次，不随父级重渲染重启
     const [armed] = useState(fresh)
@@ -607,7 +639,7 @@ export default function SquadDetailPage() {
                                 <div className="sw-round__pa sw-round__pa--user">汇</div>
                                 <div className="sw-round__body">
                                     <div className="sw-round__head"><span className="sw-round__name">最终汇总</span><span className="sw-badge sw-badge--msg">结论</span></div>
-                                    <div className="sw-round__content"><div className="sw-bubble sw-bubble--hl">{summary}</div></div>
+                                    <div className="sw-round__content"><div className="sw-bubble sw-bubble--hl"><MarkdownRenderer className="sw-md" content={normalizeMd(summary)}/></div></div>
                                 </div>
                             </div>
                         )}
