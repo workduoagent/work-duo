@@ -54,7 +54,7 @@
       display: flex;
       flex-direction: column;
       gap: 12px;
-      padding: 16px 16px 12px; /* 底部收紧，按钮行贴近卡片底边 */
+      padding: 12px 14px 10px; /* 顶/底都收紧：头部贴顶、按钮行贴底 */
     }
 
     &-head {
