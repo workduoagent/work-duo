@@ -221,6 +221,7 @@ async fn fetch_rows(app: &AppHandle, sql: &str, binds: &[String]) -> Value {
 }
 
 /// 把单个 Sqlite 列值转为 JSON（按列类型分派，未知类型回退 Null）。
+/// 表达式列（COUNT(*)/聚合/别名）的 type_info 常为 "NULL"，须按值试取（2026-09-30 修复）。
 fn column_value(row: &sqlx::sqlite::SqliteRow, col: &sqlx::sqlite::SqliteColumn) -> Value {
     let name = col.name().to_string();
     let key = name.as_str();
@@ -232,6 +233,22 @@ fn column_value(row: &sqlx::sqlite::SqliteRow, col: &sqlx::sqlite::SqliteColumn)
             .flatten()
             .map(|n| Value::Number(n.into()))
             .unwrap_or(Value::Null),
+        // 表达式列兜底：依次试 i64 / f64 / String / bool，全失败才 Null
+        "NULL" | "ANY" => {
+            if let Ok(Some(n)) = row.try_get::<Option<i64>, _>(key) {
+                return Value::Number(n.into());
+            }
+            if let Ok(Some(f)) = row.try_get::<Option<f64>, _>(key) {
+                return serde_json::Number::from_f64(f).map(Value::Number).unwrap_or(Value::Null);
+            }
+            if let Ok(Some(s)) = row.try_get::<Option<String>, _>(key) {
+                return Value::String(s);
+            }
+            if let Ok(Some(b)) = row.try_get::<Option<bool>, _>(key) {
+                return Value::Bool(b);
+            }
+            Value::Null
+        }
         "REAL" => row
             .try_get::<Option<f64>, _>(key)
             .ok()
@@ -1062,15 +1079,26 @@ async fn call_tool(app: &AppHandle, name: &str, args: &Value) -> Value {
                 &[key.to_string()],
             )
             .await;
-            match squads.as_array().and_then(|a| a.first()).cloned() {
+            // fetch_rows 返回 {rows:[…], count} 包装——必须先剥 rows 再取首行
+            //（2026-09-30 修复：原 .as_array() 落在顶层对象上恒 None，squad_get 对正常 id 也报 not found）
+            let squad_row = squads
+                .get("rows")
+                .and_then(|r| r.as_array())
+                .and_then(|a| a.first())
+                .cloned();
+            match squad_row {
                 Some(squad) => {
                     let sid = squad.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                    let members = fetch_rows(
+                    let members_resp = fetch_rows(
                         app,
                         "SELECT agent_id, role, persona_override, pipeline_order, depends_on, tool_profile_json, is_leader FROM agent_squad_member WHERE squad_id = ? ORDER BY CASE WHEN pipeline_order IS NULL THEN 0 ELSE 1 END, pipeline_order",
                         &[sid],
                     )
                     .await;
+                    let members = members_resp
+                        .get("rows")
+                        .cloned()
+                        .unwrap_or(Value::Array(Vec::new()));
                     json!({ "squad": squad, "members": members })
                 }
                 None => json!({ "error": "squad not found" }),

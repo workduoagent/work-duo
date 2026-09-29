@@ -1,0 +1,34 @@
+{
+  "caseId": "S-CHAT-1",
+  "dim": "squad",
+  "title": "群聊共识收口：收敛+决议落表",
+  "status": "done",
+  "autoPass": true,
+  "autoScore": 1,
+  "asserts": [
+    {
+      "name": "群聊会话终态 done",
+      "ok": true,
+      "detail": "status=done"
+    },
+    {
+      "name": "≥2 名成员参与发言（无独角戏）",
+      "ok": true,
+      "detail": "speakers=3"
+    },
+    {
+      "name": "轮次收敛（< 上限）",
+      "ok": true,
+      "detail": "rounds=5 cap=6"
+    },
+    {
+      "name": "决议结构化落表",
+      "ok": true,
+      "detail": "decisions=5"
+    }
+  ],
+  "sessionId": "sqs_1790661689754899000_3",
+  "durationMs": 506230,
+  "notes": "",
+  "at": "2026-09-29T06:09:55.979Z"
+}

@@ -2384,6 +2384,18 @@ pub async fn squad_broadcast_note(
     if note.is_empty() {
         return Err("广播内容为空".into());
     }
+    // §4.11.8：无人值守（schedule/api）会话三路说话统一拒绝——广播不豁免
+    // （2026-09-30 squad_eval_harness S-UNATT-1 真机抓漏：inject/talk 已拒，broadcast 漏网）。
+    {
+        let g = SQUAD_INJECTS.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(map) = g.as_ref() {
+            if let Some(entry) = map.get(session_id) {
+                if entry.unattended {
+                    return Err("无人值守会话（schedule/api）不支持广播".into());
+                }
+            }
+        }
+    }
     persist_decisions(pool, app, squad_id, session_id, &[BoardDecision { kind: "scope".into(), text: note.to_string() }]).await;
     let row = format!("📣 团队广播：{note}");
     let _ = sqlx::query(
@@ -3059,6 +3071,17 @@ fn tool_kept_by_profile(
     }
 }
 
+/// 成员无人值守上下文独有裁剪：ask_user_choice 会挂起等待用户点选——小分队成员是
+/// 无人值守执行单元，挂起即死锁（2026-09-30 squad_eval_harness S-PRETALK-1 真机抓漏）。
+fn strip_unattended_member_tools(registry: &mut ToolRegistry) {
+    let before = registry.tool_names().len();
+    registry.retain(|name| name != "native__ask_user_choice");
+    let after = registry.tool_names().len();
+    if before != after {
+        tracing::info!("[squad] 成员上下文裁剪 ask_user_choice：{before} → {after} 项");
+    }
+}
+
 /// 对注册表应用工具面裁剪（规划侧与执行侧都应用，保证大纲与能力同源）。
 fn apply_tool_profile(
     registry: &mut ToolRegistry,
@@ -3137,6 +3160,7 @@ async fn run_member_subtask(
     // S2（§4.2）：规划侧注册表先过工具面裁剪——planner_digest 从本表派生，大纲与能力同源。
     let mut plan_registry = crate::agent::engine::runtime::build_full_registry(app, &cfg);
     apply_tool_profile(&mut plan_registry, tool_profile);
+    strip_unattended_member_tools(&mut plan_registry);
     let (plan, _, _) = planner::build_plan(&cfg, prompt, Some(workspace), squad_cancel, &plan_registry, None).await;
 
     // 图驱动：为每个成员子任务打开独立实体图（按 workspace + 成员 id 区分会话），
@@ -3163,6 +3187,7 @@ async fn run_member_subtask(
     }
     // S2（§4.2）：执行侧注册表同款裁剪（与规划侧同一 profile，杜绝「大纲说可用、执行没工具」）。
     apply_tool_profile(&mut base, tool_profile);
+    strip_unattended_member_tools(&mut base);
     let registry = base;
 
     let ctx = ToolContext {

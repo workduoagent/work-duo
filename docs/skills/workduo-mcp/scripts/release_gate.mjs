@@ -20,6 +20,7 @@ const VERSION = get('version', 'v' + new Date().toISOString().slice(0, 10).repla
 const OUT = get('out', 'E:/Codes/ABC/work-duo/docs/eval-results/2026-09-24-full')
 const OFFLINE = flag('offline')
 const RELEASE_DIR = 'E:/Codes/ABC/work-duo/docs/eval-results/release'
+const SQUAD_DIR = get('squad-dir', 'E:/Codes/ABC/work-duo/docs/eval-results/squad-20260929-final')
 const DROP_PCT = 5 // 指标环比降幅阈值（百分点）
 
 // 发布指标聚合（与 buildScorecard 同款去重口径：同 caseId 多槽位取 mtime 最新）
@@ -94,12 +95,29 @@ async function main() {
   add('产物达成≥90%', cur.artifactPct >= 90, `${cur.artifactPct}%`)
   if (cur.resolvedPct != null) add('客观判分 resolved≥80%', cur.resolvedPct >= 80, `${cur.resolvedPct}%（${cur.judgedCount} 判分用例）`)
 
+  // ②b Squad suite 门禁（§10：17 用例回归全绿；--squad-dir 指定证据目录，缺目录记 SKIP 不阻断）
+  {
+    const squadGate = path.join(SQUAD_DIR, 'gate.json')
+    if (fs.existsSync(squadGate)) {
+      try {
+        const g = JSON.parse(fs.readFileSync(squadGate, 'utf8'))
+        add('Squad suite 全绿（§10）', !!g.pass, `${g.results.filter((r) => r.autoPass).length}/${g.results.length} 用例 @ ${path.basename(SQUAD_DIR)}`)
+        for (const r of g.results.filter((r) => !r.autoPass)) add('└ ' + r.caseId, false, r.status)
+      } catch (e) {
+        add('Squad suite 全绿（§10）', false, 'gate.json 解析失败: ' + e.message.slice(0, 80))
+      }
+    } else {
+      add('Squad suite 全绿（§10）', true, `SKIP（无 ${path.basename(SQUAD_DIR)}/gate.json——跑 squad_eval_harness.mjs run+gate 生成）`)
+    }
+  }
+
   // ③ 版本归档
   const vDir = path.join(RELEASE_DIR, VERSION)
   fs.mkdirSync(vDir, { recursive: true })
   fs.writeFileSync(path.join(vDir, 'metrics.json'), JSON.stringify({ version: VERSION, at: new Date().toISOString(), out: OUT, offline: OFFLINE, ...cur }, null, 2))
   const gateJson = path.join(OUT, 'gate.json')
   if (fs.existsSync(gateJson)) fs.copyFileSync(gateJson, path.join(vDir, 'gate.json'))
+  if (fs.existsSync(squadGate)) fs.copyFileSync(squadGate, path.join(vDir, 'squad_gate.json'))
   add('版本归档', true, vDir)
 
   // ④ 环比对比（最近一个其他版本为基线）

@@ -1,0 +1,34 @@
+{
+  "caseId": "S-CANCEL-1",
+  "dim": "squad",
+  "title": "中途取消：终态+无 running+无孤儿",
+  "status": "done",
+  "autoPass": true,
+  "autoScore": 1,
+  "asserts": [
+    {
+      "name": "cancel 受理",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "终态 cancelled",
+      "ok": true,
+      "detail": "status=cancelled"
+    },
+    {
+      "name": "board 无 running 残留",
+      "ok": true,
+      "detail": "{\"t1\":{\"title\":\"取消一\",\"assignee\":\"Python 后端\",\"status\":\"failed\",\"handoff_id\":\"sqdh_1790662440215_00049\"},\"t2\":{\"title\":\"取消二\",\"assignee\":\"React 前端\",\"stat"
+    },
+    {
+      "name": "孤儿清扫通道可用",
+      "ok": true,
+      "detail": "swept=0"
+    }
+  ],
+  "sessionId": "sqs_1790662436970555200_5",
+  "durationMs": 6076,
+  "notes": "",
+  "at": "2026-09-29T06:14:03.004Z"
+}
