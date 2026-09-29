@@ -1,4 +1,4 @@
-import {useCallback, useEffect, useMemo, useRef, useState} from 'react'
+import {memo, useCallback, useEffect, useMemo, useRef, useState, type RefObject} from 'react'
 import {useNavigate, useParams} from 'react-router-dom'
 import {ArrowLeft, Brain, Plus, Send, Trash2} from 'lucide-react'
 import {listen} from '@tauri-apps/api/event'
@@ -7,10 +7,12 @@ import {Button, Empty, Input, Select, Spin} from '@/components/ui'
 import {useNotify} from '@/components/ui/notify'
 import {PixelAgent} from '@/components/ui/pixel-agent'
 import {MarkdownRenderer} from '@/components/markdown/MarkdownRenderer'
-import {getSquad, listSquadSessions, listSquadRounds, deleteSquadSession, listSquadMemories, anchorSquadMemory, deleteSquadMemory, type AnchorSquadMemoryInput} from '@/core/mapper/squad-mapper'
+import {getSquad, listSquadSessions, listSquadRounds, deleteSquadSession, listSquadMemories, anchorSquadMemory, deleteSquadMemory} from '@/core/mapper/squad-mapper'
 import {listAgents} from '@/core/mapper/agent-mapper'
 import type {AgentInfo, SquadInfo, SquadSession, SquadMemory, SquadMemoryCategory} from '@/types/core'
 import {memberLabel, agentAppearanceOf, type BoardRound, type SquadBoardView} from './index'
+// 舞台背景：等距像素风会议室（椅子已由像素小人站位表达，换图时同步核对 SEATS 坐标）
+import ROOM_BG from '@/assets/images/squad-meeting-room.png'
 
 const ACTIVE_STATUSES = ['running', 'paused', 'awaiting_checkpoint', 'awaiting_delivery']
 const STATUS_PILL: Record<string, {label: string; cls: string}> = {
@@ -34,62 +36,87 @@ const ROUND_BADGE: Record<string, {label: string; cls: string}> = {
     metrics: {label: '指标', cls: 'metrics'}, checkpoint: {label: '门禁', cls: 'gate'},
     delivery: {label: '交付', cls: 'gate'},
 }
-const WALKER_SPOTS: Record<string, Array<{x: number; y: number; role: string}>> = {
-    orchestrator: [{x: 48, y: 28, role: '主管 · 调度'}, {x: 18, y: 55, role: '执行'}, {x: 38, y: 62, role: '执行'}, {x: 62, y: 58, role: '执行'}, {x: 82, y: 52, role: '支持'}, {x: 8, y: 40, role: '待命'}, {x: 90, y: 30, role: '待命'}, {x: 70, y: 30, role: '待命'}, {x: 28, y: 30, role: '待命'}, {x: 55, y: 45, role: '待命'}],
-    pipeline: [{x: 22, y: 58, role: '工位1'}, {x: 48, y: 58, role: '工位2'}, {x: 74, y: 58, role: '工位3'}, {x: 35, y: 35, role: '调度'}, {x: 88, y: 35, role: '记录'}, {x: 8, y: 35, role: '待命'}, {x: 60, y: 35, role: '待命'}, {x: 15, y: 70, role: '待命'}, {x: 65, y: 70, role: '待命'}, {x: 90, y: 60, role: '待命'}],
-    chat: [{x: 35, y: 48, role: '发言'}, {x: 65, y: 48, role: '倾听'}, {x: 30, y: 68, role: '思考'}, {x: 70, y: 68, role: '倾听'}, {x: 50, y: 72, role: '主笔'}, {x: 10, y: 55, role: '旁听'}, {x: 88, y: 55, role: '旁听'}, {x: 15, y: 30, role: '旁听'}, {x: 82, y: 30, role: '旁听'}, {x: 50, y: 40, role: '旁听'}],
+/**
+ * 会议桌座位（舞台坐标百分比）：主位在桌前正中，其余沿长桌两侧围坐。
+ * 顺序即优先级——成员按此顺序落座，人数不足时后面的座位空着（不画椅子）。
+ */
+/**
+ * 会议桌座位（舞台坐标百分比）：主位在桌前正中，其余沿桌前沿一字排开。
+ * 坐标与背景图 src/assets/images/squad-meeting-room.png（1920×600）对应，
+ * 改图时需同步这套坐标（用图片百分比即可，舞台按 100%×100% 铺图，不裁切）。
+ */
+const SEATS: Array<{x: number; y: number}> = [
+    // 坐标为「图片坐标系」百分比（squad-meeting-room.png 1920x600，3.2:1 与舞台同比例，
+    // object-fit: fill 严格 1:1 铺满不裁切）。桌面 x≈18.5%~80.5%、y≈49%~77%。
+    // 常规 1~6 号沿桌前沿一字排开（脚踩桌前沿外地面），7~10 人多时启用（后排/桌后沿）。
+    {x: 47, y: 75.5},   // 桌前正中（主位）
+    {x: 38.5, y: 75},   // 桌前左
+    {x: 55.5, y: 75.8}, // 桌前右
+    {x: 30, y: 74.5},   // 桌前左外
+    {x: 63.5, y: 76},   // 桌前右外
+    {x: 71.5, y: 76.2}, // 桌右前角
+    {x: 26, y: 47},     // 桌后沿左（人多时启用）
+    {x: 37, y: 46},     // 桌后沿中左（人多时启用）
+    {x: 59, y: 46.5},   // 桌后沿中右（人多时启用）
+    {x: 70, y: 47.5},   // 桌后沿右（人多时启用）
+]
+/** 座位角色标签（按协作模式）：与 SEATS 顺序一一对应 */
+const SEAT_LABELS: Record<string, string[]> = {
+    orchestrator: ['主管 · 调度', '执行 A', '执行 B', '执行 C', '执行 D', '支持', '支持', '旁听', '旁听', '旁听'],
+    pipeline: ['工位 1', '工位 2', '工位 3', '工位 4', '工位 5', '记录', '记录', '旁听', '旁听', '旁听'],
+    chat: ['发言', '倾听', '倾听', '思考', '思考', '旁听', '旁听', '旁听', '旁听', '旁听'],
+}
+/** 桌前那一排（气泡挂到小人下方，避免压住桌面）的判定阈值 */
+const FRONT_ROW_Y = 70
+
+/** 按模式与人数取落座表：第 1 位坐主位，其余沿桌两侧展开 */
+function seatSpots(mode: string, n: number): Array<{x: number; y: number; role: string}> {
+    const labels = SEAT_LABELS[mode] || SEAT_LABELS.orchestrator
+    const count = Math.max(n, 1)
+    return Array.from({length: count}, (_, i) => {
+        const seat = SEATS[i % SEATS.length]
+        return {x: seat.x, y: seat.y, role: labels[i % labels.length]}
+    })
 }
 
-/** 场景像素画（按协作模式）：办公室 / 流水线车间 / 会议室（设计稿 sceneSVG 移植） */
-function sceneSVG(mode: string): string {
-    const P = 20, W = 32, H = 18
-    const px = (x: number, y: number, w: number, h: number, fill: string) => `<rect x="${x * P}" y="${y * P}" width="${w * P}" height="${h * P}" fill="${fill}"/>`
-    let s = `<svg viewBox="0 0 ${W * P} ${H * P}" preserveAspectRatio="xMidYMid slice" shape-rendering="crispEdges">`
-    if (mode === 'pipeline') {
-        s += px(0, 0, 32, 2, '#37474f') + px(0, 2, 32, 11, '#546e7a')
-        for (let i = 0; i < 4; i++) { s += px(2 + i * 8, 3, 5, 3, '#b3e5fc') + px(2 + i * 8, 3, 5, 1, '#81d4fa') }
-        s += px(0, 13, 32, 5, '#78909c') + px(0, 13, 32, 1, '#607d8b')
-        s += px(0, 15, 32, 2, '#455a64') + px(0, 15, 32, 1, '#546e7a')
-        for (let i = 0; i < 32; i += 2) { s += px(i, 15, 1, 2, '#37474f') }
-        s += px(1, 4, 4, 1, '#8d6e63') + px(1, 7, 4, 1, '#8d6e63') + px(1, 4, 1, 4, '#6d4c41') + px(4, 4, 1, 4, '#6d4c41')
-        s += px(2, 5, 1, 1, '#ffb74d') + px(3, 5, 1, 1, '#4fc3f7') + px(2, 8, 1, 1, '#81c784')
-        s += px(26, 4, 4, 1, '#8d6e63') + px(26, 7, 4, 1, '#8d6e63') + px(26, 4, 1, 4, '#6d4c41') + px(29, 4, 1, 4, '#6d4c41')
-        s += px(27, 5, 1, 1, '#ff8a65') + px(28, 5, 1, 1, '#aed581')
-        for (let i = 0; i < 32; i += 4) { s += px(i, 12, 2, 1, '#ffca28') + px(i + 2, 12, 2, 1, '#212121') }
-        s += px(10, 4, 1, 9, '#455a64') + px(9, 3, 3, 1, '#fff59d')
-        s += px(21, 4, 1, 9, '#455a64') + px(20, 3, 3, 1, '#fff59d')
-    } else if (mode === 'chat') {
-        s += px(0, 0, 32, 2, '#4e342e') + px(0, 2, 32, 11, '#8d6e63')
-        s += px(10, 3, 12, 6, '#eceff1') + px(10, 3, 12, 1, '#cfd8dc')
-        s += px(11, 4, 6, 3, '#90caf9') + px(18, 4, 3, 1, '#a5d6a7') + px(18, 6, 3, 1, '#ffcc80')
-        s += px(9, 2, 1, 8, '#5d4037') + px(22, 2, 1, 8, '#5d4037')
-        s += px(2, 4, 3, 3, '#ffcc80') + px(2, 4, 3, 1, '#ffb74d')
-        s += px(27, 4, 3, 3, '#80cbc4') + px(27, 4, 3, 1, '#4db6ac')
-        s += px(0, 13, 32, 5, '#5d4037') + px(6, 14, 20, 3, '#6d4c41')
-        s += px(12, 15, 8, 2, '#a1887f') + px(13, 17, 6, 1, '#8d6e63') + px(14, 14, 4, 1, '#bcaaa4')
-        ;[[11, 15], [20, 15], [11, 17], [20, 17], [15, 18], [18, 18]].forEach(([x, y]) => { s += px(x, y, 1, 1, '#5d4037') })
-        s += px(0, 11, 1, 2, '#66bb6a') + px(31, 11, 1, 2, '#66bb6a') + px(0, 13, 1, 1, '#5d4037') + px(31, 13, 1, 1, '#5d4037')
-        s += px(15, 2, 2, 1, '#fff59d') + px(16, 3, 1, 1, '#ffe082')
-    } else {
-        s += px(0, 0, 32, 2, '#3d2b1f') + px(0, 2, 32, 1, '#5c4033')
-        s += px(0, 3, 32, 10, '#c4a574')
-        for (let i = 0; i < 3; i++) {
-            const wx = 3 + i * 10
-            s += px(wx, 4, 7, 5, '#87ceeb') + px(wx + 1, 5, 2, 3, '#b0e0f0')
-            s += px(wx, 4, 7, 1, '#5c4033') + px(wx, 8, 7, 1, '#5c4033') + px(wx + 3, 4, 1, 5, '#5c4033')
-        }
-        s += px(0, 13, 32, 5, '#d4a574') + px(0, 13, 32, 1, '#c4956a')
-        for (let i = 0; i < 16; i++) { s += px(i * 2, 15, 1, 1, '#c4956a') + px(i * 2 + 1, 17, 1, 1, '#c4956a') }
-        s += px(12, 4, 8, 5, '#f5f5f5') + px(12, 4, 8, 1, '#e0e0e0')
-        s += px(13, 5, 3, 2, '#90caf9') + px(17, 5, 2, 2, '#a5d6a7') + px(13, 7, 5, 1, '#bdbdbd')
-        s += px(11, 3, 1, 7, '#90a4ae') + px(20, 3, 1, 7, '#90a4ae')
-        ;[[2, 14], [7, 14], [22, 14], [27, 14]].forEach(([x, y]) => {
-            s += px(x, y, 3, 1, '#8d6e63') + px(x, y + 1, 1, 2, '#6d4c41') + px(x + 2, y + 1, 1, 2, '#6d4c41') + px(x + 1, y - 1, 1, 1, '#455a64')
-        })
-        s += px(24, 5, 6, 2, '#5c7a99') + px(24, 7, 6, 1, '#4a6a8a')
-        s += px(0, 11, 1, 2, '#4caf50') + px(31, 11, 1, 2, '#4caf50') + px(0, 13, 1, 1, '#795548') + px(31, 13, 1, 1, '#795548')
-    }
-    return s + '</svg>'
+/** 轮次内容 → 纯文本摘要（舞台气泡只回显一句话，去掉 Markdown 记号与代码块） */
+function plainText(src: string, max = 46): string {
+    const t = (src || '')
+        .replace(/```[\s\S]*?```/g, ' ')
+        .replace(/!\[[^\]]*]\([^)]*\)/g, ' ')
+        .replace(/\[([^\]]*)]\([^)]*\)/g, '$1')
+        .replace(/[#>*_`~|]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+    return t.length > max ? `${t.slice(0, max)}…` : t
+}
+
+/** 系统机器人像素（无角色的「系统」轮用它出镜：舞台上站在边上，时间线里当头像） */
+function RobotPixel({size = 28}: {size?: number}) {
+    const r = (x: number, y: number, w: number, h: number, fill: string, key: string) => (
+        <rect key={key} x={x} y={y} width={w} height={h} fill={fill}/>
+    )
+    return (
+        <svg className="sw-robot" width={size} height={size} viewBox="0 0 16 16" shapeRendering="crispEdges" aria-hidden="true">
+            {/* 天线 */}
+            {r(7, 0, 1, 1, '#ef5350', 'a1')}{r(7, 1, 1, 1, '#90a4ae', 'a2')}
+            {/* 头壳 + 屏幕脸 */}
+            {r(4, 2, 8, 1, '#78909c', 'h1')}{r(3, 3, 10, 5, '#78909c', 'h2')}
+            {r(4, 3, 8, 4, '#eceff1', 'f1')}
+            {r(5, 4, 2, 2, '#0284c7', 'e1')}{r(9, 4, 2, 2, '#0284c7', 'e2')}
+            {r(6, 6, 4, 1, '#90a4ae', 'm1')}
+            {/* 耳侧 */}
+            {r(2, 4, 1, 3, '#546e7a', 's1')}{r(13, 4, 1, 3, '#546e7a', 's2')}
+            {/* 颈 + 身体 + 状态灯 */}
+            {r(7, 8, 2, 1, '#607d8b', 'n1')}
+            {r(4, 9, 8, 5, '#90a4ae', 'b1')}
+            {r(5, 10, 6, 3, '#cfd8dc', 'b2')}
+            {r(7, 11, 2, 1, '#4fc3f7', 'l1')}
+            {/* 手臂 + 底座 */}
+            {r(2, 9, 2, 4, '#78909c', 'r1')}{r(12, 9, 2, 4, '#78909c', 'r2')}
+            {r(5, 14, 6, 1, '#607d8b', 'd1')}{r(4, 15, 8, 1, '#455a64', 'd2')}
+        </svg>
+    )
 }
 
 /** 轮次内容渲染：metrics/handoff/JSON → 代码块；其余 → Markdown。 */
@@ -179,6 +206,22 @@ function TypewriterBubble({kind, text, fresh, onGrow}: {
     )
 }
 
+/**
+ * 运行时长计时（自持 tick）。
+ * 原先由父级 setNow 每秒驱动整页重渲染（连带全部 Markdown 解析 / 像素头像重建），
+ * 交互会明显顿挫；改为只有这一个节点每秒更新。
+ */
+function LiveTimer({sinceMs}: {sinceMs: number}) {
+    const [now, setNow] = useState(() => Date.now())
+    useEffect(() => {
+        const t = setInterval(() => setNow(Date.now()), 1000)
+        return () => clearInterval(t)
+    }, [])
+    const el = Math.max(0, now - sinceMs)
+    const hms = `${String(Math.floor(el / 3600000)).padStart(2, '0')}:${String(Math.floor((el % 3600000) / 60000)).padStart(2, '0')}:${String(Math.floor((el % 60000) / 1000)).padStart(2, '0')}`
+    return <span className="sw-pill sw-pill--live"><i className="sw-dot"/>运行中 · {hms}</span>
+}
+
 /** 小分队工作台（像素舞台 v3，严格按设计稿 docs/design/小分队工作台-UI设计稿.html） */
 export default function SquadDetailPage() {
     const nav = useNavigate()
@@ -200,7 +243,6 @@ export default function SquadDetailPage() {
     const [prompt, setPrompt] = useState('')
     const [starting, setStarting] = useState(false)
     const sessionIdRef = useRef<string | null>(null)
-    const [now, setNow] = useState(Date.now())
     // 对话时间线贴底跟随：用户上滚即暂停跟随，手动滚回底部（距底 <48px）自动恢复
     const timelineRef = useRef<HTMLDivElement>(null)
     const stickBottomRef = useRef(true)
@@ -243,13 +285,9 @@ export default function SquadDetailPage() {
     const [chatCard, setChatCard] = useState<string | null>(null)
 
     const [asideOpen, setAsideOpen] = useState(false)
-    const [asideTab, setAsideTab] = useState<'members' | 'memory' | 'decisions'>('members')
+    // 顶栏「团队记忆」按钮请求右栏切页：n 递增即触发（Tab 状态已下沉到右栏内部）
+    const [asideReq, setAsideReq] = useState<{tab: AsideTab; n: number}>({tab: 'members', n: 0})
     const [memberMotion, setMemberMotion] = useState<Record<string, string>>({})
-    const [memories, setMemories] = useState<SquadMemory[]>([])
-    const [memKey, setMemKey] = useState('')
-    const [memContent, setMemContent] = useState('')
-    const [memCat, setMemCat] = useState<SquadMemoryCategory>('general')
-    const [memSaving, setMemSaving] = useState(false)
 
     const [planPending, setPlanPending] = useState(false)
     const [checkpointPending, setCheckpointPending] = useState(false)
@@ -272,24 +310,19 @@ export default function SquadDetailPage() {
         if (!id) return
         try { setSessions(await listSquadSessions(id)) } catch { /* 容错 */ }
     }, [id])
-    const reloadMemories = useCallback(async () => {
-        if (!id) return
-        try { setMemories(await listSquadMemories(id)) } catch { /* 容错 */ }
-    }, [id])
 
     useEffect(() => {
         let alive = true
         ;(async () => {
             setLoading(true)
             try {
-                const [sq, ags, sess, mems] = await Promise.all([
+                const [sq, ags, sess] = await Promise.all([
                     id ? getSquad(id) : Promise.resolve(undefined),
                     listAgents(),
                     id ? listSquadSessions(id) : Promise.resolve([] as SquadSession[]),
-                    id ? listSquadMemories(id) : Promise.resolve([] as SquadMemory[]),
                 ])
                 if (!alive) return
-                setSquad(sq); setAgents(ags); setSessions(sess); setMemories(mems)
+                setSquad(sq); setAgents(ags); setSessions(sess)
                 const active = sess.find((x) => ACTIVE_STATUSES.includes(x.status))
                 if (active) setSelected(active.id)
             } finally { if (alive) setLoading(false) }
@@ -298,20 +331,9 @@ export default function SquadDetailPage() {
     }, [id])
 
     useEffect(() => {
-        const t = setInterval(() => { void reloadSessions(); setNow(Date.now()) }, 30000)
+        const t = setInterval(() => { void reloadSessions() }, 30000)
         return () => clearInterval(t)
     }, [reloadSessions])
-    useEffect(() => {
-        if (!isRunning) return
-        const t = setInterval(() => setNow(Date.now()), 1000)
-        return () => clearInterval(t)
-    }, [isRunning])
-
-    useEffect(() => {
-        let un: (() => void) | undefined
-        void listen<{item: SquadMemory}>('agent-squad-memory-anchored', () => { void reloadMemories() }).then((f) => { un = f })
-        return () => un?.()
-    }, [reloadMemories])
 
     const openSessionRounds = useCallback(async (sid: string | null) => {
         setRounds([]); setBoard(null); setSummary(''); setPlanPending(false); setCheckpointPending(false); setChatCard(null)
@@ -391,38 +413,79 @@ export default function SquadDetailPage() {
         } catch (e) { message.error(`重跑失败：${e instanceof Error ? e.message : String(e)}`) }
     }
 
-    async function handleInject() {
+    const handleInject = useCallback(async () => {
         const text = injectText.trim()
         const target = selectedSession?.id ?? sessionIdRef.current
         if (!text) { message.error('请输入要补充的内容'); return }
         if (!injectTarget) { message.error('请选择插话目标（成员）'); return }
-        if (!target) { message.error('协作尚未开始，无法插话'); return }
+        if (!target || !squad) { message.error('协作尚未开始，无法插话'); return }
         setInjectBusy(true)
         try {
-            await invoke<string>('squad_inject_send', {squadId: squad!.id, sessionId: target, taskId: injectTarget, content: text, mode: injectMode})
+            await invoke<string>('squad_inject_send', {squadId: squad.id, sessionId: target, taskId: injectTarget, content: text, mode: injectMode})
             message.success(injectMode === 'pre_talk' ? '预嘱已入队，将在其任务启动时生效' : injectMode === 'hard' ? '强打断已送达，将在该成员下一轮优先处理' : '已打断，将在该成员下一轮生效')
             setInjectText('')
         } catch (e) { message.error(`插话失败：${e instanceof Error ? e.message : String(e)}`) } finally { setInjectBusy(false) }
-    }
+    }, [injectText, injectTarget, injectMode, selectedSession, squad, message])
+    // 舞台上点成员：选中并打开插话卡（默认「打断」）
+    const pickMember = useCallback((agentId: string) => {
+        setInjectTarget(agentId); setInjectMode('soft'); setChatCard(agentId)
+    }, [])
+    const closeChatCard = useCallback(() => setChatCard(null), [])
 
-    async function gateCall(cmd: string, args: Record<string, unknown>, okMsg: string) {
+    // 门禁 / 交付决议：sessionId 统一在此补齐，子组件只传业务参数
+    const gateCallAsync = useCallback(async (cmd: string, args: Record<string, unknown>, okMsg: string) => {
         try {
-            await invoke(cmd, args); message.success(okMsg)
+            await invoke(cmd, {sessionId: selected ?? sessionIdRef.current, ...args}); message.success(okMsg)
             setPlanPending(false); setCheckpointPending(false)
             void reloadSessions()
         } catch (e) { message.error(`操作失败：${e instanceof Error ? e.message : String(e)}`) }
-    }
+    }, [message, reloadSessions, selected])
+    // 稳定引用的 void 包装：直接传内联箭头会给 memo 子组件制造新 props，导致时间线白重渲染
+    const gateCall = useCallback((cmd: string, args: Record<string, unknown>, okMsg: string) => {
+        void gateCallAsync(cmd, args, okMsg)
+    }, [gateCallAsync])
 
-    async function handleMemorySave() {
-        if (!memKey.trim() || !memContent.trim() || !squad) { message.error('键名与内容必填'); return }
-        setMemSaving(true)
-        try {
-            const input: AnchorSquadMemoryInput = {squadId: squad.id, key: memKey.trim(), content: memContent.trim(), category: memCat}
-            await anchorSquadMemory(input)
-            message.success('记忆已锚定（下次协作注入生效）')
-            setMemKey(''); setMemContent(''); void reloadMemories()
-        } catch (e) { message.error(`锚定失败：${e instanceof Error ? e.message : String(e)}`) } finally { setMemSaving(false) }
-    }
+    // 像素头像外观缓存：agentAppearanceOf 在库内未存 appearance 时会现算生成新对象，
+    // 直接内联传入会击穿 PixelAgent 的 memo（每次重渲染都重建数百个 rect）；按 agentId 缓存引用。
+    const appearanceMap = useMemo(() => {
+        const map: Record<string, ReturnType<typeof agentAppearanceOf>> = {}
+        for (const m of squad?.members || []) map[m.agentId] = agentAppearanceOf(agents, m.agentId)
+        return map
+    }, [agents, squad])
+    const appearanceOf = useCallback((agentId?: string) => {
+        if (!agentId) return agentAppearanceOf(agents, undefined)
+        return appearanceMap[agentId] ?? agentAppearanceOf(agents, agentId)
+    }, [agents, appearanceMap])
+    // 落座表 + 场景像素画（会议室长桌，椅子按实际落座生成）：只随模式与人数变化
+    const memberCount = (squad?.members || []).length
+    const spots = useMemo(() => seatSpots(squad?.mode ?? 'orchestrator', memberCount), [squad?.mode, memberCount])
+    // 舞台气泡：每位成员最近一次发言（舞台只回显一句话，不渲染整段 Markdown）
+    const lastWords = useMemo(() => {
+        const map: Record<string, string> = {}
+        for (const r of rounds) {
+            if (!r.speakerAgentId || r.kind === 'metrics' || r.kind === 'handoff') continue
+            const t = plainText(r.content)
+            if (t) map[r.speakerAgentId] = t
+        }
+        return map
+    }, [rounds])
+    // 系统轮没有角色：取最近一条系统消息给「机器人」气泡
+    const systemWord = useMemo(() => {
+        for (let i = rounds.length - 1; i >= 0; i--) {
+            const r = rounds[i]
+            if (r.speakerAgentId) continue
+            const t = plainText(r.content)
+            if (t) return t
+        }
+        return ''
+    }, [rounds])
+    // 呼吸灯：谁在发言谁亮——事件状态优先，其次取最新一轮的发言者（群聊等无成员事件的回退）
+    const lastSpeakerId = rounds.length ? (rounds[rounds.length - 1].speakerAgentId ?? null) : null
+    const memberState = useCallback((agentId: string, role: string): string => {
+        const ev = memberMotion[role]
+        if (ev && ev !== 'idle') return ev
+        return isRunning && agentId === lastSpeakerId ? 'working' : 'idle'
+    }, [memberMotion, isRunning, lastSpeakerId])
 
     if (loading) return <div className="squads squads--detail"><Spin spinning wrapperClassName="squads__spin"/></div>
     if (!squad) {
@@ -452,20 +515,9 @@ export default function SquadDetailPage() {
     const liveCreatedMs = liveSession
         ? (typeof liveSession.createdAt === 'number' ? liveSession.createdAt : Date.parse(String(liveSession.createdAt)))
         : NaN
-    const elapsed = liveSession && liveSession.status === 'running' && Number.isFinite(liveCreatedMs)
-        ? Math.max(0, now - liveCreatedMs) : 0
-    const fmtElapsed = `${String(Math.floor(elapsed / 3600000)).padStart(2, '0')}:${String(Math.floor((elapsed % 3600000) / 60000)).padStart(2, '0')}:${String(Math.floor((elapsed % 60000) / 1000)).padStart(2, '0')}`
-    const spots = WALKER_SPOTS[mode] || WALKER_SPOTS.orchestrator
-    const chatMember = chatCard ? (squad.members.find((m) => m.agentId === chatCard) || null) : null
     void boardTasks
-    // 呼吸灯：谁在发言谁亮——事件状态优先，其次取最新一轮的发言者
-    const lastSpeakerId = rounds.length ? (rounds[rounds.length - 1].speakerAgentId ?? null) : null
-    // 成员状态：事件优先；群聊等无成员事件的路径回退到「最新发言者」——谁发言谁亮
-    const memberState = (agentId: string, role: string): string => {
-        const ev = memberMotion[role]
-        if (ev && ev !== 'idle') return ev
-        return isRunning && agentId === lastSpeakerId ? 'working' : 'idle'
-    }
+    // 点选像素小人后右下角对话框的「对谁说」
+    const chatMember = chatCard ? (squad.members.find((m) => m.agentId === chatCard) || null) : null
 
     return (
         <div className="squads squads--detail sw">
@@ -476,7 +528,7 @@ export default function SquadDetailPage() {
                     <div className="sw-topbar__name">{squad.name}</div>
                     <div className="sw-topbar__meta">
                         <span className="sw-pill sw-pill--mode">{MODE_META[mode]?.label ?? mode}</span>
-                        {liveSession && liveSession.status === 'running' && <span className="sw-pill sw-pill--live"><i className="sw-dot"/>运行中 · {fmtElapsed}</span>}
+                        {liveSession && liveSession.status === 'running' && Number.isFinite(liveCreatedMs) && <LiveTimer sinceMs={liveCreatedMs}/>}
                         {squad.workspaceDir && <span className="sw-pill sw-pill--muted">📁 {squad.workspaceDir}</span>}
                     </div>
                 </div>
@@ -487,23 +539,14 @@ export default function SquadDetailPage() {
                     </div>
                 </div>
                 <div className="sw-topbar__spacer"/>
-                <div className="sw-crew">
-                    {(squad.members || []).map((m, i) => {
-                        const st = memberState(m.agentId, m.role)
-                        return (
-                            <div key={m.id || i} className={`sw-crew__slot${st === 'working' || st === 'cheer' ? ' is-active' : ''}`} title={memberLabel(m, agents)}>
-                                <PixelAgent appearance={agentAppearanceOf(agents, m.agentId)} size={26} motion={st === 'working'} state={st as 'working'}/>
-                            </div>
-                        )
-                    })}
-                </div>
+                <CrewBar members={squad.members} agents={agents} appearanceOf={appearanceOf} memberState={memberState}/>
             </header>
 
             <div className="sw-body">
                 <aside className="sw-panel sw-side">
                     <div className="sw-side__cta">
                         <Button variant="solid" size="sm" block onClick={() => selectSessionLocal(null)}><Plus size={13}/> 新建任务</Button>
-                        <Button variant="ghost" size="sm" aria-label="团队记忆" title="团队记忆（热更新）" onClick={() => { setAsideOpen(true); setAsideTab('memory'); void reloadMemories() }}><Brain size={14}/></Button>
+                        <Button variant="ghost" size="sm" aria-label="团队记忆" title="团队记忆（热更新）" onClick={() => { setAsideOpen(true); setAsideReq((r) => ({tab: 'memory', n: r.n + 1})) }}><Brain size={14}/></Button>
                     </div>
                     <div className="sw-chips">
                         {chips.map((c) => (
@@ -558,133 +601,37 @@ export default function SquadDetailPage() {
                 </aside>
 
                 <main className="sw-panel sw-main" data-view={view}>
-                    <div className="sw-stage">
-                        <div className="sw-scene" dangerouslySetInnerHTML={{__html: sceneSVG(mode)}}/>
-                        {(squad.members || []).map((m, i) => {
-                            const spot = spots[i % spots.length]
-                            const motion = memberState(m.agentId, m.role)
-                            const anim = motion === 'working' ? 'is-working' : motion === 'speaking' ? 'is-speaking' : 'is-idle'
-                            return (
-                                <div
-                                    key={m.id || i}
-                                    className={`sw-walker ${anim}${chatCard === m.agentId ? ' is-selected' : ''}`}
-                                    style={{left: `${spot.x}%`, top: `${spot.y}%`}}
-                                    onClick={(e) => { e.stopPropagation(); if (!canInject) return; setInjectTarget(m.agentId); setInjectMode('soft'); setChatCard(m.agentId) }}
-                                    title={memberLabel(m, agents)}
-                                >
-                                    <div className="sw-walker__glow"/>
-                                    <div className="sw-walker__pa"><PixelAgent appearance={agentAppearanceOf(agents, m.agentId)} size={48} motion={anim !== 'is-idle'} state={anim === 'is-working' ? 'working' : anim === 'is-speaking' ? 'speaking' : 'idle'}/></div>
-                                    <div className="sw-walker__name">{memberLabel(m, agents)} · {spot.role}</div>
-                                </div>
-                            )
-                        })}
-                        {chatMember && (
-                            <div className="sw-chatcard" onClick={(e) => e.stopPropagation()}>
-                                <div className="sw-chatcard__head">
-                                    <div className="sw-chatcard__ava"><PixelAgent appearance={agentAppearanceOf(agents, chatMember.agentId)} size={32}/></div>
-                                    <div className="sw-chatcard__name">{memberLabel(chatMember, agents)}</div>
-                                    <button className="sw-chatcard__x" onClick={() => setChatCard(null)}>✕</button>
-                                </div>
-                                <div className="sw-chatcard__modes">
-                                    <span>方式</span>
-                                    {([['soft', '打断'], ['hard', '强打断'], ['pre_talk', '预嘱']] as const).map(([v, l]) => (
-                                        <button key={v} className={`sw-chatcard__mode${injectMode === v ? ' is-on' : ''}`} onClick={() => setInjectMode(v)}>{l}</button>
-                                    ))}
-                                    <div className="sw-chatcard__mode-hint">
-                                        {injectMode === 'soft' ? '打断：其下一轮生效' : injectMode === 'hard' ? '强打断：优先处理' : '预嘱：任务启动时注入'}
-                                    </div>
-                                </div>
-                                <div className="sw-chatcard__row">
-                                    <input
-                                        placeholder={`对 ${memberLabel(chatMember, agents)} 说…`}
-                                        value={injectText}
-                                        onChange={(e) => setInjectText(e.target.value)}
-                                        onKeyDown={(e) => { if (e.key === 'Enter') void handleInject() }}
-                                    />
-                                    <button className="sw-chatcard__send" onClick={() => void handleInject()}>发送</button>
-                                </div>
-                            </div>
-                        )}
-                    </div>
+                    <StageView
+                        mode={mode}
+                        members={squad.members}
+                        agents={agents}
+                        spots={spots}
+                        appearanceOf={appearanceOf}
+                        memberState={memberState}
+                        lastWords={lastWords}
+                        systemWord={systemWord}
+                        activeSpeakerId={lastSpeakerId}
+                        chatCard={chatCard}
+                        canInject={canInject}
+                        onPick={pickMember}
+                    />
 
-                    <div className="sw-timeline" ref={timelineRef} onScroll={handleTimelineScroll}>
-                        {rounds.map((r, i) => {
-                            const badge = ROUND_BADGE[r.kind] || {label: r.kind, cls: 'sys'}
-                            const speaker = r.speakerAgentId ? (squad.members.find((m) => m.agentId === r.speakerAgentId)) : null
-                            const name = speaker ? memberLabel(speaker, agents) : r.role
-                            const motion = speaker ? memberMotion[memberLabel(speaker, agents)] ?? memberMotion[speaker.role] : undefined
-                            const anim = motion === 'working' ? 'working' : motion === 'cheer' ? 'cheer' : motion === 'error' ? 'error' : 'idle'
-                            return (
-                                <div key={i} className={`sw-round${badge.cls === 'sys' ? ' sw-round--sys' : ''}`}>
-                                    <div className={`sw-round__pa${speaker && squad.members[0]?.agentId === speaker.agentId ? ' sw-round__pa--lead' : ''}`}>
-                                        {speaker
-                                            ? <PixelAgent appearance={agentAppearanceOf(agents, speaker.agentId)} size={28} motion={anim !== 'idle'} state={anim as 'idle'}/>
-                                            : <span>系</span>}
-                                    </div>
-                                    <div className="sw-round__body">
-                                        <div className="sw-round__head">
-                                            <span className="sw-round__name">{name}</span>
-                                            <span className={`sw-badge sw-badge--${badge.cls}`}>{badge.label}</span>
-                                        </div>
-                                        <div className="sw-round__content"><div className="sw-bubble">
-                                            {isStructuredRound(r.kind, r.content)
-                                                ? renderRoundContent(r.kind, r.content)
-                                                : <TypewriterBubble kind={r.kind} text={r.content} fresh={!!r.fresh} onGrow={stickScroll}/>}
-                                        </div></div>
-                                    </div>
-                                </div>
-                            )
-                        })}
-                        {(planPending || checkpointPending) && (
-                            <div className="sw-round sw-round--gate">
-                                <div className="sw-round__pa sw-round__pa--user">禁</div>
-                                <div className="sw-round__body">
-                                    <div className="sw-round__head"><span className="sw-round__name">门禁</span><span className="sw-badge sw-badge--gate">{planPending ? '计划待批准' : '检查点待决议'}</span></div>
-                                    <div className="sw-round__content">
-                                        {planPending ? '协作计划已生成，等待批准。' : '波次已完成，等待检查点决议。'}
-                                        <div style={{display: 'flex', gap: 8, marginTop: 8}}>
-                                            {planPending ? (
-                                                <>
-                                                    <Button variant="solid" size="sm" onClick={() => void gateCall('squad_plan_approve', {sessionId: selected, approved: true}, '计划已批准')}>批准计划</Button>
-                                                    <Button variant="outline" size="sm" onClick={() => void gateCall('squad_plan_approve', {sessionId: selected, approved: false}, '已拒绝')}>拒绝</Button>
-                                                </>
-                                            ) : (
-                                                <>
-                                                    <Button variant="solid" size="sm" onClick={() => void gateCall('squad_checkpoint_resolve', {sessionId: selected, decision: 'continue'}, '继续执行')}>继续执行</Button>
-                                                    <Button variant="outline" size="sm" onClick={() => void gateCall('squad_checkpoint_resolve', {sessionId: selected, decision: 'rework'}, '已要求返工')}>要求返工</Button>
-                                                </>
-                                            )}
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        )}
-                        {selectedSession?.status === 'awaiting_delivery' && (
-                            <div className="sw-round sw-round--gate">
-                                <div className="sw-round__pa sw-round__pa--user">包</div>
-                                <div className="sw-round__body">
-                                    <div className="sw-round__head"><span className="sw-round__name">交付</span><span className="sw-badge sw-badge--gate">交付待确认</span></div>
-                                    <div className="sw-round__content">
-                                        协作已完成，等待交付确认。
-                                        <div style={{display: 'flex', gap: 8, marginTop: 8}}>
-                                            <Button variant="solid" size="sm" onClick={() => void gateCall('squad_delivery_resolve', {sessionId: selected, approved: true}, '已确认交付')}>确认交付</Button>
-                                            <Button variant="outline" size="sm" onClick={() => void gateCall('squad_delivery_resolve', {sessionId: selected, approved: false}, '已要求修订')}>要求修订</Button>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        )}
-                        {rounds.length === 0 && !isDraft && <div className="sw-round"><div className="sw-round__body"><div className="sw-round__content" style={{color: 'var(--color-foreground-muted)'}}>暂无轮次内容</div></div></div>}
-                        {summary && !rounds.some((r) => r.kind === 'summary') && (
-                            <div className="sw-round sw-round--highlight">
-                                <div className="sw-round__pa sw-round__pa--user">汇</div>
-                                <div className="sw-round__body">
-                                    <div className="sw-round__head"><span className="sw-round__name">最终汇总</span><span className="sw-badge sw-badge--msg">结论</span></div>
-                                    <div className="sw-round__content"><div className="sw-bubble sw-bubble--hl"><MarkdownRenderer className="sw-md" content={normalizeMd(summary)}/></div></div>
-                                </div>
-                            </div>
-                        )}
-                    </div>
+                    <TimelineView
+                        rounds={rounds}
+                        members={squad.members}
+                        agents={agents}
+                        appearanceOf={appearanceOf}
+                        memberMotion={memberMotion}
+                        planPending={planPending}
+                        checkpointPending={checkpointPending}
+                        delivery={selectedSession?.status === 'awaiting_delivery'}
+                        showEmpty={!isDraft}
+                        summary={summary}
+                        onGate={gateCall}
+                        stickScroll={stickScroll}
+                        scrollRef={timelineRef}
+                        onScroll={handleTimelineScroll}
+                    />
 
                     <div className="sw-composer">
                         <div className="sw-composer__body">
@@ -700,7 +647,7 @@ export default function SquadDetailPage() {
                                         <span className="sw-modebar__label">目标</span>
                                         {(squad.members || []).map((m) => (
                                             <div key={m.id || m.agentId} className={`sw-member-pick${injectTarget === m.agentId ? ' is-on' : ''}`} onClick={() => setInjectTarget(m.agentId)}>
-                                                <div className="sw-member-pick__pa"><PixelAgent appearance={agentAppearanceOf(agents, m.agentId)} size={20}/></div>
+                                                <div className="sw-member-pick__pa"><PixelAgent appearance={appearanceOf(m.agentId)} size={20}/></div>
                                                 {memberLabel(m, agents)}
                                             </div>
                                         ))}
@@ -731,80 +678,355 @@ export default function SquadDetailPage() {
             </div>
 
             {asideOpen && (
-            <div className="sw-aside-float">
-                <aside className="sw-panel sw-aside-panel">
-                    <div className="sw-rtabs">
-                        {([['members', '成员状态'], ['memory', '团队记忆'], ['decisions', '决策']] as const).map(([k, l]) => (
-                            <div key={k} className={`sw-rtabs__item${asideTab === k ? ' is-on' : ''}`} onClick={() => setAsideTab(k)}>{l}</div>
-                        ))}
-                    </div>
-                    <div className="sw-panel__body">
-                        {asideTab === 'members' && (squad.members || []).map((m) => {
-                            const motion = memberState(m.agentId, m.role)
-                            const bub = motion === 'working' ? 'work' : motion === 'cheer' ? 'work' : motion === 'error' ? 'think' : 'idle'
-                            const label = motion === 'working' ? '执行中' : motion === 'cheer' ? '已完成' : motion === 'error' ? '受阻' : '待命'
-                            return (
-                                <div key={m.id || m.agentId} className="sw-mrow">
-                                    <div className="sw-mrow__pa-wrap">
-                                        <div className={`sw-mrow__pa${squad.members[0]?.agentId === m.agentId ? ' sw-mrow__pa--lead' : ''}`}>
-                                            <PixelAgent appearance={agentAppearanceOf(agents, m.agentId)} size={34} motion={bub === 'work'} state={motion === 'working' ? 'working' : motion === 'cheer' ? 'cheer' : motion === 'error' ? 'error' : 'idle'}/>
-                                        </div>
-                                        <div className={`sw-mrow__bubble sw-mrow__bubble--${bub}`}/>
-                                    </div>
-                                    <div className="sw-mrow__info">
-                                        <div className="sw-mrow__name">{memberLabel(m, agents)}{squad.members[0]?.agentId === m.agentId ? ' · 主管' : ''}</div>
-                                        <div className="sw-mrow__role">{m.role || '成员'}</div>
-                                    </div>
-                                    <span className={`sw-mrow__state sw-mrow__state--${bub === 'work' ? 'work' : 'idle'}`}>{label}</span>
-                                </div>
-                            )
-                        })}
-                        {asideTab === 'memory' && (
-                            <>
-                                {memories.map((m) => (
-                                    <div key={m.id} className="sw-mem">
-                                        <div className="sw-mem__head">
-                                            <span className="sw-mem__key">{m.key}</span>
-                                            <span className="sw-mem__cat">{m.category}</span>
-                                            <Button variant="ghost" size="sm" aria-label="删除记忆" onClick={() => void deleteSquadMemory(m.id, squad!.id).then(() => reloadMemories())}><Trash2 size={12}/></Button>
-                                        </div>
-                                        <div className="sw-mem__body">{m.content}</div>
-                                    </div>
-                                ))}
-                                {memories.length === 0 && <Empty description="暂无记忆——下方锚定第一条"/>}
-                                <div className="sw-mem-add">
-                                    <Input autoComplete="off" placeholder="键名，如：统一返回结构" value={memKey} onChange={(e) => setMemKey(e.target.value)}/>
-                                    <Input.TextArea autoComplete="off" rows={2} placeholder="记忆内容…" value={memContent} onChange={(e) => setMemContent(e.target.value)}/>
-                                    <div className="sw-mem-add__row">
-                                        <Select
-                                            style={{width: 110}}
-                                            size="small"
-                                            value={memCat}
-                                            onChange={(v) => setMemCat(v as SquadMemoryCategory)}
-                                            options={[{label: '通用', value: 'general'}, {label: '决策', value: 'decision'}, {label: '代码范式', value: 'code_pattern'}]}
-                                        />
-                                        <Button variant="solid" size="sm" loading={memSaving} disabled={!memKey.trim() || !memContent.trim()} onClick={() => void handleMemorySave()}><Send size={13}/> 锚定</Button>
-                                    </div>
-                                </div>
-                            </>
-                        )}
-                        {asideTab === 'decisions' && (
-                            (board?.decisions?.length ?? 0) === 0
-                                ? <Empty description="当前会话暂无决策卡"/>
-                                : (board?.decisions || []).map((d, i) => (
-                                    <div key={i} className="sw-mem">
-                                        <div className="sw-mem__head"><span className="sw-mem__key">{d.kind}</span></div>
-                                        <div className="sw-mem__body">{d.text}</div>
-                                    </div>
-                                ))
-                        )}
-                    </div>
-                </aside>
-            </div>
+                <AsideFloat
+                    squadId={squad.id}
+                    members={squad.members}
+                    agents={agents}
+                    appearanceOf={appearanceOf}
+                    memberState={memberState}
+                    board={board}
+                    request={asideReq}
+                />
+            )}
+            {/* 打断对话框：屏幕右下角固定浮出，与像素小人解绑 */}
+            {chatMember && (
+                <InjectDock
+                    member={chatMember}
+                    agents={agents}
+                    appearanceOf={appearanceOf}
+                    injectMode={injectMode}
+                    injectText={injectText}
+                    onMode={setInjectMode}
+                    onText={setInjectText}
+                    onSend={() => void handleInject()}
+                    onClose={closeChatCard}
+                />
             )}
             <button className="sw-aside-toggle" title={asideOpen ? '收起右栏' : '展开右栏'} onClick={() => setAsideOpen((v) => !v)}>{asideOpen ? '❮' : '❯'}</button>
         </div>
     )
 }
+
+/* --------------------------------------------------------------------------
+ * 渲染分区（均 memo 化）：
+ * 大页面此前每次 setState（切右栏 Tab / 计时 tick / 输入框打字 / 成员事件）都会整页
+ * 重渲染，连带重跑全部 Markdown 解析管线与像素头像重建，交互明显顿挫。拆成 memo
+ * 子组件后，props 未变的分区会被整体跳过，切 Tab 只重渲染右栏那一小片。
+ * -------------------------------------------------------------------------- */
+
+type AsideTab = 'members' | 'memory' | 'decisions'
+type AppearanceOf = (agentId?: string) => ReturnType<typeof agentAppearanceOf>
+type Members = SquadInfo['members']
+
+/** 顶栏成员头像条：成员与状态不变时跳过重渲染（像素头像重建代价最高） */
+const CrewBar = memo(function CrewBar({members, agents, appearanceOf, memberState}: {
+    members: Members; agents: AgentInfo[]; appearanceOf: AppearanceOf;
+    memberState: (agentId: string, role: string) => string
+}) {
+    return (
+        <div className="sw-crew">
+            {(members || []).map((m, i) => {
+                const st = memberState(m.agentId, m.role)
+                return (
+                    <div key={m.id || i} className={`sw-crew__slot${st === 'working' || st === 'cheer' ? ' is-active' : ''}`} title={memberLabel(m, agents)}>
+                        <PixelAgent appearance={appearanceOf(m.agentId)} size={26} motion={st === 'working'} state={st as 'working'}/>
+                    </div>
+                )
+            })}
+        </div>
+    )
+})
+
+/** 像素舞台：会议室长桌场景 + 围坐成员 + 发言气泡回显 + 系统机器人 */
+const StageView = memo(function StageView({mode, members, agents, spots, appearanceOf, memberState, lastWords, systemWord, activeSpeakerId, chatCard, canInject, onPick}: {
+    mode: string; members: Members; agents: AgentInfo[];
+    spots: Array<{x: number; y: number; role: string}>;
+    appearanceOf: AppearanceOf; memberState: (agentId: string, role: string) => string;
+    lastWords: Record<string, string>; systemWord: string; activeSpeakerId: string | null;
+    chatCard: string | null; canInject: boolean;
+    onPick: (agentId: string) => void
+}) {
+    return (
+        <div className="sw-stage" data-mode={mode}>
+            <div className="sw-scene-frame">
+                <img className="sw-scene__bg" src={ROOM_BG} alt="" draggable={false}/>
+            </div>
+            {(members || []).map((m, i) => {
+                const spot = spots[i % spots.length]
+                const motion = memberState(m.agentId, m.role)
+                const anim = motion === 'working' ? 'is-working' : motion === 'speaking' ? 'is-speaking' : 'is-idle'
+                const word = lastWords[m.agentId] || ''
+                const talking = anim === 'is-working' || anim === 'is-speaking'
+                // 只有「正在说话的人」出气泡（含刚刚说完的那位），避免桌面被一堆气泡糊住
+                const showWord = !!word && (talking || m.agentId === activeSpeakerId)
+                return (
+                    <div
+                        key={m.id || i}
+                        className={`sw-walker ${anim}${spot.y >= FRONT_ROW_Y ? ' is-front' : ''}${chatCard === m.agentId ? ' is-selected' : ''}${showWord ? ' has-word' : ''}`}
+                        style={{left: `${spot.x}%`, top: `${spot.y}%`}}
+                        onClick={(e) => { e.stopPropagation(); if (!canInject) return; onPick(m.agentId) }}
+                        title={memberLabel(m, agents)}
+                    >
+                        {showWord && <div className={`sw-walker__say${talking ? ' is-talking' : ''}`}>{word}</div>}
+                        <div className="sw-walker__glow"/>
+                        <div className="sw-walker__pa"><PixelAgent appearance={appearanceOf(m.agentId)} size={72} motion={anim !== 'is-idle'} state={anim === 'is-working' ? 'working' : anim === 'is-speaking' ? 'speaking' : 'idle'}/></div>
+                        <div className="sw-walker__name">{memberLabel(m, agents)} · {spot.role}</div>
+                    </div>
+                )
+            })}
+            {/* 系统轮没有角色：用机器人像素站在桌上，系统消息同样回显到气泡 */}
+            <div className={`sw-robot-stand${systemWord ? ' has-word' : ''}`} style={{left: '74%', top: '66%'}} title="系统">
+                {systemWord && <div className="sw-walker__say is-sys">{systemWord}</div>}
+                <RobotPixel size={60}/>
+                <div className="sw-walker__name">系统</div>
+            </div>
+        </div>
+    )
+})
+
+/** 打断对话框：固定在屏幕右下角（不再贴着像素小人飘，避免被舞台裁掉） */
+const InjectDock = memo(function InjectDock({member, agents, appearanceOf, injectMode, injectText, onMode, onText, onSend, onClose}: {
+    member: {agentId: string; role?: string} | null; agents: AgentInfo[]; appearanceOf: AppearanceOf;
+    injectMode: 'soft' | 'hard' | 'pre_talk'; injectText: string;
+    onMode: (v: 'soft' | 'hard' | 'pre_talk') => void; onText: (v: string) => void;
+    onSend: () => void; onClose: () => void
+}) {
+    if (!member) return null
+    return (
+        <div className="sw-chatcard" onClick={(e) => e.stopPropagation()}>
+            <div className="sw-chatcard__head">
+                <div className="sw-chatcard__ava"><PixelAgent appearance={appearanceOf(member.agentId)} size={32}/></div>
+                <div className="sw-chatcard__name">{memberLabel(member, agents)}</div>
+                <button className="sw-chatcard__x" onClick={onClose}>✕</button>
+            </div>
+            <div className="sw-chatcard__modes">
+                <span>方式</span>
+                {([['soft', '打断'], ['hard', '强打断'], ['pre_talk', '预嘱']] as const).map(([v, l]) => (
+                    <button key={v} className={`sw-chatcard__mode${injectMode === v ? ' is-on' : ''}`} onClick={() => onMode(v)}>{l}</button>
+                ))}
+                <div className="sw-chatcard__mode-hint">
+                    {injectMode === 'soft' ? '打断：其下一轮生效' : injectMode === 'hard' ? '强打断：优先处理' : '预嘱：任务启动时注入'}
+                </div>
+            </div>
+            <div className="sw-chatcard__row">
+                <input
+                    placeholder={`对 ${memberLabel(member, agents)} 说…`}
+                    value={injectText}
+                    onChange={(e) => onText(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') onSend() }}
+                />
+                <button className="sw-chatcard__send" onClick={onSend}>发送</button>
+            </div>
+        </div>
+    )
+})
+
+/** 对话时间线：轮次不变时不随右栏 Tab / 计时等无关状态重渲染 */
+const TimelineView = memo(function TimelineView({rounds, members, agents, appearanceOf, memberMotion, planPending, checkpointPending, delivery, showEmpty, summary, onGate, stickScroll, scrollRef, onScroll}: {
+    rounds: BoardRound[]; members: Members; agents: AgentInfo[]; appearanceOf: AppearanceOf;
+    memberMotion: Record<string, string>; planPending: boolean; checkpointPending: boolean;
+    delivery: boolean; showEmpty: boolean; summary: string;
+    onGate: (cmd: string, args: Record<string, unknown>, okMsg: string) => void;
+    stickScroll: () => void;
+    scrollRef: RefObject<HTMLDivElement | null>; onScroll: () => void
+}) {
+    return (
+        <div className="sw-timeline" ref={scrollRef} onScroll={onScroll}>
+            {rounds.map((r, i) => {
+                const badge = ROUND_BADGE[r.kind] || {label: r.kind, cls: 'sys'}
+                const speaker = r.speakerAgentId ? (members.find((m) => m.agentId === r.speakerAgentId)) : null
+                const name = speaker ? memberLabel(speaker, agents) : r.role
+                const motion = speaker ? memberMotion[memberLabel(speaker, agents)] ?? memberMotion[speaker.role] : undefined
+                const anim = motion === 'working' ? 'working' : motion === 'cheer' ? 'cheer' : motion === 'error' ? 'error' : 'idle'
+                return (
+                    <div key={i} className={`sw-round${badge.cls === 'sys' ? ' sw-round--sys' : ''}`}>
+                        <div className={`sw-round__pa${speaker && members[0]?.agentId === speaker.agentId ? ' sw-round__pa--lead' : ''}`}>
+                            {speaker
+                                ? <PixelAgent appearance={appearanceOf(speaker.agentId)} size={28} motion={anim !== 'idle'} state={anim as 'idle'}/>
+                                : <RobotPixel size={28}/>}
+                        </div>
+                        <div className="sw-round__body">
+                            <div className="sw-round__head">
+                                <span className="sw-round__name">{name}</span>
+                                <span className={`sw-badge sw-badge--${badge.cls}`}>{badge.label}</span>
+                            </div>
+                            <div className="sw-round__content"><div className="sw-bubble">
+                                {isStructuredRound(r.kind, r.content)
+                                    ? renderRoundContent(r.kind, r.content)
+                                    : <TypewriterBubble kind={r.kind} text={r.content} fresh={!!r.fresh} onGrow={stickScroll}/>}
+                            </div></div>
+                        </div>
+                    </div>
+                )
+            })}
+            {(planPending || checkpointPending) && (
+                <div className="sw-round sw-round--gate">
+                    <div className="sw-round__pa sw-round__pa--user">禁</div>
+                    <div className="sw-round__body">
+                        <div className="sw-round__head"><span className="sw-round__name">门禁</span><span className="sw-badge sw-badge--gate">{planPending ? '计划待批准' : '检查点待决议'}</span></div>
+                        <div className="sw-round__content">
+                            {planPending ? '协作计划已生成，等待批准。' : '波次已完成，等待检查点决议。'}
+                            <div style={{display: 'flex', gap: 8, marginTop: 8}}>
+                                {planPending ? (
+                                    <>
+                                        <Button variant="solid" size="sm" onClick={() => onGate('squad_plan_approve', {approved: true}, '计划已批准')}>批准计划</Button>
+                                        <Button variant="outline" size="sm" onClick={() => onGate('squad_plan_approve', {approved: false}, '已拒绝')}>拒绝</Button>
+                                    </>
+                                ) : (
+                                    <>
+                                        <Button variant="solid" size="sm" onClick={() => onGate('squad_checkpoint_resolve', {decision: 'continue'}, '继续执行')}>继续执行</Button>
+                                        <Button variant="outline" size="sm" onClick={() => onGate('squad_checkpoint_resolve', {decision: 'rework'}, '已要求返工')}>要求返工</Button>
+                                    </>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+            {delivery && (
+                <div className="sw-round sw-round--gate">
+                    <div className="sw-round__pa sw-round__pa--user">包</div>
+                    <div className="sw-round__body">
+                        <div className="sw-round__head"><span className="sw-round__name">交付</span><span className="sw-badge sw-badge--gate">交付待确认</span></div>
+                        <div className="sw-round__content">
+                            协作已完成，等待交付确认。
+                            <div style={{display: 'flex', gap: 8, marginTop: 8}}>
+                                <Button variant="solid" size="sm" onClick={() => onGate('squad_delivery_resolve', {approved: true}, '已确认交付')}>确认交付</Button>
+                                <Button variant="outline" size="sm" onClick={() => onGate('squad_delivery_resolve', {approved: false}, '已要求修订')}>要求修订</Button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+            {rounds.length === 0 && showEmpty && <div className="sw-round"><div className="sw-round__body"><div className="sw-round__content" style={{color: 'var(--color-foreground-muted)'}}>暂无轮次内容</div></div></div>}
+            {summary && !rounds.some((r) => r.kind === 'summary') && (
+                <div className="sw-round sw-round--highlight">
+                    <div className="sw-round__pa sw-round__pa--user">汇</div>
+                    <div className="sw-round__body">
+                        <div className="sw-round__head"><span className="sw-round__name">最终汇总</span><span className="sw-badge sw-badge--msg">结论</span></div>
+                        <div className="sw-round__content"><div className="sw-bubble sw-bubble--hl"><MarkdownRenderer className="sw-md" content={normalizeMd(summary)}/></div></div>
+                    </div>
+                </div>
+            )}
+        </div>
+    )
+})
+
+/**
+ * 右栏悬浮面板：自持 Tab 与团队记忆数据。
+ * Tab / 记忆输入是面板局部状态，不再提升到大页面——否则每次点 Tab 都会重渲染整条时间线。
+ */
+const AsideFloat = memo(function AsideFloat({squadId, members, agents, appearanceOf, memberState, board, request}: {
+    squadId: string; members: Members; agents: AgentInfo[]; appearanceOf: AppearanceOf;
+    memberState: (agentId: string, role: string) => string;
+    board: SquadBoardView | null; request: {tab: AsideTab; n: number}
+}) {
+    const {message} = useNotify()
+    const [tab, setTab] = useState<AsideTab>('members')
+    const [memories, setMemories] = useState<SquadMemory[]>([])
+    const [memKey, setMemKey] = useState('')
+    const [memContent, setMemContent] = useState('')
+    const [memCat, setMemCat] = useState<SquadMemoryCategory>('general')
+    const [memSaving, setMemSaving] = useState(false)
+
+    const reload = useCallback(async () => {
+        try { setMemories(await listSquadMemories(squadId)) } catch { /* 容错 */ }
+    }, [squadId])
+    useEffect(() => { void reload() }, [reload])
+    useEffect(() => {
+        let un: (() => void) | undefined
+        void listen<{item: SquadMemory}>('agent-squad-memory-anchored', () => { void reload() }).then((f) => { un = f })
+        return () => un?.()
+    }, [reload])
+    // 外部（顶栏「团队记忆」按钮）请求切页：n 递增即触发
+    useEffect(() => {
+        setTab(request.tab)
+        if (request.tab === 'memory') void reload()
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [request.n])
+
+    async function handleSave() {
+        if (!memKey.trim() || !memContent.trim()) { message.error('键名与内容必填'); return }
+        setMemSaving(true)
+        try {
+            await anchorSquadMemory({squadId, key: memKey.trim(), content: memContent.trim(), category: memCat})
+            message.success('记忆已锚定（下次协作注入生效）')
+            setMemKey(''); setMemContent(''); void reload()
+        } catch (e) { message.error(`锚定失败：${e instanceof Error ? e.message : String(e)}`) } finally { setMemSaving(false) }
+    }
+
+    return (
+        <div className="sw-aside-float">
+            <aside className="sw-panel sw-aside-panel">
+                <div className="sw-rtabs">
+                    {([['members', '成员状态'], ['memory', '团队记忆'], ['decisions', '决策']] as const).map(([k, l]) => (
+                        <div key={k} className={`sw-rtabs__item${tab === k ? ' is-on' : ''}`} onClick={() => setTab(k)}>{l}</div>
+                    ))}
+                </div>
+                <div className="sw-panel__body">
+                    {tab === 'members' && (members || []).map((m) => {
+                        const motion = memberState(m.agentId, m.role)
+                        const bub = motion === 'working' ? 'work' : motion === 'cheer' ? 'work' : motion === 'error' ? 'think' : 'idle'
+                        const label = motion === 'working' ? '执行中' : motion === 'cheer' ? '已完成' : motion === 'error' ? '受阻' : '待命'
+                        return (
+                            <div key={m.id || m.agentId} className="sw-mrow">
+                                <div className="sw-mrow__pa-wrap">
+                                    <div className={`sw-mrow__pa${members[0]?.agentId === m.agentId ? ' sw-mrow__pa--lead' : ''}`}>
+                                        <PixelAgent appearance={appearanceOf(m.agentId)} size={34} motion={bub === 'work'} state={motion === 'working' ? 'working' : motion === 'cheer' ? 'cheer' : motion === 'error' ? 'error' : 'idle'}/>
+                                    </div>
+                                    <div className={`sw-mrow__bubble sw-mrow__bubble--${bub}`}/>
+                                </div>
+                                <div className="sw-mrow__info">
+                                    <div className="sw-mrow__name">{memberLabel(m, agents)}{members[0]?.agentId === m.agentId ? ' · 主管' : ''}</div>
+                                    <div className="sw-mrow__role">{m.role || '成员'}</div>
+                                </div>
+                                <span className={`sw-mrow__state sw-mrow__state--${bub === 'work' ? 'work' : 'idle'}`}>{label}</span>
+                            </div>
+                        )
+                    })}
+                    {tab === 'memory' && (
+                        <>
+                            {memories.map((m) => (
+                                <div key={m.id} className="sw-mem">
+                                    <div className="sw-mem__head">
+                                        <span className="sw-mem__key">{m.key}</span>
+                                        <span className="sw-mem__cat">{m.category}</span>
+                                        <Button variant="ghost" size="sm" aria-label="删除记忆" onClick={() => void deleteSquadMemory(m.id, squadId).then(() => reload())}><Trash2 size={12}/></Button>
+                                    </div>
+                                    <div className="sw-mem__body">{m.content}</div>
+                                </div>
+                            ))}
+                            {memories.length === 0 && <Empty description="暂无记忆——下方锚定第一条"/>}
+                            <div className="sw-mem-add">
+                                <Input autoComplete="off" placeholder="键名，如：统一返回结构" value={memKey} onChange={(e) => setMemKey(e.target.value)}/>
+                                <Input.TextArea autoComplete="off" rows={2} placeholder="记忆内容…" value={memContent} onChange={(e) => setMemContent(e.target.value)}/>
+                                <div className="sw-mem-add__row">
+                                    <Select
+                                        style={{width: 110}}
+                                        size="small"
+                                        value={memCat}
+                                        onChange={(v) => setMemCat(v as SquadMemoryCategory)}
+                                        options={[{label: '通用', value: 'general'}, {label: '决策', value: 'decision'}, {label: '代码范式', value: 'code_pattern'}]}
+                                    />
+                                    <Button variant="solid" size="sm" loading={memSaving} disabled={!memKey.trim() || !memContent.trim()} onClick={() => void handleSave()}><Send size={13}/> 锚定</Button>
+                                </div>
+                            </div>
+                        </>
+                    )}
+                    {tab === 'decisions' && (
+                        (board?.decisions?.length ?? 0) === 0
+                            ? <Empty description="当前会话暂无决策卡"/>
+                            : (board?.decisions || []).map((d, i) => (
+                                <div key={i} className="sw-mem">
+                                    <div className="sw-mem__head"><span className="sw-mem__key">{d.kind}</span></div>
+                                    <div className="sw-mem__body">{d.text}</div>
+                                </div>
+                            ))
+                    )}
+                </div>
+            </aside>
+        </div>
+    )
+})
 
 

@@ -1798,16 +1798,25 @@
 .sw-stage {
   flex: none; position: relative; overflow: hidden;
   border-bottom: 1px solid var(--swborder);
-  background: #2c2c2c; height: 240px;
+  background: #e9eef3; height: 320px;
 }
-.sw-scene { position: absolute; inset: 0; }
-.sw-scene svg { width: 100%; height: 100%; display: block; }
+/* 背景 1920×600 与舞台比例一致，fill 严格 1:1 铺满不裁切，座位百分比与图片一一对应 */
+.sw-scene-frame { position: absolute; inset: 0; }
+.sw-scene__bg {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  display: block; object-fit: fill;
+  image-rendering: pixelated;
+  user-select: none; -webkit-user-drag: none;
+}
 
 .sw-walker {
   position: absolute; z-index: 5; cursor: pointer;
-  transition: left 1.2s linear, top 1.2s linear;
-  filter: drop-shadow(0 2px 3px rgba(0, 0, 0, .25));
+  /* 以座位点为小人中心：与场景里按同一坐标画的椅子对齐 */
+  transform: translate(-50%, -50%);
+  transition: left .6s linear, top .6s linear;
 }
+/* 阴影只给像素小人：整块加 filter 会把发言气泡的文字也拉进滤镜重算 */
+.sw-walker__pa { filter: drop-shadow(0 2px 3px rgba(0, 0, 0, .25)); }
 .sw-walker:hover { z-index: 10; }
 .sw-walker:hover .sw-walker__glow { opacity: 1; }
 .sw-walker__glow {
@@ -1818,26 +1827,90 @@
 }
 .sw-walker__name {
   position: absolute; left: 50%; bottom: -16px; transform: translateX(-50%);
-  font-size: 10px; font-weight: 700; color: #fff;
-  background: rgba(0, 0, 0, .55); padding: 1px 7px; border-radius: 6px;
+  font-size: 10px; font-weight: 700; color: #475569;
+  background: rgba(255, 255, 255, .95); border: 1px solid #dbe4ec;
+  padding: 1px 7px; border-radius: 6px;
   white-space: nowrap; pointer-events: none;
 }
-.sw-walker.is-selected .sw-walker__name { background: #0ea5e9; box-shadow: 0 0 0 2px #fff; }
+.sw-walker.is-selected .sw-walker__name { background: #0ea5e9; border-color: #0ea5e9; color: #fff; box-shadow: 0 0 0 2px rgba(14, 165, 233, .25); }
+.dark .sw-walker__name { color: #cbd5e1; background: rgba(30, 41, 59, .95); border-color: #334155; }
 .sw-walker.is-working .sw-walker__pa { animation: sw-work-bounce .9s ease-in-out infinite; }
 .sw-walker.is-speaking .sw-walker__pa { animation: sw-speak-rock 1.1s ease-in-out infinite; }
 .sw-walker.is-idle .sw-walker__pa { animation: sw-idle-breathe 2.8s ease-in-out infinite; }
 .sw-walker__pa { display: block; line-height: 0; }
 
+/* 群聊模式：围坐圆桌，不再有走动感（位移与弹跳都换成坐着轻微起伏） */
+.sw-stage[data-mode='chat'] .sw-walker { transition: none; }
+.sw-stage[data-mode='chat'] .sw-walker.is-working .sw-walker__pa,
+.sw-stage[data-mode='chat'] .sw-walker.is-speaking .sw-walker__pa,
+.sw-stage[data-mode='chat'] .sw-walker.is-idle .sw-walker__pa { animation: sw-sit-nod 2.2s ease-in-out infinite; }
+
 @keyframes sw-idle-breathe { 0%, 100% { transform: translateY(0) scale(1); } 50% { transform: translateY(-3px) scale(1.02); } }
 @keyframes sw-work-bounce { 0%, 100% { transform: translateY(0); } 30% { transform: translateY(-5px); } 60% { transform: translateY(1px); } }
 @keyframes sw-speak-rock { 0%, 100% { transform: rotate(-2deg) translateY(0); } 50% { transform: rotate(2deg) translateY(-3px); } }
+@keyframes sw-sit-nod { 0%, 100% { transform: translateY(0) rotate(0); } 50% { transform: translateY(-2px) rotate(-1deg); } }
 
+/* 发言气泡：轮到谁说话，就在谁旁边回显最近一句（纯文本，不渲染 Markdown） */
+.sw-walker__say {
+  position: absolute; left: 50%; bottom: 100%;
+  transform: translate(-50%, -4px);
+  width: max-content; max-width: 180px;
+  padding: 4px 8px; border-radius: 8px;
+  font-size: 10.5px; line-height: 1.35; color: #334155;
+  background: #ffffff;
+  border: 1px solid #bae6fd;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, .08);
+  white-space: normal; word-break: break-word;
+  pointer-events: none; z-index: 6;
+  animation: sw-say-in .18s ease-out;
+}
+.sw-walker__say::after {
+  content: ''; position: absolute; left: 50%; top: 100%; transform: translateX(-50%);
+  border: 4px solid transparent; border-top-color: #ffffff;
+}
+/* 桌前那排人（下排）：气泡挂在小人下方，避免压住桌面 */
+.sw-walker.is-front .sw-walker__say {
+  top: 100%; bottom: auto; transform: translate(-50%, 4px);
+  animation: sw-say-in-front .18s ease-out;
+}
+.sw-walker.is-front .sw-walker__say::after {
+  top: auto; bottom: 100%; border-top-color: transparent; border-bottom-color: #ffffff;
+}
+.sw-walker__say.is-talking {
+  background: #0284c7; border-color: #0284c7; color: #fff;
+  box-shadow: 0 4px 14px rgba(2, 132, 199, .3);
+}
+.sw-walker__say.is-talking::after { border-top-color: #0284c7; }
+.sw-walker.is-front .sw-walker__say.is-talking::after { border-top-color: transparent; border-bottom-color: #0284c7; }
+.sw-walker__say.is-sys { background: #f1f5f9; border-color: #cbd5e1; color: #334155; }
+.sw-walker__say.is-sys::after { border-top-color: #f1f5f9; }
+.dark .sw-walker__say { background: #1e293b; border-color: #334155; color: #e2e8f0; }
+.dark .sw-walker__say::after { border-top-color: #1e293b; }
+.dark .sw-walker.is-front .sw-walker__say::after { border-bottom-color: #1e293b; border-top-color: transparent; }
+@keyframes sw-say-in { from { opacity: 0; transform: translate(-50%, 4px); } to { opacity: 1; transform: translate(-50%, -4px); } }
+@keyframes sw-say-in-front { from { opacity: 0; transform: translate(-50%, -4px); } to { opacity: 1; transform: translate(-50%, 4px); } }
+
+/* 系统机器人：无角色，站在会议桌桌面上（右侧偏后，按效果图落位） */
+.sw-robot-stand {
+  position: absolute; left: 72%; top: 66%; z-index: 6;
+  transform: translate(-50%, -100%);
+  display: flex; flex-direction: column; align-items: center;
+  pointer-events: none;
+}
+.sw-robot { display: block; }
+.sw-robot-stand .sw-robot { animation: sw-idle-breathe 3.4s ease-in-out infinite; }
+.sw-robot-stand .sw-walker__name { position: static; transform: none; margin-top: 2px; }
+.sw-round__pa .sw-robot { display: block; }
+
+/* 打断对话框：屏幕右下角固定浮出（不随像素小人定位，也不会被舞台裁切） */
 .sw-chatcard {
-  position: absolute; z-index: 20; width: 240px; padding: 12px;
-  right: 16px; bottom: 16px;
+  position: fixed; z-index: 60; width: 330px; padding: 12px;
+  right: 26px; bottom: 26px;
   background: var(--swbg); border-radius: 12px;
   border: 2px solid #0ea5e9; box-shadow: 0 12px 40px rgba(0, 0, 0, .25);
+  animation: sw-dock-in .16s ease-out;
 }
+@keyframes sw-dock-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
 .sw-chatcard__head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
 .sw-chatcard__ava { width: 32px; height: 32px; border-radius: 8px; overflow: hidden; background: var(--color-background-muted, var(--swborder)); }
 .sw-chatcard__name { font-size: 13px; font-weight: 700; color: var(--color-foreground-intense); flex: 1; }
@@ -1859,6 +1932,7 @@
 .sw-chatcard__row input {
   flex: 1; min-width: 0; border: 1px solid var(--swborder); border-radius: 8px;
   padding: 6px 9px; font-size: 12px; font-family: inherit; outline: none;
+  background: var(--color-background, var(--swbg)); color: var(--color-foreground);
 }
 .sw-chatcard__row input:focus { border-color: #0ea5e9; }
 .sw-chatcard__send {
@@ -1980,13 +2054,17 @@
   height: calc((100vh - 96px) * 0.5);      /* 高度 -50%；垂直居中与收起把手对齐 */
   z-index: 40;
   display: flex; flex-direction: column;
-  filter: drop-shadow(-8px 0 28px rgba(0, 0, 0, .12));
+  /* 不用 filter: drop-shadow——它会在面板内容每次变化时对整块半屏区域重新做阴影光栅化，
+     切 Tab / 输入时明显掉帧；改用 box-shadow（只影响绘制，不触发滤镜重算）。 */
 }
 .sw-aside-panel {
   flex: 1; min-height: 0; overflow: hidden;
   background: var(--color-background-subtle);
   border: 1px solid var(--swborder); border-right: none;
   border-radius: 14px 0 0 14px;
+  box-shadow: -8px 0 28px rgba(0, 0, 0, .12);
+  /* 内容变化不外溢重绘：切 Tab / 输入时只重绘这块面板内部 */
+  contain: paint;
 }
 .sw-aside-toggle {
   position: fixed; top: 50%; right: 0; transform: translateY(-50%);
