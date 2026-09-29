@@ -259,6 +259,9 @@ export default function SquadDetailPage() {
     return (
         <div className="squads squads--detail squad-ws">
             <aside className="squad-ws__side">
+                <Button variant="ghost" size="sm" block onClick={() => nav('/squads-workspace')} aria-label="返回列表">
+                    <ArrowLeft size={14}/> 返回列表
+                </Button>
                 <Button
                     variant={isDraft ? 'solid' : 'soft'}
                     size="sm"

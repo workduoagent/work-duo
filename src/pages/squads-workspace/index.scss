@@ -1370,6 +1370,8 @@
   display: flex;
   flex-direction: column;
   gap: 14px;
+  height: 100%; /* 工作台贯穿到底：左栏与主区等高 */
+  min-height: 0;
 }
 
 .squad-detail__bar {

@@ -1989,15 +1989,22 @@ const BOARD_STATUS_META: Record<string, {color: string; label: string}> = {
 }
 
 export function RoundBoard({rounds, summary, board}: { rounds: BoardRound[]; summary?: string; board?: SquadBoardView | null }) {
+    // board_json.tasks 实际是对象（键=t1/t2…，serde BTreeMap）；类型声明为数组——这里统一规范化，防 .map 崩溃
+    const rawTasks = (board?.tasks ?? []) as unknown
+    const taskList: Array<{taskId: string; title: string; assignee: string; status: string}> = Array.isArray(rawTasks)
+        ? (rawTasks as Array<{taskId: string; title: string; assignee: string; status: string}>)
+        : rawTasks && typeof rawTasks === 'object'
+            ? Object.entries(rawTasks as Record<string, {title: string; assignee: string; status: string}>).map(([taskId, t]) => ({taskId, title: t.title, assignee: t.assignee, status: t.status}))
+            : []
     return (
         <div className="squad-console__board">
-            {board && (board.tasks.length > 0 || (board.decisions && board.decisions.length > 0) || (board.actions && board.actions.length > 0)) && (
+            {board && (taskList.length > 0 || (board.decisions && board.decisions.length > 0) || (board.actions && board.actions.length > 0)) && (
                 <div className="squad-round squad-round--board">
                     <div className="squad-round__head">
                         <Tag color="geekblue">任务状态板</Tag>
                     </div>
                     <div className="squad-round__content">
-                        {board.tasks.map((t) => {
+                        {taskList.map((t) => {
                             const meta = BOARD_STATUS_META[t.status] ?? {color: 'default', label: t.status}
                             return (
                                 <div key={t.taskId} style={{display: 'flex', alignItems: 'center', gap: 6, padding: '2px 0'}}>
