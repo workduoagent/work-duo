@@ -1,0 +1,75 @@
+{
+ "llm": "9a7a0491-e8a0-4cf8-888c-30f009b42721",
+ "agents": [
+  {
+   "identifier": "pm-product",
+   "id": "e671a0a5-9f76-430d-8428-2d86fb6c2fd7"
+  },
+  {
+   "identifier": "arch-tech-lead",
+   "id": "c0dc5e4b-d71c-4fd7-81ba-e8e50183763f"
+  },
+  {
+   "identifier": "dev-python-backend",
+   "id": "23feb4f4-e6d6-4e44-b7a4-b36bcc804521"
+  },
+  {
+   "identifier": "dev-java-backend",
+   "id": "f06fb16f-effe-4348-ba29-54793073a2a7"
+  },
+  {
+   "identifier": "dev-react-frontend",
+   "id": "3c4c9398-5751-4e6b-89f5-f642471e4d0a"
+  },
+  {
+   "identifier": "dev-vue-frontend",
+   "id": "d72961e6-47d7-42ce-94f5-44654689d668"
+  },
+  {
+   "identifier": "dev-tauri-rust",
+   "id": "5ad9d874-563b-4762-953c-51f548d98012"
+  },
+  {
+   "identifier": "qa-test-engineer",
+   "id": "74d8b3e5-a872-47cb-ad59-c5870c50a886"
+  },
+  {
+   "identifier": "review-code-critic",
+   "id": "c39ec6e3-74a1-4811-a4ce-b97454892412"
+  },
+  {
+   "identifier": "int-delivery",
+   "id": "ec503e69-004a-4553-9b2a-92d63f52a484"
+  }
+ ],
+ "skills": {
+  "skill-task-breakdown": "1a9f6201-0777-4387-983a-e97c9626017c",
+  "skill-delivery-pack": "a3817154-b6e6-471a-bf96-da181398fa34",
+  "skill-code-review-checklist": "a9235316-c23f-412e-8d42-d071b61dcb6c",
+  "skill-test-case-design": "30fff157-8fe2-4cb9-8c5c-25a1bbcb51f0",
+  "skill-api-contract": "37443f34-f728-4c22-8cc4-4f7576b69129",
+  "skill-eng-standards": "b072f048-2e08-4ec5-9539-c86c9f236cc9"
+ },
+ "plugins": {
+  "plugin-vue-build": "0a13fbb2-efd2-47ba-ae33-c62a2ac0d18a",
+  "plugin-changelog-draft": "a3db0514-2621-4704-845c-ebf331b705b9",
+  "plugin-md-toc": "6b7c66e0-7fa5-4bff-97b2-d50ac51dc2ab",
+  "plugin-ts-typecheck": "eeaf90ec-5c58-4957-908b-a218dea8667e",
+  "plugin-diff-summary": "ce725cd3-aca2-42ec-978d-3bfeae6678d1",
+  "plugin-pytest-runner": "f0a43e87-103a-4876-b75d-15c3148ad0f8",
+  "plugin-coverage-report": "7c825872-1c62-440c-9370-61e1cac5fe94",
+  "plugin-code-stats": "01246429-17a1-4e73-9a15-e653b6d3f698",
+  "plugin-sql-migrate-check": "a017c04c-3e2d-4262-a6df-912abd7eadd9",
+  "plugin-openapi-lint": "a0fb51f7-42ad-41b7-b04f-b72e4279e575",
+  "plugin-test-report-md": "c2365d45-a518-4db3-aaaf-c71f3202e811",
+  "plugin-java-build": "3523b079-222c-40a9-b4e2-f0871bc3af39",
+  "plugin-cargo-check": "e61006b9-cc1a-4434-b1a4-9165108b41ff"
+ },
+ "kbs": {
+  "kb-pitfalls": "d02fe1df-537f-4e49-ba41-7a7eb66f08a8",
+  "kb-test-assets": "b109e477-c5fb-46c2-ae0a-ec7c17061c2e",
+  "kb-adr": "74c10163-652c-490e-b97c-4515aac02f14",
+  "kb-product-prd": "5d1c04fc-ce41-4fa2-996a-1c326c1e485b",
+  "kb-eng-standards": "a5d557d6-324e-48df-a09f-6974565eb071"
+ }
+}
