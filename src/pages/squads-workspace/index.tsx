@@ -30,6 +30,9 @@ import {
     ImagePlus,
 } from 'lucide-react'
 import {Button, Card, Modal, Field, FieldLabel, Input, Select, Segmented, Switch, InputNumber, Empty, Spin, Popconfirm, Tag, Tabs, Tooltip, Alert} from '@/components/ui'
+import { PixelAgent } from '@/components/ui/pixel-agent'
+import { generateAvatarByScenario } from '@/components/ui/pixel-agent'
+import type { AgentMotionState, PixelAgentAppearance } from '@/components/ui/pixel-agent'
 import {useNotify} from '@/components/ui/notify'
 import {listAgents} from '@/core/mapper/agent-mapper'
 import {
@@ -245,6 +248,12 @@ function fromTemplate(t: SquadTemplateJson): EditorState {
  * 未装 @xyflow/react 时由 shims.d.ts 兜底。
  * ------------------------------------------------------------------ */
 
+/** §4.12.5：成员外观解析——有 appearance 用之；从未设计过则按场景+agentId 稳定生成兜底。 */
+function agentAppearanceOf(agents: AgentInfo[], agentId?: string): PixelAgentAppearance {
+    const a = agents.find((x) => x.id === agentId)
+    if (a?.appearance) return a.appearance
+    return generateAvatarByScenario(a?.scenario, agentId)
+}
 const INPUT_NODE_ID = '__squad_input__'
 
 interface SquadNodeData {
@@ -253,6 +262,7 @@ interface SquadNodeData {
     agentLogo?: string
     role: string
     isLeader: boolean
+    appearance?: PixelAgentAppearance
 }
 
 function SquadInputNode({data}: { data: { supportsFile: boolean } }) {
@@ -273,7 +283,7 @@ function SquadFlowNode({data}: { data: SquadNodeData }) {
         <div className={`squad-dag__node squad-dag__node--member${data.isLeader ? ' is-leader' : ''}`}>
             <Handle type="target" position={Position.Left} id="in"/>
             <div className="squad-dag__node-avatar">
-                {data.agentLogo ? <img src={data.agentLogo} alt=""/> : <Users size={16}/>}
+                {data.appearance ? <PixelAgent appearance={data.appearance} size={40} motion={false}/> : data.agentLogo ? <img src={data.agentLogo} alt=""/> : <Users size={16}/>}
             </div>
             <div className="squad-dag__node-body">
                 <div className="squad-dag__node-name">{data.agentName}</div>
@@ -329,6 +339,7 @@ function SquadDagEditor({
                         agentId: m.agentId,
                         agentName: a?.name ?? m.agentId,
                         agentLogo: a?.logo,
+                        appearance: a?.appearance,
                         role: m.role,
                         isLeader: m.isLeader,
                     },
@@ -1183,6 +1194,9 @@ function SquadEditorModal({
                                             {state.members.map((m, idx) => (
                                                 <div className="squad-editor__member" key={m.agentId || `m-${idx}`}>
                                                     <div className="squad-editor__member-line">
+                                                        {(() => {
+                                                            return <PixelAgent appearance={agentAppearanceOf(agents, m.agentId)} size={48} motion={false} className="squad-editor__member-avatar"/>
+                                                        })()}
                                                         <Select
                                                             className="squad-editor__member-agent"
                                                             allowClear
@@ -1510,9 +1524,11 @@ interface SquadRoundView {
 function SquadRunConsole({
                              open,
                              squad,
+                                agents,
                              onClose,
                          }: {
     open: boolean
+    agents: AgentInfo[]
     squad: SquadInfo
     onClose: () => void
 }) {
@@ -1521,6 +1537,7 @@ function SquadRunConsole({
     const [running, setRunning] = useState(false)
     const [rounds, setRounds] = useState<SquadRoundView[]>([])
     const [summary, setSummary] = useState('')
+    const [memberMotion, setMemberMotion] = useState<Record<string, AgentMotionState>>({})
     const [planPending, setPlanPending] = useState(false)
     const [checkpointPending, setCheckpointPending] = useState(false)
     const [deliveryPending, setDeliveryPending] = useState(false)
@@ -1543,6 +1560,7 @@ function SquadRunConsole({
             setRounds([])
             setSummary('')
             setRunning(false)
+            setMemberMotion({})
             setPlanPending(false)
             setCheckpointPending(false)
             setDeliveryPending(false)
@@ -1601,7 +1619,14 @@ function SquadRunConsole({
                     cleanup()
                 },
             )
-            unlistenRef.current = [offStart, offRound, offDone]
+            const offMember = await listen<{ squadId: string; memberRole: string; phase: string; ok: boolean }>('squad-member-event', (e) => {
+                if (e.payload.squadId !== squad.id) return
+                const role = e.payload.memberRole
+                const state: AgentMotionState = e.payload.phase === 'started' ? 'working' : e.payload.ok ? 'cheer' : 'error'
+                setMemberMotion((m) => ({...m, [role]: state}))
+                if (e.payload.phase !== 'started') setTimeout(() => setMemberMotion((m) => ({...m, [role]: 'idle'})), 3000)
+            })
+            unlistenRef.current = [offStart, offRound, offDone, offMember]
             await invoke('run_squad_task', { input: { squad_id: squad.id, prompt: p } })
         } catch (e) {
             message.error(`启动失败：${e instanceof Error ? e.message : String(e)}`)
@@ -1682,6 +1707,12 @@ function SquadRunConsole({
                             return (
                                 <div className={`squad-round squad-round--${r.kind}`} key={i}>
                                     <div className="squad-round__head">
+                                        {(() => {
+                                            const member = squad.members.find((m) => m.role === r.role)
+                                            if (!member) return null
+                                            const st: AgentMotionState = r.kind === 'handoff' ? 'handoff' : memberMotion[member.role] ?? 'idle'
+                                            return <PixelAgent appearance={agentAppearanceOf(agents, member.agentId)} state={st} size={24} className="squad-round__avatar"/>
+                                        })()}
                                         <Tag color={meta.color}>{meta.label}</Tag>
                                         <span className="squad-round__role">{r.role}</span>
                                     </div>
@@ -2181,9 +2212,11 @@ function SquadMemoryPanel({
 function SquadHistoryPanel({
                                open,
                                squad,
+                               agents,
                                onClose,
                            }: {
     open: boolean
+    agents: AgentInfo[]
     squad: SquadInfo
     onClose: () => void
 }) {
@@ -2283,6 +2316,16 @@ function SquadHistoryPanel({
                         </button>
                     ))}
                 </div>
+                {squad.members.length > 0 && (
+                    <div className="squad-hist__crew">
+                        {squad.members.map((m) => (
+                            <div key={m.agentId} className="squad-hist__crew-item" title={m.role}>
+                                <PixelAgent appearance={agentAppearanceOf(agents, m.agentId)} state={summary ? 'cheer' : 'idle'} size={40} motion={!!summary}/>
+                                <span>{m.role}</span>
+                            </div>
+                        ))}
+                    </div>
+                )}
                 <div className="squad-hist__board">
                     {activeId ? (
                         <>
@@ -2506,6 +2549,7 @@ export default function SquadsWorkspacePage() {
                 <SquadRunConsole
                     open={Boolean(runningSquad)}
                     squad={runningSquad}
+                        agents={agents}
                     onClose={() => setRunningSquad(undefined)}
                 />
             )}
@@ -2514,6 +2558,7 @@ export default function SquadsWorkspacePage() {
                 <SquadHistoryPanel
                     open={Boolean(histSquad)}
                     squad={histSquad}
+                        agents={agents}
                     onClose={() => setHistSquad(undefined)}
                 />
             )}

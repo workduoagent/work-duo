@@ -229,3 +229,49 @@ export function generateAvatarByScenario(scenario?: string, seed?: string): Pixe
     heldProp: mood?.heldProp ?? 'none',
   }
 }
+
+/**
+ * S3（小分队设计方案 §4.12.4）：小分队五角色换装预设——
+ * 「同一模板形象一致又可改」，role 名与 SquadToolProfile/模板体系的角色键一致。
+ * 应用方式：与现有 appearance 做 {...current, ...preset} 浅合并（只覆盖形象意向字段，
+ * 保留用户已调的性别/肤色/发型等个体特征）。
+ */
+export const SQUAD_APPEARANCE_PRESETS: Record<string, Partial<PixelAgentAppearance>> = {
+  RESEARCHER: {
+    accessory: 'glasses-black',
+    heldProp: 'book',
+    topColor: 'accent-sky',
+    top: 'm-shirt',
+  },
+  WORKER: {
+    heldProp: 'laptop',
+    topColor: 'neutral-700',
+    top: 'm-hoodie',
+  },
+  CRITIC: {
+    hat: 'beret',
+    hatColor: 'ink-900',
+    accessory: 'glasses-round',
+    heldProp: 'coffee-cup',
+    topColor: 'accent-rose',
+  },
+  INTEGRATOR: {
+    accessory: 'headset',
+    topColor: 'accent-indigo',
+    top: 'm-shirt',
+  },
+  MODERATOR: {
+    topColor: 'neutral-200',
+    topAccent: 'accent-amber',
+    top: 'f-blouse',
+  },
+}
+
+/** 应用角色预设：浅合并覆盖形象意向字段，返回新 appearance（不改传入值）。 */
+export function applySquadAppearancePreset(
+  current: PixelAgentAppearance,
+  role: string,
+): PixelAgentAppearance {
+  const preset = SQUAD_APPEARANCE_PRESETS[role?.toUpperCase()]
+  return preset ? { ...current, ...preset } : current
+}

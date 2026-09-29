@@ -52,7 +52,15 @@ export type PropType = 'none' | 'laptop' | 'coffee-cup' | 'book'
  * 动作状态：**仅形象设计弹窗预览用**（试玩分段），不落库、不进列表 / 聊天。
  * 表情（眼/嘴/姿态）由状态驱动：idle 平静静止 / working 打字 / thinking 托腮思考 / error 惊恐。
  */
-export type AgentMotionState = 'idle' | 'working' | 'thinking' | 'error'
+export type AgentMotionState =
+  | 'idle'
+  | 'working'
+  | 'thinking'
+  | 'error'
+  | 'waiting'
+  | 'speaking'
+  | 'handoff'
+  | 'cheer'
 
 /**
  * 形象配置。颜色一律存 **palette key**（非 hex 裸色），渲染期 resolveColor 解析；

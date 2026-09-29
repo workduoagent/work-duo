@@ -259,6 +259,43 @@ export function buildPixelRects(
       add(13, 15, 6, 2, FEATURE_COLOR) // 张嘴
       break
     }
+    case 'waiting': {
+      eyeWhite()
+      // 虹膜左右张望（两帧交替）
+      add(12, 12, 2, 2, FEATURE_COLOR, 'pa-fa') // 左
+      add(14, 12, 1, 1, WHITE, 'pa-fa')
+      add(19, 12, 2, 2, FEATURE_COLOR, 'pa-fb') // 右
+      add(19, 12, 1, 1, WHITE, 'pa-fb')
+      add(14, 15, 4, 1, FEATURE_COLOR)
+      break
+    }
+    case 'speaking': {
+      eyeWhite()
+      add(13, 12, 2, 2, FEATURE_COLOR)
+      add(18, 12, 2, 2, FEATURE_COLOR)
+      // 嘴部两帧开合：A 帧微张 / B 帧大张（表达"正在说话"）
+      add(14, 15, 4, 1, FEATURE_COLOR, 'pa-fa')
+      add(14, 15, 4, 2, FEATURE_COLOR, 'pa-fb')
+      break
+    }
+    case 'handoff': {
+      // 专注递出：下视（同 working 简版）+ 微笑
+      add(12, 11, 3, 2, WHITE)
+      add(18, 11, 3, 2, WHITE)
+      add(13, 12, 2, 1, FEATURE_COLOR)
+      add(18, 12, 2, 1, FEATURE_COLOR)
+      add(14, 15, 4, 1, FEATURE_COLOR)
+      break
+    }
+    case 'cheer': {
+      // 眯眼笑（下弯线）
+      add(12, 12, 3, 1, FEATURE_COLOR)
+      add(18, 12, 3, 1, FEATURE_COLOR)
+      // 大张嘴笑
+      add(13, 14, 6, 2, FEATURE_COLOR)
+      add(14, 14, 4, 1, WHITE) // 牙
+      break
+    }
     default: {
       // idle：平静
       eyeWhite()
@@ -360,6 +397,34 @@ export function buildPixelRects(
     add(15, 6, 2, 2, RED, 'pa-alert')
     add(24, 5, 1, 1, BLUE, 'pa-drop')
     add(24, 6, 2, 2, BLUE, 'pa-drop')
+  } else if (state === 'waiting') {
+    // 右臂举手挥动（两帧上下交替）
+    add(24, 12, 2, 6, top, 'pa-fa')
+    add(24, 10, 2, 2, skin, 'pa-fa') // 手（高）
+    add(24, 14, 2, 6, top, 'pa-fb')
+    add(24, 12, 2, 2, skin, 'pa-fb') // 手（低）
+    // 头顶问号点（闪烁）
+    add(26, 1, 2, 1, BLUE, 'pa-dot1')
+    add(27, 3, 2, 1, BLUE, 'pa-dot2')
+    add(28, 5, 1, 1, BLUE, 'pa-dot3')
+  } else if (state === 'handoff') {
+    // 双臂前伸托物 + 物品两帧前后推（递出动感）
+    add(9, 20, 4, 2, top) // 左臂前伸
+    add(19, 20, 4, 2, top) // 右臂前伸
+    add(11, 19, 10, 5, LAPTOP, 'pa-fa') // 箱子（近身）
+    add(12, 18, 10, 5, LAPTOP, 'pa-fb') // 箱子（推出）
+  } else if (state === 'cheer') {
+    // 双臂上举 V 字
+    add(7, 12, 2, 6, top)
+    add(6, 10, 2, 2, skin) // 左手（高）
+    add(23, 12, 2, 6, top)
+    add(24, 10, 2, 2, skin) // 右手（高）
+    // 头顶彩纸（错峰闪烁）
+    add(9, 2, 2, 2, GREEN, 'pa-dot1')
+    add(15, 0, 2, 2, RED, 'pa-dot2')
+    add(21, 3, 2, 2, BLUE, 'pa-dot3')
+    // 脚下影子两帧（有影=腾空 / 无影=落地，表达跳跃）
+    add(10, 29, 12, 1, resolveColor('outfit', 'ink-700'), 'pa-fa')
   } else {
     // idle：静态持物
     switch (a.heldProp) {
@@ -383,6 +448,8 @@ export function buildPixelRects(
     // 打字手已在姿态层带帧标记，这里不重复画
   } else if (state === 'thinking') {
     add(8, 25, 2, 2, skin) // 仅左手自然下垂
+  } else if (state === 'waiting' || state === 'handoff' || state === 'cheer') {
+    // 手已画在姿态层（举手/托物/上举），不重复画
   } else {
     add(8, 25, 2, 2, skin)
     add(22, 25, 2, 2, skin)

@@ -15,19 +15,33 @@
   }
 
   &.is-motion {
-    &.pixel-agent--working .pa-fa {
+    /* 两帧交替态：working 打字 / waiting 张望举手 / speaking 嘴部开合 / handoff 递物推拉 */
+    &.pixel-agent--working .pa-fa,
+    &.pixel-agent--waiting .pa-fa,
+    &.pixel-agent--speaking .pa-fa,
+    &.pixel-agent--handoff .pa-fa {
       animation: pa-show-a 0.5s steps(1, end) infinite;
     }
-    &.pixel-agent--working .pa-fb {
+    &.pixel-agent--working .pa-fb,
+    &.pixel-agent--waiting .pa-fb,
+    &.pixel-agent--speaking .pa-fb,
+    &.pixel-agent--handoff .pa-fb {
       animation: pa-show-b 0.5s steps(1, end) infinite;
     }
-    &.pixel-agent--thinking .pa-dot1 {
+    /* 呼吸点态：thinking 思考点 / waiting 问号 / cheer 彩纸（错峰闪烁） */
+    &.pixel-agent--thinking .pa-dot1,
+    &.pixel-agent--waiting .pa-dot1,
+    &.pixel-agent--cheer .pa-dot1 {
       animation: pa-blink 1.2s steps(1, end) infinite;
     }
-    &.pixel-agent--thinking .pa-dot2 {
+    &.pixel-agent--thinking .pa-dot2,
+    &.pixel-agent--waiting .pa-dot2,
+    &.pixel-agent--cheer .pa-dot2 {
       animation: pa-blink 1.2s steps(1, end) 0.4s infinite;
     }
-    &.pixel-agent--thinking .pa-dot3 {
+    &.pixel-agent--thinking .pa-dot3,
+    &.pixel-agent--waiting .pa-dot3,
+    &.pixel-agent--cheer .pa-dot3 {
       animation: pa-blink 1.2s steps(1, end) 0.8s infinite;
     }
     &.pixel-agent--error .pa-alert {
@@ -82,5 +96,38 @@
   }
   .pixel-agent.is-motion .pa-fb {
     opacity: 0;
+  }
+}
+
+/* ===== S2/S3：小分队五角色换装预设（§4.12.4 一键换装） ===== */
+.squad-role-preset-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+
+  .squad-role-preset {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    padding: 6px 8px;
+    border: 1px solid var(--color-border, #e5e5e5);
+    border-radius: 6px;
+    background: transparent;
+    cursor: pointer;
+    font-size: 12px;
+    color: var(--color-text-secondary, #666);
+
+    &:hover {
+      border-color: var(--color-primary, #1668dc);
+      color: var(--color-primary, #1668dc);
+    }
+
+    &.is-active {
+      border-color: var(--color-primary, #1668dc);
+      color: var(--color-primary, #1668dc);
+      background: var(--color-primary-bg, rgba(22, 104, 220, 0.06));
+    }
   }
 }
