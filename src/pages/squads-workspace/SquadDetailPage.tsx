@@ -154,15 +154,15 @@ function TypewriterBubble({kind, text, fresh, onGrow}: {
     const [shown, setShown] = useState(() => (fresh ? 0 : total))
     useEffect(() => {
         if (!armed || shown >= total) return
-        // 基准 ~12.5 字/秒（≈8 token/s，肉眼可跟）；超长文本封顶 ~10s 打完
-        const step = Math.max(1, Math.ceil(total / 125))
+        // 基准 ~25 字/秒（tick 40ms×1 字）；超长文本封顶 ~10s 打完
+        const step = Math.max(1, Math.ceil(total / 250))
         const timer = window.setInterval(() => {
             setShown((s) => {
                 const n = Math.min(total, s + step)
                 if (n >= total) window.clearInterval(timer)
                 return n
             })
-        }, 80)
+        }, 40)
         return () => window.clearInterval(timer)
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [armed, total])
@@ -449,6 +449,12 @@ export default function SquadDetailPage() {
                         {squad.workspaceDir && <span className="sw-pill sw-pill--muted">📁 {squad.workspaceDir}</span>}
                     </div>
                 </div>
+                <div className="sw-topbar__center">
+                    <div className="sw-viewseg">
+                        <div className={`sw-viewseg__item${view === 'dialog' ? ' is-on' : ''}`} onClick={() => setView('dialog')}>💬 对话</div>
+                        <div className={`sw-viewseg__item${view === 'stage' ? ' is-on' : ''}`} onClick={() => setView('stage')}>🎮 舞台</div>
+                    </div>
+                </div>
                 <div className="sw-topbar__spacer"/>
                 <div className="sw-crew">
                     {(squad.members || []).map((m, i) => {
@@ -521,14 +527,6 @@ export default function SquadDetailPage() {
                 </aside>
 
                 <main className="sw-panel sw-main" data-view={view}>
-                    <div className="sw-modebar">
-                        <div className="sw-modebar__spacer"/>
-                        <div className="sw-viewseg">
-                            <div className={`sw-viewseg__item${view === 'dialog' ? ' is-on' : ''}`} onClick={() => setView('dialog')}>💬 对话</div>
-                            <div className={`sw-viewseg__item${view === 'stage' ? ' is-on' : ''}`} onClick={() => setView('stage')}>🎮 舞台</div>
-                        </div>
-                    </div>
-
                     <div className="sw-stage">
                         <div className="sw-scene" dangerouslySetInnerHTML={{__html: sceneSVG(mode)}}/>
                         {(squad.members || []).map((m, i) => {

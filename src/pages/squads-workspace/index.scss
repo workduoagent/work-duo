@@ -1655,6 +1655,8 @@
 .sw-topbar__name { font-size: 15px; font-weight: 650; color: var(--color-foreground-intense); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sw-topbar__meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 11px; color: var(--color-foreground-muted); }
 .sw-topbar__spacer { flex: 1; }
+/* topbar 中部：对话|舞台 切换（在剩余空间内居中） */
+.sw-topbar__center { flex: 1; display: flex; align-items: center; justify-content: center; min-width: 0; }
 
 .sw-pill {
   display: inline-flex; align-items: center; gap: 5px;
@@ -1770,11 +1772,11 @@
 .sw-mode-tab__desc { font-size: 10px; font-weight: 400; opacity: .75; margin-left: 2px; }
 .sw-modebar__spacer { flex: 1; }
 
-.sw-viewseg { display: inline-flex; border: 1px solid var(--swborder); border-radius: 8px; overflow: hidden; background: var(--swbg); flex: none; }
+.sw-viewseg { display: inline-flex; border: 1px solid var(--swborder); border-radius: 10px; overflow: hidden; background: var(--swbg); flex: none; }
 .sw-viewseg__item {
-  padding: 4px 11px; font-size: 11px; font-weight: 600;
+  padding: 7px 18px; font-size: 12.5px; font-weight: 600;
   color: var(--color-foreground-muted); cursor: pointer;
-  display: flex; align-items: center; gap: 4px;
+  display: flex; align-items: center; gap: 5px;
 }
 .sw-viewseg__item + .sw-viewseg__item { border-left: 1px solid var(--swborder); }
 .sw-viewseg__item.is-on { background: #0284c7; color: #fff; }
@@ -2029,7 +2031,7 @@
   /* 走代码色令牌：白天浅底深字 / 暗色深底浅字（硬编码深底会让白天的语法高亮 token 糊掉） */
   background: var(--color-code-bg); color: var(--color-code-fg);
   border: 1px solid var(--color-code-border);
-  font-size: 11px; line-height: 1.55;
+  font-size: 12px; line-height: 1.55;
   font-family: Consolas, 'Courier New', monospace;
   overflow-x: auto; white-space: pre;
 }
@@ -2038,23 +2040,23 @@
    white-space: normal 是关键——外层 .sw-round__content 的 pre-wrap 会继承进来，把 react-markdown
    保留在 DOM 里的每个软换行符（\n）渲染成真实换行，造成「字小了行距却不变」的假象；
    markdown 的换行语义由渲染器处理，气泡内必须恢复正常折叠。 */
-.sw .sw-md { font-size: 12px; line-height: 1.5; color: var(--color-foreground); overflow-wrap: break-word; white-space: normal; }
+.sw .sw-md { font-size: 13.5px; line-height: 1.55; color: var(--color-foreground); overflow-wrap: break-word; white-space: normal; }
 .sw .sw-md p, .sw .sw-md li { white-space: normal; }
-.sw .sw-md h1, .sw .sw-md h2, .sw .sw-md h3, .sw .sw-md h4, .sw .sw-md h5, .sw .sw-md h6 { margin: 6px 0 3px; font-size: 12.5px; font-weight: 650; line-height: 1.4; color: var(--color-foreground-intense); }
+.sw .sw-md h1, .sw .sw-md h2, .sw .sw-md h3, .sw .sw-md h4, .sw .sw-md h5, .sw .sw-md h6 { margin: 7px 0 4px; font-size: 14px; font-weight: 650; line-height: 1.4; color: var(--color-foreground-intense); }
 .sw .sw-md p { margin: 0 0 4px; }
 .sw .sw-md ul, .sw .sw-md ol { margin: 0 0 4px; padding-left: 16px; }
 .sw .sw-md li { margin: 1px 0; }
 .sw .sw-md li > p { margin: 0; }
 .sw .sw-md li::marker { color: var(--color-foreground-muted); }
-.sw .sw-md code { background: var(--color-background-muted, var(--swborder)); padding: 1px 5px; border-radius: 4px; font-size: 11px; font-family: Consolas, monospace; }
+.sw .sw-md code { background: var(--color-background-muted, var(--swborder)); padding: 1px 5px; border-radius: 4px; font-size: 12px; font-family: Consolas, monospace; }
 .sw .sw-md pre {
   margin: 0 0 5px; padding: 7px 9px; border-radius: 8px;
   background: var(--color-code-bg); color: var(--color-code-fg);
   border: 1px solid var(--color-code-border);
-  font-size: 11px; line-height: 1.5;
+  font-size: 12px; line-height: 1.55;
 }
 .sw .sw-md pre code { background: transparent; padding: 0; color: inherit; }
-.sw .sw-md table { border-collapse: collapse; margin: 0 0 4px; font-size: 11px; }
+.sw .sw-md table { border-collapse: collapse; margin: 0 0 4px; font-size: 12px; }
 .sw .sw-md th, .sw .sw-md td { border: 1px solid var(--swborder); padding: 2px 7px; }
 .sw .sw-md blockquote { margin: 0 0 4px; padding: 2px 9px; border-left: 3px solid #0ea5e9; color: var(--color-foreground-muted); }
 .sw .sw-md a { color: #0284c7; }
