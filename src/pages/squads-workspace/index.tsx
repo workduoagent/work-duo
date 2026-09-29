@@ -20,7 +20,6 @@ import {
     Play,
     Users,
     LogIn,
-    History,
     Settings2,
     FileUp,
     Inbox,
