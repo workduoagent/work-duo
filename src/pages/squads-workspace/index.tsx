@@ -254,6 +254,12 @@ function agentAppearanceOf(agents: AgentInfo[], agentId?: string): PixelAgentApp
     if (a?.appearance) return a.appearance
     return generateAvatarByScenario(a?.scenario, agentId)
 }
+
+/** 列表卡成员显示名：role 为空（如流水线工序位）回退智能体名，杜绝裸 agentId。 */
+function memberLabel(m: { role?: string; agentId: string }, agents: AgentInfo[]): string {
+    if (m.role && m.role.trim()) return m.role
+    return agents.find((a) => a.id === m.agentId)?.name || '未命名成员'
+}
 const INPUT_NODE_ID = '__squad_input__'
 
 interface SquadNodeData {
@@ -2466,11 +2472,26 @@ export default function SquadsWorkspacePage() {
                   </span>
                                 </div>
 
+                                <div className="squads__card-crew" title={squad.members.map((m) => memberLabel(m, agents)).join('、')}>
+                                    {squad.members.slice(0, 8).map((m, i) => (
+                                        <PixelAgent
+                                            key={m.id || `${m.agentId}-${i}`}
+                                            appearance={agentAppearanceOf(agents, m.agentId)}
+                                            size={24}
+                                            motion={false}
+                                            className="squads__crew-avatar"
+                                        />
+                                    ))}
+                                    {squad.members.length > 8 && (
+                                        <span className="squads__crew-more">+{squad.members.length - 8}</span>
+                                    )}
+                                </div>
+
                                 <div className="squads__card-members">
                                     <Users size={13}/>
                                     <span>
                     {squad.members.length} 名成员：
-                                        {squad.members.map((m) => m.role || m.agentId).join('、')}
+                                        {squad.members.map((m) => memberLabel(m, agents)).join('、')}
                   </span>
                                 </div>
 

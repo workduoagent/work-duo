@@ -49,6 +49,7 @@
     display: flex;
     flex-direction: column;
     gap: 10px;
+    height: 100%; /* 网格等高拉伸：操作行贴底，不受描述/成员文字长短影响 */
 
     &-head {
       display: flex;
@@ -104,6 +105,54 @@
       min-height: 38px;
     }
 
+    &-workspace {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      color: var(--color-foreground-muted);
+      min-width: 0;
+
+      svg {
+        flex: none;
+      }
+
+      span {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+    }
+
+    /* 成员像素头像条（§4.12）：固定高度，最多 8 个 + 溢出计数 */
+    &-crew {
+      display: flex;
+      align-items: center;
+      height: 26px;
+      flex: none;
+
+      .squads__crew-avatar {
+        width: 24px;
+        height: 24px;
+        flex: none;
+        border-radius: 6px;
+        overflow: hidden;
+        background: var(--color-background-subtle);
+      }
+
+      .squads__crew-avatar + .squads__crew-avatar {
+        margin-left: -6px;
+      }
+
+      &.squads__crew-more,
+      .squads__crew-more {
+        margin-left: 6px;
+        font-size: 12px;
+        color: var(--color-foreground-muted);
+      }
+    }
+
     &-members {
       display: flex;
       align-items: flex-start;
@@ -111,13 +160,29 @@
       font-size: 12px;
       color: var(--color-foreground-muted);
       line-height: 1.5;
+      min-width: 0;
+
+      svg {
+        flex: none;
+        margin-top: 2px;
+      }
+
+      span {
+        min-width: 0;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+      }
     }
 
     &-actions {
       display: flex;
       align-items: center;
       gap: 8px;
-      margin-top: 2px;
+      margin-top: auto; /* 贴底（对齐智能体模块卡片） */
+      padding-top: 12px;
+      border-top: 1px solid var(--color-border);
     }
 
     &-del:hover {
