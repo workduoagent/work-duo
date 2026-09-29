@@ -8,6 +8,7 @@ import AgentStudioPage from '@/pages/agent-studio'
 import AgentWizardPage from '@/pages/agent-studio/wizard'
 import AgentChatPage from '@/pages/agent-studio/chat'
 import SquadsWorkspacePage from '@/pages/squads-workspace'
+import SquadDetailPage from '@/pages/squads-workspace/SquadDetailPage'
 import SkillHubPage from '@/pages/skill-hub'
 import SkillDetailPage from '@/pages/skill-hub/detail'
 import McpHubPage from '@/pages/mcp'
@@ -36,6 +37,7 @@ export const router = createHashRouter([
       { path: 'agent-studio/:id/edit', element: <AgentWizardPage /> },
       { path: 'agent-studio/:id/chat', element: <AgentChatPage /> },
       { path: 'squads-workspace', element: <SquadsWorkspacePage /> },
+      { path: 'squads-workspace/:id', element: <SquadDetailPage /> },
       { path: 'skill-hub', element: <SkillHubPage /> },
       { path: 'skill-hub/:id', element: <SkillDetailPage /> },
       { path: 'mcp-hub', element: <McpHubPage /> },

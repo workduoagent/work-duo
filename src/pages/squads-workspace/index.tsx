@@ -12,6 +12,7 @@
  */
 import {useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent} from 'react'
 import { openPath } from '@tauri-apps/plugin-opener'
+import { useNavigate } from 'react-router-dom'
 import {
     Plus,
     Trash2,
@@ -1537,16 +1538,18 @@ interface SquadRoundView {
     speakerAgentId?: string | null
 }
 
-function SquadRunConsole({
-                             open,
-                             squad,
-                                agents,
-                             onClose,
-                         }: {
+export function SquadRunConsole({
+                            open,
+                            squad,
+                               agents,
+                            onClose,
+                            embedded = false,
+                        }: {
     open: boolean
     agents: AgentInfo[]
     squad: SquadInfo
     onClose: () => void
+    embedded?: boolean
 }) {
     const {message} = useNotify()
     const [prompt, setPrompt] = useState('')
@@ -1685,19 +1688,8 @@ function SquadRunConsole({
         }
     }
 
-    return (
-        <Modal
-            open={open}
-            onOpenChange={onClose}
-            title={`运行 · ${squad.name}`}
-            description={`协作模式：${MODE_OPTIONS.find((o) => o.value === squad.mode)?.label ?? squad.mode}`}
-            width={760}
-            footer={
-                <Button variant="ghost" onClick={onClose}>
-                    关闭
-                </Button>
-            }
-        >
+    const panelContent = (
+        <>
             <div className="squad-console">
                 <div className="squad-console__input">
                     <Input.TextArea
@@ -1842,6 +1834,27 @@ function SquadRunConsole({
                     </Button>
                 </div>
             </div>
+        </>
+    )
+
+    if (embedded) {
+        return <div className="squad-page-panel">{panelContent}</div>
+    }
+
+    return (
+        <Modal
+            open={open}
+            onOpenChange={onClose}
+            title={`运行 · ${squad.name}`}
+            description={`协作模式：${MODE_OPTIONS.find((o) => o.value === squad.mode)?.label ?? squad.mode}`}
+            width={760}
+            footer={
+                <Button variant="ghost" onClick={onClose}>
+                    关闭
+                </Button>
+            }
+        >
+            {panelContent}
         </Modal>
     )
 }
@@ -2056,14 +2069,16 @@ function RoundBoard({rounds, summary, board}: { rounds: BoardRound[]; summary?: 
 }
 
 /** 团队记忆面板：列出 / 新增 / 删除小分队的黑板记忆（共享 + 成员个人）。 */
-function SquadMemoryPanel({
+export function SquadMemoryPanel({
                               open,
                               squad,
                               onClose,
+                              embedded = false,
                           }: {
     open: boolean
     squad: SquadInfo
     onClose: () => void
+    embedded?: boolean
 }) {
     const {message} = useNotify()
     const [memories, setMemories] = useState<SquadMemory[]>([])
@@ -2124,19 +2139,8 @@ function SquadMemoryPanel({
         }
     }
 
-    return (
-        <Modal
-            open={open}
-            onOpenChange={onClose}
-            title={`团队记忆 · ${squad.name}`}
-            description="团队黑板的知识点。运行小分队时按引用热度注入成员系统提示。"
-            width={720}
-            footer={
-                <Button variant="ghost" onClick={onClose}>
-                    关闭
-                </Button>
-            }
-        >
+    const panelContent = (
+        <>
             <div className="squad-mem">
                 <div className="squad-mem__add">
                     <Field>
@@ -2220,21 +2224,44 @@ function SquadMemoryPanel({
                     ))}
                 </div>
             </div>
+        </>
+    )
+
+    if (embedded) {
+        return <div className="squad-page-panel">{panelContent}</div>
+    }
+
+    return (
+        <Modal
+            open={open}
+            onOpenChange={onClose}
+            title={`团队记忆 · ${squad.name}`}
+            description="团队黑板的知识点。运行小分队时按引用热度注入成员系统提示。"
+            width={720}
+            footer={
+                <Button variant="ghost" onClick={onClose}>
+                    关闭
+                </Button>
+            }
+        >
+            {panelContent}
         </Modal>
     )
 }
 
 /** 运行历史面板：列出历次协作会话，点开查看其讨论黑板与最终汇总。 */
-function SquadHistoryPanel({
+export function SquadHistoryPanel({
                                open,
                                squad,
                                agents,
                                onClose,
+                               embedded = false,
                            }: {
     open: boolean
     agents: AgentInfo[]
     squad: SquadInfo
     onClose: () => void
+    embedded?: boolean
 }) {
     const {message} = useNotify()
     const [sessions, setSessions] = useState<SquadSession[]>([])
@@ -2300,19 +2327,8 @@ function SquadHistoryPanel({
         }
     }
 
-    return (
-        <Modal
-            open={open}
-            onOpenChange={onClose}
-            title={`运行历史 · ${squad.name}`}
-            description="查看历次协作的讨论黑板与最终汇总。"
-            width={760}
-            footer={
-                <Button variant="ghost" onClick={onClose}>
-                    关闭
-                </Button>
-            }
-        >
+    const panelContent = (
+        <>
             <div className="squad-hist">
                 <div className="squad-hist__list">
                     {sessions.length === 0 && <div className="squad-console__empty">暂无运行记录。</div>}
@@ -2359,12 +2375,34 @@ function SquadHistoryPanel({
                     )}
                 </div>
             </div>
+        </>
+    )
+
+    if (embedded) {
+        return <div className="squad-page-panel">{panelContent}</div>
+    }
+
+    return (
+        <Modal
+            open={open}
+            onOpenChange={onClose}
+            title={`运行历史 · ${squad.name}`}
+            description="查看历次协作的讨论黑板与最终汇总。"
+            width={760}
+            footer={
+                <Button variant="ghost" onClick={onClose}>
+                    关闭
+                </Button>
+            }
+        >
+            {panelContent}
         </Modal>
     )
 }
 
 export default function SquadsWorkspacePage() {
     const {message} = useNotify()
+    const nav = useNavigate()
     const [loading, setLoading] = useState(true)
     const [list, setList] = useState<SquadInfo[]>([])
     const [agents, setAgents] = useState<AgentInfo[]>([])
@@ -2377,9 +2415,6 @@ export default function SquadsWorkspacePage() {
     // S3 批次2（§12）：从官方模板新建（编辑器内补选成员智能体后保存）。
     const [tplEditing, setTplEditing] = useState<SquadTemplateJson | undefined>(undefined)
     const [tplSel, setTplSel] = useState<string | undefined>(undefined)
-    const [runningSquad, setRunningSquad] = useState<SquadInfo | undefined>(undefined)
-    const [memSquad, setMemSquad] = useState<SquadInfo | undefined>(undefined)
-    const [histSquad, setHistSquad] = useState<SquadInfo | undefined>(undefined)
 
     const reload = useCallback(async () => {
         setLoading(true)
@@ -2523,24 +2558,26 @@ export default function SquadsWorkspacePage() {
                                     <Button
                                         variant="solid"
                                         size="sm"
-                                        onClick={() => setRunningSquad(squad)}
-                                        aria-label="运行"
+                                        onClick={() => nav(`/squads-workspace/${squad.id}?tab=run`)}
+                                        aria-label="进入运行"
                                     >
                                         <Play size={14}/> 运行
                                     </Button>
                                     <Button
                                         variant="ghost"
                                         size="sm"
-                                        onClick={() => setHistSquad(squad)}
-                                        aria-label="运行历史"
+                                        onClick={() => nav(`/squads-workspace/${squad.id}?tab=history`)}
+                                        aria-label="进入运行历史"
+                                        title="运行历史"
                                     >
                                         <History size={15}/>
                                     </Button>
                                     <Button
                                         variant="ghost"
                                         size="sm"
-                                        onClick={() => setMemSquad(squad)}
-                                        aria-label="团队记忆"
+                                        onClick={() => nav(`/squads-workspace/${squad.id}?tab=memory`)}
+                                        aria-label="进入团队记忆"
+                                        title="团队记忆"
                                     >
                                         <Brain size={15}/>
                                     </Button>
@@ -2602,31 +2639,8 @@ export default function SquadsWorkspacePage() {
                 onSaved={(next) => setList(next)}
             />
 
-            {runningSquad && (
-                <SquadRunConsole
-                    open={Boolean(runningSquad)}
-                    squad={runningSquad}
-                        agents={agents}
-                    onClose={() => setRunningSquad(undefined)}
-                />
-            )}
 
-            {histSquad && (
-                <SquadHistoryPanel
-                    open={Boolean(histSquad)}
-                    squad={histSquad}
-                        agents={agents}
-                    onClose={() => setHistSquad(undefined)}
-                />
-            )}
 
-            {memSquad && (
-                <SquadMemoryPanel
-                    open={Boolean(memSquad)}
-                    squad={memSquad}
-                    onClose={() => setMemSquad(undefined)}
-                />
-            )}
         </div>
     )
 }

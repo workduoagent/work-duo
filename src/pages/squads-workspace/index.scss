@@ -1363,3 +1363,37 @@
   0%, 100% { opacity: 1; }
   50% { opacity: 0.35; }
 }
+
+/* ---------------- 子页（运行 / 历史 / 记忆 三 Tab） ---------------- */
+
+.squads--detail {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.squad-detail__bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: none;
+}
+
+.squad-detail__title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--color-foreground-intense);
+}
+
+.squad-detail__missing {
+  padding: 48px 0;
+  text-align: center;
+  color: var(--color-foreground-muted);
+  font-size: 13px;
+}
+
+/* 内嵌面板：去弹窗壳后的正文容器 */
+.squad-page-panel {
+  min-width: 0;
+}
