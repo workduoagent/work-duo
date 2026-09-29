@@ -141,9 +141,12 @@ function normalizeMd(src: string): string {
 
 /**
  * 打字机流式气泡：仅对「运行中由事件实时推来的新轮」（fresh）做逐字输出，
- * 历史回放轮直接整段渲染。打字阶段显示纯文本 + 光标，完成后切换 Markdown 渲染。
+ * 历史回放轮直接整段渲染。打字阶段即按 Markdown 实时渲染已输出部分（所见即所得，
+ * 不会出现「打完闪变规范排列」），增长时经 onGrow 通知父级做贴底跟随。
  */
-function TypewriterBubble({kind, text, fresh}: { kind: string; text: string; fresh: boolean }) {
+function TypewriterBubble({kind, text, fresh, onGrow}: {
+    kind: string; text: string; fresh: boolean; onGrow?: () => void
+}) {
     const t = normalizeMd((text || '')).trim()
     const total = t.length
     // fresh 快照进初始 state：打字只由「新轮首次挂载」触发一次，不随父级重渲染重启
@@ -151,23 +154,27 @@ function TypewriterBubble({kind, text, fresh}: { kind: string; text: string; fre
     const [shown, setShown] = useState(() => (fresh ? 0 : total))
     useEffect(() => {
         if (!armed || shown >= total) return
-        // 长文本加速：整体 ~1.6s 内打完，视觉保持均匀
-        const step = Math.max(2, Math.ceil(total / 140))
+        // 基准 ~12.5 字/秒（≈8 token/s，肉眼可跟）；超长文本封顶 ~10s 打完
+        const step = Math.max(1, Math.ceil(total / 125))
         const timer = window.setInterval(() => {
             setShown((s) => {
                 const n = Math.min(total, s + step)
                 if (n >= total) window.clearInterval(timer)
                 return n
             })
-        }, 16)
+        }, 80)
         return () => window.clearInterval(timer)
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [armed, total])
+    // 每次内容增长通知父级：若用户仍贴底则跟随滚动（打字撑高不丢跟随）
+    useEffect(() => {
+        if (armed) onGrow?.()
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [shown])
     if (shown >= total) return renderRoundContent(kind, text)
     return (
-        <div className="sw-typing">
-            {t.slice(0, shown)}
-            <span className="sw-typing__caret" aria-hidden="true"/>
+        <div className="sw-typing-md">
+            <MarkdownRenderer className="sw-md" content={t.slice(0, shown)}/>
         </div>
     )
 }
@@ -200,6 +207,11 @@ export default function SquadDetailPage() {
     const handleTimelineScroll = useCallback(() => {
         const el = timelineRef.current
         if (el) stickBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48
+    }, [])
+    // 打字机内容增长时的跟随滚动（用户上滚暂停后不跟随）
+    const stickScroll = useCallback(() => {
+        const el = timelineRef.current
+        if (el && stickBottomRef.current) el.scrollTop = el.scrollHeight
     }, [])
     const [injectTarget, setInjectTarget] = useState<string>('')
     const [injectMode, setInjectMode] = useState<'soft' | 'hard' | 'pre_talk'>('soft')
@@ -627,7 +639,7 @@ export default function SquadDetailPage() {
                                         <div className="sw-round__content"><div className="sw-bubble">
                                             {isStructuredRound(r.kind, r.content)
                                                 ? renderRoundContent(r.kind, r.content)
-                                                : <TypewriterBubble kind={r.kind} text={r.content} fresh={!!r.fresh}/>}
+                                                : <TypewriterBubble kind={r.kind} text={r.content} fresh={!!r.fresh} onGrow={stickScroll}/>}
                                         </div></div>
                                     </div>
                                 </div>

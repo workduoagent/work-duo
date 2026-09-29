@@ -2063,15 +2063,7 @@
 .sw .sw-md > *:first-child { margin-top: 0; }
 .sw .sw-md > *:last-child { margin-bottom: 0; }
 
-/* 打字机流式输出 */
-.sw-typing { white-space: pre-wrap; word-break: break-word; }
-.sw-typing__caret {
-  display: inline-block; width: 2px; height: 12px; margin-left: 2px;
-  vertical-align: -2px; background: #0ea5e9;
-  animation: sw-caret-blink 1s steps(2, start) infinite;
-}
-@keyframes sw-caret-blink { 50% { opacity: 0; } }
-@media (prefers-reduced-motion: reduce) { .sw-typing__caret { animation: none; } }
+/* 打字机流式：打字阶段即 Markdown 实时渲染（增长本身即流式反馈，无需光标） */
 
 .sw-mem-add { display: flex; flex-direction: column; gap: 6px; margin-top: auto; padding: 10px; border: 1px dashed var(--swborder); border-radius: 10px; background: var(--swbg); position: sticky; bottom: 0; }
 .sw-mem-add__row { display: flex; align-items: center; gap: 6px; }
