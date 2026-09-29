@@ -3892,18 +3892,20 @@ async fn run_squad_chat(
     };
 
     // 汇总主笔：chat_config.summarizer_agent_id > leader_agent_id > 首个成员。
-    let summarizer_id: Option<String> = squad
-        .chat_config
-        .summarizer_agent_id
+    // S3 修复（2026-09-29 真机实证）：仅「显式指定的汇总主笔」才排除出辩论席——
+    // leader/首成员只是汇总调用 cfg 的兜底来源（编排式的 leader 概念不应卷入群聊席位分配），
+    // 否则未配 Moderator 的两队编队会把 leader 席位排除，只剩另一人自辩全程（CRITIC 独角戏实锤）。
+    let explicit_summarizer = squad.chat_config.summarizer_agent_id.clone();
+    let summarizer_id: Option<String> = explicit_summarizer
         .clone()
         .or_else(|| squad.leader_agent_id.clone())
         .or_else(|| squad.members.first().map(|m| m.agent.agent_id.clone()));
 
-    // 参与者 = 除汇总主笔外的成员；若无其他成员则全员参与。
+    // 参与者 = 除「显式指定汇总主笔」外的成员（leader 兜底不排除）；空则全员参与。
     let participants: Vec<&SquadMemberConfig> = squad
         .members
         .iter()
-        .filter(|m| Some(&m.agent.agent_id) != summarizer_id.as_ref())
+        .filter(|m| Some(&m.agent.agent_id) != explicit_summarizer.as_ref())
         .collect();
     let speakers: Vec<&SquadMemberConfig> = if participants.is_empty() {
         squad.members.iter().collect()
