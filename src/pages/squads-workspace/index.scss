@@ -48,7 +48,7 @@
   &__card {
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 12px;
     height: 100%; /* 网格等高拉伸：操作行贴底，不受描述/成员文字长短影响 */
 
     &-head {
@@ -141,7 +141,7 @@
       align-items: center;
       height: 26px;
       flex: none;
-      margin-top: 6px; /* 与描述层的固定间隔（叠加容器 gap 10px = 16px） */
+      margin-top: 10px; /* 与描述层的固定间隔（叠加容器 gap 12px = 22px） */
 
       .squads__crew-slot {
         display: inline-flex;
