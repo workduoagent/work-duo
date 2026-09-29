@@ -460,6 +460,12 @@ export default function SquadDetailPage() {
     void boardTasks
     // 呼吸灯：谁在发言谁亮——事件状态优先，其次取最新一轮的发言者
     const lastSpeakerId = rounds.length ? (rounds[rounds.length - 1].speakerAgentId ?? null) : null
+    // 成员状态：事件优先；群聊等无成员事件的路径回退到「最新发言者」——谁发言谁亮
+    const memberState = (agentId: string, role: string): string => {
+        const ev = memberMotion[role]
+        if (ev && ev !== 'idle') return ev
+        return isRunning && agentId === lastSpeakerId ? 'working' : 'idle'
+    }
 
     return (
         <div className="squads squads--detail sw">
@@ -483,8 +489,7 @@ export default function SquadDetailPage() {
                 <div className="sw-topbar__spacer"/>
                 <div className="sw-crew">
                     {(squad.members || []).map((m, i) => {
-                        const ev = memberMotion[m.role]
-                        const st = ev && ev !== 'idle' ? ev : isRunning && m.agentId === lastSpeakerId ? 'working' : 'idle'
+                        const st = memberState(m.agentId, m.role)
                         return (
                             <div key={m.id || i} className={`sw-crew__slot${st === 'working' || st === 'cheer' ? ' is-active' : ''}`} title={memberLabel(m, agents)}>
                                 <PixelAgent appearance={agentAppearanceOf(agents, m.agentId)} size={26} motion={st === 'working'} state={st as 'working'}/>
@@ -557,8 +562,8 @@ export default function SquadDetailPage() {
                         <div className="sw-scene" dangerouslySetInnerHTML={{__html: sceneSVG(mode)}}/>
                         {(squad.members || []).map((m, i) => {
                             const spot = spots[i % spots.length]
-                            const motion = memberMotion[m.role]
-                            const anim = motion === 'working' || (isRunning && i === 0) ? 'is-working' : motion === 'speaking' ? 'is-speaking' : 'is-idle'
+                            const motion = memberState(m.agentId, m.role)
+                            const anim = motion === 'working' ? 'is-working' : motion === 'speaking' ? 'is-speaking' : 'is-idle'
                             return (
                                 <div
                                     key={m.id || i}
@@ -718,7 +723,7 @@ export default function SquadDetailPage() {
                                     </div>
                                 </>
                             ) : (
-                                <div className="sw-composer__row"><span className="sw-inject-hint">{selectedSession?.status === 'paused' ? '协作已暂停，可在左侧卡片恢复。' : selectedSession?.status === 'awaiting_delivery' ? '交付待确认：请在上方决议条操作。' : '该会话已结束，可重跑或新建任务。'}</span></div>
+                                <div className="sw-composer__row sw-composer__row--center"><span className="sw-inject-hint">{selectedSession?.status === 'paused' ? '协作已暂停，可在左侧卡片恢复。' : selectedSession?.status === 'awaiting_delivery' ? '交付待确认：请在上方决议条操作。' : '该会话已结束，可重跑或新建任务。'}</span></div>
                             )}
                         </div>
                     </div>
@@ -735,7 +740,7 @@ export default function SquadDetailPage() {
                     </div>
                     <div className="sw-panel__body">
                         {asideTab === 'members' && (squad.members || []).map((m) => {
-                            const motion = memberMotion[m.role]
+                            const motion = memberState(m.agentId, m.role)
                             const bub = motion === 'working' ? 'work' : motion === 'cheer' ? 'work' : motion === 'error' ? 'think' : 'idle'
                             const label = motion === 'working' ? '执行中' : motion === 'cheer' ? '已完成' : motion === 'error' ? '受阻' : '待命'
                             return (
