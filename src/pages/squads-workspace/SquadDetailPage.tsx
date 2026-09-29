@@ -101,6 +101,45 @@ function renderRoundContent(kind: string, text: string) {
     return <MarkdownRenderer className="sw-md" content={t}/>
 }
 
+/** 结构化轮（代码块直显，不做打字机）。 */
+function isStructuredRound(kind: string, text: string) {
+    const t = (text || '').trim()
+    return kind === 'metrics' || kind === 'handoff' || (t.startsWith('{') && t.endsWith('}'))
+}
+
+/**
+ * 打字机流式气泡：仅对「运行中由事件实时推来的新轮」（fresh）做逐字输出，
+ * 历史回放轮直接整段渲染。打字阶段显示纯文本 + 光标，完成后切换 Markdown 渲染。
+ */
+function TypewriterBubble({kind, text, fresh}: { kind: string; text: string; fresh: boolean }) {
+    const t = (text || '').trim()
+    const total = t.length
+    // fresh 快照进初始 state：打字只由「新轮首次挂载」触发一次，不随父级重渲染重启
+    const [armed] = useState(fresh)
+    const [shown, setShown] = useState(() => (fresh ? 0 : total))
+    useEffect(() => {
+        if (!armed || shown >= total) return
+        // 长文本加速：整体 ~1.6s 内打完，视觉保持均匀
+        const step = Math.max(2, Math.ceil(total / 140))
+        const timer = window.setInterval(() => {
+            setShown((s) => {
+                const n = Math.min(total, s + step)
+                if (n >= total) window.clearInterval(timer)
+                return n
+            })
+        }, 16)
+        return () => window.clearInterval(timer)
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [armed, total])
+    if (shown >= total) return renderRoundContent(kind, text)
+    return (
+        <div className="sw-typing">
+            {t.slice(0, shown)}
+            <span className="sw-typing__caret" aria-hidden="true"/>
+        </div>
+    )
+}
+
 /** 小分队工作台（像素舞台 v3，严格按设计稿 docs/design/小分队工作台-UI设计稿.html） */
 export default function SquadDetailPage() {
     const nav = useNavigate()
@@ -123,7 +162,13 @@ export default function SquadDetailPage() {
     const [starting, setStarting] = useState(false)
     const sessionIdRef = useRef<string | null>(null)
     const [now, setNow] = useState(Date.now())
-
+    // 对话时间线贴底跟随：用户上滚即暂停跟随，手动滚回底部（距底 <48px）自动恢复
+    const timelineRef = useRef<HTMLDivElement>(null)
+    const stickBottomRef = useRef(true)
+    const handleTimelineScroll = useCallback(() => {
+        const el = timelineRef.current
+        if (el) stickBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48
+    }, [])
     const [injectTarget, setInjectTarget] = useState<string>('')
     const [injectMode, setInjectMode] = useState<'soft' | 'hard' | 'pre_talk'>('soft')
     const [injectText, setInjectText] = useState('')
@@ -141,6 +186,11 @@ export default function SquadDetailPage() {
 
     const [planPending, setPlanPending] = useState(false)
     const [checkpointPending, setCheckpointPending] = useState(false)
+    // 滚动跟随生效点：轮次/汇总/门禁挂起卡变化后，若用户仍贴底则自动滚到最新
+    useEffect(() => {
+        const el = timelineRef.current
+        if (el && stickBottomRef.current) el.scrollTop = el.scrollHeight
+    }, [rounds, summary, planPending, checkpointPending, selected])
 
     const selectedSession = sessions.find((s) => s.id === selected) || null
     const isRunning = selectedSession?.status === 'running'
@@ -235,7 +285,7 @@ export default function SquadDetailPage() {
                 if (sessionIdRef.current && pl.sessionId !== sessionIdRef.current) return
                 if (pl.kind === 'plan') setPlanPending(true)
                 if (pl.kind === 'checkpoint') setCheckpointPending(true)
-                setRounds((r) => [...r, {role: pl.role, kind: pl.kind, content: pl.content, speakerAgentId: pl.speakerAgentId}])
+                setRounds((r) => [...r, {role: pl.role, kind: pl.kind, content: pl.content, speakerAgentId: pl.speakerAgentId, fresh: true}])
             }))
             offs.push(await listen<{squadId: string; sessionId: string; summary: string}>('agent-squad-session-done', (e) => {
                 if (e.payload.squadId !== squad.id) return
@@ -330,7 +380,13 @@ export default function SquadDetailPage() {
     ]
     const filtered = sessions.filter((s) => chip === 'all' ? true : chip === 'active' ? ACTIVE_STATUSES.includes(s.status) : chip === 'await' ? s.status.startsWith('awaiting') : s.status === 'done')
     const liveSession = sessions.find((s) => ACTIVE_STATUSES.includes(s.status))
-    const elapsed = liveSession && liveSession.status === 'running' ? Math.max(0, now - Number(liveSession.createdAt)) : 0
+    // createdAt 是 ISO 字符串（safeIso），Number() 直接转会 NaN → 计时显示 NaN:NaN:NaN；
+    // 统一经 Date.parse 并对非法值兜底归零。
+    const liveCreatedMs = liveSession
+        ? (typeof liveSession.createdAt === 'number' ? liveSession.createdAt : Date.parse(String(liveSession.createdAt)))
+        : NaN
+    const elapsed = liveSession && liveSession.status === 'running' && Number.isFinite(liveCreatedMs)
+        ? Math.max(0, now - liveCreatedMs) : 0
     const fmtElapsed = `${String(Math.floor(elapsed / 3600000)).padStart(2, '0')}:${String(Math.floor((elapsed % 3600000) / 60000)).padStart(2, '0')}:${String(Math.floor((elapsed % 60000) / 1000)).padStart(2, '0')}`
     const spots = WALKER_SPOTS[mode] || WALKER_SPOTS.orchestrator
     const chatMember = chatCard ? (squad.members.find((m) => m.agentId === chatCard) || null) : null
@@ -478,7 +534,7 @@ export default function SquadDetailPage() {
                         )}
                     </div>
 
-                    <div className="sw-timeline">
+                    <div className="sw-timeline" ref={timelineRef} onScroll={handleTimelineScroll}>
                         {(planPending || checkpointPending) && (
                             <div className="sw-round sw-round--gate">
                                 <div className="sw-round__pa sw-round__pa--user">禁</div>
@@ -536,7 +592,11 @@ export default function SquadDetailPage() {
                                             <span className="sw-round__name">{name}</span>
                                             <span className={`sw-badge sw-badge--${badge.cls}`}>{badge.label}</span>
                                         </div>
-                                        <div className="sw-round__content"><div className="sw-bubble">{renderRoundContent(r.kind, r.content)}</div></div>
+                                        <div className="sw-round__content"><div className="sw-bubble">
+                                            {isStructuredRound(r.kind, r.content)
+                                                ? renderRoundContent(r.kind, r.content)
+                                                : <TypewriterBubble kind={r.kind} text={r.content} fresh={!!r.fresh}/>}
+                                        </div></div>
                                     </div>
                                 </div>
                             )

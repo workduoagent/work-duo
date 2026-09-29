@@ -1873,6 +1873,8 @@ export interface BoardRound {
     kind: string
     content: string
     speakerAgentId?: string | null
+    /** 运行中由事件实时推来的新轮（区别于历史回放）——前端据此做打字机流式。 */
+    fresh?: boolean
 }
 
 function roundTagMeta(kind: string): { label: string; color: string } {
