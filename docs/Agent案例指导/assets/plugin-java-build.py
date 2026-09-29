@@ -1,30 +1,28 @@
 """
 name: java-build
-description: 宿主 JDK/Maven 或 Gradle 包装（无 JVM 沙箱）：compile/test，解析失败摘要。子命令白名单。
+description: 宿主 JDK 与 Maven/Gradle 包装，执行 compile 或 test 并解析失败摘要
 dependencies: []
 parameters:
-  type: object
-  properties:
-    workspace:
-      type: string
-      description: 含 pom.xml 或 build.gradle 的工程根
-    action:
-      type: string
-      description: "固定枚举: compile | test"
-      enum: [compile, test]
-    tool:
-      type: string
-      description: "构建工具，默认 auto：maven|gradle|auto"
-      enum: [maven, gradle, auto]
-    module:
-      type: string
-      description: 可选 -pl 模块名
-    timeoutSec:
-      type: integer
-      description: 超时秒数，默认 180，上限 600
-  required:
-    - workspace
-    - action
+  workspace:
+    type: string
+    description: 含 pom.xml 或 build.gradle 的工程根
+    required: true
+  action:
+    type: string
+    description: 固定枚举 compile 或 test
+    required: true
+  tool:
+    type: string
+    description: 构建工具 maven|gradle|auto，默认 auto
+    required: false
+  module:
+    type: string
+    description: 可选 Maven -pl 模块名
+    required: false
+  timeoutSec:
+    type: integer
+    description: 超时秒数，默认 180，上限 600
+    required: false
 """
 from __future__ import annotations
 
@@ -42,7 +40,9 @@ def _find_tool(prefer: str, ws: Path):
         mvn = os.environ.get("WD_MVN_BIN") or shutil.which("mvn") or shutil.which("mvn.cmd")
         if mvn:
             return "maven", mvn
-    if prefer in {"gradle", "auto"} and any((ws / n).exists() for n in ("build.gradle", "build.gradle.kts", "gradlew", "gradlew.bat")):
+    if prefer in {"gradle", "auto"} and any(
+        (ws / n).exists() for n in ("build.gradle", "build.gradle.kts", "gradlew", "gradlew.bat")
+    ):
         gw = ws / ("gradlew.bat" if os.name == "nt" else "gradlew")
         if gw.exists():
             return "gradle", str(gw)
@@ -100,7 +100,9 @@ def run(params):
 
     out = (proc.stdout or "") + "\n" + (proc.stderr or "")
     failures = re.findall(r"^\s*(?:\[ERROR\]|FAILURE!|.*FAILED)\s*(.+)$", out, flags=re.M)
-    tests = re.search(r"Tests run:\s*(\d+),\s*Failures:\s*(\d+),\s*Errors:\s*(\d+),\s*Skipped:\s*(\d+)", out)
+    tests = re.search(
+        r"Tests run:\s*(\d+),\s*Failures:\s*(\d+),\s*Errors:\s*(\d+),\s*Skipped:\s*(\d+)", out
+    )
     summary = {
         "testsRun": int(tests.group(1)) if tests else None,
         "failures": int(tests.group(2)) if tests else None,

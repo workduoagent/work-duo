@@ -1,74 +1,82 @@
 /**
- * name: ts-typecheck
- * description: 在工程内执行 typecheck（tsc/vue-tsc/自定义 npm script），解析 error TS 列表。
- * dependencies: []
- * parameters:
- *   type: object
- *   properties:
- *     workspace:
- *       type: string
- *       description: 前端工程根目录（含 package.json）
- *     script:
- *       type: string
- *       description: package.json script 名，默认 typecheck；无则回退 npx tsc -p tsconfig.json --noEmit
- *     timeoutSec:
- *       type: integer
- *       description: 超时秒，默认 120
- *   required:
- *     - workspace
+ * @name ts-typecheck
+ * @description 执行项目 typecheck（npm script 或 tsc）并解析 TS 错误列表
+ * @dependencies
+ * @parameters
+ *   workspace:
+ *     type: string
+ *     description: 前端工程根目录（含 package.json）
+ *     required: true
+ *   script:
+ *     type: string
+ *     description: package.json script 名，默认 typecheck
+ *     required: false
+ *   timeoutSec:
+ *     type: integer
+ *     description: 超时秒，默认 120
+ *     required: false
  */
-async function runNpmScript(workspace: string, script: string, timeoutSec: number) {
-  const isWin = process.platform === 'win32'
-  const cmd = isWin
-    ? ['cmd', '/c', 'npm', 'run', script]
-    : ['npm', 'run', script]
-  const proc = Bun.spawnSync({
-    cmd,
-    cwd: workspace,
-    stdout: 'pipe',
-    stderr: 'pipe',
-  })
-  return {
-    exitCode: proc.exitCode,
-    stdout: new TextDecoder().decode(proc.stdout),
-    stderr: new TextDecoder().decode(proc.stderr),
-  }
-}
+import { spawnSync } from 'node:child_process'
+import { existsSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
 
-export async function run(params: Record<string, unknown>): Promise<unknown> {
-  const workspace = (params.workspace as string) || ''
+export default async function run(params: {
+  workspace?: string
+  script?: string
+  timeoutSec?: number
+}) {
+  const workspace = params.workspace || ''
   if (!workspace) throw new Error('workspace is required')
-  const script = (params.script as string) || 'typecheck'
+  const script = params.script || 'typecheck'
   const timeoutSec = Number(params.timeoutSec || 120)
 
-  const pkgPath = `${workspace}/package.json`
-  const pkgFile = Bun.file(pkgPath)
   let hasScript = false
-  if (await pkgFile.exists()) {
-    const pkg = await pkgFile.json()
-    hasScript = Boolean(pkg.scripts && pkg.scripts[script])
+  const pkgPath = join(workspace, 'package.json')
+  if (existsSync(pkgPath)) {
+    try {
+      const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'))
+      hasScript = Boolean(pkg.scripts && pkg.scripts[script])
+    } catch {
+      hasScript = false
+    }
   }
 
-  let out: { exitCode: number; stdout: string; stderr: string }
+  let out: { exitCode: number | null; stdout: string; stderr: string }
   if (hasScript) {
-    out = await runNpmScript(workspace, script, timeoutSec)
-  } else {
-    const proc = Bun.spawnSync({
-      cmd: ['npx', '--no-install', 'tsc', '-p', 'tsconfig.json', '--noEmit'],
+    const isWin = process.platform === 'win32'
+    const cmd = isWin ? 'cmd' : 'npm'
+    const args = isWin ? ['/c', 'npm', 'run', script] : ['run', script]
+    const proc = spawnSync(cmd, args, {
       cwd: workspace,
-      stdout: 'pipe',
-      stderr: 'pipe',
+      encoding: 'utf-8',
+      shell: false,
+      timeout: timeoutSec * 1000,
     })
     out = {
-      exitCode: proc.exitCode,
-      stdout: new TextDecoder().decode(proc.stdout),
-      stderr: new TextDecoder().decode(proc.stderr),
+      exitCode: proc.status,
+      stdout: proc.stdout || '',
+      stderr: proc.stderr || '',
+    }
+  } else {
+    const proc = spawnSync(
+      'npx',
+      ['--no-install', 'tsc', '-p', 'tsconfig.json', '--noEmit'],
+      {
+        cwd: workspace,
+        encoding: 'utf-8',
+        shell: false,
+        timeout: timeoutSec * 1000,
+      }
+    )
+    out = {
+      exitCode: proc.status,
+      stdout: proc.stdout || '',
+      stderr: proc.stderr || '',
     }
   }
 
   const text = out.stdout + '\n' + out.stderr
   const errors: Array<{ file: string; message: string }> = []
-  // TS2304: file(1,2): message  /  error TS2304: ...
   const re = /((?:[A-Za-z]:)?[^\s(]+)\((\d+),(\d+)\):\s*(?:error\s+)?(TS\d+):\s*(.+)/g
   let m: RegExpExecArray | null
   while ((m = re.exec(text))) {
@@ -89,5 +97,6 @@ export async function run(params: Record<string, unknown>): Promise<unknown> {
     errors: errors.slice(0, 30),
     stdoutTail: out.stdout.slice(-3000),
     stderrTail: out.stderr.slice(-1000),
+    timeoutSec,
   }
 }

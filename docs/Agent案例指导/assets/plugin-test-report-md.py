@@ -1,24 +1,24 @@
 """
 name: test-report-md
-description: 把测试结果 JSON 渲染为 Markdown 报告（通过/失败、失败详情、是否可发布）。
+description: 把测试结果 JSON 渲染为 Markdown 报告并可落盘
 dependencies: []
 parameters:
-  type: object
-  properties:
-    resultJson:
-      type: object
-      description: 测试结果对象，含 passed/failed/failedTests 等；或 workspace+inputPath 读文件
-    title:
-      type: string
-      description: 报告标题
-    outputPath:
-      type: string
-      description: 相对 workspace 写出 md；为空则只返回内容不落盘
-    workspace:
-      type: string
-      description: 输出工作空间
-  required:
-    - resultJson
+  resultJson:
+    type: object
+    description: 测试结果对象，含 passed/failed/failedTests 等
+    required: true
+  title:
+    type: string
+    description: 报告标题
+    required: false
+  workspace:
+    type: string
+    description: 输出工作空间
+    required: false
+  outputPath:
+    type: string
+    description: 相对 workspace 写出 md 路径，为空只返回内容
+    required: false
 """
 from __future__ import annotations
 

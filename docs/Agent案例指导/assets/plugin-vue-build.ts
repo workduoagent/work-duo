@@ -1,71 +1,85 @@
 /**
- * name: vue-build
- * description: Vue3 工程构建自检：优先 vue-tsc/vite build（或 package script），解析错误摘要。
- * dependencies: []
- * parameters:
- *   type: object
- *   properties:
- *     workspace:
- *       type: string
- *       description: Vue 工程根目录
- *     action:
- *       type: string
- *       description: "typecheck | build，默认 typecheck"
- *       enum: [typecheck, build]
- *     script:
- *       type: string
- *       description: 覆盖 npm script 名
- *     timeoutSec:
- *       type: integer
- *       description: 超时秒，默认 180
- *   required:
- *     - workspace
+ * @name vue-build
+ * @description Vue3 工程 typecheck 或 build 自检并解析错误摘要
+ * @dependencies
+ * @parameters
+ *   workspace:
+ *     type: string
+ *     description: Vue 工程根目录
+ *     required: true
+ *   action:
+ *     type: string
+ *     description: typecheck 或 build，默认 typecheck
+ *     required: false
+ *   script:
+ *     type: string
+ *     description: 覆盖 npm script 名
+ *     required: false
+ *   timeoutSec:
+ *     type: integer
+ *     description: 超时秒，默认 180
+ *     required: false
  */
-export async function run(params: Record<string, unknown>): Promise<unknown> {
-  const workspace = (params.workspace as string) || ''
+import { spawnSync } from 'node:child_process'
+import { existsSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
+
+export default async function run(params: {
+  workspace?: string
+  action?: string
+  script?: string
+  timeoutSec?: number
+}) {
+  const workspace = params.workspace || ''
   if (!workspace) throw new Error('workspace is required')
-  const action = (params.action as string) || 'typecheck'
+  const action = params.action || 'typecheck'
   if (!['typecheck', 'build'].includes(action)) {
     throw new Error("action must be 'typecheck' or 'build'")
   }
   const timeoutSec = Number(params.timeoutSec || 180)
 
-  const pkgFile = Bun.file(`${workspace}/package.json`)
-  if (!(await pkgFile.exists())) {
+  const pkgPath = join(workspace, 'package.json')
+  if (!existsSync(pkgPath)) {
     throw new Error('package.json not found')
   }
-  const pkg = await pkgFile.json()
+  const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'))
   const scripts: Record<string, string> = pkg.scripts || {}
   const preferred =
-    (params.script as string) ||
+    params.script ||
     (action === 'build'
       ? ['build', 'build:prod'].find((s) => scripts[s]) || ''
       : ['typecheck', 'vue-tsc', 'type-check'].find((s) => scripts[s]) || '')
 
-  let cmd: string[]
+  let cmd: string
+  let args: string[]
   let used: string
   if (preferred && scripts[preferred]) {
     used = `npm run ${preferred}`
-    cmd =
-      process.platform === 'win32'
-        ? ['cmd', '/c', 'npm', 'run', preferred]
-        : ['npm', 'run', preferred]
+    if (process.platform === 'win32') {
+      cmd = 'cmd'
+      args = ['/c', 'npm', 'run', preferred]
+    } else {
+      cmd = 'npm'
+      args = ['run', preferred]
+    }
   } else if (action === 'build') {
     used = 'npx vite build'
-    cmd = ['npx', '--no-install', 'vite', 'build']
+    cmd = 'npx'
+    args = ['--no-install', 'vite', 'build']
   } else {
     used = 'npx vue-tsc --noEmit'
-    cmd = ['npx', '--no-install', 'vue-tsc', '--noEmit']
+    cmd = 'npx'
+    args = ['--no-install', 'vue-tsc', '--noEmit']
   }
 
-  const proc = Bun.spawnSync({
-    cmd,
+  const proc = spawnSync(cmd, args, {
     cwd: workspace,
-    stdout: 'pipe',
-    stderr: 'pipe',
+    encoding: 'utf-8',
+    shell: false,
+    timeout: timeoutSec * 1000,
   })
-  const stdout = new TextDecoder().decode(proc.stdout)
-  const stderr = new TextDecoder().decode(proc.stderr)
+  const stdout = proc.stdout || ''
+  const stderr = proc.stderr || ''
   const text = stdout + '\n' + stderr
 
   const errors: string[] = []
@@ -80,8 +94,8 @@ export async function run(params: Record<string, unknown>): Promise<unknown> {
   }
 
   return {
-    ok: proc.exitCode === 0 && errors.length === 0,
-    exitCode: proc.exitCode,
+    ok: proc.status === 0 && errors.length === 0,
+    exitCode: proc.status,
     action,
     used,
     timeoutSec,

@@ -1,21 +1,16 @@
 """
 name: code-stats
-description: 统计目录下代码行数、文件分布、简单热点（最大文件），供拆解与评审参考。
+description: 统计目录代码行数、扩展名分布与最大文件热点
 dependencies: []
 parameters:
-  type: object
-  properties:
-    workspace:
-      type: string
-      description: 工程根目录
-    includeExt:
-      type: array
-      description: 只统计这些扩展名，默认常见代码后缀
-    maxHot:
-      type: integer
-      description: 热点文件数，默认 10
-  required:
-    - workspace
+  workspace:
+    type: string
+    description: 工程根目录
+    required: true
+  maxHot:
+    type: integer
+    description: 热点文件数量，默认 10
+    required: false
 """
 from __future__ import annotations
 
@@ -39,7 +34,7 @@ def run(params):
     if not ws.is_dir():
         raise FileNotFoundError(f"workspace not found: {ws}")
 
-    include = set(params.get("includeExt") or _DEFAULT_EXT)
+    include = set(_DEFAULT_EXT)
     max_hot = int(params.get("maxHot") or 10)
 
     by_ext = Counter()

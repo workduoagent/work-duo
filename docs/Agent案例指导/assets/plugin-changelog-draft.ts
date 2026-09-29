@@ -1,28 +1,31 @@
 /**
- * name: changelog-draft
- * description: 从任务要点/提交说明拼变更日志草稿（Keep a Changelog 风格）。
- * dependencies: []
- * parameters:
- *   type: object
- *   properties:
- *     version:
- *       type: string
- *       description: 版本号，如 1.2.0
- *     date:
- *       type: string
- *       description: 日期 YYYY-MM-DD，默认今天
- *     items:
- *       type: array
- *       description: 变更条目，每项可为字符串或 {type, text}
- *     repoPath:
- *       type: string
- *       description: 可选 git 仓库，用最近 N 条 commit message 作素材
- *     commitLimit:
- *       type: integer
- *       description: 读取 commit 条数，默认 20
- *   required:
- *     - version
+ * @name changelog-draft
+ * @description 从任务要点或 git commit 生成 Keep a Changelog 风格变更日志草稿
+ * @dependencies
+ * @parameters
+ *   version:
+ *     type: string
+ *     description: 版本号，如 1.2.0
+ *     required: true
+ *   date:
+ *     type: string
+ *     description: 日期 YYYY-MM-DD，默认今天
+ *     required: false
+ *   items:
+ *     type: array
+ *     description: 变更条目，字符串或 {type,text}
+ *     required: false
+ *   repoPath:
+ *     type: string
+ *     description: 可选 git 仓库路径，用于读取最近提交
+ *     required: false
+ *   commitLimit:
+ *     type: integer
+ *     description: 读取 commit 条数，默认 20
+ *     required: false
  */
+import { spawnSync } from 'node:child_process'
+
 type Item = { type: string; text: string }
 
 function classify(text: string): string {
@@ -35,33 +38,34 @@ function classify(text: string): string {
   return 'Changed'
 }
 
-export async function run(params: Record<string, unknown>): Promise<unknown> {
+export default async function run(params: {
+  version?: string
+  date?: string
+  items?: Array<string | { type?: string; text?: string; summary?: string }>
+  repoPath?: string
+  commitLimit?: number
+}) {
   const version = String(params.version || '')
   if (!version) throw new Error('version is required')
-  const date =
-    (params.date as string) ||
-    new Date().toISOString().slice(0, 10)
+  const date = params.date || new Date().toISOString().slice(0, 10)
 
   const items: Item[] = []
-  const rawItems = (params.items as unknown[]) || []
-  for (const it of rawItems) {
+  for (const it of params.items || []) {
     if (typeof it === 'string') items.push({ type: classify(it), text: it })
     else if (it && typeof it === 'object') {
-      const o = it as Record<string, unknown>
-      const text = String(o.text || o.summary || '')
-      if (text) items.push({ type: String(o.type || classify(text)), text })
+      const text = String(it.text || it.summary || '')
+      if (text) items.push({ type: String(it.type || classify(text)), text })
     }
   }
 
   if (params.repoPath) {
     const limit = Number(params.commitLimit || 20)
-    const proc = Bun.spawnSync({
-      cmd: ['git', 'log', `-${limit}`, '--pretty=format:%s'],
-      cwd: params.repoPath as string,
-      stdout: 'pipe',
-      stderr: 'pipe',
+    const proc = spawnSync('git', ['log', `-${limit}`, '--pretty=format:%s'], {
+      cwd: params.repoPath,
+      encoding: 'utf-8',
+      shell: false,
     })
-    const log = new TextDecoder().decode(proc.stdout)
+    const log = proc.stdout || ''
     for (const line of log.split('\n')) {
       const s = line.trim()
       if (!s) continue

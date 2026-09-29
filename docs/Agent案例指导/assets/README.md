@@ -3,17 +3,17 @@
 > 本目录是 `Agent案例指导` 的**可落地资产包**：Skill 设计稿 + 本地插件（FaaS）脚本 + 知识库种子语料。  
 > 可复制到 WorkDuo「技能中心 / 插件 / 知识库」导入。
 
-## 知识库（按 identifier 建目录）
+## 知识库（单文件，按 identifier 命名）
 
-| 目录 | identifier | 用途 | 挂载建议 |
+| 文件 | identifier | 用途 | 挂载建议 |
 |---|---|---|---|
-| `kb-eng-standards/` | `kb-eng-standards` | 工程规范（目录/前后端/Rust/Git） | 全员 |
-| `kb-product-prd/` | `kb-product-prd` | PRD、用户故事、验收、变更 | PM、架构、QA |
-| `kb-adr/` | `kb-adr` | ADR、契约组织、数据建模 | 架构、开发、评审 |
-| `kb-test-assets/` | `kb-test-assets` | 用例模式、自动化、门禁 | QA、开发 |
-| `kb-pitfalls/` | `kb-pitfalls` | 踩坑、回归、RCA | 全员（优先召回） |
+| `kb-eng-standards.md` | `kb-eng-standards` | 工程规范（目录/前后端/Rust/Git） | 全员 |
+| `kb-product-prd.md` | `kb-product-prd` | PRD、用户故事、验收、变更 | PM、架构、QA |
+| `kb-adr.md` | `kb-adr` | ADR、契约组织、数据建模 | 架构、开发、评审 |
+| `kb-test-assets.md` | `kb-test-assets` | 用例模式、自动化、门禁 | QA、开发 |
+| `kb-pitfalls.md` | `kb-pitfalls` | 踩坑、回归、RCA | 全员（优先召回） |
 
-每个目录内 `README.md` 是导入说明，`0*.md` 是可直接入库的语料。
+> **单文件合并**便于整库检索/一次导入；建库后将对应 `kb-*.md` 作为知识库资产导入即可。
 
 ## Skill（按 identifier 命名）
 
@@ -48,11 +48,14 @@
 
 ## 导入要点
 
-1. 头注释元数据已按 WorkDuo 范式写好（`name/description/dependencies/parameters`）。  
-2. 函数签名固定：Python `def run(params)` / Bun `export async function run(params)`。  
-3. `timeoutSec` 建议：构建类 180–300；检查类 60–120。  
-4. **宿主工具链**（java/cargo）需本机已装 JDK/Maven 或 Rust；可用 `WD_CARGO_BIN`、`WD_MVN_BIN`、`JAVA_HOME` 定位。  
-5. 试跑：`plugin_test` 用 `sampleParams`；缺依赖 Python/Bun 走 exit 42 / 模块未找到自愈。
+1. **头注释按官方模板**（自动识别 name/description/dependencies/parameters）：  
+   - Python：`""" name: … / description: … / dependencies: [] / parameters: <字段YAML> """`  
+   - Bun：`@name @description @dependencies @parameters`，参数为 `字段: {type, description, required}`  
+2. 导出签名：Python `def run(params)`；Bun **`export default async function run(params)`**。  
+3. **Bun=Node 环境**：只用 `node:child_process` / `node:fs` / `node:path` 等 Node 标准库，**禁止** `Bun.spawnSync`、`Bun.file` 等 Bun 专有 API。  
+4. `timeoutSec` 建议：构建类 180–300；检查类 60–120。  
+5. **宿主工具链**（java/cargo）需本机已装 JDK/Maven 或 Rust；可用 `WD_CARGO_BIN`、`WD_MVN_BIN`、`JAVA_HOME` 定位。  
+6. 试跑：`plugin_test` 用 `sampleParams`；缺依赖走平台自愈。
 
 ## 与案例文档关系
 

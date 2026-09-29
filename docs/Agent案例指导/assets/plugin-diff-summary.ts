@@ -1,41 +1,46 @@
 /**
- * name: diff-summary
- * description: 扫描 git diff 或传入 diff 文本，输出变更文件摘要与风险提示（大文件/删除/迁移）。
- * dependencies: []
- * parameters:
- *   type: object
- *   properties:
- *     workspace:
- *       type: string
- *       description: git 工程根目录（使用 git diff 时必填）
- *     diffText:
- *       type: string
- *       description: 直接传入 unified diff 文本（与 workspace 二选一）
- *     staged:
- *       type: boolean
- *       description: 是否只看 staged（git diff --cached）
- *   required: []
+ * @name diff-summary
+ * @description 扫描 git diff 或传入 diff 文本，输出变更文件摘要与风险提示
+ * @dependencies
+ * @parameters
+ *   workspace:
+ *     type: string
+ *     description: git 工程根目录（使用 git diff 时填写）
+ *     required: false
+ *   diffText:
+ *     type: string
+ *     description: 直接传入 unified diff 文本（与 workspace 二选一）
+ *     required: false
+ *   staged:
+ *     type: boolean
+ *     description: 是否只看 staged 变更
+ *     required: false
  */
-export async function run(params: Record<string, unknown>): Promise<unknown> {
-  const workspace = (params.workspace as string) || ''
+import { spawnSync } from 'node:child_process'
+
+export default async function run(params: {
+  workspace?: string
+  diffText?: string
+  staged?: boolean
+}) {
+  const workspace = params.workspace || ''
   const staged = Boolean(params.staged)
-  let diffText = (params.diffText as string) || ''
+  let diffText = params.diffText || ''
 
   if (!diffText && workspace) {
     const args = staged ? ['diff', '--cached'] : ['diff', 'HEAD']
-    const proc = Bun.spawnSync({
-      cmd: ['git', ...args],
+    const proc = spawnSync('git', args, {
       cwd: workspace,
-      stdout: 'pipe',
-      stderr: 'pipe',
+      encoding: 'utf-8',
+      shell: false,
     })
-    diffText = new TextDecoder().decode(proc.stdout) + new TextDecoder().decode(proc.stderr)
-    if (proc.exitCode !== 0 && !diffText.includes('diff --git')) {
+    diffText = (proc.stdout || '') + (proc.stderr || '')
+    if (proc.status !== 0 && !diffText.includes('diff --git')) {
       return {
         ok: false,
         errorType: 'git_failed',
-        exitCode: proc.exitCode,
-        stderr: new TextDecoder().decode(proc.stderr).slice(0, 500),
+        exitCode: proc.status,
+        stderr: (proc.stderr || '').slice(0, 500),
       }
     }
   }

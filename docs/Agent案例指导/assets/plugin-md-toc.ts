@@ -1,21 +1,20 @@
 /**
- * name: md-toc
- * description: 生成或校验 Markdown 文件目录（TOC），按标题层级输出锚点列表。
- * dependencies: []
- * parameters:
- *   type: object
- *   properties:
- *     markdown:
- *       type: string
- *       description: Markdown 全文
- *     maxLevel:
- *       type: integer
- *       description: 收录到的标题级别，默认 3
- *     checkOnly:
- *       type: boolean
- *       description: 仅校验是否已有 TOC，不返回生成结果
- *   required:
- *     - markdown
+ * @name md-toc
+ * @description 生成或校验 Markdown 标题目录（TOC）
+ * @dependencies
+ * @parameters
+ *   markdown:
+ *     type: string
+ *     description: Markdown 全文
+ *     required: true
+ *   maxLevel:
+ *     type: integer
+ *     description: 收录标题级别，默认 3
+ *     required: false
+ *   checkOnly:
+ *     type: boolean
+ *     description: 仅校验是否已有 TOC
+ *     required: false
  */
 function slugify(text: string): string {
   return text
@@ -25,8 +24,12 @@ function slugify(text: string): string {
     .replace(/\s+/g, '-')
 }
 
-export async function run(params: Record<string, unknown>): Promise<unknown> {
-  const markdown = (params.markdown as string) || ''
+export default async function run(params: {
+  markdown?: string
+  maxLevel?: number
+  checkOnly?: boolean
+}) {
+  const markdown = params.markdown || ''
   if (!markdown) throw new Error('markdown is required')
   const maxLevel = Number(params.maxLevel || 3)
   const checkOnly = Boolean(params.checkOnly)

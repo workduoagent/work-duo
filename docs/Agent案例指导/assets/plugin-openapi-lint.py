@@ -1,19 +1,16 @@
 """
 name: openapi-lint
-description: 校验 OpenAPI/接口契约片段：路径命名、method、必填字段、错误响应，输出结构化问题列表。
+description: 校验 OpenAPI/接口契约片段的路径、方法与必填字段并输出问题列表
 dependencies: []
 parameters:
-  type: object
-  properties:
-    workspace:
-      type: string
-      description: 工程根目录
-    specPath:
-      type: string
-      description: OpenAPI 或契约 Markdown/JSON 相对路径
-  required:
-    - workspace
-    - specPath
+  workspace:
+    type: string
+    description: 工程根目录
+    required: true
+  specPath:
+    type: string
+    description: OpenAPI 或契约文件相对路径
+    required: true
 """
 from __future__ import annotations
 
@@ -35,7 +32,6 @@ def run(params):
     text = path.read_text(encoding="utf-8", errors="ignore")
     findings = []
 
-    # JSON OpenAPI 粗检
     if path.suffix.lower() == ".json":
         try:
             spec = json.loads(text)
@@ -44,7 +40,7 @@ def run(params):
                 if not p.startswith("/"):
                     findings.append({"level": "error", "rule": "path must start with /", "where": p})
                 if re.search(r"[A-Z]", p):
-                    findings.append({"level": "warn", "rule": "path prefer kebab-case lowercase", "where": p})
+                    findings.append({"level": "warn", "rule": "path prefer kebab-case", "where": p})
                 if not item:
                     findings.append({"level": "error", "rule": "empty path item", "where": p})
                 for method, op in (item or {}).items():
@@ -74,7 +70,6 @@ def run(params):
         except json.JSONDecodeError as e:
             findings.append({"level": "error", "rule": "invalid JSON", "where": str(e)})
     else:
-        # Markdown 契约：检查是否出现 method + path
         apis = re.findall(r"(?i)\b(GET|POST|PUT|PATCH|DELETE)\s+(/[^\s`]+)", text)
         if not apis:
             findings.append({"level": "warn", "rule": "no METHOD /path pairs found", "where": spec_path})

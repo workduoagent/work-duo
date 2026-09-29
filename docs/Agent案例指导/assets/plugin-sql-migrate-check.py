@@ -1,18 +1,16 @@
 """
 name: sql-migrate-check
-description: 检查 SQL 迁移/DDL 约定：init.sql 与 updater.sql 双轨、幂等 ALTER（IF NOT EXISTS / 事务）、禁 DROP 风险语句。
+description: 检查 SQL 迁移约定：风险语句与 ADD COLUMN 幂等性
 dependencies: []
 parameters:
-  type: object
-  properties:
-    workspace:
-      type: string
-      description: 工程根目录
-    sqlPaths:
-      type: array
-      description: 相对路径列表，默认扫描 **/init.sql 与 **/updater.sql
-  required:
-    - workspace
+  workspace:
+    type: string
+    description: 工程根目录
+    required: true
+  sqlPaths:
+    type: array
+    description: 相对路径列表，默认扫描 init.sql 与 updater.sql
+    required: false
 """
 from __future__ import annotations
 
@@ -24,16 +22,12 @@ _RISK = [
     (re.compile(r"\bTRUNCATE\b", re.I), "TRUNCATE"),
     (re.compile(r"\bDELETE\s+FROM\b(?![^\n]*WHERE)", re.I), "DELETE without WHERE"),
 ]
-_IDEMPOTENT = re.compile(
-    r"ALTER\s+TABLE[\s\S]*?ADD\s+COLUMN[\s\S]*?(IF\s+NOT\s+EXISTS)",
-    re.I,
-)
 
 
-def _find_sql(ws: Path, sql_paths) -> list[Path]:
+def _find_sql(ws: Path, sql_paths) -> list:
     if sql_paths:
         return [ws / p for p in sql_paths if (ws / p).is_file()]
-    found: list[Path] = []
+    found = []
     for name in ("init.sql", "updater.sql"):
         found.extend(ws.rglob(name))
     return found
@@ -57,15 +51,14 @@ def run(params):
                 findings.append(
                     {"file": rel, "level": "risk", "rule": label, "snippet": m.group(0)[:80]}
                 )
-        # ALTER ADD COLUMN 无 IF NOT EXISTS 提示（双轨幂等）
         for m in re.finditer(r"ALTER\s+TABLE[\s\S]{0,200}?ADD\s+COLUMN[\s\S]{0,80};", text, re.I):
             block = m.group(0)
-            if "IF NOT EXISTS" not in block.upper() and "IF NOT EXIST" not in block.upper():
+            if "IF NOT EXISTS" not in block.upper():
                 findings.append(
                     {
                         "file": rel,
                         "level": "warn",
-                        "rule": "ADD COLUMN without IF NOT EXISTS (idempotency)",
+                        "rule": "ADD COLUMN without IF NOT EXISTS",
                         "snippet": " ".join(block.split())[:100],
                     }
                 )

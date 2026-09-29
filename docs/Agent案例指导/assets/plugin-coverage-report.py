@@ -1,21 +1,20 @@
 """
 name: coverage-report
-description: 解析 coverage.py 的 JSON/终端输出，生成覆盖率缺口清单（未覆盖文件 TOP）。
+description: 解析 coverage.json 并输出覆盖率与最低覆盖文件缺口清单
 dependencies: []
 parameters:
-  type: object
-  properties:
-    workspace:
-      type: string
-      description: 工程根目录
-    coverageJson:
-      type: string
-      description: coverage.json 相对路径，默认 coverage.json
-    minPct:
-      type: number
-      description: 门禁百分比，默认 70
-  required:
-    - workspace
+  workspace:
+    type: string
+    description: 工程根目录
+    required: true
+  coverageJson:
+    type: string
+    description: coverage.json 相对路径，默认 coverage.json
+    required: false
+  minPct:
+    type: number
+    description: 门禁百分比，默认 70
+    required: false
 """
 from __future__ import annotations
 
@@ -56,17 +55,15 @@ def run(params):
     rows.sort(key=lambda r: r["percentCovered"])
     total = (data.get("totals") or {}).get("percent_covered")
     if total is None and rows:
-        # 简单加权
         st = sum(r["numStatements"] for r in rows) or 1
         cv = sum(r["coveredLines"] for r in rows)
         total = 100.0 * cv / st
 
-    gaps = rows[:15]
     return {
         "ok": float(total or 0) >= min_pct,
         "totalPercentCovered": round(float(total or 0), 2),
         "minPct": min_pct,
         "fileCount": len(rows),
-        "lowestFiles": gaps,
+        "lowestFiles": rows[:15],
         "workspace": str(ws),
     }
