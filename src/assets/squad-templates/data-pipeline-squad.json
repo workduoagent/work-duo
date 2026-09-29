@@ -1,0 +1,33 @@
+{
+  "templateId": "official-data-pipeline",
+  "name": "数据管道组",
+  "description": "流水线四工序（§12）：采集（调研员）→ 清洗（执行员）→ 报表与图（执行员）→ 数据简报（整合交付），前步产物自动交接后步；成员就位后可在 DAG 画布上连线改并行。",
+  "mode": "pipeline",
+  "runStrategy": {
+    "executionMode": "manual",
+    "retryCount": 3,
+    "schedulePrompt": "给定一个数据主题：完成采集→清洗→报表与图表的全流程，并产出最终数据简报。"
+  },
+  "members": [
+    {
+      "rolePreset": "RESEARCHER",
+      "pipelineOrder": 1,
+      "personaOverride": "本队工序 1（采集）：只负责资料/数据的采集与落盘，产出原始素材文件；不做清洗与结论。"
+    },
+    {
+      "rolePreset": "WORKER",
+      "pipelineOrder": 2,
+      "personaOverride": "本队工序 2（清洗）：只消费上游交接的原始素材，负责去重/校验/规范化，产出干净数据集；不做报表。"
+    },
+    {
+      "rolePreset": "WORKER",
+      "pipelineOrder": 3,
+      "personaOverride": "本队工序 3（报表）：基于上游干净数据产出统计报表与图表文件。"
+    },
+    {
+      "rolePreset": "INTEGRATOR",
+      "pipelineOrder": 4,
+      "personaOverride": "本队工序 4（简报）：汇总全部上游产出，产出最终数据简报（结论 + 关键数字 + 图表引用）。"
+    }
+  ]
+}

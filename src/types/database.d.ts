@@ -202,12 +202,14 @@ export interface AgentSquadMemberRow {
 
 /** 小分队群聊配置表（agent_squad_chat_config）行映射。
  * - max_rounds：发言轮次上限（默认 8）；
- * - summarizer_agent_id：汇总主笔（最终产物结论负责人，可空）。
+ * - summarizer_agent_id：汇总主笔（最终产物结论负责人，可空）；
+ * - execute_actions：S3 批次2 §7.1 结论转执行（行动项自动转 Wave 续跑，0/1）。
  */
 export interface AgentSquadChatConfigRow {
   squad_id: string
   max_rounds: number
   summarizer_agent_id: string | null
+  execute_actions: number | null
 }
 
 /** 小分队协作运行表（agent_squad_session）行映射。

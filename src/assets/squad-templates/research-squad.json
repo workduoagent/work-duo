@@ -1,0 +1,21 @@
+{
+  "templateId": "official-research",
+  "name": "深研小组",
+  "description": "群聊深度调研（§12）：两位调研员交叉检索与辩论，评审员把关结论口径（禁写工作区），主持人收口共识；开启「结论转执行」后，行动项自动转 Wave 由整合交付产出报告。",
+  "mode": "chat",
+  "chatConfig": { "maxRounds": 8, "executeActions": true },
+  "runStrategy": {
+    "executionMode": "manual",
+    "retryCount": 3,
+    "schedulePrompt": "围绕给定主题完成一轮深度调研：多来源交叉验证后输出一份带引用来源的调研报告。"
+  },
+  "members": [
+    { "rolePreset": "RESEARCHER" },
+    {
+      "rolePreset": "RESEARCHER",
+      "personaOverride": "辩论时主动提供与另一位研究员不同的信息源与视角，敢于指出对方论据的薄弱处。"
+    },
+    { "rolePreset": "CRITIC" },
+    { "rolePreset": "INTEGRATOR" }
+  ]
+}

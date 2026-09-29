@@ -530,6 +530,8 @@ pub struct SquadChatConfig {
     pub max_rounds: usize,
     /// 汇总主笔（最终产物结论负责人）；可为 leader_agent_id 或单独指定。
     pub summarizer_agent_id: Option<String>,
+    /// S3 批次2（§7.1 chat_then_execute）：汇总产出行动项后自动转 Wave 续跑（0=关，默认）。
+    pub execute_actions: bool,
 }
 
 /// S2（§4.2）成员角色工具面：能力层裁剪配置（非 prompt 空谈）。
@@ -579,6 +581,15 @@ pub fn tool_family_members(family: &str) -> &'static [&'static str] {
         "network" => &["native__http_request"],
         // 破坏族：删除/移动（可覆盖既有产物）
         "destructive" => &["native__delete_path", "native__move_path"],
+        // 只读族（S3 批次2 角色包用）：检索/浏览类，MODERATOR 白名单=只读+网络
+        "read" => &[
+            "native__read_file",
+            "native__list_directory",
+            "native__path_exists",
+            "native__grep_files",
+            "native__kb_search",
+            "native__query_graph",
+        ],
         _ => &[],
     }
 }

@@ -2,7 +2,7 @@
 -- Work Duo 本地数据库初始化脚本（DDL 单一事实源）
 -- 当前 schema 版本（台账 S11）：每次 DDL 变更时同步递增（与 updater.sql 末段版本号一致），
 -- SqlService.updateTables 读取此标记作为 user_version 封存目标。
--- SCHEMA_VERSION: 37
+-- SCHEMA_VERSION: 38
 -- 由 InitContext 在「每次启动」时幂等执行：
 --   - CREATE TABLE IF NOT EXISTS：表已存在则跳过，不会重建/丢数据；
 --   - INSERT OR IGNORE：种子已存在则跳过，不会重复插入。
@@ -587,12 +587,14 @@ CREATE INDEX IF NOT EXISTS idx_squad_member_squad ON agent_squad_member(squad_id
 -- ============ 小分队群聊配置表（agent_squad_chat_config） ============
 -- 仅 chat（群聊协商）模式使用的专属配置：
 --   max_rounds        发言轮次上限（默认 8，达到后由 summarizer 收口）；
---   summarizer_agent_id 汇总主笔（最终产物结论负责人，可 = leader_agent_id 或单独指定，可空）。
+--   summarizer_agent_id 汇总主笔（最终产物结论负责人，可 = leader_agent_id 或单独指定，可空）；
+--   execute_actions   S3 批次2（§7.1）：汇总行动项自动转 Wave 续跑（0=关，默认）。
 CREATE TABLE IF NOT EXISTS agent_squad_chat_config
 (
     squad_id          TEXT    PRIMARY KEY,
     max_rounds        INTEGER NOT NULL DEFAULT 8,
     summarizer_agent_id TEXT,
+    execute_actions   INTEGER NOT NULL DEFAULT 0,
     FOREIGN KEY(squad_id) REFERENCES agent_squad(id) ON DELETE CASCADE
 );
 

@@ -198,10 +198,13 @@ pub async fn load_squad(app: &AppHandle, squad_id: &str) -> Result<SquadRuntimeC
                         Some(s)
                     }
                 },
+                // S3 批次2（§7.1）：结论转执行——汇总行动项自动转 Wave 续跑（DDL v38，默认关）。
+                execute_actions: get_i64(&c, "execute_actions") == 1,
             },
             _ => SquadChatConfig {
                 max_rounds: 8,
                 summarizer_agent_id: None,
+                execute_actions: false,
             },
         };
 

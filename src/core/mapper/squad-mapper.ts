@@ -77,7 +77,7 @@ async function loadMembers(db: Awaited<ReturnType<typeof getDb>>, squadId: strin
 async function loadChatConfig(
   db: Awaited<ReturnType<typeof getDb>>,
   squadId: string,
-): Promise<{ maxRounds: number; summarizerAgentId?: string | null }> {
+): Promise<SquadInfo['chatConfig']> {
   const rows = await db.select<AgentSquadChatConfigRow[]>(
     'SELECT * FROM agent_squad_chat_config WHERE squad_id = ?',
     [squadId],
@@ -86,15 +86,17 @@ async function loadChatConfig(
     return {
       maxRounds: rows[0].max_rounds,
       summarizerAgentId: rows[0].summarizer_agent_id ?? null,
+      // S3 批次2（§7.1）：结论转执行（DDL v38，默认关）。
+      executeActions: rows[0].execute_actions === 1,
     }
   }
-  return { maxRounds: 8, summarizerAgentId: null }
+  return { maxRounds: 8, summarizerAgentId: null, executeActions: false }
 }
 
 function rowToSquad(
   r: AgentSquadRow,
   members: SquadMember[],
-  chat: { maxRounds: number; summarizerAgentId?: string | null },
+  chat: SquadInfo['chatConfig'],
 ): SquadInfo {
   return {
     id: r.id,
@@ -116,6 +118,7 @@ function rowToSquad(
     chatConfig: {
       maxRounds: chat.maxRounds,
       summarizerAgentId: chat.summarizerAgentId ?? null,
+      executeActions: chat.executeActions ?? false,
     },
     createdAt: safeIso(r.created_at),
     updatedAt: safeIso(r.updated_at),
@@ -278,12 +281,18 @@ export async function upsertSquad(input: SquadUpsertInput): Promise<SquadInfo[]>
 
   // 群聊配置：upsert
   await db.execute(
-    `INSERT INTO agent_squad_chat_config (squad_id, max_rounds, summarizer_agent_id)
-     VALUES (?, ?, ?)
+    `INSERT INTO agent_squad_chat_config (squad_id, max_rounds, summarizer_agent_id, execute_actions)
+     VALUES (?, ?, ?, ?)
      ON CONFLICT(squad_id) DO UPDATE SET
        max_rounds          = excluded.max_rounds,
-       summarizer_agent_id = excluded.summarizer_agent_id`,
-    [id, input.chatConfig.maxRounds, input.chatConfig.summarizerAgentId ?? null],
+       summarizer_agent_id = excluded.summarizer_agent_id,
+       execute_actions     = excluded.execute_actions`,
+    [
+      id,
+      input.chatConfig.maxRounds,
+      input.chatConfig.summarizerAgentId ?? null,
+      input.chatConfig.executeActions ? 1 : 0,
+    ],
   )
 
   return listSquads()

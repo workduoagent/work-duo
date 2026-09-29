@@ -45,6 +45,14 @@ import {
     setSquadApiConfig,
     type SquadMemberInput,
 } from '@/core/mapper/squad-mapper'
+import {
+    SQUAD_ROLE_PRESETS,
+    SQUAD_TEMPLATES,
+    applyRolePreset,
+    resolveTemplateMember,
+    type SquadRolePreset,
+    type SquadTemplateJson,
+} from '@/core/mapper/squad-templates'
 import {listMcps, listMcpTools} from '@/core/mapper/mcp-mapper'
 import type {McpInfo, McpToolDefinition} from '@/core/file/mcp-file'
 import type {
@@ -90,16 +98,21 @@ const EXEC_OPTIONS: { label: string; value: SquadExecutionMode }[] = [
 ]
 
 // 角色为固定枚举，按协作模式开放不同选项；流水线模式不提供角色选择（角色由工序固定）。
+// S3 批次2（§4.2）：内置角色包五预设进入选项（一键套用人设+工具面见成员行「套用角色预设」）。
 const SQUAD_ROLE_OPTIONS: Record<SquadMode, { label: string; value: string }[]> = {
     orchestrator: [
         {label: '执行 WORKER', value: 'WORKER'},
+        {label: '调研 RESEARCHER', value: 'RESEARCHER'},
         {label: '评审 CRITIC', value: 'CRITIC'},
+        {label: '整合 INTEGRATOR', value: 'INTEGRATOR'},
     ],
     pipeline: [{label: '执行 WORKER', value: 'WORKER'}],
     chat: [
         {label: '执行 WORKER', value: 'WORKER'},
+        {label: '调研 RESEARCHER', value: 'RESEARCHER'},
         {label: '评审 CRITIC', value: 'CRITIC'},
-        {label: '主持人 ORCHESTRATOR', value: 'ORCHESTRATOR'},
+        {label: '整合 INTEGRATOR', value: 'INTEGRATOR'},
+        {label: '主持人 MODERATOR', value: 'MODERATOR'},
     ],
 }
 
@@ -145,6 +158,8 @@ interface EditorState {
     schedulePrompt: string
     maxRounds: number
     summarizerAgentId: string
+    /** S3 批次2（§7.1 chat_then_execute）：群聊结论转执行（行动项自动转 Wave 续跑）。 */
+    executeActions: boolean
     /** S2：协作 token 总预算（prompt+completion；0=不限），读写 run_strategy.budget_tokens。 */
     budgetTokens: number
     members: SquadMemberInput[]
@@ -168,6 +183,7 @@ function blankState(): EditorState {
         schedulePrompt: '',
         maxRounds: 8,
         summarizerAgentId: '',
+        executeActions: false,
         budgetTokens: 0,
         members: [],
     }
@@ -192,6 +208,7 @@ function fromSquad(s: SquadInfo): EditorState {
         schedulePrompt: s.runStrategy.schedulePrompt ?? '',
         maxRounds: s.chatConfig.maxRounds,
         summarizerAgentId: s.chatConfig.summarizerAgentId ?? '',
+        executeActions: s.chatConfig.executeActions ?? false,
         budgetTokens: s.runStrategy.budgetTokens ?? 0,
         members: s.members.map((m) => ({
             agentId: m.agentId,
@@ -202,6 +219,23 @@ function fromSquad(s: SquadInfo): EditorState {
             isLeader: m.isLeader,
             toolProfile: m.toolProfile,
         })),
+    }
+}
+
+/** 官方模板（§12）→ 编辑器初始状态：成员 agentId 留空由用户挑选；pipelineOrder 保留（线性串流）。 */
+function fromTemplate(t: SquadTemplateJson): EditorState {
+    const s = blankState()
+    return {
+        ...s,
+        name: t.name,
+        description: t.description ?? '',
+        mode: t.mode,
+        executionMode: t.runStrategy?.executionMode ?? 'manual',
+        retryCount: t.runStrategy?.retryCount ?? 3,
+        schedulePrompt: t.runStrategy?.schedulePrompt ?? '',
+        maxRounds: t.chatConfig?.maxRounds ?? 8,
+        executeActions: t.chatConfig?.executeActions ?? false,
+        members: t.members.map(resolveTemplateMember),
     }
 }
 
@@ -482,12 +516,15 @@ function SquadApiConfigModal({open, onClose}: { open: boolean; onClose: () => vo
 function SquadEditorModal({
                               open,
                               initial,
+                              template,
                               agents,
                               onClose,
                               onSaved,
                           }: {
     open: boolean
     initial?: SquadInfo
+    /** S3 批次2（§12）：从官方模板新建（成员 agentId 留空，由用户在编辑器内挑选）。 */
+    template?: SquadTemplateJson
     agents: AgentInfo[]
     onClose: () => void
     onSaved: (list: SquadInfo[]) => void
@@ -514,7 +551,7 @@ function SquadEditorModal({
 
     useEffect(() => {
         if (open) {
-            setState(initial ? fromSquad(initial) : blankState())
+            setState(initial ? fromSquad(initial) : template ? fromTemplate(template) : blankState())
             void listMcps()
                 .then(async (list) => {
                     setMcps(list)
@@ -532,7 +569,7 @@ function SquadEditorModal({
                 })
                 .catch(() => setMcps([]))
         }
-    }, [open, initial])
+    }, [open, initial, template])
 
     // S2：编辑器打开时，为已配置工具面的成员拉取工具目录
     useEffect(() => {
@@ -706,9 +743,11 @@ function SquadEditorModal({
             const summarizerAgentId = state.mode === 'chat' ? (state.summarizerAgentId || null) : null
             const members = state.members.map((m) => ({
                 ...m,
-                isLeader: false,
+                // S3 批次2：编排式保留模板/编辑器的主管标记（leaderAgentId 未选时自动推导）。
+                isLeader: state.mode === 'orchestrator' && m.isLeader,
                 role: state.mode === 'pipeline' ? '' : m.role,
-                pipelineOrder: null,
+                // S3 批次2：保留模板/编辑器的工序序号（流水线无 dependsOn 时按 pipeline_order 线性串流）。
+                pipelineOrder: m.pipelineOrder ?? null,
             }))
             const list = await upsertSquad({
                 id: state.id,
@@ -730,7 +769,12 @@ function SquadEditorModal({
                     budgetTokens: state.budgetTokens > 0 ? state.budgetTokens : 0,
                 },
                 members,
-                chatConfig: {maxRounds: state.maxRounds, summarizerAgentId},
+                chatConfig: {
+                    maxRounds: state.maxRounds,
+                    summarizerAgentId,
+                    // S3 批次2（§7.1）：结论转执行仅 chat 模式有意义。
+                    executeActions: state.mode === 'chat' && state.executeActions,
+                },
             })
             onSaved(list)
             message.success(state.id ? '已更新小分队' : '已创建小分队')
@@ -739,6 +783,45 @@ function SquadEditorModal({
             message.error(`保存失败：${e instanceof Error ? e.message : String(e)}`)
         } finally {
             setSaving(false)
+        }
+    }
+
+    // S3 批次2（§12）：导出编队模板 JSON——成员 agentId 留空（可移植分享），其余配置全保真。
+    async function handleExportTemplate() {
+        const tpl: SquadTemplateJson = {
+            templateId: `custom-${genUniqueId()}`,
+            name: state.name.trim() || '未命名编队',
+            description: state.description.trim() || undefined,
+            mode: state.mode,
+            chatConfig: {
+                maxRounds: state.maxRounds,
+                executeActions: state.mode === 'chat' ? state.executeActions : undefined,
+            },
+            runStrategy: {
+                executionMode: state.executionMode,
+                retryCount: state.retryCount,
+                schedulePrompt: state.schedulePrompt.trim() || null,
+            },
+            members: state.members.map((m) => ({
+                rolePreset: SQUAD_ROLE_PRESETS.some((p) => p.id === m.role)
+                    ? (m.role as SquadRolePreset['id'])
+                    : undefined,
+                role: m.role || undefined,
+                personaOverride: m.personaOverride || undefined,
+                toolProfile: m.toolProfile,
+                pipelineOrder: m.pipelineOrder ?? undefined,
+                dependsOn: m.dependsOn?.length ? m.dependsOn : undefined,
+                isLeader: m.isLeader || undefined,
+            })),
+        }
+        try {
+            const ok = await saveTextFile(
+                `${tpl.name}-编队模板.json`,
+                JSON.stringify(tpl, null, 2),
+            )
+            if (ok) message.success('编队模板已导出（成员留空，可直接分享导入）')
+        } catch (e) {
+            message.error(`导出失败：${e instanceof Error ? e.message : String(e)}`)
         }
     }
 
@@ -752,6 +835,9 @@ function SquadEditorModal({
                 width={940}
                 footer={
                     <div style={{display: 'flex', justifyContent: 'flex-end', gap: 12}}>
+                        <Button variant="ghost" onClick={handleExportTemplate}>
+                            导出 JSON
+                        </Button>
                         <Button variant="ghost" onClick={onClose}>
                             取消
                         </Button>
@@ -1117,6 +1203,23 @@ function SquadEditorModal({
                                                                 onChange={(v) => patchMember(idx, {role: (v as string) ?? ''})}
                                                             />
                                                         )}
+                                                        {/* S3 批次2（§4.2）：一键套用内置角色包——只落 toolProfile + persona 两维 */}
+                                                        {state.mode !== 'pipeline' && (
+                                                            <Select
+                                                                className="squad-editor__member-preset"
+                                                                placeholder="套用角色预设"
+                                                                allowClear
+                                                                value={undefined}
+                                                                options={SQUAD_ROLE_PRESETS.map((p) => ({
+                                                                    value: p.id,
+                                                                    label: p.label,
+                                                                }))}
+                                                                onChange={(v) => {
+                                                                    const preset = SQUAD_ROLE_PRESETS.find((p) => p.id === v)
+                                                                    if (preset) patchMember(idx, applyRolePreset(preset))
+                                                                }}
+                                                            />
+                                                        )}
                                                         {/* S2（§4.2）：工具面摘要 chips */}
                                                         {m.toolProfile && m.toolProfile.mode !== 'inherit' && (
                                                             <Tooltip title={(m.toolProfile.nativeTools ?? []).concat(m.toolProfile.mcpTools ?? []).join('\n')}>
@@ -1302,6 +1405,25 @@ function SquadEditorModal({
                                                         onChange={(v) => setState((s) => ({...s, maxRounds: v ?? 8}))}
                                                     />
                                                     <span>轮次</span>
+                                                </div>
+                                            </Field>
+                                        )}
+
+                                        {/* S3 批次2（§7.1）：chat_then_execute——讨论收口后行动项自动转 Wave 执行 */}
+                                        {state.mode === 'chat' && (
+                                            <Field className="squad-editor__row">
+                                                <FieldLabel>
+                                                    结论转执行
+                                                    <Tooltip title="chat_then_execute：群聊汇总产出行动项（【squad-actions】）后，自动把行动项转为委派任务续跑编排式 Wave（复用波次循环，上游上下文=讨论结论），执行完毕重建交付包并走交付确认。">
+                                                        <Info size={13} style={{marginLeft: 4, cursor: 'help'}}/>
+                                                    </Tooltip>
+                                                </FieldLabel>
+                                                <div className="squad-editor__strategy-line">
+                                                    <Switch
+                                                        checked={state.executeActions}
+                                                        onChange={(v) => setState((s) => ({...s, executeActions: !!v}))}
+                                                    />
+                                                    <span>{state.executeActions ? '行动项自动转入 Wave 执行' : '仅讨论收口，不执行行动项'}</span>
                                                 </div>
                                             </Field>
                                         )}
@@ -2189,6 +2311,9 @@ export default function SquadsWorkspacePage() {
     const [agents, setAgents] = useState<AgentInfo[]>([])
     const [editorOpen, setEditorOpen] = useState(false)
     const [editing, setEditing] = useState<SquadInfo | undefined>(undefined)
+    // S3 批次2（§12）：从官方模板新建（编辑器内补选成员智能体后保存）。
+    const [tplEditing, setTplEditing] = useState<SquadTemplateJson | undefined>(undefined)
+    const [tplSel, setTplSel] = useState<string | undefined>(undefined)
     const [runningSquad, setRunningSquad] = useState<SquadInfo | undefined>(undefined)
     const [memSquad, setMemSquad] = useState<SquadInfo | undefined>(undefined)
     const [histSquad, setHistSquad] = useState<SquadInfo | undefined>(undefined)
@@ -2238,6 +2363,22 @@ export default function SquadsWorkspacePage() {
                     </p>
                 </div>
                 <div className="squads__actions">
+                    {/* S3 批次2（§12）：从官方模板新建——选模板进编辑器，补选成员智能体后保存 */}
+                    <Select
+                        className="squads__tpl-select"
+                        placeholder="⭐ 从模板新建"
+                        value={tplSel}
+                        options={SQUAD_TEMPLATES.map((t) => ({value: t.templateId, label: `⭐ ${t.name}`}))}
+                        onChange={(v) => {
+                            const t = SQUAD_TEMPLATES.find((x) => x.templateId === v)
+                            if (t) {
+                                setEditing(undefined)
+                                setTplEditing(t)
+                                setEditorOpen(true)
+                            }
+                            setTplSel(undefined)
+                        }}
+                    />
                     <Button variant="soft" size="sm" onClick={openCreate}>
                         <Plus size={14}/> 新建小分队
                     </Button>
@@ -2352,8 +2493,12 @@ export default function SquadsWorkspacePage() {
             <SquadEditorModal
                 open={editorOpen}
                 initial={editing}
+                template={tplEditing}
                 agents={agents}
-                onClose={() => setEditorOpen(false)}
+                onClose={() => {
+                    setEditorOpen(false)
+                    setTplEditing(undefined)
+                }}
                 onSaved={(next) => setList(next)}
             />
 

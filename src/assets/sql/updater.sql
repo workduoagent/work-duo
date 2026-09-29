@@ -659,3 +659,8 @@ CREATE INDEX IF NOT EXISTS idx_squad_inject_session ON agent_squad_inject(sessio
 -- 成员工具面（能力层裁剪，非 prompt）：{mode: inherit|allowlist|denylist, nativeTools:[], mcpTools:[], skillIds:[]}。
 -- 裁剪发生在成员规划之前——planner_digest 从 registry 派生（S6），能力大纲与实际工具自动同源。
 ALTER TABLE agent_squad_member ADD COLUMN tool_profile_json TEXT;
+
+-- ---------- v38：小分队 S3 批次2——chat_then_execute 结论转执行（设计方案 v1.4 §7.1） ----------
+-- 群聊汇总产出行动项后自动转 Wave 续跑（行动项 → 委派任务，复用编排式波次循环）。
+-- 0=关（默认，维持纯讨论收口）；1=开。
+ALTER TABLE agent_squad_chat_config ADD COLUMN execute_actions INTEGER NOT NULL DEFAULT 0;

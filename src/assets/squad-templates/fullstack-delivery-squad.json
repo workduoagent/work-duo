@@ -1,0 +1,22 @@
+{
+  "templateId": "official-fullstack",
+  "name": "全栈交付组",
+  "description": "编排式波次（§12）：主管拆解委派，前端/后端执行员并行开发，评审员只评审不改码（禁写工作区），整合交付汇总最终产物与自测报告。",
+  "mode": "orchestrator",
+  "runStrategy": {
+    "executionMode": "manual",
+    "retryCount": 3,
+    "schedulePrompt": "实现一个待办事项 CRUD 全栈应用（前端 + 后端），完成自测并交付自测报告。"
+  },
+  "members": [
+    {
+      "rolePreset": "WORKER",
+      "role": "前端 WORKER",
+      "isLeader": true,
+      "personaOverride": "你是本队主管（兼前端执行）：先按「主管」职责把任务拆解为前端/后端子任务并委派（无依赖的子任务会并行执行），再认领前端子任务；全部完成后汇总交付。"
+    },
+    { "rolePreset": "WORKER", "role": "后端 WORKER" },
+    { "rolePreset": "CRITIC" },
+    { "rolePreset": "INTEGRATOR" }
+  ]
+}

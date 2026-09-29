@@ -29,6 +29,14 @@
 
   &__actions {
     flex: none;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  /* S3 批次2：列表页「从模板新建」选择器（即用即清） */
+  &__tpl-select {
+    width: 150px;
   }
 
   &__grid {
@@ -299,6 +307,13 @@
   &__member-agent,
   &__member-role {
     flex: 1 1 0;
+    min-width: 0;
+  }
+
+  /* S3 批次2：成员行「套用角色预设」下拉（即用即清，固定窄宽不挤压角色列） */
+  &__member-preset {
+    flex: 0 0 auto;
+    width: 132px;
     min-width: 0;
   }
 

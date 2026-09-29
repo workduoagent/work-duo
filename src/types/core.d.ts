@@ -470,6 +470,8 @@ export interface SquadRunStrategy {
 export interface SquadChatConfig {
   maxRounds: number
   summarizerAgentId?: string | null
+  /** S3 批次2（§7.1 chat_then_execute）：汇总行动项自动转 Wave 续跑。 */
+  executeActions?: boolean
 }
 
 /** 小分队 API 触发服务配置（存于 app_config：squad_api_enabled / squad_api_port / squad_api_token）。 */
