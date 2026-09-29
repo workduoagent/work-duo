@@ -298,6 +298,21 @@ export async function upsertSquad(input: SquadUpsertInput): Promise<SquadInfo[]>
   return listSquads()
 }
 
+/** 各编队最新会话状态（卡片实时徽标）：squad_id → status；无会话的编队不出现在结果里。 */
+export async function latestSquadStatuses(): Promise<Record<string, string>> {
+  if (!isTauri) return {}
+  const db = await getDb()
+  const rows = await db.select<Array<{ squad_id: string; status: string }>>(
+    `SELECT s.squad_id, s.status FROM agent_squad_session s
+     JOIN (SELECT squad_id, MAX(created_at) AS mc FROM agent_squad_session GROUP BY squad_id) m
+       ON m.squad_id = s.squad_id AND s.created_at = m.mc`,
+    [],
+  )
+  const out: Record<string, string> = {}
+  for (const r of rows) out[r.squad_id] = r.status
+  return out
+}
+
 /** 删除小分队（级联清理成员 / 群聊配置 / 运行会话 / 轮次）。返回最新列表。 */
 export async function deleteSquad(id: string): Promise<SquadInfo[]> {
   if (!isTauri) {

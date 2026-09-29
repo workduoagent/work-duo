@@ -38,6 +38,7 @@ import {useNotify} from '@/components/ui/notify'
 import {listAgents} from '@/core/mapper/agent-mapper'
 import {
     listSquads,
+    latestSquadStatuses,
     upsertSquad,
     deleteSquad,
     listSquadSessions,
@@ -260,6 +261,14 @@ function agentAppearanceOf(agents: AgentInfo[], agentId?: string): PixelAgentApp
 function memberLabel(m: { role?: string; agentId: string }, agents: AgentInfo[]): string {
     if (m.role && m.role.trim()) return m.role
     return agents.find((a) => a.id === m.agentId)?.name || '未命名成员'
+}
+
+/** 卡片实时徽标文案（最新会话非终态才显示；终态无标记）。 */
+const LIVE_LABELS: Record<string, string> = {
+    running: '协作中',
+    paused: '已暂停',
+    awaiting_checkpoint: '待检查点决议',
+    awaiting_delivery: '待确认交付',
 }
 const INPUT_NODE_ID = '__squad_input__'
 
@@ -2359,6 +2368,10 @@ export default function SquadsWorkspacePage() {
     const [loading, setLoading] = useState(true)
     const [list, setList] = useState<SquadInfo[]>([])
     const [agents, setAgents] = useState<AgentInfo[]>([])
+    // 卡片实时徽标：各编队最新会话状态（30s 轻量轮询）
+    const [liveStatus, setLiveStatus] = useState<Record<string, string>>({})
+    // 悬浮像素小人：key=`${squadId}-${idx}`，悬浮时该小人播放 idle 动画
+    const [hoverCrew, setHoverCrew] = useState<string | null>(null)
     const [editorOpen, setEditorOpen] = useState(false)
     const [editing, setEditing] = useState<SquadInfo | undefined>(undefined)
     // S3 批次2（§12）：从官方模板新建（编辑器内补选成员智能体后保存）。
@@ -2371,12 +2384,21 @@ export default function SquadsWorkspacePage() {
     const reload = useCallback(async () => {
         setLoading(true)
         try {
-            const [squads, ags] = await Promise.all([listSquads(), listAgents()])
+            const [squads, ags, sts] = await Promise.all([listSquads(), listAgents(), latestSquadStatuses()])
             setList(squads)
             setAgents(ags)
+            setLiveStatus(sts)
         } finally {
             setLoading(false)
         }
+    }, [])
+
+    // 后台协作实时徽标：轻量 SQL 轮询（不动列表 loading）
+    useEffect(() => {
+        const t = setInterval(() => {
+            latestSquadStatuses().then(setLiveStatus).catch(() => {})
+        }, 30000)
+        return () => clearInterval(t)
     }, [])
 
     useEffect(() => {
@@ -2461,21 +2483,36 @@ export default function SquadsWorkspacePage() {
                                         >
                                             {MODE_OPTIONS.find((o) => o.value === squad.mode)?.label ?? squad.mode}
                                         </Tag>
+                                        {LIVE_LABELS[liveStatus[squad.id]] && (
+                                            <span className={`squads__live squads__live--${liveStatus[squad.id]}`}>
+                                                <i className="squads__live-dot"/>
+                                                {LIVE_LABELS[liveStatus[squad.id]]}
+                                            </span>
+                                        )}
                                     </div>
                                 </div>
 
                                 <p className="squads__card-desc">{squad.description || '暂无描述'}</p>
 
                                 <div className="squads__card-crew" title={squad.members.map((m) => memberLabel(m, agents)).join('、')}>
-                                    {squad.members.slice(0, 8).map((m, i) => (
-                                        <PixelAgent
-                                            key={m.id || `${m.agentId}-${i}`}
-                                            appearance={agentAppearanceOf(agents, m.agentId)}
-                                            size={24}
-                                            motion={false}
-                                            className="squads__crew-avatar"
-                                        />
-                                    ))}
+                                    {squad.members.slice(0, 8).map((m, i) => {
+                                        const crewKey = `${squad.id}-${i}`
+                                        return (
+                                            <span
+                                                key={m.id || crewKey}
+                                                className="squads__crew-slot"
+                                                onMouseEnter={() => setHoverCrew(crewKey)}
+                                                onMouseLeave={() => setHoverCrew((k) => (k === crewKey ? null : k))}
+                                            >
+                                                <PixelAgent
+                                                    appearance={agentAppearanceOf(agents, m.agentId)}
+                                                    size={24}
+                                                    motion={hoverCrew === crewKey}
+                                                    className="squads__crew-avatar"
+                                                />
+                                            </span>
+                                        )
+                                    })}
                                     {squad.members.length > 8 && (
                                         <span className="squads__crew-more">+{squad.members.length - 8}</span>
                                     )}
