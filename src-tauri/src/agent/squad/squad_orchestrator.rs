@@ -1389,6 +1389,22 @@ async fn persist_board(pool: &sqlx::SqlitePool, session_id: &str, board: &BoardS
     }
 }
 
+/// 读取会话黑板快照（无行 / NULL / 坏 JSON → 空板）。
+/// chat_then_execute 续跑依赖它保留 chat 阶段的 decisions/actions（单写者语义下读-改-写安全）。
+async fn load_board(pool: &sqlx::SqlitePool, session_id: &str) -> BoardState {
+    use sqlx::Row;
+    let row = sqlx::query("SELECT board_json FROM agent_squad_session WHERE id = ?")
+        .bind(session_id)
+        .fetch_optional(pool)
+        .await;
+    let raw: Option<String> = match row {
+        Ok(Some(r)) => r.try_get("board_json").ok().flatten(),
+        _ => None,
+    };
+    raw.and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
+}
+
 /// S1（§4.4.5）：决策卡（黑板 L2）——群聊共识结构化落下，供后续生产波继承。
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 struct BoardDecision {
@@ -1991,7 +2007,9 @@ async fn run_delegated_waves(
         })
         .collect();
     let inbox_root = squad_shared_inbox(&squad.squad_id);
-    let mut board = BoardState::default();
+    // S3 批次2 真机发现（09-29）：chat_then_execute 续跑时黑板已含 chat 阶段的 decisions/actions，
+    // 重建空板会把它们冲掉——改为读-改-写（单写者=调度协程，串行安全）；编排式新会话无板面，行为不变。
+    let mut board = load_board(&pool, &session_id).await;
     for (i, t) in delegated.iter().enumerate() {
         board.tasks.insert(
             format!("t{}", i + 1),
