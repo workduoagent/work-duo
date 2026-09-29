@@ -22,7 +22,7 @@ use tauri_plugin_sql::DbInstances;
 use tauri_plugin_sql::DbPool;
 
 use crate::agent::squad::config::load_squad;
-use crate::agent::squad::squad_orchestrator::run_squad_task;
+use crate::agent::squad::squad_orchestrator::{run_squad_task, SquadContractTask};
 
 async fn get_pool(app: &AppHandle) -> Result<sqlx::SqlitePool, String> {
     let instances = app.state::<DbInstances>();
@@ -53,7 +53,8 @@ pub fn start_api_server(app: AppHandle) {
                 Ok(p) => p,
                 Err(_) => return (false, 3939u16),
             };
-            let enabled = read_cfg(&pool, "squad_api_enabled").await.as_deref() == Some("true");
+            // S3 批次3（§4.10-3）：启动清扫——上一进程遗留半终态会话收敛为 failed。
+            crate::agent::squad::squad_orchestrator::sweep_stale_squad_sessions(&app).await;            let enabled = read_cfg(&pool, "squad_api_enabled").await.as_deref() == Some("true");
             let port = read_cfg(&pool, "squad_api_port")
                 .await
                 .and_then(|s| s.parse::<u16>().ok())
@@ -189,18 +190,112 @@ async fn route(
             Some(rid) => rid,
             None => return (404, err_json("squad not found")),
         };
+        // S3 批次3（§8）：body 可带 {prompt, contract, wait}——prompt 覆盖 schedule_prompt；
+        // contract=外部直接给委派计划（跳过主管规划与 L1 门禁）；wait=false 异步触发立即返回 sessionId。
+        let (body_prompt, contract_tasks, wait) = match body {
+            Some(raw) if !raw.trim().is_empty() => match serde_json::from_str::<serde_json::Value>(raw) {
+                Ok(v) => (
+                    v.get("prompt").and_then(|x| x.as_str()).map(|s| s.to_string()),
+                    v.get("contract")
+                        .and_then(|x| x.as_array())
+                        .map(|arr| {
+                            arr.iter()
+                                .filter_map(|t| serde_json::from_value::<SquadContractTask>(t.clone()).ok())
+                                .collect::<Vec<SquadContractTask>>()
+                        })
+                        .filter(|c| !c.is_empty()),
+                    v.get("wait").and_then(|x| x.as_bool()).unwrap_or(true),
+                ),
+                Err(_) => (None, None, true),
+            },
+            _ => (None, None, true),
+        };
         return match load_squad(app, &resolved).await {
             Ok(cfg) => {
-                let prompt = cfg
-                    .run_strategy
-                    .schedule_prompt
-                    .clone()
+                let prompt = body_prompt
+                    .or(cfg.run_strategy.schedule_prompt.clone())
                     .unwrap_or_default();
-                run_squad_task(app, cfg, prompt).await;
-                (200, "{\"ok\":true}".to_string())
+                if wait {
+                    // 阻塞至终态（既有语义，外部可轮询 DB 配合）。
+                    let session_id = run_squad_task(app, cfg, prompt, contract_tasks, None).await;
+                    (200, format!("{{\"ok\":true,\"sessionId\":\"{session_id}\",\"waited\":true}}"))
+                } else {
+                    // 异步触发（§8）：预生成 session_id 立即返回，任务后台跑。
+                    let session_id = format!(
+                        "sqs_{}_{}",
+                        chrono::Utc::now().timestamp_nanos_opt().unwrap_or_else(|| {
+                            std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .map(|d| d.as_nanos() as i64)
+                                .unwrap_or(0)
+                        }),
+                        crate::agent::squad::squad_orchestrator::next_session_seq()
+                    );
+                    let app2 = app.clone();
+                    let session_id2 = session_id.clone();
+                    tauri::async_runtime::spawn(async move {
+                        run_squad_task(&app2, cfg, prompt, contract_tasks, Some(session_id2)).await;
+                    });
+                    (200, format!("{{\"ok\":true,\"sessionId\":\"{session_id}\",\"waited\":false}}"))
+                }
             }
             Err(e) => (404, err_json(&e)),
         };
+    }
+
+    // S3 批次3（§4.10）：外部暂停——完成当前节点后挂起（波次/层/发言轮边界），状态 paused。
+    if method == "POST" && path.starts_with("/api/squads/") && path.ends_with("/pause") {
+        let id = &path["/api/squads/".len()..path.len() - "/pause".len()];
+        if id.is_empty() {
+            return (400, err_json("squad id 为空"));
+        }
+        let pool = match get_pool(app).await {
+            Ok(p) => p,
+            Err(e) => return (500, err_json(&e)),
+        };
+        let resolved = match resolve_squad_id(&pool, id).await {
+            Some(rid) => rid,
+            None => return (404, err_json("squad not found")),
+        };
+        let n = crate::agent::squad::squad_orchestrator::squad_pause_sessions(&resolved);
+        return (200, format!("{{\"ok\":true,\"paused_sessions\":{n}}}"));
+    }
+
+    // S3 批次3（§4.10）：外部恢复——body 缺省（或 {sessionId 缺省}）= 同进程清暂停标志；
+    // body 带 {sessionId} 且该会话已无存活协程 = 从 BoardState 重入续跑（crash 恢复）。
+    if method == "POST" && path.starts_with("/api/squads/") && path.ends_with("/resume") {
+        let id = &path["/api/squads/".len()..path.len() - "/resume".len()];
+        if id.is_empty() {
+            return (400, err_json("squad id 为空"));
+        }
+        let pool = match get_pool(app).await {
+            Ok(p) => p,
+            Err(e) => return (500, err_json(&e)),
+        };
+        let resolved = match resolve_squad_id(&pool, id).await {
+            Some(rid) => rid,
+            None => return (404, err_json("squad not found")),
+        };
+        let explicit_session = body
+            .and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok())
+            .and_then(|v| {
+                v.get("sessionId")
+                    .and_then(|x| x.as_str())
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+            });
+        match explicit_session {
+            Some(sid) => {
+                return match crate::agent::squad::squad_orchestrator::resume_squad_session(app, &resolved, &sid).await {
+                    Ok(r) => (200, format!("{{\"ok\":true,\"resumed\":\"reenter\",\"sessionId\":\"{r}\"}}")),
+                    Err(e) => (400, err_json(&e)),
+                };
+            }
+            None => {
+                let n = crate::agent::squad::squad_orchestrator::squad_resume_sessions(&resolved);
+                return (200, format!("{{\"ok\":true,\"resumed\":\"unpark\",\"resumed_sessions\":{n}}}"));
+            }
+        }
     }
 
     // S0-5（2026-09-28）：外部取消入口——对指定小分队的全部活跃会话置取消信号。

@@ -140,7 +140,7 @@ async fn run_due_squads(app: &AppHandle) {
                     .execute(&pool2)
                     .await;
                     tracing::info!("[scheduler] 触发小分队 {}（cron={}）", sid, cron);
-                    run_squad_task(&app2, cfg, prompt).await;
+                    run_squad_task(&app2, cfg, prompt, None, None).await;
                 }
                 Err(e) => tracing::warn!("[scheduler] load_squad 失败 {}: {e}", sid),
             }

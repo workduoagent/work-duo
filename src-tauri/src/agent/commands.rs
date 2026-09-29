@@ -1327,9 +1327,23 @@ pub async fn run_squad_task(app: AppHandle, input: RunSquadTaskInput) -> Result<
     let app_clone = app.clone();
     let prompt = input.prompt.clone();
     tauri::async_runtime::spawn(async move {
-        crate::agent::squad::squad_orchestrator::run_squad_task(&app_clone, squad, prompt).await;
+        // UI 触发：无合同入参、session_id 由 orchestrator 生成（返回值仅用于日志）。
+        let sid = crate::agent::squad::squad_orchestrator::run_squad_task(&app_clone, squad, prompt, None, None).await;
+        tracing::info!("[squad] UI 触发会话 {sid} 结束");
     });
     Ok(())
+}
+
+/// S3 批次3（§4.10）：暂停指定小分队的全部活跃会话（完成当前节点后挂起，状态 paused）。
+#[tauri::command]
+pub async fn squad_pause(_app: AppHandle, squad_id: String) -> Result<usize, String> {
+    Ok(crate::agent::squad::squad_orchestrator::squad_pause_sessions(&squad_id))
+}
+
+/// S3 批次3（§4.10）：恢复指定小分队的暂停会话（同进程清标志续跑）。
+#[tauri::command]
+pub async fn squad_resume(_app: AppHandle, squad_id: String) -> Result<usize, String> {
+    Ok(crate::agent::squad::squad_orchestrator::squad_resume_sessions(&squad_id))
 }
 
 /// 取消指定小分队的全部活跃会话（小分队 S0-3 取消穿线）：置位 squad 级取消标志，

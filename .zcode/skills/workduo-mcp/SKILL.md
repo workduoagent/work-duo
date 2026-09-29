@@ -1,6 +1,6 @@
 ---
 name: workduo-mcp
-description: WorkDuo 桌面应用（Tauri2 + React19）内建 MCP Server 的集成指南。面向外部编程工具（AI IDE / Agent 框架等任意支持 MCP 的客户端），说明如何将 127.0.0.1:18755/mcp（Streamable HTTP）注册为标准 MCP Server，并以 UI 级真实链路驱动 WorkDuo 全模块（Agent 对话 / 本地插件 / 知识库 / 记忆宫殿 / 技能中心）。覆盖：84 个工具分层、UI 级各模块流程、插件脚本范式（scripts/）、已知坑与根因修复。
+description: WorkDuo 桌面应用（Tauri2 + React19）内建 MCP Server 的集成指南。面向外部编程工具（AI IDE / Agent 框架等任意支持 MCP 的客户端），说明如何将 127.0.0.1:18755/mcp（Streamable HTTP）注册为标准 MCP Server，并以 UI 级真实链路驱动 WorkDuo 全模块（Agent 对话 / 本地插件 / 知识库 / 记忆宫殿 / 技能中心）。覆盖：98 个工具分层（含 S3 新增 squad 层 14）、UI 级各模块流程、插件脚本范式（scripts/）、已知坑与根因修复。
 agent_created: true
 ---
 
@@ -34,7 +34,7 @@ MCP 客户端 **UI 级**驱动 WorkDuo 全模块。
 - 端点：`POST http://127.0.0.1:18755/mcp`（Streamable HTTP；可选 `GET /mcp` SSE）。
 - 开关：`app_config.mcp_server_enabled`（默认启用）、`mcp_server_port`（默认 18755）。改端口/开关需重启 WorkDuo。
 - 启动位置：`src-tauri/src/mcp_server.rs::start_mcp_server`，在 app setup 中以独立 std 线程监听。
-- 工具分层，共 **84** 个：引擎层(16，含 P2 新增 `agent_get_run_progress`、孤儿清扫 `agent_sweep_orphan_rounds`、压缩状态 `agent_session_compact_status`、P-4 `agent_project_ensure`/`agent_project_list`、D' `agent_snapshot_list`/`agent_snapshot_rollback`) + 模块发现层(7) + UI 意图层(54，含 Agent/会话 12 + 插件 8 + 知识库 15 + 记忆 9 + 技能 10) + 服务器托管层(6，Rust 直调 host::commands)。
+- 工具分层，共 **98** 个：引擎层(16，含 P2 新增 `agent_get_run_progress`、孤儿清扫 `agent_sweep_orphan_rounds`、压缩状态 `agent_session_compact_status`、P-4 `agent_project_ensure`/`agent_project_list`、D' `agent_snapshot_list`/`agent_snapshot_rollback`) + 模块发现层(7) + UI 意图层(54，含 Agent/会话 12 + 插件 8 + 知识库 15 + 记忆 9 + 技能 10) + 服务器托管层(6，Rust 直调 host::commands) + **小分队层(14，S3 批次3 2026-09-29：squad_list/get/run/get_session/list_rounds/submit_decision/cancel/pause/resume/talk_to_task/inject_to_task/broadcast_note/export_pack/anchor_memory——headless 直调 squad_orchestrator，不经 UI 意图)**。
 - **并发语义（P2-5，2026-09-23 明确）**：同一 Agent 同一时刻只有一个 run（per-agent 运行锁，第二个 `agent_run_task` 直接 Err「已有任务正在运行」）；**并行 = 多个 Agent 各自跑**（不同 Agent 互不影响）。需要并行跑多个任务时，为每个任务装配/复用一个独立 Agent（`agent_ui_create`）。
 - **工具轮分级（Batch C，2026-09-23）**：子任务工具轮预算基线 8（env `WD_SUBTASK_MAX_ITERATIONS`），带诊断回灌的修复型轮 +8（`WD_SUBTASK_REPAIR_EXTRA_ITERATIONS`）——修复型任务「跑测试→读码→改码→再跑测试」天然多轮，基线对其过紧（C-H1 实测）。
 - 引擎层 + 模块发现层由 Rust 直调；UI 意图层经 `mcp:intent` 派发到 `src/core/mcpBridge.ts` 真实 handler，
@@ -72,14 +72,14 @@ curl -s -X POST http://127.0.0.1:18755/mcp \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
 ```
 
-应返回含 84 个工具的 `tools` 数组（2026-09-25 起含服务器托管层 server_host_* / agent_server_bind）。
+应返回含 98 个工具的 `tools` 数组（2026-09-25 起含服务器托管层 server_host_* / agent_server_bind；2026-09-29 起含小分队层 squad_*）。
 
 > 注意：部分客户端会缓存工具清单。若改过 Rust 后工具数/签名没刷新，**重新加载该 MCP Server 连接**即可；
 > 也可直接打上面的 `tools/list` 端点绕过缓存核对。
 
 ---
 
-## 工具清单（84 个，按层）
+## 工具清单（98 个，按层）
 
 ### A. 引擎层（Rust 直调，无需前端）
 | 工具 | 作用 | 关键入参 |
@@ -413,7 +413,7 @@ node scripts/kb_driver.mjs
 
 ## 集成核对清单
 
-- [ ] `tools/list` 返回 84 个工具（引擎 16 + 发现 7 + UI 意图 54 + 服务器托管 6，与正文分层清单一致）。
+- [ ] `tools/list` 返回 98 个工具（引擎 16 + 发现 7 + UI 意图 54 + 服务器托管 6 + 小分队 14，与正文分层清单一致）。
 - [ ] 端口 18755 有监听；外部编程工具已成功连上该 MCP Server。
 - [ ] 绑定 KB 的 Agent 跑「kb_chunks 的 id 字段格式是什么？」→ trace events 出现 `native__kb_search`，reply 引用 KB。
 - [ ] `plugin_upsert` 编写插件后 `plugin_test` 返回 `ok:true`；前端插件列表可见。

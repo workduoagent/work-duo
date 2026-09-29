@@ -38,7 +38,56 @@ use tauri_plugin_sql::DbPool;
 use crate::agent::commands;
 use crate::agent::events;
 use crate::agent::engine::runtime::AgentRuntime;
+use crate::agent::squad::squad_orchestrator::{run_squad_task, SquadContractTask};
 use crate::logging;
+
+/// 解析 MCP squad 工具的目标会话：显式 sessionId 优先；否则取该小分队最新会话
+/// （优先 running，回退任意最新）。返回 None 表示找不到可操作会话。
+async fn resolve_mcp_session_id(
+    app: &AppHandle,
+    args: &Value,
+) -> Option<String> {
+    if let Some(sid) = args
+        .get("sessionId")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+    {
+        return Some(sid);
+    }
+    let squad_key = args.get("squadId").and_then(|v| v.as_str())?;
+    if squad_key.trim().is_empty() {
+        return None;
+    }
+    let pool = get_pool(app).await.ok()?;
+    let squad_id = sqlx::query_scalar::<_, String>(
+        "SELECT id FROM agent_squad WHERE id = ?1 OR unique_id = ?1 LIMIT 1",
+    )
+    .bind(squad_key.trim())
+    .fetch_optional(&pool)
+    .await
+    .ok()
+    .flatten()?;
+    // running 优先（插话/广播只在活跃会话有意义），否则取最新会话（决议/导出可对 paused/latest 操作）。
+    for where_clause in [
+        "squad_id = ?1 AND status = 'running'",
+        "squad_id = ?1",
+    ] {
+        let sql = format!(
+            "SELECT id FROM agent_squad_session WHERE {where_clause} ORDER BY created_at DESC LIMIT 1"
+        );
+        if let Some(sid) = sqlx::query_scalar::<_, String>(&sql)
+            .bind(&squad_id)
+            .fetch_optional(&pool)
+            .await
+            .ok()
+            .flatten()
+        {
+            return Some(sid);
+        }
+    }
+    None
+}
 
 /// 待前端回传的 UI 意图请求：`request_id -> oneshot sender`。
 type PendingMap = HashMap<String, tokio::sync::oneshot::Sender<Value>>;
@@ -991,6 +1040,287 @@ async fn call_tool(app: &AppHandle, name: &str, args: &Value) -> Value {
                 Err(e) => json!({ "error": e }),
             }
         }
+        /* ------------- S3 批次3（§8）：小分队（Squad）工具族 ------------- */
+        "squad_list" => {
+            fetch_rows(
+                app,
+                "SELECT s.id, s.name, s.mode, s.description, s.unique_id, s.leader_agent_id, s.updated_at, \
+                 (SELECT COUNT(*) FROM agent_squad_member m WHERE m.squad_id = s.id) AS member_count \
+                 FROM agent_squad s ORDER BY s.updated_at DESC",
+                &[],
+            )
+            .await
+        }
+        "squad_get" => {
+            let key = args.get("squadId").and_then(|v| v.as_str()).unwrap_or("").trim();
+            if key.is_empty() {
+                return json!({ "error": "缺少 squadId（内部 id 或 unique_id）" });
+            }
+            let squads = fetch_rows(
+                app,
+                "SELECT id, name, mode, description, unique_id, leader_agent_id, global_mcp_ids, workspace_dir, run_strategy FROM agent_squad WHERE id = ?1 OR unique_id = ?1",
+                &[key.to_string()],
+            )
+            .await;
+            match squads.as_array().and_then(|a| a.first()).cloned() {
+                Some(squad) => {
+                    let sid = squad.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                    let members = fetch_rows(
+                        app,
+                        "SELECT agent_id, role, persona_override, pipeline_order, depends_on, tool_profile_json, is_leader FROM agent_squad_member WHERE squad_id = ? ORDER BY CASE WHEN pipeline_order IS NULL THEN 0 ELSE 1 END, pipeline_order",
+                        &[sid],
+                    )
+                    .await;
+                    json!({ "squad": squad, "members": members })
+                }
+                None => json!({ "error": "squad not found" }),
+            }
+        }
+        "squad_run" => {
+            let key = args.get("squadId").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+            if key.is_empty() {
+                return json!({ "error": "缺少 squadId（内部 id 或 unique_id）" });
+            }
+            let wait = args.get("wait").and_then(|v| v.as_bool()).unwrap_or(true);
+            let prompt = args
+                .get("prompt")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+            let contract_tasks: Option<Vec<SquadContractTask>> = args
+                .get("contract")
+                .and_then(|v| v.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|t| serde_json::from_value::<SquadContractTask>(t.clone()).ok())
+                        .collect::<Vec<SquadContractTask>>()
+                })
+                .filter(|c| !c.is_empty());
+            match crate::agent::squad::config::load_squad(app, &key).await {
+                Ok(cfg) => {
+                    let prompt = prompt.or(cfg.run_strategy.schedule_prompt.clone()).unwrap_or_default();
+                    if wait {
+                        let session_id = run_squad_task(app, cfg, prompt, contract_tasks, None).await;
+                        json!({ "ok": true, "sessionId": session_id, "waited": true })
+                    } else {
+                        let session_id = format!(
+                            "sqs_{}_{}",
+                            chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0),
+                            crate::agent::squad::squad_orchestrator::next_session_seq()
+                        );
+                        let app2 = app.clone();
+                        let sid2 = session_id.clone();
+                        tauri::async_runtime::spawn(async move {
+                            run_squad_task(&app2, cfg, prompt, contract_tasks, Some(sid2)).await;
+                        });
+                        json!({ "ok": true, "sessionId": session_id, "waited": false })
+                    }
+                }
+                Err(e) => json!({ "error": e }),
+            }
+        }
+        "squad_get_session" => {
+            match resolve_mcp_session_id(app, args).await {
+                Some(sid) => fetch_rows(
+                    app,
+                    "SELECT id, squad_id, title, mode, status, snapshot, board_json, contract_json, pack_json, created_at, updated_at FROM agent_squad_session WHERE id = ?",
+                    &[sid],
+                )
+                .await,
+                None => json!({ "error": "缺少 sessionId（或带 squadId 以取最新会话）" }),
+            }
+        }
+        "squad_list_rounds" => {
+            match resolve_mcp_session_id(app, args).await {
+                Some(sid) => {
+                    let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(200);
+                    let sql = format!(
+                        "SELECT id, speaker_agent_id, role, kind, content, created_at FROM agent_squad_round WHERE session_id = ? ORDER BY created_at ASC LIMIT {limit}"
+                    );
+                    fetch_rows(app, &sql, &[sid]).await
+                }
+                None => json!({ "error": "缺少 sessionId（或带 squadId 以取最新会话）" }),
+            }
+        }
+        "squad_submit_decision" => {
+            let gate = args.get("gate").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+            let raw_decision = args.get("decision").cloned().unwrap_or(Value::Null);
+            let decision = match &raw_decision {
+                Value::Bool(b) => if *b { "approve".to_string() } else { "reject".to_string() },
+                Value::String(s) => s.trim().to_string(),
+                _ => String::new(),
+            };
+            if gate.is_empty() || decision.is_empty() {
+                return json!({ "error": "缺少 gate / decision" });
+            }
+            match resolve_mcp_session_id(app, args).await {
+                Some(sid) => {
+                    use crate::agent::squad::squad_orchestrator as orch;
+                    let hit = match gate.as_str() {
+                        "plan" => orch::resolve_plan_gate(&sid, decision == "approve"),
+                        "checkpoint" => orch::resolve_squad_checkpoint(&sid, &decision),
+                        "delivery" => orch::resolve_squad_delivery(&sid, decision == "approve"),
+                        other => return json!({ "error": format!("未知 gate：{other}（plan|checkpoint|delivery）") }),
+                    };
+                    json!({ "ok": true, "sessionId": sid, "gate": gate, "resolved": hit })
+                }
+                None => json!({ "error": "缺少 sessionId（或带 squadId 以取最新会话）" }),
+            }
+        }
+        "squad_cancel" => {
+            let key = args.get("squadId").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+            if key.is_empty() {
+                return json!({ "error": "缺少 squadId" });
+            }
+            let n = crate::agent::squad::squad_orchestrator::cancel_squad_sessions(&key);
+            json!({ "ok": true, "cancelled_sessions": n })
+        }
+        "squad_pause" => {
+            let key = args.get("squadId").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+            if key.is_empty() {
+                return json!({ "error": "缺少 squadId" });
+            }
+            let n = crate::agent::squad::squad_orchestrator::squad_pause_sessions(&key);
+            json!({ "ok": true, "paused_sessions": n })
+        }
+        "squad_resume" => {
+            let key = args.get("squadId").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+            if key.is_empty() {
+                return json!({ "error": "缺少 squadId" });
+            }
+            let explicit = args
+                .get("sessionId")
+                .and_then(|v| v.as_str())
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty());
+            match explicit {
+                // 带 sessionId → 跨进程重入（从 BoardState + Contract 恢复，crash 恢复路径）。
+                Some(sid) => {
+                    match crate::agent::squad::squad_orchestrator::resume_squad_session(app, &key, &sid).await {
+                        Ok(r) => json!({ "ok": true, "resumed": "reenter", "sessionId": r }),
+                        Err(e) => json!({ "error": e }),
+                    }
+                }
+                // 缺省 → 同进程清暂停标志（挂起中的波次/轮次继续）。
+                None => {
+                    let n = crate::agent::squad::squad_orchestrator::squad_resume_sessions(&key);
+                    json!({ "ok": true, "resumed": "unpark", "resumed_sessions": n })
+                }
+            }
+        }
+        "squad_talk_to_task" | "squad_inject_to_task" => {
+            let mode = if name == "squad_talk_to_task" {
+                "pre_talk".to_string()
+            } else {
+                args.get("mode").and_then(|v| v.as_str()).unwrap_or("soft").to_string()
+            };
+            let content = args.get("content").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+            let task_id = args.get("taskId").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+            if content.is_empty() || task_id.is_empty() {
+                return json!({ "error": "缺少 taskId / content" });
+            }
+            match resolve_mcp_session_id(app, args).await {
+                Some(sid) => {
+                    let squad_id = args
+                        .get("squadId")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.trim().to_string())
+                        .unwrap_or_default();
+                    let pool = match get_pool(app).await {
+                        Ok(p) => p,
+                        Err(e) => return json!({ "error": e }),
+                    };
+                    // squadId 缺省时从会话反查。
+                    let squad_id = if squad_id.is_empty() {
+                        match sqlx::query_scalar::<_, String>(
+                            "SELECT squad_id FROM agent_squad_session WHERE id = ?",
+                        )
+                        .bind(&sid)
+                        .fetch_optional(&pool)
+                        .await
+                        {
+                            Ok(Some(s)) => s,
+                            _ => return json!({ "error": "sessionId 不存在" }),
+                        }
+                    } else {
+                        squad_id
+                    };
+                    match crate::agent::squad::squad_orchestrator::squad_inject_send(
+                        app, &pool, &squad_id, &sid, &task_id, &content, &mode,
+                    )
+                    .await
+                    {
+                        Ok(inject_id) => json!({ "ok": true, "injectId": inject_id, "sessionId": sid, "mode": mode }),
+                        Err(e) => json!({ "error": e }),
+                    }
+                }
+                None => json!({ "error": "缺少 sessionId（或带 squadId 以取最新会话）" }),
+            }
+        }
+        "squad_broadcast_note" => {
+            let note = args.get("note").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+            if note.is_empty() {
+                return json!({ "error": "缺少 note" });
+            }
+            match resolve_mcp_session_id(app, args).await {
+                Some(sid) => {
+                    let pool = match get_pool(app).await {
+                        Ok(p) => p,
+                        Err(e) => return json!({ "error": e }),
+                    };
+                    let squad_id = match sqlx::query_scalar::<_, String>(
+                        "SELECT squad_id FROM agent_squad_session WHERE id = ?",
+                    )
+                    .bind(&sid)
+                    .fetch_optional(&pool)
+                    .await
+                    {
+                        Ok(Some(s)) => s,
+                        _ => return json!({ "error": "sessionId 不存在" }),
+                    };
+                    match crate::agent::squad::squad_orchestrator::squad_broadcast_note(app, &pool, &squad_id, &sid, &note).await {
+                        Ok(_) => json!({ "ok": true, "sessionId": sid }),
+                        Err(e) => json!({ "error": e }),
+                    }
+                }
+                None => json!({ "error": "缺少 sessionId（或带 squadId 以取最新会话）" }),
+            }
+        }
+        "squad_export_pack" => {
+            match resolve_mcp_session_id(app, args).await {
+                Some(sid) => {
+                    match crate::agent::squad::squad_orchestrator::squad_export_pack(app, &sid).await {
+                        Ok(v) => v,
+                        Err(e) => json!({ "error": e }),
+                    }
+                }
+                None => json!({ "error": "缺少 sessionId（或带 squadId 以取最新会话）" }),
+            }
+        }
+        "squad_anchor_memory" => {
+            let squad_id = args.get("squadId").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+            let key = args.get("key").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+            let content = args.get("content").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+            if squad_id.is_empty() || key.is_empty() || content.is_empty() {
+                return json!({ "error": "缺少 squadId / key / content" });
+            }
+            let input = commands::AnchorSquadMemoryInput {
+                squad_id: squad_id.clone(),
+                agent_id: args.get("agentId").and_then(|v| v.as_str()).map(String::from),
+                session_id: args.get("sessionId").and_then(|v| v.as_str()).map(String::from),
+                key,
+                content,
+                category: Some(
+                    args.get("category")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("general")
+                        .to_string(),
+                ),
+            };
+            match commands::anchor_squad_memory(app.clone(), input).await {
+                Ok(item) => json!(item),
+                Err(e) => json!({ "error": e }),
+            }
+        }
         _ => json!({ "error": format!("unknown tool: {name}") }),
     }
 }
@@ -1733,6 +2063,112 @@ step/totalSteps 来自规划事件（未规划或 SIMPLE_CHAT 为 0/0）；lastT
                 "agentId": { "type": "string" },
                 "serverIds": { "type": "array", "items": { "type": "string" } }
             }, "required": ["agentId", "serverIds"] }),
+        ),
+        /* ------------- S3 批次3（§8）：小分队（Squad）工具族 ------------- */
+        tool(
+            "squad_list",
+            "【小分队·列表】列出全部小分队（id/name/模式/描述/unique_id/主管/更新时间/成员数）。",
+            json!({ "type": "object", "properties": {} }),
+        ),
+        tool(
+            "squad_get",
+            "【小分队·详情】查看一个小分队的定义与成员编制（角色/人设/工具面/依赖/主管标记）。squadId 可用内部 id 或 unique_id。",
+            json!({ "type": "object", "properties": { "squadId": { "type": "string" } }, "required": ["squadId"] }),
+        ),
+        tool(
+            "squad_run",
+            "【小分队·运行】触发一次协作任务。prompt（可选）覆盖 schedule_prompt；contract（可选，数组）=外部直接给委派计划 [{title,assignee,instruction?,dependsOn?,expectedArtifacts?}]——跳过主管规划与 L1 门禁（视为已批准）；wait（默认 true）=阻塞至终态；wait=false 立即返回 sessionId 由调用方轮询 squad_get_session。",
+            json!({ "type": "object", "properties": {
+                "squadId": { "type": "string" },
+                "prompt": { "type": "string" },
+                "contract": { "type": "array", "items": { "type": "object" } },
+                "wait": { "type": "boolean" }
+            }, "required": ["squadId"] }),
+        ),
+        tool(
+            "squad_get_session",
+            "【小分队·会话】查看协作会话（状态/黑板 board_json/合同 contract_json/交付包 pack_json/汇总 snapshot）。sessionId 或 squadId（取最新会话）。",
+            json!({ "type": "object", "properties": {
+                "squadId": { "type": "string" }, "sessionId": { "type": "string" }
+            } }),
+        ),
+        tool(
+            "squad_list_rounds",
+            "【小分队·黑板】按时间列出会话全部轮次（发言/子任务/交接/门禁/汇总/metrics）。sessionId 或 squadId。",
+            json!({ "type": "object", "properties": {
+                "squadId": { "type": "string" }, "sessionId": { "type": "string" },
+                "limit": { "type": "number" }
+            } }),
+        ),
+        tool(
+            "squad_submit_decision",
+            "【小分队·HITL 应答】三门禁决议：gate=plan（approve/reject）| checkpoint（continue/rework）| delivery（approve/reject）。sessionId 或 squadId。",
+            json!({ "type": "object", "properties": {
+                "squadId": { "type": "string" }, "sessionId": { "type": "string" },
+                "gate": { "type": "string", "description": "plan|checkpoint|delivery" },
+                "decision": { "type": "string", "description": "approve|reject|continue|rework" }
+            }, "required": ["gate", "decision"] }),
+        ),
+        tool(
+            "squad_cancel",
+            "【小分队·取消】取消该小分队全部活跃会话（squad 级取消信号贯穿成员 run），终态 cancelled。",
+            json!({ "type": "object", "properties": { "squadId": { "type": "string" } }, "required": ["squadId"] }),
+        ),
+        tool(
+            "squad_pause",
+            "【小分队·暂停】完成当前节点后在波次/层/发言轮边界挂起（状态 paused）。",
+            json!({ "type": "object", "properties": { "squadId": { "type": "string" } }, "required": ["squadId"] }),
+        ),
+        tool(
+            "squad_resume",
+            "【小分队·恢复】缺省=同进程解除暂停继续；带 sessionId=跨进程重入续跑（从 BoardState+Contract 恢复，done 跳过、其余从头重跑、handoff 覆盖写——crash 恢复路径，仅编排式）。",
+            json!({ "type": "object", "properties": {
+                "squadId": { "type": "string" }, "sessionId": { "type": "string" }
+            }, "required": ["squadId"] }),
+        ),
+        tool(
+            "squad_talk_to_task",
+            "【小分队·预嘱】对等待中（未启动）的任务提前布置要求（pre_talk，§4.11.2），任务启动时合并进其指令最高优先级段。content 建议用 ASCII。",
+            json!({ "type": "object", "properties": {
+                "squadId": { "type": "string" }, "sessionId": { "type": "string" },
+                "taskId": { "type": "string" }, "content": { "type": "string" }
+            }, "required": ["taskId", "content"] }),
+        ),
+        tool(
+            "squad_inject_to_task",
+            "【小分队·打断】向运行中的成员打断插话（§4.11.3 live inject，下一安全点注入 user 消息）。mode=soft|hard（默认 soft）。content 建议用 ASCII。",
+            json!({ "type": "object", "properties": {
+                "squadId": { "type": "string" }, "sessionId": { "type": "string" },
+                "taskId": { "type": "string" }, "content": { "type": "string" },
+                "mode": { "type": "string", "description": "soft|hard" }
+            }, "required": ["taskId", "content"] }),
+        ),
+        tool(
+            "squad_broadcast_note",
+            "【小分队·广播】「告诉团队」：写 board.decisions（scope 决策卡）+ 黑板系统行（§4.11.4）。对运行中会话追加约束时优先用 squad_inject_to_task 定向打断。",
+            json!({ "type": "object", "properties": {
+                "squadId": { "type": "string" }, "sessionId": { "type": "string" },
+                "note": { "type": "string" }
+            }, "required": ["note"] }),
+        ),
+        tool(
+            "squad_export_pack",
+            "【小分队·导出】导出会话交付包：pack 完整 JSON + 人类可读 Markdown 文本（调用方自行落盘）。",
+            json!({ "type": "object", "properties": {
+                "squadId": { "type": "string" }, "sessionId": { "type": "string" }
+            } }),
+        ),
+        tool(
+            "squad_anchor_memory",
+            "【小分队·记忆】锚定团队黑板记忆（同 squad+agent+key 强化计数，否则新建）；后续 load_squad 按引用热度召回注入成员系统提示。",
+            json!({ "type": "object", "properties": {
+                "squadId": { "type": "string" },
+                "agentId": { "type": "string" },
+                "sessionId": { "type": "string" },
+                "key": { "type": "string" },
+                "content": { "type": "string" },
+                "category": { "type": "string" }
+            }, "required": ["squadId", "key", "content"] }),
         ),
     ])
 }
