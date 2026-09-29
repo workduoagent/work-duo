@@ -451,8 +451,8 @@ export default function SquadDetailPage() {
                 </div>
                 <div className="sw-topbar__center">
                     <div className="sw-viewseg">
-                        <div className={`sw-viewseg__item${view === 'dialog' ? ' is-on' : ''}`} onClick={() => setView('dialog')}>💬 对话</div>
-                        <div className={`sw-viewseg__item${view === 'stage' ? ' is-on' : ''}`} onClick={() => setView('stage')}>🎮 舞台</div>
+                        <div className={`sw-viewseg__item${view === 'dialog' ? ' is-on' : ''}`} onClick={() => setView('dialog')}>对话</div>
+                        <div className={`sw-viewseg__item${view === 'stage' ? ' is-on' : ''}`} onClick={() => setView('stage')}>舞台</div>
                     </div>
                 </div>
                 <div className="sw-topbar__spacer"/>
@@ -577,6 +577,33 @@ export default function SquadDetailPage() {
                     </div>
 
                     <div className="sw-timeline" ref={timelineRef} onScroll={handleTimelineScroll}>
+                        {rounds.map((r, i) => {
+                            const badge = ROUND_BADGE[r.kind] || {label: r.kind, cls: 'sys'}
+                            const speaker = r.speakerAgentId ? (squad.members.find((m) => m.agentId === r.speakerAgentId)) : null
+                            const name = speaker ? memberLabel(speaker, agents) : r.role
+                            const motion = speaker ? memberMotion[memberLabel(speaker, agents)] ?? memberMotion[speaker.role] : undefined
+                            const anim = motion === 'working' ? 'working' : motion === 'cheer' ? 'cheer' : motion === 'error' ? 'error' : 'idle'
+                            return (
+                                <div key={i} className={`sw-round${badge.cls === 'sys' ? ' sw-round--sys' : ''}`}>
+                                    <div className={`sw-round__pa${speaker && squad.members[0]?.agentId === speaker.agentId ? ' sw-round__pa--lead' : ''}`}>
+                                        {speaker
+                                            ? <PixelAgent appearance={agentAppearanceOf(agents, speaker.agentId)} size={28} motion={anim !== 'idle'} state={anim as 'idle'}/>
+                                            : <span>系</span>}
+                                    </div>
+                                    <div className="sw-round__body">
+                                        <div className="sw-round__head">
+                                            <span className="sw-round__name">{name}</span>
+                                            <span className={`sw-badge sw-badge--${badge.cls}`}>{badge.label}</span>
+                                        </div>
+                                        <div className="sw-round__content"><div className="sw-bubble">
+                                            {isStructuredRound(r.kind, r.content)
+                                                ? renderRoundContent(r.kind, r.content)
+                                                : <TypewriterBubble kind={r.kind} text={r.content} fresh={!!r.fresh} onGrow={stickScroll}/>}
+                                        </div></div>
+                                    </div>
+                                </div>
+                            )
+                        })}
                         {(planPending || checkpointPending) && (
                             <div className="sw-round sw-round--gate">
                                 <div className="sw-round__pa sw-round__pa--user">禁</div>
@@ -616,35 +643,8 @@ export default function SquadDetailPage() {
                                 </div>
                             </div>
                         )}
-                        {rounds.map((r, i) => {
-                            const badge = ROUND_BADGE[r.kind] || {label: r.kind, cls: 'sys'}
-                            const speaker = r.speakerAgentId ? (squad.members.find((m) => m.agentId === r.speakerAgentId)) : null
-                            const name = speaker ? memberLabel(speaker, agents) : r.role
-                            const motion = speaker ? memberMotion[memberLabel(speaker, agents)] ?? memberMotion[speaker.role] : undefined
-                            const anim = motion === 'working' ? 'working' : motion === 'cheer' ? 'cheer' : motion === 'error' ? 'error' : 'idle'
-                            return (
-                                <div key={i} className={`sw-round${badge.cls === 'sys' ? ' sw-round--sys' : ''}`}>
-                                    <div className={`sw-round__pa${speaker && squad.members[0]?.agentId === speaker.agentId ? ' sw-round__pa--lead' : ''}`}>
-                                        {speaker
-                                            ? <PixelAgent appearance={agentAppearanceOf(agents, speaker.agentId)} size={28} motion={anim !== 'idle'} state={anim as 'idle'}/>
-                                            : <span>系</span>}
-                                    </div>
-                                    <div className="sw-round__body">
-                                        <div className="sw-round__head">
-                                            <span className="sw-round__name">{name}</span>
-                                            <span className={`sw-badge sw-badge--${badge.cls}`}>{badge.label}</span>
-                                        </div>
-                                        <div className="sw-round__content"><div className="sw-bubble">
-                                            {isStructuredRound(r.kind, r.content)
-                                                ? renderRoundContent(r.kind, r.content)
-                                                : <TypewriterBubble kind={r.kind} text={r.content} fresh={!!r.fresh} onGrow={stickScroll}/>}
-                                        </div></div>
-                                    </div>
-                                </div>
-                            )
-                        })}
                         {rounds.length === 0 && !isDraft && <div className="sw-round"><div className="sw-round__body"><div className="sw-round__content" style={{color: 'var(--color-foreground-muted)'}}>暂无轮次内容</div></div></div>}
-                        {summary && (
+                        {summary && !rounds.some((r) => r.kind === 'summary') && (
                             <div className="sw-round sw-round--highlight">
                                 <div className="sw-round__pa sw-round__pa--user">汇</div>
                                 <div className="sw-round__body">
@@ -773,3 +773,4 @@ export default function SquadDetailPage() {
         </div>
     )
 }
+

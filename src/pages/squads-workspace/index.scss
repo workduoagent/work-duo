@@ -1627,7 +1627,7 @@
 }
 
 .sw-topbar {
-  flex: none;
+  flex: none; position: relative;
   display: flex;
   align-items: center;
   gap: 12px;
@@ -1655,8 +1655,15 @@
 .sw-topbar__name { font-size: 15px; font-weight: 650; color: var(--color-foreground-intense); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sw-topbar__meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 11px; color: var(--color-foreground-muted); }
 .sw-topbar__spacer { flex: 1; }
-/* topbar 中部：对话|舞台 切换（在剩余空间内居中） */
-.sw-topbar__center { flex: 1; display: flex; align-items: center; justify-content: center; min-width: 0; }
+/* topbar 中部：对话|舞台 切换——绝对居中（不受左右宽度差影响），窄窗退化为普通流式 */
+.sw-topbar__center {
+  position: absolute; left: 50%; top: 50%;
+  transform: translate(-50%, -50%);
+  display: flex; align-items: center;
+}
+@media (max-width: 920px) {
+  .sw-topbar__center { position: static; transform: none; margin: 0 auto; }
+}
 
 .sw-pill {
   display: inline-flex; align-items: center; gap: 5px;
