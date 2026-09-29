@@ -2507,7 +2507,8 @@ export default function SquadsWorkspacePage() {
                                                 <PixelAgent
                                                     appearance={agentAppearanceOf(agents, m.agentId)}
                                                     size={24}
-                                                    motion={hoverCrew === crewKey}
+                                                    motion={liveStatus[squad.id] === 'running' || hoverCrew === crewKey}
+                                                    state="working"
                                                     className="squads__crew-avatar"
                                                 />
                                             </span>
