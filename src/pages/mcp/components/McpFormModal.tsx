@@ -5,15 +5,19 @@
  * 采用与 model-settings / skill-hub 一致的「draft + patch」受控模式。
  */
 import { useEffect, useState } from 'react'
-import { Copy, Plug } from 'lucide-react'
-import { Button, Input, Field, FieldLabel, Modal, Select, Switch, InputNumber } from '@/components/ui'
+import { Copy, KeyRound, Plug } from 'lucide-react'
+import { Button, Input, Field, FieldLabel, Modal, Select, Switch, InputNumber, Tag } from '@/components/ui'
 import { useNotify } from '@/components/ui/notify'
 import {
   MCP_PROTOCOL_OPTIONS,
   MCP_AUTH_OPTIONS,
   createEmptyMcp,
+  getOauthTokens,
+  withOauthTokens,
   type McpInfo,
+  type McpOauthTokens,
 } from '@/core/file/mcp-file'
+import { loginMcpOauth } from '@/core/mapper/mcp-connection'
 import type { McpProtocolType, McpAuthType } from '@/types/core'
 import { ScenarioSelect } from '@/components/scenario'
 
@@ -60,6 +64,7 @@ export function McpFormModal({ open, onOpenChange, mcp, onSave }: McpFormModalPr
   const [authText, setAuthText] = useState('')
   const [errors, setErrors] = useState<Set<string>>(new Set())
   const [saving, setSaving] = useState(false)
+  const [oauthLoading, setOauthLoading] = useState(false)
 
   useEffect(() => {
     if (!open) return
@@ -67,10 +72,49 @@ export function McpFormModal({ open, onOpenChange, mcp, onSave }: McpFormModalPr
     setHeadersText(mcp?.headers ? JSON.stringify(mcp.headers, null, 2) : '')
     setAuthText(mcp?.authConfig ? JSON.stringify(mcp.authConfig, null, 2) : '')
     setErrors(new Set())
+    setOauthLoading(false)
   }, [open, mcp])
+
+  const oauthTokens: McpOauthTokens | null = (() => {
+    try {
+      return getOauthTokens(parseJsonObject(authText, 'authConfig') as Record<string, unknown> | undefined)
+    } catch {
+      return null
+    }
+  })()
+  const oauthExpired =
+    !!oauthTokens?.expiresAt && oauthTokens.expiresAt > 0 && Date.now() >= oauthTokens.expiresAt
 
   function patch(part: Partial<McpInfo>) {
     setDraft((prev) => ({ ...prev, ...part }))
+  }
+
+  async function handleOauthLogin() {
+    const url = draft.endpointUrl?.trim()
+    if (!url) {
+      message.error('请先填写访问地址')
+      return
+    }
+    setOauthLoading(true)
+    try {
+      const tokens = await loginMcpOauth(url, {
+        clientName: draft.aliasName?.trim() || draft.mcpName || 'WorkDuo',
+      })
+      // 合并进 authConfig 文本（保留用户已有字段）
+      let base: Record<string, unknown> | undefined
+      try {
+        base = parseJsonObject(authText, 'authConfig') as Record<string, unknown> | undefined
+      } catch {
+        base = undefined
+      }
+      const merged = withOauthTokens(base, tokens)
+      setAuthText(JSON.stringify(merged, null, 2))
+      message.success('OAuth 授权成功，token 已写入 authConfig')
+    } catch (e) {
+      message.error(e instanceof Error ? e.message : String(e))
+    } finally {
+      setOauthLoading(false)
+    }
   }
 
   async function handleSave() {
@@ -219,6 +263,47 @@ export function McpFormModal({ open, onOpenChange, mcp, onSave }: McpFormModalPr
                 onChange={(v) => patch({ authType: v as McpAuthType })}
               />
             </Field>
+
+            {draft.authType === 'OAUTH2' && (
+              <Field className="mcphub__span-2">
+                <FieldLabel>OAuth2 授权</FieldLabel>
+                <div
+                  style={{
+                    display: 'flex',
+                    flexWrap: 'wrap',
+                    gap: 8,
+                    alignItems: 'center',
+                  }}
+                >
+                  <Button
+                    variant="soft"
+                    icon={<KeyRound size={14} />}
+                    loading={oauthLoading}
+                    disabled={draft.protocolType === 'STDIO'}
+                    onClick={handleOauthLogin}
+                  >
+                    OAuth 授权登录
+                  </Button>
+                  {oauthTokens ? (
+                    oauthExpired ? (
+                      <Tag color="warning">授权已过期（可重新登录）</Tag>
+                    ) : (
+                      <Tag color="success">
+                        已授权
+                        {oauthTokens.expiresAt
+                          ? ` · 过期 ${new Date(oauthTokens.expiresAt).toLocaleString()}`
+                          : ''}
+                      </Tag>
+                    )
+                  ) : (
+                    <Tag>未授权</Tag>
+                  )}
+                  <span className="mcphub__field-error" style={{ flexBasis: '100%' }}>
+                    使用系统浏览器完成 OAuth2 授权
+                  </span>
+                </div>
+              </Field>
+            )}
 
             <Field>
               <FieldLabel>使用场景</FieldLabel>

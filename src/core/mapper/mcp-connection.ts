@@ -15,7 +15,12 @@
  */
 import { invoke } from '@tauri-apps/api/core'
 import { isTauri } from '@/core/config'
-import type { McpInfo, McpToolDefinition } from '@/core/file/mcp-file'
+import {
+  getOauthTokens,
+  type McpInfo,
+  type McpOauthTokens,
+  type McpToolDefinition,
+} from '@/core/file/mcp-file'
 import type { McpStatus } from '@/types/core'
 
 export interface McpConnectionResult {
@@ -54,6 +59,11 @@ function buildHeaders(
     const kn = cfg.key_name
     const kv = cfg.key_value
     if (typeof kn === 'string' && typeof kv === 'string') h[kn] = kv
+  }
+  // OAUTH2：authConfig.oauth.accessToken → Authorization（Tauri 路径由 Rust 刷新，这里是浏览器回退）
+  const oauth = getOauthTokens(mcp.authConfig)
+  if (oauth?.accessToken && !h.Authorization) {
+    h.Authorization = `${oauth.tokenType || 'Bearer'} ${oauth.accessToken}`
   }
   // Streamable HTTP 协议必备：Accept 必须同时含 application/json 与 text/event-stream，
   // Content-Type 必须为 application/json。放在最后覆盖用户误填的值，否则远端会返回
@@ -309,6 +319,78 @@ export async function callMcpTool(
       error: e instanceof Error ? e.message : String(e),
     }
   }
+}
+
+/* ------------------------------------------------------------------ *
+ * OAuth2 授权登录（浏览器弹窗 + 本地回调，由 Rust mcp_oauth_* 命令支撑）
+ * ------------------------------------------------------------------ */
+
+export interface McpOauthBeginResult {
+  sessionId: string
+  authorizeUrl: string
+  redirectUri: string
+}
+
+/**
+ * 发起 OAuth2 授权：发现元数据 → 动态注册 → PKCE → 返回浏览器授权 URL。
+ * 需随后打开 authorizeUrl，并调用 `waitMcpOauth` 取 token。
+ */
+export async function beginMcpOauth(
+  endpointUrl: string,
+  scopes?: string[],
+  clientName?: string,
+): Promise<McpOauthBeginResult> {
+  return invoke<McpOauthBeginResult>('mcp_oauth_begin', {
+    request: {
+      endpointUrl,
+      scopes: scopes ?? undefined,
+      clientName: clientName ?? 'WorkDuo',
+    },
+  })
+}
+
+/** 等待浏览器授权回调并完成 code→token 交换。 */
+export async function waitMcpOauth(
+  sessionId: string,
+  timeoutSec = 180,
+): Promise<McpOauthTokens> {
+  const res = await invoke<{ tokens: McpOauthTokens }>('mcp_oauth_wait', {
+    sessionId,
+    timeoutSec,
+  })
+  return res.tokens
+}
+
+/** 手动刷新 access_token（通常由 Rust 请求路径自动完成）。 */
+export async function refreshMcpOauth(
+  authConfig: Record<string, unknown>,
+): Promise<McpOauthTokens> {
+  const res = await invoke<{ tokens: McpOauthTokens }>('mcp_oauth_refresh', {
+    authConfig,
+  })
+  return res.tokens
+}
+
+/**
+ * 一键 OAuth 登录（begin → 打开浏览器 → wait）。
+ * 仅 Tauri 环境可用；浏览器 dev 回退 window.open 并提示。
+ */
+export async function loginMcpOauth(
+  endpointUrl: string,
+  opts?: { scopes?: string[]; clientName?: string; timeoutSec?: number },
+): Promise<McpOauthTokens> {
+  if (!isTauri) {
+    throw new Error('OAuth 授权登录需要在 WorkDuo 桌面端使用')
+  }
+  const begin = await beginMcpOauth(endpointUrl, opts?.scopes, opts?.clientName)
+  // 优先系统浏览器（用户记忆中的「点连接弹浏览器」体验）
+  try {
+    const { openUrl } = await import('@tauri-apps/plugin-opener')
+    await openUrl(begin.authorizeUrl)
+  } catch {
+    window.open(begin.authorizeUrl, '_blank', 'noopener,noreferrer')
+  }
+  return waitMcpOauth(begin.sessionId, opts?.timeoutSec ?? 180)
 }
 
 /** 非 Tauri 的 tools/call 回退实现（与 testMcpConnection 同范式的 fetch 探测）。 */

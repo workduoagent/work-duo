@@ -20,6 +20,68 @@ import type {
  * 1. 领域模型（运行时使用）
  * ------------------------------------------------------------------ */
 
+/** OAuth2 token 集（存在 authConfig.oauth，由 mcp_oauth_* 命令产出）。 */
+export interface McpOauthTokens {
+  accessToken: string
+  refreshToken?: string
+  /** 毫秒时间戳；0=未知 */
+  expiresAt?: number
+  tokenType?: string
+  scope?: string
+  clientId?: string
+  tokenEndpoint?: string
+  authorizationServer?: string
+}
+
+/** 从 authConfig 解析 oauth token（兼容 camelCase / snake_case）。 */
+export function getOauthTokens(
+  authConfig?: Record<string, unknown> | null,
+): McpOauthTokens | null {
+  if (!authConfig) return null
+  const oauth = authConfig.oauth as Record<string, unknown> | undefined
+  if (!oauth || typeof oauth !== 'object') return null
+  const pick = (...keys: string[]): string | undefined => {
+    for (const k of keys) {
+      const v = oauth[k]
+      if (typeof v === 'string' && v) return v
+    }
+    return undefined
+  }
+  const accessToken = pick('accessToken', 'access_token')
+  if (!accessToken) return null
+  const expiresRaw = oauth.expiresAt ?? oauth.expires_at
+  return {
+    accessToken,
+    refreshToken: pick('refreshToken', 'refresh_token'),
+    expiresAt: typeof expiresRaw === 'number' ? expiresRaw : undefined,
+    tokenType: pick('tokenType', 'token_type'),
+    scope: typeof oauth.scope === 'string' ? oauth.scope : undefined,
+    clientId: pick('clientId', 'client_id'),
+    tokenEndpoint: pick('tokenEndpoint', 'token_endpoint'),
+    authorizationServer: pick('authorizationServer', 'authorization_server'),
+  }
+}
+
+/** 把 OAuth token 写入 authConfig（保留其它字段）。 */
+export function withOauthTokens(
+  authConfig: Record<string, unknown> | undefined,
+  tokens: McpOauthTokens,
+): Record<string, unknown> {
+  return {
+    ...(authConfig ?? {}),
+    oauth: {
+      accessToken: tokens.accessToken,
+      refreshToken: tokens.refreshToken,
+      expiresAt: tokens.expiresAt ?? 0,
+      tokenType: tokens.tokenType ?? 'Bearer',
+      scope: tokens.scope,
+      clientId: tokens.clientId,
+      tokenEndpoint: tokens.tokenEndpoint,
+      authorizationServer: tokens.authorizationServer,
+    },
+  }
+}
+
 /** MCP 服务接入记录。 */
 export interface McpInfo {
   id: string // 本地 UUID（文本主键）

@@ -62,3 +62,6 @@ aes-gcm = "0.10"
 keyring = { version = "3", features = ["windows-native", "apple-native"] }
 hex = "0.4"
 md-5 = "0.10"
+# MCP OAuth2：PKCE(S256) 与随机会话状态
+sha2 = "0.10"
+rand = "0.8"

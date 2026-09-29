@@ -54,6 +54,67 @@ const JSON_RPC_HEADERS: &[(&str, &str)] = &[
     ("Accept", "application/json, text/event-stream"),
 ];
 
+/// 组装请求头：用户 headers + API_KEY 注入 + **OAUTH2 Bearer（自动刷新）** + 协议必备头。
+///
+/// `auth_type=OAUTH2`（或 authConfig 含 oauth token）时经 `crate::mcp_oauth::oauth_bearer`
+/// 取/刷 access_token，写入 `Authorization`。其余路径行为与旧逻辑完全一致。
+async fn compose_header_map(
+    headers: &Option<HashMap<String, String>>,
+    auth_type: &Option<String>,
+    auth_config: &Option<serde_json::Value>,
+) -> Result<reqwest::header::HeaderMap, String> {
+    let mut header_map = reqwest::header::HeaderMap::new();
+    if let Some(map) = headers {
+        for (k, v) in map {
+            if let (Ok(name), Ok(val)) = (
+                reqwest::header::HeaderName::from_bytes(k.as_bytes()),
+                reqwest::header::HeaderValue::from_str(v),
+            ) {
+                header_map.insert(name, val);
+            }
+        }
+    }
+    // API_KEY：authConfig { key_name, key_value } 注入为请求头（保持旧行为）
+    if auth_type.as_deref() == Some("API_KEY") {
+        if let Some(obj) = auth_config.as_ref().and_then(|v| v.as_object()) {
+            if let (Some(kn), Some(kv)) = (
+                obj.get("key_name").and_then(|v| v.as_str()),
+                obj.get("key_value").and_then(|v| v.as_str()),
+            ) {
+                if let (Ok(name), Ok(val)) = (
+                    reqwest::header::HeaderName::from_bytes(kn.as_bytes()),
+                    reqwest::header::HeaderValue::from_str(kv),
+                ) {
+                    header_map.insert(name, val);
+                }
+            }
+        }
+    }
+    // OAUTH2：access_token → Authorization（过期自动 refresh）。
+    // 覆盖用户 headers 里残留的旧 Authorization，避免错误 Bearer 盖住合法 token。
+    match crate::mcp_oauth::oauth_bearer(auth_type.as_deref(), auth_config).await {
+        Ok(Some(bearer)) => {
+            header_map.remove(reqwest::header::AUTHORIZATION);
+            if let Ok(val) = reqwest::header::HeaderValue::from_str(&bearer) {
+                header_map.insert(reqwest::header::AUTHORIZATION, val);
+            }
+        }
+        Ok(None) => {}
+        Err(e) => return Err(e),
+    }
+
+    // Streamable HTTP 协议必备头放在最后覆盖，防止用户误填 Accept 触发 406。
+    for (k, v) in JSON_RPC_HEADERS {
+        if let (Ok(name), Ok(val)) = (
+            reqwest::header::HeaderName::from_bytes(k.as_bytes()),
+            reqwest::header::HeaderValue::from_str(v),
+        ) {
+            header_map.insert(name, val);
+        }
+    }
+    Ok(header_map)
+}
+
 /// 日志展示 endpoint 时隐藏 query 参数，避免 URL 内 token 泄露。
 pub(crate) fn redact_endpoint(endpoint: &str) -> String {
     endpoint
@@ -146,47 +207,17 @@ pub async fn sync_mcp_tools(request: McpSyncRequest) -> McpSyncResponse {
         return fail_resp(start, "缺少 endpointUrl（SSE / HTTP 类型必须填写访问地址）".into());
     }
 
-    // 构造基础请求头（用户头与认证头先放，协议必备头在末尾覆盖，避免被误填的
-    // Accept 覆盖而触发 406 Not Acceptable）
-    let mut header_map = reqwest::header::HeaderMap::new();
-    if let Some(map) = &request.headers {
-        for (k, v) in map {
-            if let (Ok(name), Ok(val)) = (
-                reqwest::header::HeaderName::from_bytes(k.as_bytes()),
-                reqwest::header::HeaderValue::from_str(v),
-            ) {
-                header_map.insert(name, val);
-            }
-        }
-    }
-    // API_KEY：authConfig { key_name, key_value } 注入为请求头
-    if request.auth_type.as_deref() == Some("API_KEY") {
-        if let Some(obj) = request.auth_config.as_ref().and_then(|v| v.as_object()) {
-            if let (Some(kn), Some(kv)) = (
-                obj.get("key_name").and_then(|v| v.as_str()),
-                obj.get("key_value").and_then(|v| v.as_str()),
-            ) {
-                if let (Ok(name), Ok(val)) = (
-                    reqwest::header::HeaderName::from_bytes(kn.as_bytes()),
-                    reqwest::header::HeaderValue::from_str(kv),
-                ) {
-                    header_map.insert(name, val);
-                }
-            }
-        }
-    }
-
-    // Streamable HTTP 协议必备头：Content-Type=application/json、Accept 须含
-    // text/event-stream。放在最后覆盖用户 headers，防止其 Accept 仅 application/json
-    // 触发 406 Not Acceptable（"Client must accept both ..."）。
-    for (k, v) in JSON_RPC_HEADERS {
-        if let (Ok(name), Ok(val)) = (
-            reqwest::header::HeaderName::from_bytes(k.as_bytes()),
-            reqwest::header::HeaderValue::from_str(v),
-        ) {
-            header_map.insert(name, val);
-        }
-    }
+    // 构造基础请求头（用户头 / API_KEY / OAUTH2 Bearer 先放，协议必备头末尾覆盖）
+    let header_map = match compose_header_map(
+        &request.headers,
+        &request.auth_type,
+        &request.auth_config,
+    )
+    .await
+    {
+        Ok(h) => h,
+        Err(e) => return fail_resp(start, e),
+    };
 
     let client = match reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(request.timeout_sec.unwrap_or(120)))
@@ -378,47 +409,24 @@ pub async fn call_mcp_tool(request: McpCallRequest) -> McpCallResponse {
         };
     }
 
-    // 构造基础请求头（用户头与认证头先放，协议必备头在末尾覆盖，避免被误填的
-    // Accept 覆盖而触发 406 Not Acceptable）
-    let mut header_map = reqwest::header::HeaderMap::new();
-    if let Some(map) = &request.headers {
-        for (k, v) in map {
-            if let (Ok(name), Ok(val)) = (
-                reqwest::header::HeaderName::from_bytes(k.as_bytes()),
-                reqwest::header::HeaderValue::from_str(v),
-            ) {
-                header_map.insert(name, val);
+    // 构造基础请求头（用户头 / API_KEY / OAUTH2 Bearer 先放，协议必备头末尾覆盖）
+    let header_map = match compose_header_map(
+        &request.headers,
+        &request.auth_type,
+        &request.auth_config,
+    )
+    .await
+    {
+        Ok(h) => h,
+        Err(e) => {
+            return McpCallResponse {
+                ok: false,
+                error: Some(e),
+                latency_ms: start.elapsed().as_millis() as u64,
+                raw: String::new(),
             }
         }
-    }
-    // API_KEY：authConfig { key_name, key_value } 注入为请求头
-    if request.auth_type.as_deref() == Some("API_KEY") {
-        if let Some(obj) = request.auth_config.as_ref().and_then(|v| v.as_object()) {
-            if let (Some(kn), Some(kv)) = (
-                obj.get("key_name").and_then(|v| v.as_str()),
-                obj.get("key_value").and_then(|v| v.as_str()),
-            ) {
-                if let (Ok(name), Ok(val)) = (
-                    reqwest::header::HeaderName::from_bytes(kn.as_bytes()),
-                    reqwest::header::HeaderValue::from_str(kv),
-                ) {
-                    header_map.insert(name, val);
-                }
-            }
-        }
-    }
-
-    // Streamable HTTP 协议必备头：Content-Type=application/json、Accept 须含
-    // text/event-stream。放在最后覆盖用户 headers，防止其 Accept 仅 application/json
-    // 触发 406 Not Acceptable（"Client must accept both ..."）。
-    for (k, v) in JSON_RPC_HEADERS {
-        if let (Ok(name), Ok(val)) = (
-            reqwest::header::HeaderName::from_bytes(k.as_bytes()),
-            reqwest::header::HeaderValue::from_str(v),
-        ) {
-            header_map.insert(name, val);
-        }
-    }
+    };
 
     let client = match reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(request.timeout_sec.unwrap_or(120)))

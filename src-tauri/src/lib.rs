@@ -1,6 +1,7 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 mod agent;
 mod mcp;
+mod mcp_oauth;
 mod mamba_manager;
 mod bun_manager;
 mod sandbox_audit;
@@ -84,6 +85,8 @@ pub fn run() {
             // 后台静默确保 Agent 默认环境（default）存在；失败仅日志，不阻塞启动。
             // 严格延后：先 await DB 连接池就绪闸门，杜绝启动早期组件未就绪导致的空指针 / 连接断裂。
             let handle = app.handle().clone();
+            // MCP OAuth2：登记 AppHandle，便于后续把刷新后的 token 回写 mcp_info。
+            mcp_oauth::init(handle.clone());
             tauri::async_runtime::spawn(async move {
                 if let Err(e) = agent::engine::round_compactor::wait_db_ready(&handle).await {
                     tracing::error!("[startup] DB 就绪等待失败，后台初始化跳过：{e}");
@@ -118,6 +121,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             mcp::sync_mcp_tools,
             mcp::call_mcp_tool,
+            mcp_oauth::mcp_oauth_begin,
+            mcp_oauth::mcp_oauth_wait,
+            mcp_oauth::mcp_oauth_refresh,
             mamba_manager::init_mamba_env,
             mamba_manager::list_mamba_envs,
             mamba_manager::list_mamba_packages,
