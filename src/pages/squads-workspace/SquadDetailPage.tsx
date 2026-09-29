@@ -1,6 +1,6 @@
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react'
 import {useNavigate, useParams} from 'react-router-dom'
-import {ArrowLeft, Brain, Pencil, Plus, Send, Trash2} from 'lucide-react'
+import {ArrowLeft, Brain, Plus, Send, Trash2} from 'lucide-react'
 import {listen} from '@tauri-apps/api/event'
 import {invoke} from '@tauri-apps/api/core'
 import {Button, Empty, Input, Select, Spin} from '@/components/ui'
@@ -360,7 +360,6 @@ export default function SquadDetailPage() {
                         )
                     })}
                 </div>
-                <Button variant="ghost" size="sm" onClick={() => nav('/squads-workspace')} title="编辑编制（回列表）"><Pencil size={14}/> 编辑编制</Button>
             </header>
 
             <div className="sw-body">
@@ -423,13 +422,7 @@ export default function SquadDetailPage() {
 
                 <main className="sw-panel sw-main" data-view={view}>
                     <div className="sw-modebar">
-                        <span className="sw-modebar__label">协作模式</span>
-                        <div className="sw-mode-tab is-on" data-mode={mode}>
-                            <span className="sw-mode-tab__ico">{MODE_META[mode]?.ico}</span>{MODE_META[mode]?.label ?? mode}
-                            <span className="sw-mode-tab__desc">{MODE_META[mode]?.desc}</span>
-                        </div>
                         <div className="sw-modebar__spacer"/>
-                        <span className="sw-modebar__label">中间区</span>
                         <div className="sw-viewseg">
                             <div className={`sw-viewseg__item${view === 'dialog' ? ' is-on' : ''}`} onClick={() => setView('dialog')}>💬 对话</div>
                             <div className={`sw-viewseg__item${view === 'stage' ? ' is-on' : ''}`} onClick={() => setView('stage')}>🎮 舞台</div>
@@ -447,7 +440,7 @@ export default function SquadDetailPage() {
                                     key={m.id || i}
                                     className={`sw-walker ${anim}${chatCard === m.agentId ? ' is-selected' : ''}`}
                                     style={{left: `${spot.x}%`, top: `${spot.y}%`}}
-                                    onClick={(e) => { e.stopPropagation(); setInjectTarget(m.agentId); setInjectMode('soft'); setChatCard(m.agentId) }}
+                                    onClick={(e) => { e.stopPropagation(); if (!canInject) return; setInjectTarget(m.agentId); setInjectMode('soft'); setChatCard(m.agentId) }}
                                     title={memberLabel(m, agents)}
                                 >
                                     <div className="sw-walker__glow"/>
@@ -565,7 +558,7 @@ export default function SquadDetailPage() {
                             {isDraft ? (
                                 <div className="sw-input-row">
                                     <textarea rows={2} placeholder="描述这次要协作完成的任务…" value={prompt} onChange={(e) => setPrompt(e.target.value)}/>
-                                    <button className="sw-send" disabled={!prompt.trim() || starting} onClick={() => void handleStart()}>{starting ? '启动中…' : '开始运行'}</button>
+                                    <button className="sw-send sw-send--in" disabled={!prompt.trim() || starting} onClick={() => void handleStart()}>{starting ? '启动中…' : '开始运行'}</button>
                                 </div>
                             ) : canInject ? (
                                 <>

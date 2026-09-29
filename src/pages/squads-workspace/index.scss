@@ -1825,6 +1825,7 @@
 
 .sw-chatcard {
   position: absolute; z-index: 20; width: 240px; padding: 12px;
+  right: 16px; bottom: 16px;
   background: var(--swbg); border-radius: 12px;
   border: 2px solid #0ea5e9; box-shadow: 0 12px 40px rgba(0, 0, 0, .25);
 }
@@ -1938,6 +1939,9 @@
   font-family: inherit;
 }
 .sw-send:disabled { opacity: .45; cursor: not-allowed; }
+.sw-input-row { position: relative; }
+.sw-input-row textarea { padding-right: 96px; }
+.sw-send--in { position: absolute; right: 8px; bottom: 8px; height: 30px; padding: 0 14px; }
 
 /* 悬浮右栏 */
 .sw-aside-float {
@@ -1945,10 +1949,11 @@
   width: 300px; z-index: 40;
   display: flex; flex-direction: column;
   transform: translateX(calc(100% + 20px));
-  transition: transform .28s cubic-bezier(.2, .8, .3, 1);
+  visibility: hidden;
+  transition: transform .28s cubic-bezier(.2, .8, .3, 1), visibility .28s;
   filter: drop-shadow(-8px 0 28px rgba(0, 0, 0, .12));
 }
-.sw-aside-float.is-open { transform: translateX(0); }
+.sw-aside-float.is-open { transform: translateX(0); visibility: visible; }
 .sw-aside-panel {
   flex: 1; min-height: 0; overflow: hidden;
   background: var(--color-background-subtle);
