@@ -9,7 +9,7 @@ import {PixelAgent} from '@/components/ui/pixel-agent'
 import {getSquad, listSquadSessions, listSquadRounds, deleteSquadSession, listSquadMemories, anchorSquadMemory, deleteSquadMemory, type AnchorSquadMemoryInput} from '@/core/mapper/squad-mapper'
 import {listAgents} from '@/core/mapper/agent-mapper'
 import type {AgentInfo, SquadInfo, SquadSession, SquadMemory, SquadMemoryCategory} from '@/types/core'
-import {RoundBoard, memberLabel, agentAppearanceOf, type BoardRound, type SquadBoardView} from './index'
+import {memberLabel, agentAppearanceOf, type BoardRound, type SquadBoardView} from './index'
 
 const ACTIVE_STATUSES = ['running', 'paused', 'awaiting_checkpoint', 'awaiting_delivery']
 const STATUS_PILL: Record<string, {label: string; cls: string}> = {
