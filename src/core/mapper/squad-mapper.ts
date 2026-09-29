@@ -298,6 +298,13 @@ export async function upsertSquad(input: SquadUpsertInput): Promise<SquadInfo[]>
   return listSquads()
 }
 
+/** 删除单条协作会话（round/handoff/decision/inject 随外键级联清理）。 */
+export async function deleteSquadSession(sessionId: string): Promise<void> {
+  if (!isTauri) return
+  const db = await getDb()
+  await db.execute('DELETE FROM agent_squad_session WHERE id = ?', [sessionId])
+}
+
 /** 各编队最新会话状态（卡片实时徽标）：squad_id → status；无会话的编队不出现在结果里。 */
 export async function latestSquadStatuses(): Promise<Record<string, string>> {
   if (!isTauri) return {}

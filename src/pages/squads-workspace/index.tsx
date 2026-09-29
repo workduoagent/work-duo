@@ -251,14 +251,14 @@ function fromTemplate(t: SquadTemplateJson): EditorState {
  * ------------------------------------------------------------------ */
 
 /** §4.12.5：成员外观解析——有 appearance 用之；从未设计过则按场景+agentId 稳定生成兜底。 */
-function agentAppearanceOf(agents: AgentInfo[], agentId?: string): PixelAgentAppearance {
+export function agentAppearanceOf(agents: AgentInfo[], agentId?: string): PixelAgentAppearance {
     const a = agents.find((x) => x.id === agentId)
     if (a?.appearance) return a.appearance
     return generateAvatarByScenario(a?.scenario, agentId)
 }
 
 /** 列表卡成员显示名：role 为空（如流水线工序位）回退智能体名，杜绝裸 agentId。 */
-function memberLabel(m: { role?: string; agentId: string }, agents: AgentInfo[]): string {
+export function memberLabel(m: { role?: string; agentId: string }, agents: AgentInfo[]): string {
     if (m.role && m.role.trim()) return m.role
     return agents.find((a) => a.id === m.agentId)?.name || '未命名成员'
 }
@@ -1868,7 +1868,7 @@ const CAT_OPTIONS: { label: string; value: SquadMemoryCategory }[] = [
     {label: '其他', value: 'other'},
 ]
 
-interface BoardRound {
+export interface BoardRound {
     role: string
     kind: string
     content: string
@@ -1962,7 +1962,7 @@ function MetricsRoundView({content}: { content: string }) {
 
 /** 复用的讨论黑板渲染（运行控制台实时流 / 历史回显共用）。 */
 /** S1：黑板 L2 状态板视图（board_json 解析后的展示形态）。 */
-interface SquadBoardView {
+export interface SquadBoardView {
     tasks: Array<{taskId: string; title: string; assignee: string; status: string}>
     artifactsIndex?: string[]
     decisions?: Array<{kind: string; text: string}>
@@ -1988,7 +1988,7 @@ const BOARD_STATUS_META: Record<string, {color: string; label: string}> = {
     skipped: {color: 'warning', label: '已跳过'},
 }
 
-function RoundBoard({rounds, summary, board}: { rounds: BoardRound[]; summary?: string; board?: SquadBoardView | null }) {
+export function RoundBoard({rounds, summary, board}: { rounds: BoardRound[]; summary?: string; board?: SquadBoardView | null }) {
     return (
         <div className="squad-console__board">
             {board && (board.tasks.length > 0 || (board.decisions && board.decisions.length > 0) || (board.actions && board.actions.length > 0)) && (
