@@ -435,6 +435,8 @@ export default function SquadDetailPage() {
     const spots = WALKER_SPOTS[mode] || WALKER_SPOTS.orchestrator
     const chatMember = chatCard ? (squad.members.find((m) => m.agentId === chatCard) || null) : null
     void boardTasks
+    // 呼吸灯：谁在发言谁亮——事件状态优先，其次取最新一轮的发言者
+    const lastSpeakerId = rounds.length ? (rounds[rounds.length - 1].speakerAgentId ?? null) : null
 
     return (
         <div className="squads squads--detail sw">
@@ -458,9 +460,10 @@ export default function SquadDetailPage() {
                 <div className="sw-topbar__spacer"/>
                 <div className="sw-crew">
                     {(squad.members || []).map((m, i) => {
-                        const st = memberMotion[m.role] === 'working' ? 'working' : isRunning && i === 0 ? 'working' : 'idle'
+                        const ev = memberMotion[m.role]
+                        const st = ev && ev !== 'idle' ? ev : isRunning && m.agentId === lastSpeakerId ? 'working' : 'idle'
                         return (
-                            <div key={m.id || i} className={`sw-crew__slot${isRunning && st === 'working' ? ' is-active' : ''}`} title={memberLabel(m, agents)}>
+                            <div key={m.id || i} className={`sw-crew__slot${st === 'working' || st === 'cheer' ? ' is-active' : ''}`} title={memberLabel(m, agents)}>
                                 <PixelAgent appearance={agentAppearanceOf(agents, m.agentId)} size={26} motion={st === 'working'} state={st as 'working'}/>
                             </div>
                         )

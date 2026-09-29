@@ -1952,9 +1952,9 @@
 
 /* 悬浮右栏 */
 .sw-aside-float {
-  position: fixed; top: 64px; right: 14px;
+  position: fixed; top: 50%; right: 14px; transform: translateY(-50%);
   width: 450px;                            /* 宽度 +50%（原 300px） */
-  height: calc((100vh - 78px) * 0.5);      /* 高度 -50%（原 top/bottom 撑满） */
+  height: calc((100vh - 96px) * 0.5);      /* 高度 -50%；垂直居中与收起把手对齐 */
   z-index: 40;
   display: flex; flex-direction: column;
   filter: drop-shadow(-8px 0 28px rgba(0, 0, 0, .12));
@@ -1977,7 +1977,7 @@
 }
 .sw-aside-toggle:hover { background: rgba(224, 242, 254, 1); }
 
-.sw-rtabs { display: flex; padding: 0 8px; border-bottom: 1px solid var(--color-border-muted, var(--swborder)); background: var(--color-background-subtle); flex: none; }
+.sw-rtabs { display: flex; padding: 0 8px; margin: 8px 10px 0; border-bottom: 1px solid var(--color-border-muted, var(--swborder)); background: var(--color-background-subtle); flex: none; border-radius: 10px 10px 0 0; }
 .sw-rtabs__item {
   padding: 9px 11px; font-size: 11.5px; font-weight: 600;
   color: var(--color-foreground-muted); cursor: pointer;
