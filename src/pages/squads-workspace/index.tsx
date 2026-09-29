@@ -19,8 +19,8 @@ import {
     Pencil,
     Play,
     Users,
+    LogIn,
     History,
-    Brain,
     Settings2,
     FileUp,
     Inbox,
@@ -2556,30 +2556,13 @@ export default function SquadsWorkspacePage() {
 
                                 <div className="squads__card-actions">
                                     <Button
-                                        variant="solid"
+                                        variant="soft"
                                         size="sm"
                                         onClick={() => nav(`/squads-workspace/${squad.id}?tab=run`)}
-                                        aria-label="进入运行"
+                                        aria-label="打开协作工作台"
+                                        title="打开协作工作台（运行 / 历史 / 记忆）"
                                     >
-                                        <Play size={14}/> 运行
-                                    </Button>
-                                    <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        onClick={() => nav(`/squads-workspace/${squad.id}?tab=history`)}
-                                        aria-label="进入运行历史"
-                                        title="运行历史"
-                                    >
-                                        <History size={15}/>
-                                    </Button>
-                                    <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        onClick={() => nav(`/squads-workspace/${squad.id}?tab=memory`)}
-                                        aria-label="进入团队记忆"
-                                        title="团队记忆"
-                                    >
-                                        <Brain size={15}/>
+                                        <LogIn size={15}/> 工作台
                                     </Button>
                                     <Button
                                         variant="ghost"
