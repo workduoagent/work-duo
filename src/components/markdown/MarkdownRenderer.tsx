@@ -10,7 +10,7 @@
  *
  * 样式：katex.min.css 与 highlight.js 主题在组件内引入；mermaid 直接产出内联 SVG，无需额外 CSS。
  */
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
@@ -135,7 +135,7 @@ function MdImage({
   return <img src={resolved} alt={alt} />
 }
 
-export function MarkdownRenderer({
+function MarkdownRendererInner({
   content,
   className,
   resolveImageUrl,
@@ -183,3 +183,9 @@ export function MarkdownRenderer({
     </div>
   )
 }
+
+/**
+ * 记忆化导出：父级无关重渲染（切 Tab / 计时 / 输入框打字等）时，content 未变即跳过整条
+ * remark/rehype 解析管线（katex + highlight + mermaid），避免重复解析造成的交互卡顿。
+ */
+export const MarkdownRenderer = memo(MarkdownRendererInner)
