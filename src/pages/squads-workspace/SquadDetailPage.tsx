@@ -23,9 +23,9 @@ const STATUS_PILL: Record<string, {label: string; cls: string}> = {
     cancelled: {label: '已取消', cls: 'muted'},
 }
 const MODE_META: Record<string, {ico: string; label: string; desc: string}> = {
-    orchestrator: {ico: '⚡', label: '编排式', desc: '主管委派'},
-    pipeline: {ico: '🔗', label: '流水线', desc: '线性接力'},
-    chat: {ico: '💬', label: '群聊', desc: '圆桌发言'},
+    orchestrator: {ico: '', label: '编排式', desc: '主管委派'},
+    pipeline: {ico: '', label: '流水线', desc: '线性接力'},
+    chat: {ico: '', label: '群聊', desc: '圆桌发言'},
 }
 const ROUND_BADGE: Record<string, {label: string; cls: string}> = {
     system: {label: '系统', cls: 'sys'}, plan: {label: '委派规划', cls: 'plan'},
@@ -444,7 +444,7 @@ export default function SquadDetailPage() {
                 <div className="sw-topbar__id">
                     <div className="sw-topbar__name">{squad.name}</div>
                     <div className="sw-topbar__meta">
-                        <span className="sw-pill sw-pill--mode">{MODE_META[mode]?.ico} {MODE_META[mode]?.label ?? mode}</span>
+                        <span className="sw-pill sw-pill--mode">{MODE_META[mode]?.label ?? mode}</span>
                         {liveSession && liveSession.status === 'running' && <span className="sw-pill sw-pill--live"><i className="sw-dot"/>运行中 · {fmtElapsed}</span>}
                         {squad.workspaceDir && <span className="sw-pill sw-pill--muted">📁 {squad.workspaceDir}</span>}
                     </div>
@@ -658,9 +658,9 @@ export default function SquadDetailPage() {
                     <div className="sw-composer">
                         <div className="sw-composer__body">
                             {isDraft ? (
-                                <div className="sw-input-row">
+                                <div className="sw-input-box">
                                     <textarea rows={2} placeholder="描述这次要协作完成的任务…" value={prompt} onChange={(e) => setPrompt(e.target.value)}/>
-                                    <button className="sw-send sw-send--in" disabled={!prompt.trim() || starting} onClick={() => void handleStart()}>{starting ? '启动中…' : '开始运行'}</button>
+                                    <div className="sw-input-box__footer"><Button variant="solid" size="sm" disabled={!prompt.trim() || starting} onClick={() => void handleStart()}>{starting ? '启动中…' : '开始运行'}</Button></div>
                                 </div>
                             ) : canInject ? (
                                 <>
@@ -684,9 +684,9 @@ export default function SquadDetailPage() {
                                             {injectMode === 'soft' ? '打断：其下一轮生效' : injectMode === 'hard' ? '强打断：优先处理' : '预嘱：任务启动时注入'}
                                         </span>
                                     </div>
-                                    <div className="sw-input-row">
+                                    <div className="sw-input-box">
                                         <textarea rows={2} placeholder="补充说明、纠偏指令…" value={injectText} onChange={(e) => setInjectText(e.target.value)}/>
-                                        <button className="sw-send" disabled={injectBusy || !injectText.trim()} onClick={() => void handleInject()}>{injectBusy ? '发送中…' : '发送'}</button>
+                                        <div className="sw-input-box__footer"><Button variant="solid" size="sm" disabled={injectBusy || !injectText.trim()} onClick={() => void handleInject()}>{injectBusy ? '发送中…' : '发送'}</Button></div>
                                     </div>
                                 </>
                             ) : (
@@ -773,4 +773,5 @@ export default function SquadDetailPage() {
         </div>
     )
 }
+
 

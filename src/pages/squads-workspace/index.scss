@@ -1906,11 +1906,8 @@
 .sw-badge--inject { background: #ede9fe; color: #5b21b6; }
 
 /* 指令坞 */
-.sw-composer {
-  flex: none; border: 1px solid var(--swborder);
-  border-radius: 12px; background: var(--swbg); overflow: hidden;
-}
-.sw-composer__body { padding: 10px 11px; display: flex; flex-direction: column; gap: 8px; }
+.sw-composer { flex: none; }
+.sw-composer__body { padding: 8px 12px 12px; display: flex; flex-direction: column; gap: 8px; }
 .sw-composer__row { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
 .sw-inject-hint { font-size: 10.5px; color: var(--color-foreground-muted); }
 
@@ -1934,28 +1931,31 @@
   background: var(--color-background-muted, var(--swborder));
   display: flex; align-items: center; justify-content: center;
 }
-.sw-input-row { display: flex; align-items: flex-end; gap: 8px; }
-.sw-input-row textarea {
-  flex: 1; min-width: 0; border: 1px solid var(--swborder); border-radius: 10px;
-  padding: 9px 11px; font-family: inherit; font-size: 12.5px;
-  color: var(--color-foreground); background: var(--color-background-subtle);
-  resize: none; outline: none;
+/* 输入框（对齐 Agent 对话页样式）：圆角 18 / focus 主色描边 / 内嵌无边框输入区 + 右下操作按钮 */
+.sw-input-box {
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 8px 10px;
+  border: 1px solid var(--color-border, var(--swborder));
+  border-radius: 18px;
+  background: var(--swbg);
+  transition: border-color .15s;
 }
-.sw-input-row textarea:focus { border-color: #0ea5e9; }
-.sw-send {
-  height: 38px; padding: 0 16px; border: none; border-radius: 10px;
-  background: #0284c7; color: #fff; font-size: 12.5px; font-weight: 600; cursor: pointer;
-  font-family: inherit;
+.sw-input-box:focus-within { border-color: #0ea5e9; }
+.sw-input-box textarea {
+  width: 100%; box-sizing: border-box; resize: none; outline: none;
+  border: none; background: transparent;
+  min-height: 42px; max-height: 180px; padding: 4px 6px;
+  font-family: inherit; font-size: 13px; line-height: 1.55;
+  color: var(--color-foreground);
 }
-.sw-send:disabled { opacity: .45; cursor: not-allowed; }
-.sw-input-row { position: relative; }
-.sw-input-row textarea { padding-right: 96px; }
-.sw-send--in { position: absolute; right: 8px; bottom: 8px; height: 30px; padding: 0 14px; }
+.sw-input-box__footer { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
 
 /* 悬浮右栏 */
 .sw-aside-float {
-  position: fixed; top: 64px; right: 14px; bottom: 14px;
-  width: 300px; z-index: 40;
+  position: fixed; top: 64px; right: 14px;
+  width: 450px;                            /* 宽度 +50%（原 300px） */
+  height: calc((100vh - 78px) * 0.5);      /* 高度 -50%（原 top/bottom 撑满） */
+  z-index: 40;
   display: flex; flex-direction: column;
   filter: drop-shadow(-8px 0 28px rgba(0, 0, 0, .12));
 }
