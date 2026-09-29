@@ -11,6 +11,7 @@
  * `run_squad_task`，事件经 @tauri-apps/api/event 订阅。
  */
 import {useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent} from 'react'
+import { openPath } from '@tauri-apps/plugin-opener'
 import {
     Plus,
     Trash2,
@@ -2465,13 +2466,6 @@ export default function SquadsWorkspacePage() {
 
                                 <p className="squads__card-desc">{squad.description || '暂无描述'}</p>
 
-                                <div className="squads__card-workspace">
-                                    <FolderOpen size={13}/>
-                                    <span title={squad.workspaceDir || ''}>
-                    {squad.workspaceDir || '工作目录：默认隐藏 .wd_mem/squads/'}
-                  </span>
-                                </div>
-
                                 <div className="squads__card-crew" title={squad.members.map((m) => memberLabel(m, agents)).join('、')}>
                                     {squad.members.slice(0, 8).map((m, i) => (
                                         <PixelAgent
@@ -2485,14 +2479,6 @@ export default function SquadsWorkspacePage() {
                                     {squad.members.length > 8 && (
                                         <span className="squads__crew-more">+{squad.members.length - 8}</span>
                                     )}
-                                </div>
-
-                                <div className="squads__card-members">
-                                    <Users size={13}/>
-                                    <span>
-                    {squad.members.length} 名成员：
-                                        {squad.members.map((m) => memberLabel(m, agents)).join('、')}
-                  </span>
                                 </div>
 
                                 <div className="squads__card-actions">
@@ -2527,6 +2513,18 @@ export default function SquadsWorkspacePage() {
                                         aria-label="编辑"
                                     >
                                         <Pencil size={15}/>
+                                    </Button>
+                                    <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        aria-label="打开空间目录"
+                                        title={squad.workspaceDir ? `打开空间目录：${squad.workspaceDir}` : '该编队未配置空间目录'}
+                                        disabled={!squad.workspaceDir}
+                                        onClick={() => {
+                                            if (squad.workspaceDir) void openPath(squad.workspaceDir)
+                                        }}
+                                    >
+                                        <FolderOpen size={15}/>
                                     </Button>
                                     <Popconfirm
                                         title="删除小分队"
