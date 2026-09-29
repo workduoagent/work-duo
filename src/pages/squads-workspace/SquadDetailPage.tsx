@@ -1,11 +1,12 @@
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react'
 import {useNavigate, useParams} from 'react-router-dom'
-import {ArrowLeft, Brain, Pencil, Plus, Trash2} from 'lucide-react'
+import {ArrowLeft, Brain, Pencil, Plus, Send, Trash2} from 'lucide-react'
 import {listen} from '@tauri-apps/api/event'
 import {invoke} from '@tauri-apps/api/core'
 import {Button, Empty, Input, Select, Spin} from '@/components/ui'
 import {useNotify} from '@/components/ui/notify'
 import {PixelAgent} from '@/components/ui/pixel-agent'
+import {MarkdownRenderer} from '@/components/markdown/MarkdownRenderer'
 import {getSquad, listSquadSessions, listSquadRounds, deleteSquadSession, listSquadMemories, anchorSquadMemory, deleteSquadMemory, type AnchorSquadMemoryInput} from '@/core/mapper/squad-mapper'
 import {listAgents} from '@/core/mapper/agent-mapper'
 import type {AgentInfo, SquadInfo, SquadSession, SquadMemory, SquadMemoryCategory} from '@/types/core'
@@ -91,6 +92,15 @@ function sceneSVG(mode: string): string {
     return s + '</svg>'
 }
 
+/** 轮次内容渲染：metrics/handoff/JSON → 代码块；其余 → Markdown。 */
+function renderRoundContent(kind: string, text: string) {
+    const t = (text || '').trim()
+    if (kind === 'metrics' || kind === 'handoff' || (t.startsWith('{') && t.endsWith('}'))) {
+        try { return <pre className="sw-code">{JSON.stringify(JSON.parse(t), null, 2)}</pre> } catch { /* 非 JSON 走 markdown */ }
+    }
+    return <MarkdownRenderer className="sw-md" content={t}/>
+}
+
 /** 小分队工作台（像素舞台 v3，严格按设计稿 docs/design/小分队工作台-UI设计稿.html） */
 export default function SquadDetailPage() {
     const nav = useNavigate()
@@ -106,7 +116,7 @@ export default function SquadDetailPage() {
     const [rounds, setRounds] = useState<BoardRound[]>([])
     const [board, setBoard] = useState<SquadBoardView | null>(null)
     const [summary, setSummary] = useState('')
-    const [view, setView] = useState<'stage' | 'dialog'>('stage')
+    const [view, setView] = useState<'stage' | 'dialog'>('dialog')
     const [chip, setChip] = useState<'all' | 'active' | 'await' | 'done'>('all')
 
     const [prompt, setPrompt] = useState('')
@@ -533,7 +543,7 @@ export default function SquadDetailPage() {
                                             <span className="sw-round__name">{name}</span>
                                             <span className={`sw-badge sw-badge--${badge.cls}`}>{badge.label}</span>
                                         </div>
-                                        <div className="sw-round__content">{r.content}</div>
+                                        <div className="sw-round__content"><div className="sw-bubble">{renderRoundContent(r.kind, r.content)}</div></div>
                                     </div>
                                 </div>
                             )
@@ -544,7 +554,7 @@ export default function SquadDetailPage() {
                                 <div className="sw-round__pa sw-round__pa--user">汇</div>
                                 <div className="sw-round__body">
                                     <div className="sw-round__head"><span className="sw-round__name">最终汇总</span><span className="sw-badge sw-badge--msg">结论</span></div>
-                                    <div className="sw-round__content">{summary}</div>
+                                    <div className="sw-round__content"><div className="sw-bubble sw-bubble--hl">{summary}</div></div>
                                 </div>
                             </div>
                         )}
@@ -622,19 +632,6 @@ export default function SquadDetailPage() {
                         })}
                         {asideTab === 'memory' && (
                             <>
-                                <div className="sw-mem-add">
-                                    <Input autoComplete="off" placeholder="键名" value={memKey} onChange={(e) => setMemKey(e.target.value)}/>
-                                    <Input.TextArea autoComplete="off" rows={2} placeholder="记忆内容…" value={memContent} onChange={(e) => setMemContent(e.target.value)}/>
-                                    <div style={{display: 'flex', gap: 8}}>
-                                        <Select
-                                            style={{width: 130}}
-                                            value={memCat}
-                                            onChange={(v) => setMemCat(v as SquadMemoryCategory)}
-                                            options={[{label: '通用', value: 'general'}, {label: '决策', value: 'decision'}, {label: '代码范式', value: 'code_pattern'}]}
-                                        />
-                                        <Button variant="solid" size="sm" loading={memSaving} onClick={() => void handleMemorySave()}>锚定</Button>
-                                    </div>
-                                </div>
                                 {memories.map((m) => (
                                     <div key={m.id} className="sw-mem">
                                         <div className="sw-mem__head">
@@ -645,7 +642,21 @@ export default function SquadDetailPage() {
                                         <div className="sw-mem__body">{m.content}</div>
                                     </div>
                                 ))}
-                                {memories.length === 0 && <Empty description="暂无记忆"/>}
+                                {memories.length === 0 && <Empty description="暂无记忆——下方锚定第一条"/>}
+                                <div className="sw-mem-add">
+                                    <Input autoComplete="off" placeholder="键名，如：统一返回结构" value={memKey} onChange={(e) => setMemKey(e.target.value)}/>
+                                    <Input.TextArea autoComplete="off" rows={2} placeholder="记忆内容…" value={memContent} onChange={(e) => setMemContent(e.target.value)}/>
+                                    <div className="sw-mem-add__row">
+                                        <Select
+                                            style={{width: 110}}
+                                            size="small"
+                                            value={memCat}
+                                            onChange={(v) => setMemCat(v as SquadMemoryCategory)}
+                                            options={[{label: '通用', value: 'general'}, {label: '决策', value: 'decision'}, {label: '代码范式', value: 'code_pattern'}]}
+                                        />
+                                        <Button variant="solid" size="sm" loading={memSaving} disabled={!memKey.trim() || !memContent.trim()} onClick={() => void handleMemorySave()}><Send size={13}/> 锚定</Button>
+                                    </div>
+                                </div>
                             </>
                         )}
                         {asideTab === 'decisions' && (
