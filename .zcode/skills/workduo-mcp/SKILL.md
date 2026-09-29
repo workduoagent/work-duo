@@ -1,6 +1,6 @@
 ---
 name: workduo-mcp
-description: WorkDuo 桌面应用（Tauri2 + React19）内建 MCP Server 的集成指南。面向外部编程工具（AI IDE / Agent 框架等任意支持 MCP 的客户端），说明如何将 127.0.0.1:18755/mcp（Streamable HTTP）注册为标准 MCP Server，并以 UI 级真实链路驱动 WorkDuo 全模块（Agent 对话 / 本地插件 / 知识库 / 记忆宫殿 / 技能中心）。覆盖：98 个工具分层（含 S3 新增 squad 层 14）、UI 级各模块流程、插件脚本范式（scripts/）、已知坑与根因修复。
+description: WorkDuo 桌面应用（Tauri2 + React19）内建 MCP Server 的集成指南。面向外部编程工具（AI IDE / Agent 框架等任意支持 MCP 的客户端），说明如何将 127.0.0.1:18755/mcp（Streamable HTTP）注册为标准 MCP Server，并以 UI 级真实链路驱动 WorkDuo 全模块（Agent 对话 / 本地插件 / 知识库 / 记忆宫殿 / 技能中心）。覆盖：98 个工具分层（S3 起含小分队 squad_* 14 个）、UI 级各模块流程、插件脚本范式（scripts/）、已知坑与根因修复。
 agent_created: true
 ---
 
@@ -34,7 +34,7 @@ MCP 客户端 **UI 级**驱动 WorkDuo 全模块。
 - 端点：`POST http://127.0.0.1:18755/mcp`（Streamable HTTP；可选 `GET /mcp` SSE）。
 - 开关：`app_config.mcp_server_enabled`（默认启用）、`mcp_server_port`（默认 18755）。改端口/开关需重启 WorkDuo。
 - 启动位置：`src-tauri/src/mcp_server.rs::start_mcp_server`，在 app setup 中以独立 std 线程监听。
-- 工具分层，共 **98** 个：引擎层(16，含 P2 新增 `agent_get_run_progress`、孤儿清扫 `agent_sweep_orphan_rounds`、压缩状态 `agent_session_compact_status`、P-4 `agent_project_ensure`/`agent_project_list`、D' `agent_snapshot_list`/`agent_snapshot_rollback`) + 模块发现层(7) + UI 意图层(54，含 Agent/会话 12 + 插件 8 + 知识库 15 + 记忆 9 + 技能 10) + 服务器托管层(6，Rust 直调 host::commands) + **小分队层(14，S3 批次3 2026-09-29：squad_list/get/run/get_session/list_rounds/submit_decision/cancel/pause/resume/talk_to_task/inject_to_task/broadcast_note/export_pack/anchor_memory——headless 直调 squad_orchestrator，不经 UI 意图)**。
+- 工具分层，共 **98** 个：引擎层(16，含 P2 新增 `agent_get_run_progress`、孤儿清扫 `agent_sweep_orphan_rounds`、压缩状态 `agent_session_compact_status`、P-4 `agent_project_ensure`/`agent_project_list`、D' `agent_snapshot_list`/`agent_snapshot_rollback`) + 模块发现层(7) + UI 意图层(54，含 Agent/会话 12 + 插件 8 + 知识库 15 + 记忆 9 + 技能 10) + 服务器托管层(6，Rust 直调 host::commands) + 小分队层(14，Rust 直调 squad_orchestrator)。
 - **并发语义（P2-5，2026-09-23 明确）**：同一 Agent 同一时刻只有一个 run（per-agent 运行锁，第二个 `agent_run_task` 直接 Err「已有任务正在运行」）；**并行 = 多个 Agent 各自跑**（不同 Agent 互不影响）。需要并行跑多个任务时，为每个任务装配/复用一个独立 Agent（`agent_ui_create`）。
 - **工具轮分级（Batch C，2026-09-23）**：子任务工具轮预算基线 8（env `WD_SUBTASK_MAX_ITERATIONS`），带诊断回灌的修复型轮 +8（`WD_SUBTASK_REPAIR_EXTRA_ITERATIONS`）——修复型任务「跑测试→读码→改码→再跑测试」天然多轮，基线对其过紧（C-H1 实测）。
 - 引擎层 + 模块发现层由 Rust 直调；UI 意图层经 `mcp:intent` 派发到 `src/core/mcpBridge.ts` 真实 handler，
@@ -72,14 +72,14 @@ curl -s -X POST http://127.0.0.1:18755/mcp \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
 ```
 
-应返回含 98 个工具的 `tools` 数组（2026-09-25 起含服务器托管层 server_host_* / agent_server_bind；2026-09-29 起含小分队层 squad_*）。
+应返回含 98 个工具的 `tools` 数组（2026-09-25 起含服务器托管层 server_host_* / agent_server_bind）。
 
 > 注意：部分客户端会缓存工具清单。若改过 Rust 后工具数/签名没刷新，**重新加载该 MCP Server 连接**即可；
 > 也可直接打上面的 `tools/list` 端点绕过缓存核对。
 
 ---
 
-## 工具清单（98 个，按层）
+## 工具清单（84 个，按层）
 
 ### A. 引擎层（Rust 直调，无需前端）
 | 工具 | 作用 | 关键入参 |
@@ -212,6 +212,38 @@ curl -s -X POST http://127.0.0.1:18755/mcp \
 > Agent 侧的 `host__*` 工具（12 个）是 **Agent 注册表工具**（同 `native__*`），不在 MCP 契约面——通过 `agent_run_task` 驱动 Agent 实跑验证（见流程 6）。
 
 ---
+
+### I. 小分队工具族（Rust 直调 squad_orchestrator，S3 批次3 落地）
+| 工具 | 作用 | 关键入参 |
+|---|---|---|
+| `squad_list` / `squad_get` | 列编队（含 member_count）/ 查编队（成员/工具面/策略） | `squadId`（内部 id 或 unique_id） |
+| `squad_run` | 触发协作：contract 直达波次（跳过主管规划与 L1）；wait=false 预生成 sessionId 立即返回 | `squadId` / `prompt?`(覆盖 schedule_prompt) / `contract?`=[{title,assignee,instruction?,dependsOn?,expectedArtifacts?}] / `wait?` |
+| `squad_get_session` / `squad_list_rounds` | 查会话（status/board_json/contract_json/pack_json）/ 列轮次（kind=plan/subtask/handoff/checkpoint/system/inject/summary/metrics/delivery） | `sessionId` 或 `squadId`(取最新)，`limit?` |
+| `squad_submit_decision` | 三门禁决议：plan(approve/reject) / checkpoint(continue/rework) / delivery(approve/reject) | `gate` / `decision` / `sessionId` |
+| `squad_cancel` / `squad_pause` / `squad_resume` | 取消（穿线+注册表）/ 暂停（波次边界挂起）/ 续跑（带 sessionId=跨进程重入恢复） | `squadId` / `sessionId?`(resume 显式重入) |
+| `squad_talk_to_task` / `squad_inject_to_task` | 等待中预嘱(pre_talk) / 运行中打断(soft/hard)；无人值守（schedule/api）会话三路统一拒绝 | `taskId` / `content` / `mode?` / `sessionId` |
+| `squad_broadcast_note` | 团队广播（board 决策卡+广播轮；同样受无人值守拒绝约束） | `note` / `sessionId` |
+| `squad_export_pack` / `squad_anchor_memory` | 导出交付包（pack JSON+Markdown）/ 锚定小分队记忆（专属表 agent_squad_memory，协作时经 load_squad_memory_block 注入） | `sessionId` / `squadId`+`key`+`content`+`category?` |
+
+> ⚠️ 契约要点：board_json.tasks 键=任务 id（t1/t2…），title/assignee/status 是字段值；squad_run 默认
+> wait=true 会阻塞至终态——无人值守驱动一律 `wait:false` + `squad_get_session` 轮询。checkpoint 挂起
+> **不改 status**（恒 running），观测信号=最新轮 kind='checkpoint'。
+
+## 小分队验收回归与发布门禁（squad_eval_harness，§10）
+
+`scripts/squad_eval_harness.mjs`——17 用例回归（编排并行/DAG/群聊/门禁/失败/取消/交付包/记忆/交接/打断/预嘱/像素/预算/锁/无人值守/信封/续跑幂等），夹具=正式生态 4 套编队（可临时改成员 Agent 配置，自动还原）：
+
+```bash
+node --experimental-sqlite docs/skills/workduo-mcp/scripts/squad_eval_harness.mjs env          # 环境自检
+node --experimental-sqlite docs/skills/workduo-mcp/scripts/squad_eval_harness.mjs run [--cases S-ORCH-1,S-PIPE-1]
+node --experimental-sqlite docs/skills/workduo-mcp/scripts/squad_eval_harness.mjs gate --out docs/eval-results/squad-20260929-final
+npm run squad:eval   # 同 run
+npm run squad:gate   # 同 gate
+```
+
+证据落 `docs/eval-results/squad-<stamp>/`（每用例一 JSON：caseId/status/autoPass/asserts）；`release_gate.mjs`
+第②b 步读 squad 证据目录的 gate.json（--squad-dir 指定，缺目录 SKIP 不阻断，版本归档含 squad_gate.json）。
+断言纪律：扫 board_json/rounds.kind/inject.status/handoff 表/盘面产物等结构化证据，不 grep 转录全文。
 
 ## 各模块 UI 级流程
 
@@ -403,7 +435,7 @@ node scripts/kb_driver.mjs
 7. **记忆 category 默认不一致**：SQL 默认 `'general'`，枚举是 `'other'`；`memory_anchor` 必须显式传 `category`。
 8. **`kb_chunks.id` 真实格式** = `{asset_id}#{chunk_index}`（`knowledge.rs` 构造），与设计文档
    `kb_id/...` 描述不符；引用知识库内容时以此为准。
-9. **squad_orchestrator.rs 有同类 envelope 解析 bug**（同源 #1），squad 模式不在本 skill 范围，暂未修。
+9. ~~squad_orchestrator envelope bug~~ **已修**（2026-09-27，4 处取文统一 `extract_llm_content`，由 squad_eval_harness S-ENV-1 回归钉住）。
 10. **UI 级工具回包统一 `{ok,data}` 信封**：`kb_*` / `plugin_*` / `memory_*` / `agent_ui_*` 经 `dispatch_ui` 返回
    `{ok,data}`，驱动须 `unwrap .data`；引擎层工具（agent_run_task 等）直返原始结构，不套信封。
 11. **前端日志已透传到后端**：`kbFs`/`kb-index`/`knowledge-mapper`/`mcpBridge(kb:*)` 的关键操作会经 `log_frontend`
