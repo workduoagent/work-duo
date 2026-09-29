@@ -213,6 +213,29 @@ export default function SquadDetailPage() {
         const el = timelineRef.current
         if (el && stickBottomRef.current) el.scrollTop = el.scrollHeight
     }, [])
+    // 输入框高度可拖拽（对齐 Agent 对话页：向上拖动调整高度）
+    const [inputHeight, setInputHeight] = useState(52)
+    const startInputResize = useCallback((e: React.MouseEvent) => {
+        e.preventDefault()
+        const startY = e.clientY
+        const startH = inputHeightRef.current
+        const onMove = (ev: MouseEvent) => {
+            const next = Math.max(44, Math.min(240, startH + (startY - ev.clientY)))
+            setInputHeight(next)
+        }
+        const onUp = () => {
+            window.removeEventListener('mousemove', onMove)
+            window.removeEventListener('mouseup', onUp)
+            document.body.style.userSelect = ''
+            document.body.style.cursor = ''
+        }
+        document.body.style.userSelect = 'none'
+        document.body.style.cursor = 'row-resize'
+        window.addEventListener('mousemove', onMove)
+        window.addEventListener('mouseup', onUp)
+    }, [])
+    const inputHeightRef = useRef(inputHeight)
+    useEffect(() => { inputHeightRef.current = inputHeight }, [inputHeight])
     const [injectTarget, setInjectTarget] = useState<string>('')
     const [injectMode, setInjectMode] = useState<'soft' | 'hard' | 'pre_talk'>('soft')
     const [injectText, setInjectText] = useState('')
@@ -662,7 +685,8 @@ export default function SquadDetailPage() {
                         <div className="sw-composer__body">
                             {isDraft ? (
                                 <div className="sw-input-box">
-                                    <textarea rows={2} placeholder="描述这次要协作完成的任务…" value={prompt} onChange={(e) => setPrompt(e.target.value)}/>
+                                    <div className="sw-input-box__resizer" title="向上拖动调整输入框高度" onMouseDown={startInputResize}/>
+                                    <textarea rows={2} placeholder="描述这次要协作完成的任务…" value={prompt} onChange={(e) => setPrompt(e.target.value)}style={{height: inputHeight}}/>
                                     <div className="sw-input-box__footer"><Button variant="solid" size="sm" disabled={!prompt.trim() || starting} onClick={() => void handleStart()}>{starting ? '启动中…' : '开始运行'}</Button></div>
                                 </div>
                             ) : canInject ? (
@@ -688,7 +712,8 @@ export default function SquadDetailPage() {
                                         </span>
                                     </div>
                                     <div className="sw-input-box">
-                                        <textarea rows={2} placeholder="补充说明、纠偏指令…" value={injectText} onChange={(e) => setInjectText(e.target.value)}/>
+                                        <div className="sw-input-box__resizer" title="向上拖动调整输入框高度" onMouseDown={startInputResize}/>
+                                        <textarea rows={2} placeholder="补充说明、纠偏指令…" value={injectText} onChange={(e) => setInjectText(e.target.value)}style={{height: inputHeight}}/>
                                         <div className="sw-input-box__footer"><Button variant="solid" size="sm" disabled={injectBusy || !injectText.trim()} onClick={() => void handleInject()}>{injectBusy ? '发送中…' : '发送'}</Button></div>
                                     </div>
                                 </>

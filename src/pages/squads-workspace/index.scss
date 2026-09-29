@@ -1908,7 +1908,12 @@
 /* 指令坞 */
 .sw-composer { flex: none; }
 .sw-composer__body { padding: 8px 12px 12px; display: flex; flex-direction: column; gap: 8px; }
-.sw-composer__row { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+.sw-composer__row {
+  display: flex; align-items: center; gap: 7px; flex-wrap: wrap;
+  width: 50%; max-width: 720px; margin: 0 auto;
+}
+@media (max-width: 1200px) { .sw-composer__row { width: 85%; max-width: none; } }
+@media (max-width: 700px)  { .sw-composer__row { width: 95%; max-width: none; } }
 .sw-inject-hint { font-size: 10.5px; color: var(--color-foreground-muted); }
 
 .sw-seg { display: inline-flex; border: 1px solid var(--swborder); border-radius: 8px; overflow: hidden; background: var(--color-background-subtle); }
@@ -1931,20 +1936,34 @@
   background: var(--color-background-muted, var(--swborder));
   display: flex; align-items: center; justify-content: center;
 }
-/* 输入框（对齐 Agent 对话页样式）：圆角 18 / focus 主色描边 / 内嵌无边框输入区 + 右下操作按钮 */
+/* 输入框（对齐 Agent 对话页）：悬浮居中限宽 + 圆角 18 + focus 主色 + 可拖拽高度 */
 .sw-input-box {
   display: flex; flex-direction: column; gap: 4px;
-  padding: 8px 10px;
+  width: 50%; max-width: 720px; margin: 0 auto;
+  padding: 6px 12px 10px;
   border: 1px solid var(--color-border, var(--swborder));
   border-radius: 18px;
   background: var(--swbg);
   transition: border-color .15s;
 }
+@media (max-width: 1200px) { .sw-input-box { width: 85%; max-width: none; } }
+@media (max-width: 700px)  { .sw-input-box { width: 95%; max-width: none; } }
 .sw-input-box:focus-within { border-color: #0ea5e9; }
+/* 顶部拖动条：向上拖拽调整输入区高度（对齐对话页 input-resizer） */
+.sw-input-box__resizer {
+  flex: 0 0 auto; height: 10px; margin: -4px 0 0;
+  display: flex; align-items: center; justify-content: center;
+  cursor: row-resize; user-select: none; touch-action: none;
+}
+.sw-input-box__resizer::after {
+  content: ''; width: 36px; height: 4px; border-radius: 999px;
+  background: var(--color-border, var(--swborder)); opacity: .8;
+}
+.sw-input-box__resizer:hover::after { background: #0ea5e9; }
 .sw-input-box textarea {
   width: 100%; box-sizing: border-box; resize: none; outline: none;
   border: none; background: transparent;
-  min-height: 42px; max-height: 180px; padding: 4px 6px;
+  padding: 4px 6px; min-height: 40px;
   font-family: inherit; font-size: 13px; line-height: 1.55;
   color: var(--color-foreground);
 }
