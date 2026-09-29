@@ -1,0 +1,905 @@
+<!-- AI生成 -->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>小分队工作台 · UI 设计稿 · 像素舞台</title>
+<style>
+/* 出厂默认 .accent-minimal：Zinc 灰阶 + 晴空蓝（白底） */
+:root{
+  --bg:#ffffff; --bg-subtle:#fafafa; --bg-muted:#f4f4f5;
+  --fg:#27272a; --fg-muted:#71717a; --fg-intense:#18181b;
+  --border:#e4e4e7; --border-muted:#f4f4f5;
+  --brand-50:#f0f9ff; --brand-100:#e0f2fe; --brand-200:#bae6fd;
+  --brand-300:#7dd3fc; --brand-400:#38bdf8; --brand-500:#0ea5e9; --brand-600:#0284c7;
+  --brand-700:#0369a1; --brand-800:#075985;
+  --success:#16a34a; --success-50:#dcfce7;
+  --warning:#d97706; --warning-50:#fef3c7;
+  --danger:#ef4444; --danger-50:#fee2e2;
+  --lilac:#8b5cf6; --lilac-50:#f5f3ff;
+  --shadow-sm:0 2px 12px rgba(0,0,0,.03);
+  --shadow-md:0 8px 32px rgba(0,0,0,.04);
+  --radius:12px;
+  --font:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{font-family:var(--font);background:var(--bg);color:var(--fg);font-size:13px;line-height:1.5;overflow:hidden}
+.app{display:flex;flex-direction:column;height:100vh;padding:12px 14px 14px;gap:10px}
+
+/* 顶栏 */
+.topbar{
+  flex:none;display:flex;align-items:center;gap:12px;
+  padding:10px 14px;background:var(--bg-subtle);border:1px solid var(--border);border-radius:var(--radius);
+}
+.topbar__back{width:30px;height:30px;display:flex;align-items:center;justify-content:center;border-radius:8px;border:1px solid var(--border);background:var(--bg);cursor:pointer;color:var(--fg-muted);font-size:16px}
+.topbar__logo{width:36px;height:36px;border-radius:10px;background:linear-gradient(135deg,var(--brand-500),var(--success));display:flex;align-items:center;justify-content:center;color:#fff;font-size:15px;font-weight:700;flex:none}
+.topbar__id{min-width:0;display:flex;flex-direction:column;gap:2px}
+.topbar__name{font-size:15px;font-weight:650;color:var(--fg-intense);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.topbar__meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:11px;color:var(--fg-muted)}
+.topbar__spacer{flex:1}
+.pill{display:inline-flex;align-items:center;gap:5px;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:500;white-space:nowrap}
+.pill--mode{background:var(--brand-100);color:var(--brand-800)}
+.pill--live{background:var(--success-50);color:#16a34a}
+.pill--muted{background:var(--bg-muted);color:var(--fg-muted)}
+.pill .dot{width:6px;height:6px;border-radius:50%;background:currentColor;flex:none}
+.pill--live .dot{animation:pulse 1.6s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+.crew{display:flex;align-items:center}
+.crew__slot{width:30px;height:30px;border-radius:8px;background:var(--bg-muted);border:1.5px solid var(--bg-subtle);margin-left:-5px;overflow:hidden;flex:none;display:flex;align-items:center;justify-content:center}
+.crew__slot:first-child{margin-left:0}
+.crew__slot.is-active{border-color:var(--success);box-shadow:0 0 0 2px color-mix(in srgb,var(--success) 35%,transparent)}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;border-radius:8px;border:1px solid transparent;cursor:pointer;font-family:inherit;font-size:12px;font-weight:550;padding:0 12px;height:30px;transition:.15s;white-space:nowrap}
+.btn--solid{background:var(--brand-600);color:#fff}
+.btn--ghost{background:transparent;color:var(--fg-muted);border-color:var(--border)}
+.btn--outline{background:var(--bg);color:var(--fg);border-color:var(--border)}
+.btn--sm{height:26px;padding:0 9px;font-size:11px}
+.btn--icon{width:28px;height:28px;padding:0}
+
+/* 两栏主体：左会话 + 中主区；右栏悬浮不占位 */
+.body{
+  flex:1;min-height:0;
+  display:grid;
+  grid-template-columns:270px minmax(0,1fr);
+  gap:10px;
+}
+/* 悬浮右栏（不挤压中间） */
+.aside-float{
+  position:fixed;top:64px;right:14px;bottom:14px;
+  width:300px;z-index:40;
+  display:flex;flex-direction:column;
+  transform:translateX(calc(100% + 20px));
+  transition:transform .28s cubic-bezier(.2,.8,.3,1);
+  filter:drop-shadow(-8px 0 28px rgba(0,0,0,.12));
+}
+.aside-float.is-open{transform:translateX(0)}
+.aside-float .panel-aside{
+  flex:1;min-height:0;overflow:hidden;
+  background:var(--bg-subtle);
+  border:1px solid var(--border);
+  border-right:none;
+  border-radius:14px 0 0 14px;
+}
+/* 悬浮把手：贴右缘，始终可见 */
+.aside-toggle{
+  position:fixed;top:50%;right:0;transform:translateY(-50%);
+  z-index:50;width:22px;height:72px;
+  border:1px solid var(--border);border-right:none;
+  border-radius:10px 0 0 10px;
+  background:var(--brand-50);cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+  color:var(--brand-700);font-size:14px;font-weight:700;
+  box-shadow:-4px 0 14px rgba(0,0,0,.08);
+  transition:background .15s,width .15s;
+}
+.aside-toggle:hover{background:var(--brand-100);width:26px;color:var(--brand-800)}
+.aside-float.is-open + .aside-toggle{
+  right:308px;
+  border-radius:10px 0 0 10px;
+}
+.panel{background:var(--bg-subtle);border:1px solid var(--border);border-radius:var(--radius);display:flex;flex-direction:column;min-height:0;overflow:hidden}
+.panel__body{flex:1;min-height:0;overflow-y:auto;padding:10px 12px 12px;display:flex;flex-direction:column;gap:8px}
+.panel__body::-webkit-scrollbar{width:6px}
+.panel__body::-webkit-scrollbar-thumb{background:var(--border);border-radius:999px}
+
+/* 左：会话栏 */
+.side__cta{display:flex;gap:8px;padding:10px 12px;border-bottom:1px solid var(--border-muted)}
+.side__cta .btn{flex:1}
+.chips{display:flex;gap:6px;padding:8px 12px 0;flex-wrap:wrap}
+.chip{padding:3px 10px;border-radius:999px;font-size:11px;border:1px solid var(--border);background:var(--bg);color:var(--fg-muted);cursor:pointer}
+.chip.is-on{background:var(--brand-600);border-color:var(--brand-600);color:#fff}
+.scard{border:1px solid var(--border);border-left:3px solid transparent;border-radius:10px;padding:10px 11px;background:var(--bg);cursor:pointer;display:flex;flex-direction:column;gap:7px;transition:.15s}
+.scard:hover{border-color:var(--brand-300);box-shadow:var(--shadow-sm)}
+.scard.is-selected{border-color:var(--brand-500);border-left-color:var(--brand-600);background:var(--brand-50)}
+.scard.is-active{border-left-color:var(--success)}
+.scard.is-await{border-left-color:var(--warning)}
+.scard.is-fail{border-left-color:var(--danger)}
+.scard.is-done{border-left-color:var(--border)}
+.scard__top{display:flex;align-items:center;gap:8px;min-width:0}
+.scard__pulse{width:7px;height:7px;border-radius:50%;flex:none;background:var(--success);animation:pulse 1.6s infinite}
+.scard__pulse--warn{background:var(--warning);animation:none}
+.scard__title{flex:1;min-width:0;font-size:12.5px;font-weight:600;color:var(--fg-intense);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.scard__meta{display:flex;align-items:center;justify-content:space-between;gap:6px;font-size:11px;color:var(--fg-muted)}
+.scard__ops{display:flex;align-items:center;gap:2px;opacity:0;max-height:0;overflow:hidden;transition:.15s}
+.scard:hover .scard__ops,.scard.is-selected .scard__ops{opacity:1;max-height:28px}
+.scard__prog{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--fg-muted)}
+.scard__bar{flex:1;height:4px;border-radius:999px;background:var(--bg-muted);overflow:hidden}
+.scard__bar i{display:block;height:100%;background:var(--brand-500);border-radius:999px}
+
+/* 中：主区 */
+.main{display:flex;flex-direction:column;min-height:0}
+.modebar{flex:none;display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid var(--border);background:var(--bg-subtle);flex-wrap:wrap}
+.modebar__label{font-size:11px;color:var(--fg-muted);font-weight:600;letter-spacing:.04em}
+.mode-tab{display:flex;align-items:center;gap:7px;padding:5px 12px;border-radius:9px;cursor:pointer;border:1.5px solid var(--border);background:var(--bg);font-size:12px;font-weight:600;color:var(--fg-muted);transition:.18s}
+.mode-tab:hover{border-color:var(--brand-300);color:var(--brand-700)}
+.mode-tab.is-on{border-color:var(--brand-600);color:var(--brand-800);background:var(--brand-50);box-shadow:0 0 0 3px color-mix(in srgb,var(--brand-500) 22%,transparent)}
+.mode-tab.is-on[data-mode="pipeline"]{border-color:#0ea5e9;color:#0369a1;background:#f0f9ff;box-shadow:0 0 0 3px color-mix(in srgb,#0ea5e9 22%,transparent)}
+.mode-tab.is-on[data-mode="chat"]{border-color:var(--lilac);color:#5b21b6;background:var(--lilac-50);box-shadow:0 0 0 3px color-mix(in srgb,var(--lilac) 22%,transparent)}
+.mode-tab__ico{font-size:14px}
+.mode-tab__desc{font-size:10px;font-weight:400;opacity:.75;margin-left:2px}
+.modebar__spacer{flex:1}
+
+/* 中间区双视图：对话 / 舞台（无分屏） */
+.viewseg{display:inline-flex;border:1px solid var(--border);border-radius:8px;overflow:hidden;background:var(--bg);flex:none}
+.viewseg__item{padding:4px 11px;font-size:11px;font-weight:600;color:var(--fg-muted);cursor:pointer;display:flex;align-items:center;gap:4px}
+.viewseg__item+.viewseg__item{border-left:1px solid var(--border)}
+.viewseg__item.is-on{background:var(--brand-600);color:#fff}
+
+/* 视图布局 */
+.main[data-view="stage"] .stage{height:100%;flex:1;border-bottom:none}
+.main[data-view="stage"] .timeline,
+.main[data-view="stage"] .gate,
+.main[data-view="stage"] .composer{display:none}
+.main[data-view="dialog"] .stage{display:none}
+.main[data-view="dialog"] .timeline{flex:1}
+.main[data-view="dialog"] .gate,
+.main[data-view="dialog"] .composer{display:flex}
+.main[data-view="dialog"] .timeline{padding:14px 16px 10px;gap:9px}
+.main[data-view="dialog"] .round{padding:11px 13px}
+.main[data-view="dialog"] .round__content{font-size:13px;line-height:1.7}
+.main[data-view="dialog"] .round__name{font-size:13px}
+
+/* ---------- 像素舞台：场景 + 走动小人（无框） ---------- */
+.stage{flex:none;position:relative;overflow:hidden;border-bottom:1px solid var(--border);background:#2c2c2c}
+.scene{position:absolute;inset:0;image-rendering:pixelated}
+.scene svg{width:100%;height:100%;display:block;image-rendering:pixelated}
+
+.walker{position:absolute;z-index:5;cursor:pointer;transition:left 1.2s linear,top 1.2s linear;filter:drop-shadow(0 2px 3px rgba(0,0,0,.25))}
+.walker:hover{z-index:10}
+.walker:hover .walker__glow{opacity:1}
+.walker__glow{position:absolute;left:50%;top:55%;transform:translate(-50%,-50%);width:48px;height:48px;border-radius:50%;background:radial-gradient(circle,rgba(255,255,255,.45),transparent 70%);opacity:0;transition:.2s;pointer-events:none}
+.walker__name{position:absolute;left:50%;bottom:-16px;transform:translateX(-50%);font-size:10px;font-weight:700;color:#fff;background:rgba(0,0,0,.55);padding:1px 7px;border-radius:6px;white-space:nowrap;pointer-events:none}
+.walker.is-selected .walker__name{background:var(--brand-500);color:#fff;box-shadow:0 0 0 2px #fff}
+.walker.is-walking .pa-wrap{animation:walk-bob .35s ease-in-out infinite}
+.walker.is-working .pa-wrap{animation:work-bounce .9s ease-in-out infinite}
+.walker.is-speaking .pa-wrap{animation:speak-rock 1.1s ease-in-out infinite}
+.walker.is-idle .pa-wrap{animation:idle-breathe 2.8s ease-in-out infinite}
+.pa-wrap{display:block;line-height:0}
+
+.chat-card{position:absolute;z-index:20;width:240px;padding:12px;background:#fff;border-radius:12px;border:2px solid var(--brand-500);box-shadow:0 12px 40px rgba(0,0,0,.25);animation:bubble-pop .3s cubic-bezier(.2,.8,.3,1.2)}
+.chat-card__head{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.chat-card__ava{width:32px;height:32px;border-radius:8px;overflow:hidden;background:var(--bg-muted)}
+.chat-card__name{font-size:13px;font-weight:700;color:var(--fg-intense);flex:1}
+.chat-card__x{width:22px;height:22px;border:none;background:var(--bg-muted);border-radius:6px;cursor:pointer;font-size:12px;color:var(--fg-muted);display:flex;align-items:center;justify-content:center}
+.chat-card__msg{font-size:12px;line-height:1.65;color:var(--fg);background:var(--bg-subtle);padding:8px 10px;border-radius:8px;margin-bottom:8px;min-height:48px}
+.chat-card__row{display:flex;gap:6px}
+.chat-card__row input{flex:1;min-width:0;border:1px solid var(--border);border-radius:8px;padding:6px 9px;font-size:12px;font-family:inherit;outline:none}
+.chat-card__row input:focus{border-color:var(--brand-500)}
+.chat-card__send{padding:0 12px;height:30px;border:none;border-radius:8px;background:var(--brand-600);color:#fff;font-size:12px;font-weight:600;cursor:pointer}
+/* 对话卡内的插话方式 */
+.chat-card__modes{display:flex;align-items:center;gap:4px;margin-bottom:8px;flex-wrap:wrap}
+.chat-card__modes span{font-size:10px;color:var(--fg-muted)}
+.chat-card__mode{
+  padding:3px 8px;border-radius:6px;font-size:10.5px;font-weight:600;
+  border:1px solid var(--border);background:var(--bg);color:var(--fg-muted);cursor:pointer;
+}
+.chat-card__mode.is-on{background:var(--brand-600);border-color:var(--brand-600);color:#fff}
+.chat-card__mode-hint{font-size:9.5px;color:var(--fg-muted);width:100%;margin-top:2px;line-height:1.4}
+
+.float-bubble{position:absolute;z-index:15;padding:4px 9px;border-radius:10px;font-size:11px;font-weight:550;background:#fff;border:1.5px solid var(--lilac);color:#5b21b6;box-shadow:var(--shadow-md);white-space:nowrap;animation:bubble-pop .35s ease;pointer-events:none}
+.float-bubble::after{content:'';position:absolute;bottom:-5px;left:50%;transform:translateX(-50%);border:5px solid transparent;border-top-color:#fff}
+
+@keyframes idle-breathe{0%,100%{transform:translateY(0) scale(1)}50%{transform:translateY(-3px) scale(1.02)}}
+@keyframes work-bounce{0%,100%{transform:translateY(0)}30%{transform:translateY(-5px)}60%{transform:translateY(1px)}}
+@keyframes speak-rock{0%,100%{transform:rotate(-2deg) translateY(0)}50%{transform:rotate(2deg) translateY(-3px)}}
+@keyframes walk-bob{0%,100%{transform:translateY(0) rotate(-2deg)}50%{transform:translateY(-5px) rotate(2deg)}}
+@keyframes bubble-pop{from{opacity:0;transform:translateY(8px) scale(.8)}to{opacity:1;transform:translateY(0) scale(1)}}
+
+/* 时间线 */
+.timeline{flex:1;min-height:0;overflow-y:auto;padding:10px 12px 6px;display:flex;flex-direction:column;gap:7px}
+.timeline::-webkit-scrollbar{width:6px}
+.timeline::-webkit-scrollbar-thumb{background:var(--border);border-radius:999px}
+.round{display:flex;gap:9px;align-items:flex-start;padding:8px 10px;border-radius:10px;background:var(--bg);border:1px solid var(--border-muted)}
+.round--highlight{border-color:var(--brand-200);background:linear-gradient(135deg,var(--brand-50),var(--bg))}
+.round--gate{border-color:#fcd34d;background:var(--warning-50)}
+.round--sys{background:var(--bg-subtle);border-style:dashed}
+.round__pa{width:30px;height:30px;flex:none;border-radius:8px;overflow:hidden;background:var(--bg-muted);display:flex;align-items:center;justify-content:center}
+.round__pa--lead{box-shadow:0 0 0 1.5px var(--brand-500)}
+.round__pa--user{background:#ede9fe;color:#5b21b6;font-size:12px;font-weight:700}
+.round__body{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}
+.round__head{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.round__name{font-size:12px;font-weight:650;color:var(--fg-intense)}
+.round__time{font-size:10px;color:var(--fg-muted);margin-left:auto}
+.badge{display:inline-flex;align-items:center;padding:1px 6px;border-radius:5px;font-size:10px;font-weight:600}
+.badge--msg{background:#dcfce7;color:#166534}
+.badge--plan{background:#e0e7ff;color:#3730a3}
+.badge--hand{background:#cffafe;color:#0e7490}
+.badge--sys{background:var(--bg-muted);color:var(--fg-muted)}
+.badge--gate{background:#fef3c7;color:#92400e}
+.badge--metrics{background:var(--brand-100);color:var(--brand-800)}
+.badge--inject{background:#ede9fe;color:#5b21b6}
+.round__content{font-size:12px;line-height:1.6;color:var(--fg);white-space:pre-wrap;word-break:break-word}
+.round__content code{font-size:11px;padding:1px 5px;border-radius:4px;background:var(--bg-muted);color:var(--brand-800)}
+
+/* 门禁 */
+.gate{flex:none;display:flex;align-items:center;gap:10px;margin:0 12px 8px;padding:9px 12px;border-radius:10px;border:1.5px solid var(--warning);background:linear-gradient(90deg,var(--warning-50),#fff7ed)}
+.gate__pa{width:36px;height:36px;flex:none;border-radius:10px;background:var(--bg);border:1px solid var(--border);overflow:hidden;display:flex;align-items:center;justify-content:center}
+.gate__text{flex:1;min-width:0}
+.gate__title{font-size:12px;font-weight:650;color:var(--fg-intense)}
+.gate__sub{font-size:10.5px;color:var(--fg-muted)}
+.gate__acts{display:flex;gap:6px;flex:none}
+
+/* 指令坞 */
+.composer{flex:none;margin:0 12px 12px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg);box-shadow:var(--shadow-sm);overflow:hidden}
+.composer__body{padding:10px 11px;display:flex;flex-direction:column;gap:8px}
+.composer__row{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+.seg{display:inline-flex;border:1px solid var(--border);border-radius:8px;overflow:hidden;background:var(--bg-subtle)}
+.seg__item{padding:4px 10px;font-size:11px;font-weight:550;color:var(--fg-muted);cursor:pointer}
+.seg__item+.seg__item{border-left:1px solid var(--border)}
+.seg__item.is-on{background:var(--brand-600);color:#fff}
+.member-pick{display:flex;align-items:center;gap:5px;padding:3px 10px 3px 4px;border-radius:999px;border:1px solid var(--border);background:var(--bg-subtle);font-size:11px;color:var(--fg-muted);cursor:pointer}
+.member-pick.is-on{border-color:var(--brand-500);background:var(--brand-50);color:var(--brand-800);font-weight:600;box-shadow:0 0 0 2px color-mix(in srgb,var(--brand-500) 25%,transparent)}
+.member-pick__pa{width:22px;height:22px;border-radius:6px;overflow:hidden;background:var(--bg-muted);display:flex;align-items:center;justify-content:center}
+.input-row{display:flex;align-items:flex-end;gap:8px}
+.input-row textarea{flex:1;min-width:0;border:1px solid var(--border);border-radius:10px;padding:9px 11px;font-family:inherit;font-size:12.5px;color:var(--fg);background:var(--bg-subtle);resize:none;outline:none}
+.input-row textarea:focus{border-color:var(--brand-500);box-shadow:0 0 0 3px color-mix(in srgb,var(--brand-500) 22%,transparent)}
+
+/* 右：成员 / 记忆 */
+.rtabs{display:flex;gap:0;padding:0 8px;border-bottom:1px solid var(--border-muted);background:var(--bg-subtle);flex:none}
+.rtabs__item{padding:9px 11px;font-size:11.5px;font-weight:600;color:var(--fg-muted);cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px}
+.rtabs__item.is-on{color:var(--brand-700);border-bottom-color:var(--brand-600)}
+.mrow{display:flex;align-items:center;gap:9px;padding:7px 9px;border-radius:10px;background:var(--bg);border:1px solid var(--border-muted)}
+.mrow:hover{border-color:var(--brand-300)}
+.mrow__pa-wrap{position:relative;flex:none;width:38px;height:38px}
+.mrow__pa{width:38px;height:38px;border-radius:10px;overflow:hidden;background:var(--bg-muted);display:flex;align-items:center;justify-content:center}
+.mrow__pa--lead{box-shadow:0 0 0 1.5px var(--brand-500)}
+.mrow__bubble{position:absolute;top:-3px;right:-3px;width:12px;height:12px;border-radius:50%;background:var(--success);border:2px solid var(--bg-subtle)}
+.mrow__bubble--work{background:var(--brand-500);animation:pulse 1.2s infinite}
+.mrow__bubble--think{background:var(--warning);animation:pulse 1.6s infinite}
+.mrow__bubble--idle{background:var(--border)}
+.mrow__info{flex:1;min-width:0}
+.mrow__name{font-size:12px;font-weight:600;color:var(--fg-intense)}
+.mrow__role{font-size:10.5px;color:var(--fg-muted)}
+.mrow__state{font-size:10px;padding:1px 7px;border-radius:999px;flex:none;background:var(--success-50);color:#16a34a}
+.mrow__state--idle{background:var(--bg-muted);color:var(--fg-muted)}
+.mrow__state--work{background:var(--brand-50);color:var(--brand-700)}
+.mem{padding:8px 10px;border-radius:9px;background:var(--bg);border:1px solid var(--border-muted);display:flex;flex-direction:column;gap:3px}
+.mem__head{display:flex;align-items:center;gap:6px}
+.mem__key{font-size:12px;font-weight:650;color:var(--fg-intense);flex:1}
+.mem__cat{font-size:10px;padding:1px 6px;border-radius:4px;background:var(--brand-50);color:var(--brand-800)}
+.mem__body{font-size:11px;color:var(--fg-muted);line-height:1.5}
+
+.note{position:fixed;right:12px;bottom:10px;z-index:99;background:rgba(24,24,27,.9);color:#fafafa;font-size:10.5px;padding:7px 11px;border-radius:8px;max-width:320px;line-height:1.55;pointer-events:none}
+.note b{color:#7dd3fc}
+
+/* PixelAgent 帧动画 */
+.pixel-agent{display:block;image-rendering:pixelated}
+.pixel-agent .pa-fb{opacity:0}
+.pixel-agent.is-motion.pixel-agent--working .pa-fa,
+.pixel-agent.is-motion.pixel-agent--waiting .pa-fa,
+.pixel-agent.is-motion.pixel-agent--speaking .pa-fa,
+.pixel-agent.is-motion.pixel-agent--handoff .pa-fa{animation:pa-show-a .5s steps(1,end) infinite}
+.pixel-agent.is-motion.pixel-agent--working .pa-fb,
+.pixel-agent.is-motion.pixel-agent--waiting .pa-fb,
+.pixel-agent.is-motion.pixel-agent--speaking .pa-fb,
+.pixel-agent.is-motion.pixel-agent--handoff .pa-fb{animation:pa-show-b .5s steps(1,end) infinite}
+.pixel-agent.is-motion.pixel-agent--thinking .pa-dot1,
+.pixel-agent.is-motion.pixel-agent--waiting .pa-dot1,
+.pixel-agent.is-motion.pixel-agent--cheer .pa-dot1{animation:pa-blink 1.2s steps(1,end) infinite}
+.pixel-agent.is-motion.pixel-agent--thinking .pa-dot2,
+.pixel-agent.is-motion.pixel-agent--waiting .pa-dot2,
+.pixel-agent.is-motion.pixel-agent--cheer .pa-dot2{animation:pa-blink 1.2s steps(1,end) .4s infinite}
+.pixel-agent.is-motion.pixel-agent--thinking .pa-dot3,
+.pixel-agent.is-motion.pixel-agent--waiting .pa-dot3,
+.pixel-agent.is-motion.pixel-agent--cheer .pa-dot3{animation:pa-blink 1.2s steps(1,end) .8s infinite}
+.pixel-agent.is-motion.pixel-agent--error .pa-alert{animation:pa-blink .9s steps(1,end) infinite}
+@keyframes pa-show-a{0%,49.9%{opacity:1}50%,100%{opacity:0}}
+@keyframes pa-show-b{0%,49.9%{opacity:0}50%,100%{opacity:1}}
+@keyframes pa-blink{0%,49.9%{opacity:1}50%,100%{opacity:.15}}
+@media (prefers-reduced-motion: reduce){
+  .pixel-agent.is-motion .pa-fa,.pixel-agent.is-motion .pa-fb,
+  .pixel-agent.is-motion .pa-dot1,.pixel-agent.is-motion .pa-dot2,
+  .pixel-agent.is-motion .pa-dot3,.pixel-agent.is-motion .pa-alert{animation:none !important}
+  .pixel-agent.is-motion .pa-fb{opacity:0}
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <button class="topbar__back">←</button>
+    <div class="topbar__logo">全</div>
+    <div class="topbar__id">
+      <div class="topbar__name">全栈交付小分队</div>
+      <div class="topbar__meta">
+        <span class="pill pill--mode">⚡ 编排式</span>
+        <span class="pill pill--live"><i class="dot"></i>运行中 · 00:12:34</span>
+        <span class="pill pill--muted">📁 /workspace/squad-fullstack</span>
+      </div>
+    </div>
+    <div class="topbar__spacer"></div>
+    <div class="crew" id="topCrew"></div>
+    <button class="btn btn--ghost btn--sm">⚙ 编辑编制</button>
+    <button class="btn btn--ghost btn--sm">⋯</button>
+  </header>
+
+  <div class="body">
+    <!-- 左：会话栏 -->
+    <aside class="panel">
+      <div class="side__cta">
+        <button class="btn btn--solid" style="flex:1">＋ 新建任务</button>
+        <button class="btn btn--ghost btn--icon">🧠</button>
+      </div>
+      <div class="chips">
+        <span class="chip is-on">全部 8</span>
+        <span class="chip">运行中 2</span>
+        <span class="chip">待决议 1</span>
+        <span class="chip">已完成 5</span>
+      </div>
+      <div class="panel__body">
+        <div class="scard is-selected is-active">
+          <div class="scard__top"><i class="scard__pulse"></i><div class="scard__title">搭建订单管理前后端与回归</div></div>
+          <div class="scard__meta"><span class="pill pill--live"><i class="dot"></i>运行中</span><span>09-29 18:12</span></div>
+          <div class="scard__prog"><span>3/5</span><div class="scard__bar"><i style="width:60%"></i></div></div>
+          <div class="scard__ops"><button class="btn btn--ghost btn--icon btn--sm">⏸</button><button class="btn btn--ghost btn--icon btn--sm">⏹</button></div>
+        </div>
+        <div class="scard is-await">
+          <div class="scard__top"><i class="scard__pulse scard__pulse--warn"></i><div class="scard__title">知识库检索性能优化方案评审</div></div>
+          <div class="scard__meta"><span class="pill" style="background:var(--warning-50);color:var(--warning)">⏸ 待决议</span><span>09-29 16:40</span></div>
+          <div class="scard__ops"><button class="btn btn--ghost btn--icon btn--sm">▶</button><button class="btn btn--ghost btn--icon btn--sm">⏹</button></div>
+        </div>
+        <div class="scard is-done">
+          <div class="scard__top"><div class="scard__title">生成 Q3 数据管道报告</div></div>
+          <div class="scard__meta"><span class="pill" style="background:var(--success-50);color:#16a34a">✓ 已完成</span><span>09-28 22:05</span></div>
+          <div class="scard__ops"><button class="btn btn--ghost btn--icon btn--sm">↻</button><button class="btn btn--ghost btn--icon btn--sm">🗑</button></div>
+        </div>
+        <div class="scard is-fail">
+          <div class="scard__top"><div class="scard__title">对接支付网关联调</div></div>
+          <div class="scard__meta"><span class="pill" style="background:var(--danger-50);color:var(--danger)">✕ 失败</span><span>09-28 15:20</span></div>
+          <div class="scard__ops"><button class="btn btn--ghost btn--icon btn--sm">↻</button><button class="btn btn--ghost btn--icon btn--sm">🗑</button></div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- 中：模式 + 双视图 -->
+    <main class="panel main" data-view="stage">
+      <div class="modebar">
+        <span class="modebar__label">协作模式</span>
+        <div class="mode-tab is-on" data-mode="orchestrator"><span class="mode-tab__ico">⚡</span>编排式<span class="mode-tab__desc">主管委派</span></div>
+        <div class="mode-tab" data-mode="pipeline"><span class="mode-tab__ico">🔗</span>流水线<span class="mode-tab__desc">线性接力</span></div>
+        <div class="mode-tab" data-mode="chat"><span class="mode-tab__ico">💬</span>群聊<span class="mode-tab__desc">圆桌发言</span></div>
+        <div class="modebar__spacer"></div>
+        <span class="modebar__label">中间区</span>
+        <div class="viewseg" id="viewSeg">
+          <div class="viewseg__item" data-view="dialog">💬 对话</div>
+          <div class="viewseg__item is-on" data-view="stage">🎮 舞台</div>
+        </div>
+      </div>
+
+      <!-- 像素舞台 -->
+      <div class="stage" id="stage" data-mode="orchestrator">
+        <div class="scene" id="scene"></div>
+        <div id="walkers"></div>
+        <div id="chatCardHost"></div>
+      </div>
+
+      <div class="timeline" id="timeline"></div>
+
+      <div class="gate" id="gateBar">
+        <div class="gate__pa" id="gatePa"></div>
+        <div class="gate__text">
+          <div class="gate__title" id="gateTitle">协作计划待批准</div>
+          <div class="gate__sub" id="gateSub">3 条委派线 · 批准后进入执行</div>
+        </div>
+        <div class="gate__acts">
+          <button class="btn btn--solid btn--sm" id="gateOk">批准计划</button>
+          <button class="btn btn--outline btn--sm" id="gateNo">拒绝</button>
+        </div>
+      </div>
+
+      <div class="composer">
+        <div class="composer__body">
+          <div class="composer__row" id="injectTargets"></div>
+          <div class="composer__row">
+            <span style="font-size:11px;color:var(--fg-muted)">方式</span>
+            <div class="seg">
+              <div class="seg__item is-on">打断</div>
+              <div class="seg__item">强打断</div>
+              <div class="seg__item">预嘱</div>
+            </div>
+            <span style="font-size:10.5px;color:var(--fg-muted)" id="injectHint">插话发给指定成员 · 打断/强打断/预嘱</span>
+          </div>
+          <div class="input-row">
+            <textarea rows="2" placeholder="补充说明、纠偏指令…"></textarea>
+            <button class="btn btn--solid" style="height:38px;padding:0 16px">发送</button>
+          </div>
+        </div>
+      </div>
+    </main>
+
+  </div><!-- /.body -->
+
+  <!-- 悬浮右栏（不占中间宽度） -->
+  <div class="aside-float" id="asideFloat">
+    <aside class="panel panel-aside">
+      <div class="rtabs">
+        <div class="rtabs__item is-on">成员状态</div>
+        <div class="rtabs__item">团队记忆</div>
+        <div class="rtabs__item">决策</div>
+      </div>
+      <div class="panel__body" id="memberPanel"></div>
+    </aside>
+  </div>
+  <button class="aside-toggle" id="asideToggle" title="展开右栏">❯</button>
+</div><!-- /.app -->
+
+<div class="note">
+  <b>舞台模式</b>：像素场景 · 小人自由走动 · 点小人弹对话卡<br/>
+  对话卡含「打断 / 强打断 / 预嘱」三种插话方式<br/>
+  右栏为悬浮侧板，默认收起；点右缘 ❯ 弹出，不挤压中间
+</div>
+
+<script>
+/* ========== PixelAgent 生成器 ========== */
+const PALETTE={
+  skin:{fair:'#FBE8DC',warm1:'#F6D7B0',warm2:'#E8B88A',tan:'#D9A066',deep:'#C68642',cool:'#E0C3A0'},
+  hair:{ink:'#1E1B14',brown:'#3D2B1F',chestnut:'#8B5A2B',amber:'#C47B2C',indigo:'#3D4F8C',rose:'#A64D63',silver:'#B8BEC4'},
+  outfit:{indigo:'#3D4F8C',emerald:'#2F6B4F',amber:'#C47B2C',rose:'#A64D63',sky:'#4A90C4',wine:'#7B3B4B',dark:'#3C4043',mid:'#6B7075',light:'#E8EAED',ink:'#1E1B14'},
+};
+function pixelAgentSVG({size=32,gender='male',skin='warm2',hair='ink',top='indigo',bottom='dark',shoes='ink',accessory='none',state='idle'}={}){
+  const S=PALETTE.skin[skin]||PALETTE.skin.warm2, H=PALETTE.hair[hair]||PALETTE.hair.ink;
+  const T=PALETTE.outfit[top]||PALETTE.outfit.indigo, B=PALETTE.outfit[bottom]||PALETTE.outfit.dark;
+  const SH=PALETTE.outfit[shoes]||PALETTE.outfit.ink;
+  const FACE='#2A2320', RED='#E5484D', LAPTOP='#3C4043', SCREEN='#20242E';
+  const isWorking=state==='working', isSpeaking=state==='speaking'||state==='waiting',
+        isThinking=state==='thinking', isError=state==='error',
+        isHandoff=state==='handoff', isCheer=state==='cheer';
+  let eyes=isError
+    ?`<rect x="12" y="10" width="1" height="1" fill="${FACE}"/><rect x="14" y="10" width="1" height="1" fill="${FACE}"/><rect x="13" y="11" width="1" height="1" fill="${FACE}"/><rect x="13" y="9" width="1" height="1" fill="${FACE}"/><rect x="18" y="10" width="1" height="1" fill="${FACE}"/><rect x="20" y="10" width="1" height="1" fill="${FACE}"/><rect x="19" y="11" width="1" height="1" fill="${FACE}"/><rect x="19" y="9" width="1" height="1" fill="${FACE}"/>`
+    :isThinking?`<rect x="13" y="9" width="2" height="2" fill="${FACE}"/><rect x="19" y="9" width="2" height="2" fill="${FACE}"/>`
+    :`<rect x="13" y="10" width="2" height="2" fill="${FACE}"/><rect x="19" y="10" width="2" height="2" fill="${FACE}"/>`;
+  let mouth=isError?`<rect x="15" y="13" width="3" height="2" fill="${FACE}"/>`
+    :isSpeaking?`<g class="pa-fa"><rect x="15" y="13" width="3" height="1" fill="${FACE}"/></g><g class="pa-fb"><rect x="15" y="13" width="3" height="2" fill="${FACE}"/></g>`
+    :isCheer?`<rect x="14" y="13" width="5" height="1" fill="${FACE}"/><rect x="15" y="14" width="3" height="1" fill="${FACE}"/>`
+    :`<rect x="15" y="13" width="3" height="1" fill="${FACE}"/>`;
+  const hairRects=gender==='female'
+    ?`<rect x="10" y="4" width="12" height="3" fill="${H}"/><rect x="9" y="6" width="2" height="8" fill="${H}"/><rect x="21" y="6" width="2" height="8" fill="${H}"/><rect x="11" y="6" width="10" height="2" fill="${H}"/>`
+    :`<rect x="11" y="4" width="10" height="3" fill="${H}"/><rect x="10" y="6" width="12" height="2" fill="${H}"/>`;
+  let props='';
+  if(isWorking){
+    props=`<g class="pa-fa"><rect x="8" y="20" width="16" height="8" fill="${LAPTOP}"/><rect x="9" y="21" width="14" height="5" fill="${SCREEN}"/><rect x="10" y="22" width="4" height="1" fill="#7EE787"/><rect x="10" y="24" width="6" height="1" fill="#5CA8E0"/></g>
+      <g class="pa-fb"><rect x="8" y="20" width="16" height="8" fill="${LAPTOP}"/><rect x="9" y="21" width="14" height="5" fill="${SCREEN}"/><rect x="10" y="22" width="5" height="1" fill="#7EE787"/><rect x="10" y="24" width="4" height="1" fill="#5CA8E0"/></g>
+      <g class="pa-fa"><rect x="8" y="18" width="2" height="3" fill="${S}"/><rect x="22" y="18" width="2" height="3" fill="${S}"/></g>
+      <g class="pa-fb"><rect x="8" y="19" width="2" height="2" fill="${S}"/><rect x="22" y="19" width="2" height="2" fill="${S}"/></g>`;
+  } else if(isThinking){
+    props=`<rect x="8" y="18" width="2" height="5" fill="${S}"/><rect x="22" y="18" width="2" height="3" fill="${S}"/><rect x="21" y="14" width="2" height="5" fill="${S}"/>`;
+  } else if(isHandoff){
+    props=`<g class="pa-fa"><rect x="8" y="18" width="2" height="5" fill="${S}"/><rect x="22" y="18" width="2" height="4" fill="${S}"/><rect x="24" y="19" width="5" height="3" fill="#A2E2F8"/></g>
+      <g class="pa-fb"><rect x="8" y="18" width="2" height="5" fill="${S}"/><rect x="22" y="18" width="2" height="5" fill="${S}"/><rect x="25" y="18" width="5" height="3" fill="#A2E2F8"/></g>`;
+  } else if(isCheer){
+    props=`<rect x="7" y="14" width="2" height="5" fill="${S}"/><rect x="23" y="14" width="2" height="5" fill="${S}"/><rect x="7" y="13" width="2" height="2" fill="${S}"/><rect x="23" y="13" width="2" height="2" fill="${S}"/>`;
+  } else if(isSpeaking){
+    props=`<g class="pa-fa"><rect x="8" y="18" width="2" height="5" fill="${S}"/><rect x="22" y="18" width="2" height="5" fill="${S}"/></g>
+      <g class="pa-fb"><rect x="8" y="18" width="2" height="4" fill="${S}"/><rect x="22" y="19" width="2" height="4" fill="${S}"/></g>`;
+  } else {
+    props=`<rect x="8" y="18" width="2" height="5" fill="${S}"/><rect x="22" y="18" width="2" height="5" fill="${S}"/>`;
+  }
+  let extras='';
+  if(isThinking) extras=`<rect class="pa-dot1" x="24" y="4" width="2" height="2" fill="#C47B2C"/><rect class="pa-dot2" x="27" y="2" width="2" height="2" fill="#C47B2C"/><rect class="pa-dot3" x="28" y="0" width="2" height="2" fill="#C47B2C"/>`;
+  else if(isError) extras=`<rect class="pa-alert" x="15" y="1" width="2" height="3" fill="${RED}"/><rect class="pa-alert" x="15" y="5" width="2" height="1" fill="${RED}"/>`;
+  else if(isCheer) extras=`<rect class="pa-dot1" x="4" y="3" width="2" height="2" fill="#C47B2C"/><rect class="pa-dot2" x="26" y="5" width="2" height="2" fill="#5CA8E0"/><rect class="pa-dot3" x="6" y="8" width="2" height="2" fill="#7EE787"/>`;
+  else if(state==='waiting') extras=`<rect class="pa-dot1" x="25" y="3" width="2" height="2" fill="#C47B2C"/><rect class="pa-dot2" x="27" y="1" width="1" height="2" fill="#C47B2C"/><rect class="pa-dot3" x="26" y="6" width="1" height="1" fill="#C47B2C"/>`;
+  let acc='';
+  if(accessory==='glasses') acc=`<rect x="12" y="10" width="4" height="2" fill="none" stroke="${FACE}" stroke-width="0.5"/><rect x="18" y="10" width="4" height="2" fill="none" stroke="${FACE}" stroke-width="0.5"/>`;
+  else if(accessory==='headset') acc=`<rect x="9" y="8" width="1" height="5" fill="#3C4043"/><rect x="22" y="8" width="1" height="5" fill="#3C4043"/><rect x="11" y="4" width="10" height="1" fill="#3C4043"/>`;
+  const motionCls=(state&&state!=='idle')?`is-motion pixel-agent--${state}`:'';
+  return `<svg class="pixel-agent ${motionCls}" width="${size}" height="${size}" viewBox="0 0 32 32" shape-rendering="crispEdges">
+    <rect x="11" y="26" width="4" height="4" fill="${B}"/><rect x="17" y="26" width="4" height="4" fill="${B}"/>
+    <rect x="10" y="29" width="5" height="3" fill="${SH}"/><rect x="17" y="29" width="5" height="3" fill="${SH}"/>
+    <rect x="10" y="18" width="12" height="8" fill="${T}"/>
+    <rect x="14" y="16" width="4" height="2" fill="${S}"/>
+    <rect x="11" y="5" width="10" height="11" fill="${S}"/><rect x="10" y="6" width="12" height="9" fill="${S}"/>
+    ${hairRects}${eyes}${mouth}${acc}${props}${extras}
+  </svg>`;
+}
+
+/* ========== 成员 ========== */
+const MEMBERS=[
+  {id:'lead',short:'主',name:'主管',role:'规划 / 调度',ap:{gender:'male',skin:'warm2',hair:'ink',top:'indigo',bottom:'dark',shoes:'ink',accessory:'headset'},live:'work',liveLabel:'调度中',liveCls:'work'},
+  {id:'fe',short:'前',name:'前端',role:'React / 详情',ap:{gender:'female',skin:'warm1',hair:'rose',top:'rose',bottom:'ink',shoes:'wine'},live:'work',liveLabel:'执行中',liveCls:'work'},
+  {id:'be',short:'后',name:'后端',role:'API / 模型',ap:{gender:'male',skin:'tan',hair:'brown',top:'emerald',bottom:'dark',shoes:'ink',accessory:'glasses'},live:'done',liveLabel:'已就绪',liveCls:''},
+  {id:'qa',short:'测',name:'测试',role:'回归 / 验收',ap:{gender:'female',skin:'fair',hair:'amber',top:'sky',bottom:'ink',shoes:'ink'},live:'idle',liveLabel:'待命',liveCls:'idle'},
+  {id:'doc',short:'文',name:'文档',role:'文档 / 日志',ap:{gender:'male',skin:'cool',hair:'silver',top:'amber',bottom:'dark',shoes:'ink'},live:'idle',liveLabel:'待命',liveCls:'idle'},
+];
+const byId=Object.fromEntries(MEMBERS.map(m=>[m.id,m]));
+
+/* 顶栏头像条 */
+document.getElementById('topCrew').innerHTML=MEMBERS.map(m=>{
+  const st=m.live==='work'?'working':'idle';
+  return `<div class="crew__slot ${m.live==='work'?'is-active':''}" title="${m.name}·${m.liveLabel}">${pixelAgentSVG({...m.ap,size:28,state:st})}</div>`;
+}).join('');
+
+/* 指令坞芯片 */
+document.getElementById('injectTargets').innerHTML=
+  `<span style="font-size:11px;color:var(--fg-muted)">目标</span>`+
+  MEMBERS.map((m,i)=>`<div class="member-pick ${i===1?'is-on':''}"><div class="member-pick__pa">${pixelAgentSVG({...m.ap,size:20})}</div>${m.name}</div>`).join('');
+
+/* 右栏成员 */
+document.getElementById('memberPanel').innerHTML=MEMBERS.map(m=>{
+  const st=m.live==='work'?'working':m.live==='done'?'cheer':'idle';
+  const bub=m.live==='work'?'work':m.live==='think'?'think':'idle';
+  return `<div class="mrow">
+    <div class="mrow__pa-wrap">
+      <div class="mrow__pa ${m.id==='lead'?'mrow__pa--lead':''}">${pixelAgentSVG({...m.ap,size:36,state:st})}</div>
+      <div class="mrow__bubble mrow__bubble--${bub}"></div>
+    </div>
+    <div class="mrow__info"><div class="mrow__name">${m.name}${m.id==='lead'?' · 主管':''}</div><div class="mrow__role">${m.role}</div></div>
+    <span class="mrow__state mrow__state--${m.liveCls}">${m.liveLabel}</span>
+  </div>`;
+}).join('');
+
+/* =========================================================
+ * 像素舞台：场景背景 + 自由走动小人 + 点击对话
+ * ========================================================= */
+function sceneSVG(mode){
+  const P=20, W=32, H=18;
+  const px=(x,y,w,h,fill)=>`<rect x="${x*P}" y="${y*P}" width="${w*P}" height="${h*P}" fill="${fill}"/>`;
+  let s=`<svg viewBox="0 0 ${W*P} ${H*P}" preserveAspectRatio="xMidYMid slice" shape-rendering="crispEdges">`;
+
+  if(mode==='orchestrator'){
+    // 开放式办公室：木地板、落地窗、工位、白板、绿植
+    s+=px(0,0,32,2,'#3d2b1f')+px(0,2,32,1,'#5c4033');
+    s+=px(0,3,32,10,'#c4a574');
+    for(let i=0;i<3;i++){
+      const wx=3+i*10;
+      s+=px(wx,4,7,5,'#87ceeb')+px(wx+1,5,2,3,'#b0e0f0');
+      s+=px(wx,4,7,1,'#5c4033')+px(wx,8,7,1,'#5c4033')+px(wx+3,4,1,5,'#5c4033');
+    }
+    s+=px(0,13,32,5,'#d4a574')+px(0,13,32,1,'#c4956a');
+    for(let i=0;i<16;i++){ s+=px(i*2,15,1,1,'#c4956a')+px(i*2+1,17,1,1,'#c4956a'); }
+    s+=px(12,4,8,5,'#f5f5f5')+px(12,4,8,1,'#e0e0e0');
+    s+=px(13,5,3,2,'#90caf9')+px(17,5,2,2,'#a5d6a7')+px(13,7,5,1,'#bdbdbd');
+    s+=px(11,3,1,7,'#90a4ae')+px(20,3,1,7,'#90a4ae');
+    [[2,14],[7,14],[22,14],[27,14]].forEach(([x,y])=>{
+      s+=px(x,y,3,1,'#8d6e63')+px(x,y+1,1,2,'#6d4c41')+px(x+2,y+1,1,2,'#6d4c41')+px(x+1,y-1,1,1,'#455a64');
+    });
+    s+=px(24,5,6,2,'#5c7a99')+px(24,7,6,1,'#4a6a8a');
+    s+=px(0,11,1,2,'#4caf50')+px(31,11,1,2,'#4caf50')+px(0,13,1,1,'#795548')+px(31,13,1,1,'#795548');
+  }
+  if(mode==='pipeline'){
+    // 车间流水线
+    s+=px(0,0,32,2,'#37474f')+px(0,2,32,11,'#546e7a');
+    for(let i=0;i<4;i++){ s+=px(2+i*8,3,5,3,'#b3e5fc')+px(2+i*8,3,5,1,'#81d4fa'); }
+    s+=px(0,13,32,5,'#78909c')+px(0,13,32,1,'#607d8b');
+    s+=px(0,15,32,2,'#455a64')+px(0,15,32,1,'#546e7a');
+    for(let i=0;i<32;i+=2){ s+=px(i,15,1,2,'#37474f'); }
+    s+=px(1,4,4,1,'#8d6e63')+px(1,7,4,1,'#8d6e63')+px(1,4,1,4,'#6d4c41')+px(4,4,1,4,'#6d4c41');
+    s+=px(2,5,1,1,'#ffb74d')+px(3,5,1,1,'#4fc3f7')+px(2,8,1,1,'#81c784');
+    s+=px(26,4,4,1,'#8d6e63')+px(26,7,4,1,'#8d6e63')+px(26,4,1,4,'#6d4c41')+px(29,4,1,4,'#6d4c41');
+    s+=px(27,5,1,1,'#ff8a65')+px(28,5,1,1,'#aed581');
+    for(let i=0;i<32;i+=4){ s+=px(i,12,2,1,'#ffca28')+px(i+2,12,2,1,'#212121'); }
+    s+=px(10,4,1,9,'#455a64')+px(9,3,3,1,'#fff59d');
+    s+=px(21,4,1,9,'#455a64')+px(20,3,3,1,'#fff59d');
+  }
+  if(mode==='chat'){
+    // 会议室：圆桌、投影幕、椅子
+    s+=px(0,0,32,2,'#4e342e')+px(0,2,32,11,'#8d6e63');
+    s+=px(10,3,12,6,'#eceff1')+px(10,3,12,1,'#cfd8dc');
+    s+=px(11,4,6,3,'#90caf9')+px(18,4,3,1,'#a5d6a7')+px(18,6,3,1,'#ffcc80');
+    s+=px(9,2,1,8,'#5d4037')+px(22,2,1,8,'#5d4037');
+    s+=px(2,4,3,3,'#ffcc80')+px(2,4,3,1,'#ffb74d');
+    s+=px(27,4,3,3,'#80cbc4')+px(27,4,3,1,'#4db6ac');
+    s+=px(0,13,32,5,'#5d4037')+px(6,14,20,3,'#6d4c41');
+    s+=px(12,15,8,2,'#a1887f')+px(13,17,6,1,'#8d6e63')+px(14,14,4,1,'#bcaaa4');
+    [[11,15],[20,15],[11,17],[20,17],[15,18],[18,18]].forEach(([x,y])=>{ s+=px(x,y,1,1,'#5d4037'); });
+    s+=px(0,11,1,2,'#66bb6a')+px(31,11,1,2,'#66bb6a')+px(0,13,1,1,'#5d4037')+px(31,13,1,1,'#5d4037');
+    s+=px(15,2,2,1,'#fff59d')+px(16,3,1,1,'#ffe082');
+  }
+  return s+'</svg>';
+}
+
+/* ---------- 走动小人（无框） ---------- */
+const walkerState={};
+function spawnWalkers(mode){
+  const host=document.getElementById('walkers');
+  const spots={
+    orchestrator:[
+      {id:'lead',x:48,y:28,role:'主管 · 调度'},
+      {id:'fe',x:18,y:55,role:'前端'},
+      {id:'be',x:38,y:62,role:'后端 · 执行'},
+      {id:'qa',x:62,y:58,role:'测试'},
+      {id:'doc',x:82,y:52,role:'文档'},
+    ],
+    pipeline:[
+      {id:'fe',x:22,y:58,role:'工位1 · 执行'},
+      {id:'be',x:48,y:58,role:'工位2'},
+      {id:'qa',x:74,y:58,role:'工位3'},
+      {id:'lead',x:35,y:35,role:'调度'},
+      {id:'doc',x:88,y:35,role:'记录'},
+    ],
+    chat:[
+      {id:'lead',x:35,y:48,role:'发言中'},
+      {id:'fe',x:65,y:48,role:'倾听'},
+      {id:'be',x:30,y:68,role:'思考'},
+      {id:'qa',x:70,y:68,role:'倾听'},
+      {id:'doc',x:50,y:72,role:'主笔'},
+    ],
+  };
+  const list=spots[mode]||spots.orchestrator;
+  host.innerHTML=list.map(sp=>{
+    const m=byId[sp.id];
+    const st=sp.role.includes('发言')?'speaking':sp.role.includes('执行')?'working':'idle';
+    walkerState[sp.id]={x:sp.x,y:sp.y,state:st};
+    const anim=st==='working'?'is-working':st==='speaking'?'is-speaking':'is-idle';
+    return `<div class="walker ${anim}" data-id="${sp.id}" style="left:${sp.x}%;top:${sp.y}%">
+      <div class="walker__glow"></div>
+      <div class="pa-wrap">${pixelAgentSVG({...m.ap,size:48,state:st})}</div>
+      <div class="walker__name">${m.name} · ${sp.role}</div>
+    </div>`;
+  }).join('');
+  host.querySelectorAll('.walker').forEach(w=>{
+    w.addEventListener('click',(e)=>{ e.stopPropagation(); openChatCard(w.dataset.id); });
+  });
+  startWander();
+}
+
+let wanderTimer=null;
+function startWander(){
+  if(wanderTimer) clearInterval(wanderTimer);
+  if(window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  wanderTimer=setInterval(()=>{
+    const host=document.getElementById('walkers');
+    if(!host) return;
+    host.querySelectorAll('.walker').forEach(w=>{
+      if(Math.random()>0.35) return;
+      const cur=walkerState[w.dataset.id];
+      if(!cur) return;
+      const nx=Math.max(8,Math.min(88,cur.x+(Math.random()*16-8)));
+      const ny=Math.max(25,Math.min(75,cur.y+(Math.random()*10-5)));
+      w.classList.remove('is-idle','is-working','is-speaking');
+      w.classList.add('is-walking');
+      w.style.left=nx+'%'; w.style.top=ny+'%';
+      cur.x=nx; cur.y=ny;
+      setTimeout(()=>{
+        w.classList.remove('is-walking');
+        w.classList.add(cur.state==='working'?'is-working':cur.state==='speaking'?'is-speaking':'is-idle');
+      },1200);
+    });
+  },2200);
+}
+
+/* ---------- 点击小人 → 对话卡 ---------- */
+function openChatCard(id){
+  const host=document.getElementById('chatCardHost');
+  const m=byId[id];
+  const cur=walkerState[id];
+  const replies={
+    lead:'我正在拆解任务并调度大家，有需要随时插话。',
+    fe:'列表和详情在推进，筛选交互优先。',
+    be:'API 契约已就绪，列表接口支持筛选分页。',
+    qa:'回归用例在补，等联调完就跑。',
+    doc:'文档和变更日志在整理，会同步到黑板。',
+  };
+  const left=cur.x>60?`calc(${cur.x}% - 250px)`:`calc(${cur.x}% + 30px)`;
+  host.innerHTML=`<div class="chat-card" style="left:${left};top:calc(${cur.y}% - 20px)">
+    <div class="chat-card__head">
+      <div class="chat-card__ava">${pixelAgentSVG({...m.ap,size:32})}</div>
+      <div class="chat-card__name">${m.name}</div>
+      <button class="chat-card__x" id="chatClose">✕</button>
+    </div>
+    <div class="chat-card__msg" id="chatMsg">${replies[id]||'你好，有什么要补充的吗？'}</div>
+    <div class="chat-card__modes" id="chatModes">
+      <span>方式</span>
+      <button class="chat-card__mode is-on" data-mode="soft">打断</button>
+      <button class="chat-card__mode" data-mode="hard">强打断</button>
+      <button class="chat-card__mode" data-mode="pre_talk">预嘱</button>
+      <div class="chat-card__mode-hint" id="modeHint">打断：其下一轮生效 · 强打断：优先处理 · 预嘱：任务启动时注入</div>
+    </div>
+    <div class="chat-card__row">
+      <input id="chatInput" placeholder="对 ${m.name} 说…"/>
+      <button class="chat-card__send" id="chatSend">发送</button>
+    </div>
+  </div>`;
+  // 方式切换
+  const modeHints={
+    soft:'打断：其下一轮生效',
+    hard:'强打断：优先处理',
+    pre_talk:'预嘱：任务启动时注入',
+  };
+  let injectMode='soft';
+  host.querySelectorAll('.chat-card__mode').forEach(btn=>{
+    btn.addEventListener('click',()=>{
+      host.querySelectorAll('.chat-card__mode').forEach(x=>x.classList.remove('is-on'));
+      btn.classList.add('is-on');
+      injectMode=btn.dataset.mode;
+      document.getElementById('modeHint').textContent=modeHints[injectMode];
+    });
+  });
+  document.querySelectorAll('.walker').forEach(w=>w.classList.toggle('is-selected',w.dataset.id===id));
+  const w=document.querySelector(`.walker[data-id="${id}"]`);
+  if(w){ w.classList.remove('is-walking'); w.classList.add('is-speaking'); walkerState[id].state='speaking'; }
+  document.getElementById('chatClose').onclick=()=>{
+    host.innerHTML='';
+    document.querySelectorAll('.walker').forEach(w=>w.classList.remove('is-selected'));
+  };
+  const send=()=>{
+    const v=document.getElementById('chatInput').value.trim();
+    if(!v) return;
+    const modeLabel=injectMode==='hard'?'强打断':injectMode==='pre_talk'?'预嘱':'打断';
+    document.getElementById('chatMsg').textContent=`（${modeLabel}已送达）「${v}」——${m.name} 会在下一轮处理。`;
+    document.getElementById('chatInput').value='';
+    floatBubble(id, v.slice(0,12)+(v.length>12?'…':''));
+  };
+  document.getElementById('chatSend').onclick=send;
+  document.getElementById('chatInput').onkeydown=(e)=>{ if(e.key==='Enter') send(); };
+}
+
+function floatBubble(id,text){
+  const cur=walkerState[id];
+  const host=document.getElementById('walkers');
+  const b=document.createElement('div');
+  b.className='float-bubble';
+  b.style.left=`calc(${cur.x}% + 10px)`;
+  b.style.top=`calc(${cur.y}% - 30px)`;
+  b.textContent=text;
+  host.appendChild(b);
+  setTimeout(()=>b.remove(),2200);
+}
+
+/* ---------- 模式元信息 ---------- */
+const MODE_META={
+  orchestrator:{
+    gateTitle:'协作计划待批准 · 主管正在举牌等候',
+    gateSub:'3 条委派线 · 批准后进入执行',
+    gateOk:'批准计划', gateNo:'拒绝', gateState:'waiting',
+    injectHint:'插话发给指定成员 · 打断/强打断/预嘱',
+  },
+  pipeline:{
+    gateTitle:'检查点待决议 · 流水线卡在工位 2',
+    gateSub:'本波工序已完成 · 继续放行或返工',
+    gateOk:'继续执行', gateNo:'要求返工', gateState:'waiting',
+    injectHint:'插话打向当前工位 · 预嘱下一工位生效',
+  },
+  chat:{
+    gateTitle:'主笔汇总待确认 · 行动项可转执行',
+    gateSub:'群聊已收敛 · 确认共识后可转入编排',
+    gateOk:'确认共识', gateNo:'要求修订', gateState:'cheer',
+    injectHint:'插话进群聊 · 打断当前发言者',
+  },
+};
+
+const stage=document.getElementById('stage');
+
+function applyMode(mode){
+  stage.dataset.mode=mode;
+  document.getElementById('scene').innerHTML=sceneSVG(mode);
+  spawnWalkers(mode);
+  document.querySelectorAll('.mode-tab').forEach(t=>t.classList.toggle('is-on',t.dataset.mode===mode));
+  const meta=MODE_META[mode];
+  document.getElementById('gateTitle').textContent=meta.gateTitle;
+  document.getElementById('gateSub').textContent=meta.gateSub;
+  document.getElementById('gateOk').textContent=meta.gateOk;
+  document.getElementById('gateNo').textContent=meta.gateNo;
+  document.getElementById('injectHint').textContent=meta.injectHint;
+  document.getElementById('gatePa').innerHTML=pixelAgentSVG({...byId.lead.ap,size:32,state:meta.gateState});
+  document.getElementById('chatCardHost').innerHTML='';
+}
+
+document.querySelectorAll('.mode-tab').forEach(t=>{
+  t.addEventListener('click',()=>applyMode(t.dataset.mode));
+});
+
+/* ---------- 中间区：对话 / 舞台 ---------- */
+const mainEl=document.querySelector('.main');
+mainEl.dataset.view='stage';
+document.querySelectorAll('#viewSeg .viewseg__item').forEach(v=>{
+  v.addEventListener('click',()=>{
+    document.querySelectorAll('#viewSeg .viewseg__item').forEach(x=>x.classList.remove('is-on'));
+    v.classList.add('is-on');
+    mainEl.dataset.view=v.dataset.view;
+  });
+});
+
+/* 点空白关对话卡 */
+stage.addEventListener('click',(e)=>{
+  if(e.target===stage||e.target.id==='scene'||e.target.tagName==='svg'){
+    document.getElementById('chatCardHost').innerHTML='';
+    document.querySelectorAll('.walker').forEach(w=>w.classList.remove('is-selected'));
+  }
+});
+
+/* ========== 时间线 ========== */
+function renderTimeline(mode){
+  const rounds=[
+    {sys:true,name:'系统',badge:'系统',cls:'sys',time:'18:12:01',
+     content: mode==='pipeline'?'流水线启动 · 3 工位线性串流 · 预算 50k'
+       :mode==='chat'?'群聊启动 · 5 席圆桌 · 主笔收口 · 预算 50k'
+       :'协作启动 · 编排模式 · 5 名成员 · 预算 50k'},
+    {m:'lead',name:'主管',badge:'发言',bc:'msg',time:'18:12:18',state:'speaking',
+     content: mode==='pipeline'?'工序就位：前端 → 后端 → 测试。前序产出自动喂后序。'
+       :mode==='chat'?'开个场：今天把订单管理的契约和优先级对齐。'
+       :'拆解任务：数据模型、API、前端、回归四条线，由我统一调度。'},
+    {m:'lead',name:'主管',badge:'委派规划',bc:'plan',time:'18:12:42',state:'thinking',cls:'highlight',
+     content: mode==='pipeline'?'流水线依赖：工位1前端 → 工位2后端 → 工位3测试。'
+       :mode==='chat'?'（记录）议题：1.契约 2.优先级 3.回归范围'
+       :'委派：1.后端→数据模型+API  2.前端→列表详情  3.测试→回归用例'},
+    {sys:true,name:'门禁',badge:'门禁',bc:'gate',time:'18:12:45',cls:'gate',
+     content: mode==='pipeline'?'工位波次完成，等待检查点决议。'
+       :mode==='chat'?'主笔汇总已生成，等待确认。'
+       :'协作计划已生成，等待批准。'},
+    {m:'be',name:'后端',badge:'发言',bc:'msg',time:'18:14:02',state:'working',
+     content:'数据模型与 <code>POST /api/orders</code> 已完成。'},
+    {m:'fe',name:'前端',badge:'交接',bc:'hand',time:'18:15:30',state:'handoff',
+     content: mode==='pipeline'?'接过工位1产出，进入工位2组装。'
+       :'接过 API 契约，开始搭建列表与详情。'},
+  ];
+  document.getElementById('timeline').innerHTML=rounds.map(r=>{
+    let av='';
+    if(r.sys||!r.m) av=`<div class="round__pa" style="background:var(--bg-muted);color:var(--fg-muted);font-size:11px;font-weight:700">系</div>`;
+    else {
+      const m=byId[r.m];
+      av=`<div class="round__pa ${r.m==='lead'?'round__pa--lead':''}">${pixelAgentSVG({...m.ap,size:28,state:r.state||'idle'})}</div>`;
+    }
+    return `<div class="round ${r.cls==='highlight'?'round--highlight':''}${r.cls==='gate'?' round--gate':''}${r.cls==='sys'?' round--sys':''}">
+      ${av}
+      <div class="round__body">
+        <div class="round__head">
+          <span class="round__name">${r.name}</span>
+          <span class="badge badge--${r.bc||'sys'}">${r.badge}</span>
+          <span class="round__time">${r.time}</span>
+        </div>
+        <div class="round__content">${r.content||''}</div>
+      </div>
+    </div>`;
+  }).join('');
+}
+renderTimeline('orchestrator');
+document.querySelectorAll('.mode-tab').forEach(t=>{
+  t.addEventListener('click',()=>renderTimeline(t.dataset.mode));
+});
+
+/* 轻交互 */
+document.querySelectorAll('.chip').forEach(c=>c.addEventListener('click',()=>{
+  document.querySelectorAll('.chip').forEach(x=>x.classList.remove('is-on'));c.classList.add('is-on');
+}));
+document.querySelectorAll('.rtabs__item').forEach(t=>t.addEventListener('click',()=>{
+  document.querySelectorAll('.rtabs__item').forEach(x=>x.classList.remove('is-on'));t.classList.add('is-on');
+}));
+document.querySelectorAll('.member-pick').forEach(m=>m.addEventListener('click',()=>{
+  document.querySelectorAll('.member-pick').forEach(x=>x.classList.remove('is-on'));m.classList.add('is-on');
+}));
+document.querySelectorAll('.seg__item').forEach(s=>s.addEventListener('click',()=>{
+  s.parentElement.querySelectorAll('.seg__item').forEach(x=>x.classList.remove('is-on'));s.classList.add('is-on');
+}));
+document.querySelectorAll('.scard').forEach(sc=>sc.addEventListener('click',()=>{
+  document.querySelectorAll('.scard').forEach(x=>x.classList.remove('is-selected'));sc.classList.add('is-selected');
+}));
+
+/* 悬浮右栏：默认收起，开关把手贴右缘 */
+const asideFloat=document.getElementById('asideFloat');
+const asideToggle=document.getElementById('asideToggle');
+asideToggle.textContent='❯';
+asideToggle.title='展开右栏';
+asideToggle.addEventListener('click',(e)=>{
+  e.stopPropagation();
+  const open=asideFloat.classList.toggle('is-open');
+  asideToggle.textContent=open?'❮':'❯';
+  asideToggle.title=open?'收起右栏':'展开右栏';
+});
+
+/* 初始化 */
+applyMode('orchestrator');
+</script>
+</body>
+</html>
