@@ -686,7 +686,7 @@ export default function SquadDetailPage() {
                             {isDraft ? (
                                 <div className="sw-input-box">
                                     <div className="sw-input-box__resizer" title="向上拖动调整输入框高度" onMouseDown={startInputResize}/>
-                                    <textarea rows={2} placeholder="描述这次要协作完成的任务…" value={prompt} onChange={(e) => setPrompt(e.target.value)}style={{height: inputHeight}}/>
+                                    <textarea rows={2} placeholder="描述这次要协作完成的任务…" value={prompt} onChange={(e) => setPrompt(e.target.value)} style={{height: inputHeight}}/>
                                     <div className="sw-input-box__footer"><Button variant="solid" size="sm" disabled={!prompt.trim() || starting} onClick={() => void handleStart()}>{starting ? '启动中…' : '开始运行'}</Button></div>
                                 </div>
                             ) : canInject ? (
@@ -713,7 +713,7 @@ export default function SquadDetailPage() {
                                     </div>
                                     <div className="sw-input-box">
                                         <div className="sw-input-box__resizer" title="向上拖动调整输入框高度" onMouseDown={startInputResize}/>
-                                        <textarea rows={2} placeholder="补充说明、纠偏指令…" value={injectText} onChange={(e) => setInjectText(e.target.value)}style={{height: inputHeight}}/>
+                                        <textarea rows={2} placeholder="补充说明、纠偏指令…" value={injectText} onChange={(e) => setInjectText(e.target.value)} style={{height: inputHeight}}/>
                                         <div className="sw-input-box__footer"><Button variant="solid" size="sm" disabled={injectBusy || !injectText.trim()} onClick={() => void handleInject()}>{injectBusy ? '发送中…' : '发送'}</Button></div>
                                     </div>
                                 </>
