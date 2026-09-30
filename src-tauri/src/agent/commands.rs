@@ -601,6 +601,24 @@ pub async fn wait_task(
     }
 }
 
+/// 工作台观看心跳（审批/门禁梯度判定输入）。
+#[tauri::command]
+pub async fn squad_watch_heartbeat(squad_id: String) -> Result<(), String> {
+    Ok(crate::agent::squad::squad_orchestrator::squad_watch_heartbeat(&squad_id))
+}
+
+/// 工作台卸载清除观看标记。
+#[tauri::command]
+pub async fn squad_watch_off(squad_id: String) -> Result<(), String> {
+    Ok(crate::agent::squad::squad_orchestrator::squad_watch_off(&squad_id))
+}
+
+/// 手动无人值守开关。
+#[tauri::command]
+pub async fn squad_set_unattended(squad_id: String, on: bool) -> Result<(), String> {
+    Ok(crate::agent::squad::squad_orchestrator::squad_set_unattended(&squad_id, on))
+}
+
 /// 回传审批决策。20260919002：agent_id 缺省时路由到唯一在跑任务（多任务并行须显式传）。
 #[tauri::command]
 pub async fn submit_approval_decision(

@@ -1265,6 +1265,31 @@ struct CheckpointGate {
     decision: Arc<std::sync::Mutex<Option<String>>>,
 }
 
+/// 工作台观看心跳：squadId → 最后心跳时刻（前端工作台每 5s 心跳，卸载清除）。
+static SQUAD_WATCHING: std::sync::Mutex<Option<std::collections::HashMap<String, std::time::Instant>>> =
+    std::sync::Mutex::new(None);
+/// 手动无人值守开关（工作台输入区旁 Switch）：squadId 集合。
+static SQUAD_UNATTENDED: std::sync::Mutex<Option<std::collections::HashSet<String>>> =
+    std::sync::Mutex::new(None);
+
+/// 审批梯度判定：(观看中, 无人值守)。观看=15s 内有心跳。
+pub fn approval_gradeline(squad_id: &str) -> (bool, bool) {
+    let watched = SQUAD_WATCHING
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_ref()
+        .and_then(|m| m.get(squad_id))
+        .map(|t| t.elapsed() < std::time::Duration::from_secs(15))
+        .unwrap_or(false);
+    let unattended = SQUAD_UNATTENDED
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_ref()
+        .map(|s| s.contains(squad_id))
+        .unwrap_or(false);
+    (watched, unattended)
+}
+
 static SQUAD_CHECKPOINTS: std::sync::Mutex<Option<std::collections::HashMap<String, CheckpointGate>>> =
     std::sync::Mutex::new(None);
 
@@ -1278,6 +1303,27 @@ fn normalize_checkpoint_decision(decision: &str) -> &'static str {
 }
 
 /// 用户决议入口（Tauri 命令 squad_checkpoint_resolve 调用）。返回是否命中挂起的检查点。
+/// 工作台心跳：标记该编队正被观看（审批/门禁弹卡等决策）。
+pub fn squad_watch_heartbeat(squad_id: &str) {
+    let mut m = SQUAD_WATCHING.lock().unwrap_or_else(|e| e.into_inner());
+    m.get_or_insert_with(std::collections::HashMap::new)
+        .insert(squad_id.to_string(), std::time::Instant::now());
+}
+
+/// 工作台卸载：清除观看标记。
+pub fn squad_watch_off(squad_id: &str) {
+    if let Some(m) = SQUAD_WATCHING.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
+        m.remove(squad_id);
+    }
+}
+
+/// 手动无人值守开关。
+pub fn squad_set_unattended(squad_id: &str, on: bool) {
+    let mut g = SQUAD_UNATTENDED.lock().unwrap_or_else(|e| e.into_inner());
+    let s = g.get_or_insert_with(std::collections::HashSet::new);
+    if on { s.insert(squad_id.to_string()); } else { s.remove(squad_id); }
+}
+
 pub fn resolve_squad_checkpoint(session_id: &str, decision: &str) -> bool {
     let normalized = normalize_checkpoint_decision(decision).to_string();
     let g = SQUAD_CHECKPOINTS.lock().unwrap_or_else(|e| e.into_inner());

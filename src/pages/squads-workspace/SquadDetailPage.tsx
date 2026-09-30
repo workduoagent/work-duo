@@ -3,6 +3,7 @@ import {useNavigate, useParams} from 'react-router-dom'
 import {ArrowLeft, Brain, Plus, Send, Trash2} from 'lucide-react'
 import {listen} from '@tauri-apps/api/event'
 import {invoke} from '@tauri-apps/api/core'
+import {isPermissionGranted, requestPermission, sendNotification} from '@tauri-apps/plugin-notification'
 import {Button, Empty, Input, Select, Spin} from '@/components/ui'
 import {useNotify} from '@/components/ui/notify'
 import {PixelAgent} from '@/components/ui/pixel-agent'
@@ -278,6 +279,31 @@ export default function SquadDetailPage() {
     }, [])
     const inputHeightRef = useRef(inputHeight)
     useEffect(() => { inputHeightRef.current = inputHeight }, [inputHeight])
+
+    // 工作台观看心跳：后端审批梯度判定输入（看界面→挂起等决策；不在→通知 120s×2 后低危自动批）
+    useEffect(() => {
+        if (!id) return
+        void invoke('squad_watch_heartbeat', {squadId: id})
+        const t = setInterval(() => void invoke('squad_watch_heartbeat', {squadId: id}), 5000)
+        return () => {
+            clearInterval(t)
+            void invoke('squad_watch_off', {squadId: id})
+        }
+    }, [id])
+
+    // 审批挂起 → 系统通知（用户不在界面的感知通道；120s×2 无响应后端自动批低危）
+    useEffect(() => {
+        let un: (() => void) | undefined
+        void (async () => {
+            let ok = await isPermissionGranted()
+            if (!ok) ok = (await requestPermission()) === 'granted'
+            void listen<{toolName?: string}>('agent-awaiting-approval', (e) => {
+                const tool = e.payload?.toolName || '敏感操作'
+                if (ok) void sendNotification({title: '小分队请求授权', body: `${tool} 等待审批，120 秒无响应将自动通过`})
+            }).then((f) => { un = f })
+        })()
+        return () => un?.()
+    }, [])
     const [injectTarget, setInjectTarget] = useState<string>('')
     const [injectMode, setInjectMode] = useState<'soft' | 'hard' | 'pre_talk'>('soft')
     const [injectText, setInjectText] = useState('')
@@ -291,6 +317,15 @@ export default function SquadDetailPage() {
 
     const [planPending, setPlanPending] = useState(false)
     const [checkpointPending, setCheckpointPending] = useState(false)
+    // 手动无人值守开关：开 = 该队审批/门禁不再等决策（低危自动按推荐方案，L3 高危仍挂起）
+    const [unattended, setUnattended] = useState(false)
+
+    function toggleUnattended() {
+        const next = !unattended
+        setUnattended(next)
+        if (id) void invoke('squad_set_unattended', {squadId: id, on: next})
+        message.info(next ? '已开启无人值守：审批将按推荐方案自动通过（高危除外）' : '已恢复人工决策模式')
+    }
     // 滚动跟随生效点：轮次/汇总/门禁挂起卡变化后，若用户仍贴底则自动滚到最新
     useEffect(() => {
         const el = timelineRef.current
@@ -546,6 +581,7 @@ export default function SquadDetailPage() {
                 <aside className="sw-panel sw-side">
                     <div className="sw-side__cta">
                         <Button variant="solid" size="sm" block onClick={() => selectSessionLocal(null)}><Plus size={13}/> 新建任务</Button>
+                        <Button variant={unattended ? 'solid' : 'ghost'} size="sm" aria-label="无人值守开关" title={unattended ? '无人值守：开启中（低危审批自动按推荐方案通过，高危仍挂起）' : '无人值守：关（审批通知你处理）'} onClick={toggleUnattended}>无人值守</Button>
                         <Button variant="ghost" size="sm" aria-label="团队记忆" title="团队记忆（热更新）" onClick={() => { setAsideOpen(true); setAsideReq((r) => ({tab: 'memory', n: r.n + 1})) }}><Brain size={14}/></Button>
                     </div>
                     <div className="sw-chips">
