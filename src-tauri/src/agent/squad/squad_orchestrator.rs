@@ -3078,7 +3078,7 @@ fn strip_unattended_member_tools(registry: &mut ToolRegistry) {
     registry.retain(|name| name != "native__ask_user_choice");
     let after = registry.tool_names().len();
     if before != after {
-        tracing::info!("[squad] 成员上下文裁剪 ask_user_choice：{before} → {after} 项");
+        tracing::debug!("[squad] 成员上下文裁剪 ask_user_choice：{before} → {after} 项");
     }
 }
 
@@ -3201,7 +3201,8 @@ async fn run_member_subtask(
         call_id: None,
     };
 
-    let approval = ApprovalManager::new();
+    // 成员无人值守上下文：审批自动批准（2026-09-30 卡死根因修复——写文件审批挂起 300s 白等）。
+    let approval = ApprovalManager::new_auto_approve();
     let recovery = RecoveryHub::new();
 
     // S0-4b（2026-09-28）：成员执行过 per-agent 锁（v1.4 §11/§9）——此前成员 pipeline 完全

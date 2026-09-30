@@ -58,12 +58,24 @@ pub enum ApprovalOutcome {
 #[derive(Clone, Default)]
 pub struct ApprovalManager {
     pending: Arc<Mutex<HashMap<String, Pending>>>,
+    /// 成员无人值守上下文：不挂起等决策，所有审批自动批准并留痕（2026-09-30 工作台卡死根因——
+    /// 成员写文件触发审批挂起，工作台无审批卡可点，白等 300s 超时才 Skip）。
+    auto_approve: bool,
 }
 
 impl ApprovalManager {
     pub fn new() -> Self {
         Self {
             pending: Arc::new(Mutex::new(HashMap::new())),
+            auto_approve: false,
+        }
+    }
+
+    /// 成员无人值守上下文专用：审批自动批准（工具面裁剪已控制风险边界）。
+    pub fn new_auto_approve() -> Self {
+        Self {
+            pending: Arc::new(Mutex::new(HashMap::new())),
+            auto_approve: true,
         }
     }
 
@@ -71,6 +83,17 @@ impl ApprovalManager {
     /// 返回 (request, rx)：request 用于推前端，rx 用于阻塞等待用户决策。
     #[tracing::instrument(skip_all)]
     pub async fn suspend(&self, request: ApprovalRequest) -> oneshot::Receiver<ApprovalOutcome> {
+        // 成员无人值守上下文：直接自动批准（留痕），不注册 pending、不阻塞。
+        if self.auto_approve {
+            tracing::info!(
+                "[agent] approval: 成员无人值守上下文自动批准 tool={} approval_id={}",
+                request.tool_name,
+                request.approval_id,
+            );
+            let (tx, rx) = oneshot::channel();
+            let _ = tx.send(ApprovalOutcome::Approve);
+            return rx;
+        }
         let (tx, rx) = oneshot::channel();
         let approval_id = request.approval_id.clone();
         let tool_name = request.tool_name.clone();
