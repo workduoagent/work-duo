@@ -1,14 +1,11 @@
 /**
- * Pixel Agent 外观类型字典 v2（游戏级 32×32 重制）。
+ * Pixel Agent 外观类型字典 v3（64×64 写实像素）。
  *
- * 与 v1 的差异：
- *  - 新增性别（男/女），级联发型池与服饰池（帽子/上衣/下装/鞋子四层独立配色）；
- *  - 眼睛/嘴巴不再手动选——表情由动作状态（AgentMotionState）驱动；
- *  - 配饰扩充（眼镜×2 / 耳环 / 围巾 / 耳机 / 香烟）；
- *  - normalizeAppearance 负责旧版（16×16 时代）配置的迁移。
- *
- * appearance 只有两处消费：① 形象设计弹窗编辑态；② 可选落库列 agent_info.appearance
- * （再编辑源 JSON）。列表 / 聊天展示走 logo 快照（`<img>`），不消费本模块。
+ * 与 v2 的差异：
+ *  - 画布升到 64×64，支持描边 + 三阶明暗，轮廓接近「真实小人」；
+ *  - 表情（FaceExpression）与动作（BodyPose）拆开，可由外部独立动态控制；
+ *  - AgentMotionState 保留为高层状态（兼容旧调用），内部映射到 expression+pose；
+ *  - appearance schema 不变，旧配置无需迁移。
  */
 
 export type GenderType = 'male' | 'female'
@@ -49,8 +46,39 @@ export type AccessoryType =
 export type PropType = 'none' | 'laptop' | 'coffee-cup' | 'book'
 
 /**
- * 动作状态：**仅形象设计弹窗预览用**（试玩分段），不落库、不进列表 / 聊天。
- * 表情（眼/嘴/姿态）由状态驱动：idle 平静静止 / working 打字 / thinking 托腮思考 / error 惊恐。
+ * 面部表情：外部可动态控制（与身体动作解耦）。
+ * 由 PixelAgent 的 `expression` 驱动；不传时从 state 推导。
+ */
+export type FaceExpression =
+  | 'neutral'
+  | 'happy'
+  | 'sad'
+  | 'angry'
+  | 'surprised'
+  | 'thinking'
+  | 'focused'
+  | 'tired'
+  | 'wink'
+  | 'talk'
+  | 'love'
+
+/**
+ * 身体动作：外部可动态控制（与表情解耦）。
+ * 由 PixelAgent 的 `pose` 驱动；不传时从 state 推导。
+ */
+export type BodyPose =
+  | 'idle'
+  | 'working'
+  | 'thinking'
+  | 'error'
+  | 'waiting'
+  | 'speaking'
+  | 'handoff'
+  | 'cheer'
+
+/**
+ * 高层动作状态（兼容旧调用）。内部映射为 expression + pose。
+ * 弹窗试玩 / 小分队舞台可继续只传 state。
  */
 export type AgentMotionState =
   | 'idle'
@@ -83,4 +111,68 @@ export interface PixelAgentAppearance {
   shoesColor: string
   accessory: AccessoryType
   heldProp: PropType
+}
+
+/** 高层状态 → 表情 */
+export function stateToExpression(state: AgentMotionState): FaceExpression {
+  switch (state) {
+    case 'working':
+      return 'focused'
+    case 'thinking':
+      return 'thinking'
+    case 'error':
+      return 'surprised'
+    case 'waiting':
+      return 'neutral'
+    case 'speaking':
+      return 'talk'
+    case 'handoff':
+      return 'focused'
+    case 'cheer':
+      return 'happy'
+    default:
+      return 'neutral'
+  }
+}
+
+/** 高层状态 → 动作 */
+export function stateToPose(state: AgentMotionState): BodyPose {
+  switch (state) {
+    case 'working':
+      return 'working'
+    case 'thinking':
+      return 'thinking'
+    case 'error':
+      return 'error'
+    case 'waiting':
+      return 'waiting'
+    case 'speaking':
+      return 'speaking'
+    case 'handoff':
+      return 'handoff'
+    case 'cheer':
+      return 'cheer'
+    default:
+      return 'idle'
+  }
+}
+
+export interface PixelRenderOptions {
+  state?: AgentMotionState
+  /** 外部动态控制表情；优先于 state 推导 */
+  expression?: FaceExpression
+  /** 外部动态控制动作；优先于 state 推导 */
+  pose?: BodyPose
+}
+
+/** 解析最终 expression + pose（外部显式值优先） */
+export function resolveExpressionPose(opts: PixelRenderOptions = {}): {
+  expression: FaceExpression
+  pose: BodyPose
+} {
+  const state = opts.state ?? 'idle'
+  return {
+    expression: opts.expression ?? stateToExpression(state),
+    pose: opts.pose ?? stateToPose(state),
+  }
 }

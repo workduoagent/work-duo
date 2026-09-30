@@ -3275,7 +3275,7 @@ async fn run_member_subtask(
     };
 
     // 成员无人值守上下文：审批自动批准（2026-09-30 卡死根因修复——写文件审批挂起 300s 白等）。
-    let approval = ApprovalManager::for_member(squad_id.to_string());
+    let approval = ApprovalManager::for_member(squad_id.to_string(), cfg.agent_id.clone());
     let recovery = RecoveryHub::new();
 
     // S0-4b（2026-09-28）：成员执行过 per-agent 锁（v1.4 §11/§9）——此前成员 pipeline 完全

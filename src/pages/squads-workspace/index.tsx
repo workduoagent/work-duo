@@ -19,7 +19,6 @@ import {
     Pencil,
     Play,
     Users,
-    LogIn,
     Settings2,
     FileUp,
     Inbox,
@@ -29,8 +28,11 @@ import {
     X,
     Server,
     ImagePlus,
+    Puzzle,
+    SlidersHorizontal,
+    ChevronRight,
 } from 'lucide-react'
-import {Button, Card, Modal, Field, FieldLabel, Input, Select, Segmented, Switch, InputNumber, Empty, Spin, Popconfirm, Tag, Tabs, Tooltip, Alert} from '@/components/ui'
+import {Button, Card, Modal, Field, FieldLabel, Input, Select, Segmented, Switch, InputNumber, Empty, Spin, Popconfirm, Tag, Tooltip, Alert} from '@/components/ui'
 import { PixelAgent } from '@/components/ui/pixel-agent'
 import { generateAvatarByScenario } from '@/components/ui/pixel-agent'
 import type { AgentMotionState, PixelAgentAppearance } from '@/components/ui/pixel-agent'
@@ -561,6 +563,10 @@ function SquadEditorModal({
     const [state, setState] = useState<EditorState>(blankState())
     const [saving, setSaving] = useState(false)
     const [apiOpen, setApiOpen] = useState(false)
+    // 左侧导航当前面板（UI 改版：侧栏导航替代顶部 Tabs）
+    const [pane, setPane] = useState<'basic' | 'resource' | 'members' | 'strategy'>('basic')
+    // MCP 卡片折叠态（启用服务时自动展开）
+    const [openMcpIds, setOpenMcpIds] = useState<Set<string>>(new Set())
     const [mcps, setMcps] = useState<McpInfo[]>([])
     const [mcpToolsMap, setMcpToolsMap] = useState<Record<string, McpToolDefinition[]>>({})
     // S2（§4.2）：成员工具面目录缓存（agentId → 原生/MCP 工具全名；能力层实时真相）
@@ -580,6 +586,8 @@ function SquadEditorModal({
     useEffect(() => {
         if (open) {
             setState(initial ? fromSquad(initial) : template ? fromTemplate(template) : blankState())
+            setPane('basic')
+            setOpenMcpIds(new Set())
             void listMcps()
                 .then(async (list) => {
                     setMcps(list)
@@ -679,7 +687,8 @@ function SquadEditorModal({
 
     const clearWorkspace = () => setState((s) => ({...s, workspaceDir: ''}))
 
-    const toggleMcp = (mcpId: string, on: boolean) =>
+    const toggleMcp = (mcpId: string, on: boolean) => {
+        if (on) setOpenMcpIds((s) => new Set(s).add(mcpId))
         setState((s) => {
             const ids = new Set(s.globalMcpIds)
             if (on) ids.add(mcpId)
@@ -692,6 +701,14 @@ function SquadEditorModal({
             }
             return {...s, globalMcpIds: [...ids], globalMcpTools: tools}
         })
+    }
+
+    /** 工具批量启停（卡片内「全选 / 清空」）：on=true 全选，false 清空（全部禁用）。 */
+    const toggleAllTools = (mcpId: string, on: boolean) =>
+        setState((s) => ({
+            ...s,
+            globalMcpTools: {...s.globalMcpTools, [mcpId]: on ? [] : (mcpToolsMap[mcpId] ?? []).map((t) => t.id)},
+        }))
 
     const toggleTool = (mcpId: string, toolId: string, on: boolean) =>
         setState((s) => {
@@ -875,20 +892,86 @@ function SquadEditorModal({
                     </div>
                 }
             >
-                <Tabs
-                    className="squad-editor__tabs"
-                    defaultActiveKey="basic"
-                    items={[
-                        {
-                            key: 'basic',
-                            label: (
-                                <span style={{display: 'flex', alignItems: 'center', gap: 6}}>
-                  <Settings2 size={15}/> 基本配置
-                </span>
-                            ),
-                            children: (
-                                <div className="squad-editor__pane">
-                                    <div className="squad-editor__basic">
+                <div className="squad-editor">
+                    {/* 左侧栏导航（UI 改版：分组导航替代顶部 Tabs） */}
+                    <nav className="squad-editor__nav">
+                        <div className="squad-editor__nav-sep">配置</div>
+                        <button
+                            type="button"
+                            className={`squad-editor__nav-item${pane === 'basic' ? ' is-on' : ''}`}
+                            onClick={() => setPane('basic')}
+                        >
+                            <Settings2 size={15}/> 基本配置
+                        </button>
+                        <button
+                            type="button"
+                            className={`squad-editor__nav-item${pane === 'resource' ? ' is-on' : ''}`}
+                            onClick={() => setPane('resource')}
+                        >
+                            <Puzzle size={15}/> 资源挂载
+                        </button>
+                        <div className="squad-editor__nav-sep">编制</div>
+                        <button
+                            type="button"
+                            className={`squad-editor__nav-item${pane === 'members' ? ' is-on' : ''}`}
+                            onClick={() => setPane('members')}
+                        >
+                            <Users size={15}/> 成员编排
+                            <small>{state.members.length}</small>
+                        </button>
+                        <div className="squad-editor__nav-sep">运行</div>
+                        <button
+                            type="button"
+                            className={`squad-editor__nav-item${pane === 'strategy' ? ' is-on' : ''}`}
+                            onClick={() => setPane('strategy')}
+                        >
+                            <SlidersHorizontal size={15}/> 运行策略
+                        </button>
+                    </nav>
+                    <div className="squad-editor__body">
+                        {/* ── 基本配置 ── */}
+                        <div className="squad-editor__pane" hidden={pane !== 'basic'}>
+                            <div className="squad-editor__basic">
+                                        {/* 团队头像：点击头像上传（首行整行，对齐设计稿） */}
+                                        <Field className="squad-editor__row squad-editor__span2">
+                                            <FieldLabel>团队头像</FieldLabel>
+                                            <div
+                                                className="squad-editor__logo-pick"
+                                                onClick={() => logoInputRef.current?.click()}
+                                                role="button"
+                                                tabIndex={0}
+                                                onKeyDown={(e) => {
+                                                    if (e.key === 'Enter' || e.key === ' ') logoInputRef.current?.click()
+                                                }}
+                                            >
+                                                <div className="squad-editor__logo-preview">
+                                                    {state.logo ? (
+                                                        <img src={state.logo} alt="头像预览"/>
+                                                    ) : (
+                                                        <ImagePlus size={20} className="squad-editor__logo-empty"/>
+                                                    )}
+                                                </div>
+                                                {state.logo && (
+                                                    <button
+                                                        type="button"
+                                                        className="squad-editor__logo-clear"
+                                                        aria-label="移除头像"
+                                                        onClick={(e) => {
+                                                            e.stopPropagation()
+                                                            clearLogo()
+                                                        }}
+                                                    >
+                                                        <X size={12}/>
+                                                    </button>
+                                                )}
+                                                <span className="squad-editor__logo-tip">
+                                                    {state.logo ? '点击更换头像' : '点击上传头像'}
+                                                </span>
+                                                <input ref={logoInputRef} type="file" accept="image/*" hidden
+                                                       onChange={onLogoPick}/>
+                                            </div>
+                                        </Field>
+
                                         {/* 名称 */}
                                         <Field className="squad-editor__row">
                                             <FieldLabel htmlFor="squad-name">名称</FieldLabel>
@@ -930,57 +1013,6 @@ function SquadEditorModal({
                                                         <RefreshCw size={15}/>
                                                     </Button>
                                                 }
-                                            />
-                                        </Field>
-
-                                        {/* 团队头像：点击头像上传，移除按钮 */}
-                                        <Field className="squad-editor__row">
-                                            <FieldLabel>团队头像</FieldLabel>
-                                            <div
-                                                className="squad-editor__logo-pick"
-                                                onClick={() => logoInputRef.current?.click()}
-                                                role="button"
-                                                tabIndex={0}
-                                                onKeyDown={(e) => {
-                                                    if (e.key === 'Enter' || e.key === ' ') logoInputRef.current?.click()
-                                                }}
-                                            >
-                                                <div className="squad-editor__logo-preview">
-                                                    {state.logo ? (
-                                                        <img src={state.logo} alt="头像预览"/>
-                                                    ) : (
-                                                        <ImagePlus size={20} className="squad-editor__logo-empty"/>
-                                                    )}
-                                                </div>
-                                                {state.logo && (
-                                                    <button
-                                                        type="button"
-                                                        className="squad-editor__logo-clear"
-                                                        aria-label="移除头像"
-                                                        onClick={(e) => {
-                                                            e.stopPropagation()
-                                                            clearLogo()
-                                                        }}
-                                                    >
-                                                        <X size={12}/>
-                                                    </button>
-                                                )}
-                                                <span className="squad-editor__logo-tip">
-                                                    {state.logo ? '点击更换头像' : '点击上传头像'}
-                                                </span>
-                                                <input ref={logoInputRef} type="file" accept="image/*" hidden
-                                                       onChange={onLogoPick}/>
-                                            </div>
-                                        </Field>
-
-                                        {/* 协作模式 */}
-                                        <Field className="squad-editor__row">
-                                            <FieldLabel>协作模式</FieldLabel>
-                                            <Segmented
-                                                className="squad-editor__mode"
-                                                value={state.mode}
-                                                onChange={(v) => changeMode(v as SquadMode)}
-                                                options={MODE_OPTIONS.map((o) => ({label: o.label, value: o.value}))}
                                             />
                                         </Field>
 
@@ -1040,70 +1072,6 @@ function SquadEditorModal({
                                             </div>
                                         </Field>
 
-                                        {/* 全局 MCP：卡片化选择（总开关 + 工具子开关），跨整行 */}
-                                        <Field className="squad-editor__row squad-editor__span2">
-                                            <FieldLabel>全局 MCP 服务扩展</FieldLabel>
-                                            {mcps.length === 0 ? (
-                                                <p className="squad-editor__hint">暂无可用 MCP 服务，请先到「MCP 中心」添加。</p>
-                                            ) : (
-                                                <div className="squad-editor__mcp-cards">
-                                                    {mcps.map((mcp) => {
-                                                        const enabled = state.globalMcpIds.includes(mcp.id)
-                                                        const disabledTools = new Set(state.globalMcpTools[mcp.id] ?? [])
-                                                        const tools = mcpToolsMap[mcp.id] ?? []
-                                                        return (
-                                                            <div className="squad-editor__mcp-card" key={mcp.id}>
-                                                                <div className="squad-editor__mcp-card-head">
-                                                                    <div className="squad-editor__mcp-card-title">
-                                                                        <Server size={16} className="squad-editor__mcp-card-ico"/>
-                                                                        <div className="squad-editor__mcp-card-name">
-                                                                            <span className="squad-editor__mcp-card-label">
-                                                                                {mcp.aliasName || mcp.mcpName}
-                                                                            </span>
-                                                                            <span className="squad-editor__mcp-card-sub">
-                                                                                {mcp.protocolType} · {tools.length} 个工具
-                                                                            </span>
-                                                                        </div>
-                                                                    </div>
-                                                                    <Switch
-                                                                        checked={enabled}
-                                                                        onChange={(v) => toggleMcp(mcp.id, v)}
-                                                                    />
-                                                                </div>
-                                                                <div className="squad-editor__mcp-card-tools">
-                                                                    {!enabled ? (
-                                                                        <span className="squad-editor__mcp-card-hint">
-                                                                            关闭后不会向成员注入该服务
-                                                                        </span>
-                                                                    ) : tools.length === 0 ? (
-                                                                        <span className="squad-editor__mcp-card-hint">
-                                                                            暂无工具，请先在 MCP 中心同步
-                                                                        </span>
-                                                                    ) : (
-                                                                        tools.map((tool) => (
-                                                                            <label
-                                                                                className="squad-editor__tool-row"
-                                                                                key={tool.id}
-                                                                            >
-                                                                                <span className="squad-editor__tool-name">
-                                                                                    {tool.displayName || tool.toolCode}
-                                                                                </span>
-                                                                                <Switch
-                                                                                    size="small"
-                                                                                    checked={!disabledTools.has(tool.id)}
-                                                                                    onChange={(v) => toggleTool(mcp.id, tool.id, v)}
-                                                                                />
-                                                                            </label>
-                                                                        ))
-                                                                    )}
-                                                                </div>
-                                                            </div>
-                                                        )
-                                                    })}
-                                                </div>
-                                            )}
-                                        </Field>
-
                                         {/* 描述，跨整行 */}
                                         <Field className="squad-editor__row squad-editor__span2">
                                             <FieldLabel htmlFor="squad-desc">描述 (可选)</FieldLabel>
@@ -1118,17 +1086,122 @@ function SquadEditorModal({
                                         </Field>
                                     </div>
                                 </div>
-                            )
-                        },
-                        {
-                            key: 'members',
-                            label: (
-                                <span style={{display: 'flex', alignItems: 'center', gap: 6}}>
-                  <Users size={15}/> 成员与编排
-                </span>
-                            ),
-                            children: (
-                                <div className="squad-editor__pane">
+
+                                {/* ── 资源挂载：全局 MCP（可折叠卡片，UI 改版自基本配置移入） ── */}
+                                <div className="squad-editor__pane" hidden={pane !== 'resource'}>
+                                    <Field className="squad-editor__row">
+                                        <FieldLabel>全局 MCP 服务扩展</FieldLabel>
+                                        <p className="squad-editor__hint">
+                                            启用服务并展开卡片勾选工具子集；计数为「已启用 / 全部」工具数，未启用的服务不会注入任何成员。
+                                        </p>
+                                        {mcps.length === 0 ? (
+                                            <p className="squad-editor__hint">暂无可用 MCP 服务，请先到「MCP 中心」添加。</p>
+                                        ) : (
+                                            <div className="squad-editor__mcp-cards">
+                                                {mcps.map((mcp) => {
+                                                    const enabled = state.globalMcpIds.includes(mcp.id)
+                                                    const disabledTools = new Set(state.globalMcpTools[mcp.id] ?? [])
+                                                    const tools = mcpToolsMap[mcp.id] ?? []
+                                                    const enabledCount = enabled ? tools.length - disabledTools.size : 0
+                                                    const isOpen = openMcpIds.has(mcp.id)
+                                                    return (
+                                                        <div className={`squad-editor__mcp-card${isOpen ? ' is-open' : ''}`} key={mcp.id}>
+                                                            <div
+                                                                className="squad-editor__mcp-card-head"
+                                                                role="button"
+                                                                tabIndex={0}
+                                                                aria-expanded={isOpen}
+                                                                onClick={() =>
+                                                                    setOpenMcpIds((prev) => {
+                                                                        const next = new Set(prev)
+                                                                        if (next.has(mcp.id)) next.delete(mcp.id)
+                                                                        else next.add(mcp.id)
+                                                                        return next
+                                                                    })
+                                                                }
+                                                                onKeyDown={(e) => {
+                                                                    if (e.key === 'Enter' || e.key === ' ') {
+                                                                        e.preventDefault()
+                                                                        ;(e.currentTarget as HTMLElement).click()
+                                                                    }
+                                                                }}
+                                                            >
+                                                                <div className="squad-editor__mcp-card-title">
+                                                                    <Server size={16} className="squad-editor__mcp-card-ico"/>
+                                                                    <span className="squad-editor__mcp-card-label">
+                                                                        {mcp.aliasName || mcp.mcpName}
+                                                                    </span>
+                                                                </div>
+                                                                <span
+                                                                    className={`squad-editor__mcp-card-count${
+                                                                        enabled && tools.length > 0 && enabledCount === tools.length ? ' is-on' : ''
+                                                                    }`}
+                                                                >
+                                                                    {enabledCount}/{tools.length}
+                                                                </span>
+                                                                <Switch
+                                                                    checked={enabled}
+                                                                    onClick={(_, e) => e.stopPropagation()}
+                                                                    onChange={(v) => toggleMcp(mcp.id, v)}
+                                                                />
+                                                                <ChevronRight size={15} className="squad-editor__mcp-card-chev"/>
+                                                            </div>
+                                                            {isOpen && (
+                                                                <div className="squad-editor__mcp-card-tools">
+                                                                    {!enabled ? (
+                                                                        <span className="squad-editor__mcp-card-hint">
+                                                                            关闭后不会向成员注入该服务
+                                                                        </span>
+                                                                    ) : tools.length === 0 ? (
+                                                                        <span className="squad-editor__mcp-card-hint">
+                                                                            暂无工具，请先在 MCP 中心同步
+                                                                        </span>
+                                                                    ) : (
+                                                                        <>
+                                                                            <div className="squad-editor__mcp-card-toolbar">
+                                                                                <button type="button" onClick={() => toggleAllTools(mcp.id, true)}>
+                                                                                    全选
+                                                                                </button>
+                                                                                <button type="button" onClick={() => toggleAllTools(mcp.id, false)}>
+                                                                                    清空
+                                                                                </button>
+                                                                            </div>
+                                                                            {tools.map((tool) => (
+                                                                                <label className="squad-editor__tool-row" key={tool.id}>
+                                                                                    <span className="squad-editor__tool-name">
+                                                                                        {tool.displayName || tool.toolCode}
+                                                                                    </span>
+                                                                                    <Switch
+                                                                                        size="small"
+                                                                                        checked={!disabledTools.has(tool.id)}
+                                                                                        onChange={(v) => toggleTool(mcp.id, tool.id, v)}
+                                                                                    />
+                                                                                </label>
+                                                                            ))}
+                                                                        </>
+                                                                    )}
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    )
+                                                })}
+                                            </div>
+                                        )}
+                                    </Field>
+                                </div>
+
+                                {/* ── 成员编排 ── */}
+                                <div className="squad-editor__pane" hidden={pane !== 'members'}>
+                                    {/* 协作模式（UI 改版：自基本配置移入成员编排顶部） */}
+                                    <Field className="squad-editor__row">
+                                        <FieldLabel>协作模式</FieldLabel>
+                                        <Segmented
+                                            className="squad-editor__mode"
+                                            value={state.mode}
+                                            onChange={(v) => changeMode(v as SquadMode)}
+                                            options={MODE_OPTIONS.map((o) => ({label: o.label, value: o.value}))}
+                                        />
+                                    </Field>
                                     <div className="squad-editor__mode-note">
                                         <Info size={14} className="squad-editor__mode-note-ico"/>
                                         <span>
@@ -1183,26 +1256,17 @@ function SquadEditorModal({
 
                                     <div className="squad-editor__members">
                                         <div className="squad-editor__members-head">
-                      <span className="squad-editor__members-title">
-                        小分队成员编制 <Tag color="blue" bordered={false}>{state.members.length}</Tag>
-                      </span>
-                                            <Select
-                                                className="squad-editor__add-member"
-                                                labelInValue
-                                                placeholder="➕ 挑选本地智能体入列..."
-                                                value={agentValue(addSel)}
-                                                options={allAgentOptions.filter((o) => !usedAgentIds.has(o.value))}
-                                                onChange={(v) => {
-                                                    addMember((v as { value: string } | undefined)?.value)
-                                                    setAddSel(undefined)
-                                                }}
-                                            />
+                                            <span className="squad-editor__members-title">
+                                                小分队成员编制
+                                                <Tag color="blue" bordered={false}
+                                                     style={{borderRadius: 999, marginInlineEnd: 0}}>{state.members.length}</Tag>
+                                            </span>
                                         </div>
 
                                         {state.members.length === 0 && (
                                             <Empty
                                                 image={Empty.PRESENTED_IMAGE_SIMPLE}
-                                                description="编制暂为空，请点击上方添加执行者"
+                                                description="编制暂为空，请在下方挑选本地智能体入列"
                                                 className="squad-editor__members-empty"
                                             />
                                         )}
@@ -1349,6 +1413,21 @@ function SquadEditorModal({
                                                 </div>
                                             ))}
                                         </div>
+
+                                        {/* 添加成员：虚线行（选择即入列，即用即清） */}
+                                        <div className="squad-editor__add-member">
+                                            <Select
+                                                className="squad-editor__add-select"
+                                                labelInValue
+                                                placeholder="➕ 挑选本地智能体入列..."
+                                                value={agentValue(addSel)}
+                                                options={allAgentOptions.filter((o) => !usedAgentIds.has(o.value))}
+                                                onChange={(v) => {
+                                                    addMember((v as { value: string } | undefined)?.value)
+                                                    setAddSel(undefined)
+                                                }}
+                                            />
+                                        </div>
                                     </div>
 
                                     {state.mode === 'pipeline' && (
@@ -1368,17 +1447,9 @@ function SquadEditorModal({
                                         </div>
                                     )}
                                 </div>
-                            )
-                        },
-                        {
-                            key: 'strategy',
-                            label: (
-                                <span style={{display: 'flex', alignItems: 'center', gap: 6}}>
-                  <Play size={15}/> 调度策略
-                </span>
-                            ),
-                            children: (
-                                <div className="squad-editor__pane">
+
+                                {/* ── 运行策略 ── */}
+                                <div className="squad-editor__pane" hidden={pane !== 'strategy'}>
                                     <div className="squad-editor__basic">
                                         <Field className="squad-editor__row">
                                             <FieldLabel>工作流触发机制</FieldLabel>
@@ -1520,10 +1591,8 @@ function SquadEditorModal({
                                         )}
                                     </div>
                                 </div>
-                            )
-                        }
-                    ]}
-                />
+                    </div>
+                </div>
             </Modal>
 
             <SquadApiConfigModal open={apiOpen} onClose={() => setApiOpen(false)}/>
@@ -2421,6 +2490,8 @@ export default function SquadsWorkspacePage() {
     const [hoverCrew, setHoverCrew] = useState<string | null>(null)
     const [editorOpen, setEditorOpen] = useState(false)
     const [editing, setEditing] = useState<SquadInfo | undefined>(undefined)
+    // UI 改版：API 服务入口提升至列表页头（复用既有配置弹窗）
+    const [apiOpen, setApiOpen] = useState(false)
     // S3 批次2（§12）：从官方模板新建（编辑器内补选成员智能体后保存）。
     const [tplEditing, setTplEditing] = useState<SquadTemplateJson | undefined>(undefined)
     const [tplSel, setTplSel] = useState<string | undefined>(undefined)
@@ -2495,7 +2566,10 @@ export default function SquadsWorkspacePage() {
                             setTplSel(undefined)
                         }}
                     />
-                    <Button variant="soft" size="sm" onClick={openCreate}>
+                    <Button variant="ghost" size="sm" onClick={() => setApiOpen(true)}>
+                        <Server size={14}/> API 服务
+                    </Button>
+                    <Button variant="solid" size="sm" onClick={openCreate}>
                         <Plus size={14}/> 新建小分队
                     </Button>
                 </div>
@@ -2516,23 +2590,27 @@ export default function SquadsWorkspacePage() {
                                     </div>
                                     <div className="squads__card-titles">
                                         <h3 className="squads__card-title">{squad.name}</h3>
-                                        <Tag
-                                            color={
-                                                squad.mode === 'orchestrator'
-                                                    ? 'blue'
-                                                    : squad.mode === 'pipeline'
-                                                        ? 'purple'
-                                                        : 'cyan'
-                                            }
-                                        >
-                                            {MODE_OPTIONS.find((o) => o.value === squad.mode)?.label ?? squad.mode}
-                                        </Tag>
-                                        {LIVE_LABELS[liveStatus[squad.id]] && (
-                                            <span className={`squads__live squads__live--${liveStatus[squad.id]}`}>
-                                                <i className="squads__live-dot"/>
-                                                {LIVE_LABELS[liveStatus[squad.id]]}
-                                            </span>
-                                        )}
+                                        <div className="squads__card-tags">
+                                            <Tag
+                                                color={
+                                                    squad.mode === 'orchestrator'
+                                                        ? 'blue'
+                                                        : squad.mode === 'pipeline'
+                                                            ? 'purple'
+                                                            : 'cyan'
+                                                }
+                                                bordered={false}
+                                                style={{borderRadius: 999, marginInlineEnd: 0}}
+                                            >
+                                                {MODE_OPTIONS.find((o) => o.value === squad.mode)?.label ?? squad.mode}
+                                            </Tag>
+                                            {LIVE_LABELS[liveStatus[squad.id]] && (
+                                                <span className={`squads__live squads__live--${liveStatus[squad.id]}`}>
+                                                    <i className="squads__live-dot"/>
+                                                    {LIVE_LABELS[liveStatus[squad.id]]}
+                                                </span>
+                                            )}
+                                        </div>
                                     </div>
                                 </div>
 
@@ -2567,11 +2645,12 @@ export default function SquadsWorkspacePage() {
                                     <Button
                                         variant="soft"
                                         size="sm"
+                                        className="squads__card-main"
                                         onClick={() => nav(`/squads-workspace/${squad.id}?tab=run`)}
                                         aria-label="打开协作工作台"
                                         title="打开协作工作台（运行 / 历史 / 记忆）"
                                     >
-                                        <LogIn size={15}/> 工作台
+                                        <Play size={14}/> 工作台
                                     </Button>
                                     <Button
                                         variant="ghost"
@@ -2631,8 +2710,7 @@ export default function SquadsWorkspacePage() {
                 onSaved={(next) => setList(next)}
             />
 
-
-
+            <SquadApiConfigModal open={apiOpen} onClose={() => setApiOpen(false)}/>
         </div>
     )
 }

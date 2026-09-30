@@ -1,19 +1,19 @@
-import {memo, useCallback, useEffect, useMemo, useRef, useState, type RefObject} from 'react'
+import {memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type RefObject} from 'react'
 import {useNavigate, useParams} from 'react-router-dom'
 import {ArrowLeft, Brain, Plus, Send, Trash2} from 'lucide-react'
 import {listen} from '@tauri-apps/api/event'
 import {invoke} from '@tauri-apps/api/core'
-import {isPermissionGranted, requestPermission, sendNotification} from '@tauri-apps/plugin-notification'
+import {notifyOSWhenHidden} from '@/utils/osNotify'
 import {Button, Empty, Input, Select, Spin} from '@/components/ui'
 import {useNotify} from '@/components/ui/notify'
-import {PixelAgent} from '@/components/ui/pixel-agent'
+import {PixelAgent, type AgentMotionState} from '@/components/ui/pixel-agent'
 import {MarkdownRenderer} from '@/components/markdown/MarkdownRenderer'
 import {getSquad, listSquadSessions, listSquadRounds, deleteSquadSession, listSquadMemories, anchorSquadMemory, deleteSquadMemory} from '@/core/mapper/squad-mapper'
 import {listAgents} from '@/core/mapper/agent-mapper'
 import type {AgentInfo, SquadInfo, SquadSession, SquadMemory, SquadMemoryCategory} from '@/types/core'
 import {memberLabel, agentAppearanceOf, type BoardRound, type SquadBoardView} from './index'
-// 舞台背景：等距像素风会议室（椅子已由像素小人站位表达，换图时同步核对 SEATS 坐标）
-import ROOM_BG from '@/assets/images/squad-meeting-room.png'
+// 舞台背景：开放式像素会议室（无会议桌，开阔地板，4:3，全屏填充）
+import ROOM_BG from '@/assets/images/squad-meeting-room-open.png'
 
 const ACTIVE_STATUSES = ['running', 'paused', 'awaiting_plan', 'awaiting_checkpoint', 'awaiting_delivery']
 const STATUS_PILL: Record<string, {label: string; cls: string}> = {
@@ -39,50 +39,59 @@ const ROUND_BADGE: Record<string, {label: string; cls: string}> = {
     delivery: {label: '交付', cls: 'gate'},
 }
 /**
- * 会议桌座位（舞台坐标百分比）：主位在桌前正中，其余沿长桌两侧围坐。
- * 顺序即优先级——成员按此顺序落座，人数不足时后面的座位空着（不画椅子）。
+ * 开放式会议室座位（舞台坐标百分比，对齐 squad-meeting-room-open.png 4:3）。
+ * 舞台全高铺满，背景 object-fit:fill 拉伸到面板，百分比相对整个舞台。
+ * 地面从画面 y≈52%（墙脚）开始——后排必须站在地上，不能浮在窗上。
+ * 人多时按前→中→后铺开，前后错位避免叠在一起。
+ *
+ * depth: 'near' 前/中排（大） / 'far' 靠窗后排（小，但脚仍落地）
  */
-/**
- * 会议桌座位（舞台坐标百分比）：主位在桌前正中，其余沿桌前沿一字排开。
- * 坐标与背景图 src/assets/images/squad-meeting-room.png（1920×600）对应，
- * 改图时需同步这套坐标（用图片百分比即可，舞台按 100%×100% 铺图，不裁切）。
- */
-const SEATS: Array<{x: number; y: number}> = [
-    // 坐标为「图片坐标系」百分比（squad-meeting-room.png 1920x600，3.2:1 与舞台同比例，
-    // object-fit: fill 严格 1:1 铺满不裁切）。桌面 x≈18.5%~80.5%、y≈49%~77%。
-    // 常规 1~6 号沿桌前沿一字排开（脚踩桌前沿外地面），7~10 人多时启用（后排/桌后沿）。
-    {x: 47, y: 75.5},   // 桌前正中（主位）
-    {x: 38.5, y: 75},   // 桌前左
-    {x: 55.5, y: 75.8}, // 桌前右
-    {x: 30, y: 74.5},   // 桌前左外
-    {x: 63.5, y: 76},   // 桌前右外
-    {x: 71.5, y: 76.2}, // 桌右前角
-    {x: 26, y: 47},     // 桌后沿左（人多时启用）
-    {x: 37, y: 46},     // 桌后沿中左（人多时启用）
-    {x: 59, y: 46.5},   // 桌后沿中右（人多时启用）
-    {x: 70, y: 47.5},   // 桌后沿右（人多时启用）
+const SEATS: Array<{x: number; y: number; depth: 'near' | 'far'}> = [
+    // —— 后排：墙脚地面（y≈54%，脚在 y≈63%）——
+    {x: 20, y: 54.5, depth: 'far'},
+    {x: 34, y: 53.8, depth: 'far'},
+    {x: 48, y: 53.2, depth: 'far'},
+    {x: 62, y: 53.8, depth: 'far'},
+    {x: 76, y: 54.5, depth: 'far'},
+    {x: 12, y: 55.2, depth: 'far'},
+    {x: 88, y: 55.2, depth: 'far'},
+    // —— 中排（y≈64%）——
+    {x: 26, y: 64.5, depth: 'near'},
+    {x: 40, y: 64.0, depth: 'near'},
+    {x: 54, y: 64.8, depth: 'near'},
+    {x: 68, y: 64.2, depth: 'near'},
+    {x: 14, y: 65.5, depth: 'near'},
+    {x: 82, y: 65.0, depth: 'near'},
+    // —— 前排（y≈78%，脚踩近处地面）——
+    {x: 18, y: 78.5, depth: 'near'},
+    {x: 32, y: 78.0, depth: 'near'},
+    {x: 46, y: 78.8, depth: 'near'},
+    {x: 60, y: 78.2, depth: 'near'},
+    {x: 74, y: 78.6, depth: 'near'},
+    {x: 8, y: 79.5, depth: 'near'},
+    {x: 88, y: 79.0, depth: 'near'},
 ]
 /** 座位角色标签（按协作模式）：与 SEATS 顺序一一对应 */
 const SEAT_LABELS: Record<string, string[]> = {
-    orchestrator: ['主管 · 调度', '执行 A', '执行 B', '执行 C', '执行 D', '支持', '支持', '旁听', '旁听', '旁听'],
-    pipeline: ['工位 1', '工位 2', '工位 3', '工位 4', '工位 5', '记录', '记录', '旁听', '旁听', '旁听'],
-    chat: ['发言', '倾听', '倾听', '思考', '思考', '旁听', '旁听', '旁听', '旁听', '旁听'],
+    orchestrator: ['主管 · 调度', '执行 A', '执行 B', '执行 C', '执行 D', '执行 E', '执行 F', '支持', '支持', '支持', '旁听', '旁听', '旁听', '旁听', '旁听', '旁听', '旁听', '旁听', '旁听'],
+    pipeline: ['工位 1', '工位 2', '工位 3', '工位 4', '工位 5', '工位 6', '工位 7', '记录', '记录', '记录', '旁听', '旁听', '旁听', '旁听', '旁听', '旁听', '旁听', '旁听', '旁听'],
+    chat: ['发言', '倾听', '倾听', '倾听', '思考', '思考', '思考', '旁听', '旁听', '旁听', '旁听', '旁听', '旁听', '旁听', '旁听', '旁听', '旁听', '旁听', '旁听'],
 }
-/** 桌前那一排（气泡挂到小人下方，避免压住桌面）的判定阈值 */
-const FRONT_ROW_Y = 70
+/** 前排（气泡挂到小人下方）的判定阈值 */
+const FRONT_ROW_Y = 72
 
-/** 按模式与人数取落座表：第 1 位坐主位，其余沿桌两侧展开 */
-function seatSpots(mode: string, n: number): Array<{x: number; y: number; role: string}> {
+/** 按模式与人数取落座表：按 SEATS 从后→前铺开（后排先落墙脚地面） */
+function seatSpots(mode: string, n: number): Array<{x: number; y: number; role: string; depth: 'near' | 'far'}> {
     const labels = SEAT_LABELS[mode] || SEAT_LABELS.orchestrator
     const count = Math.max(n, 1)
     return Array.from({length: count}, (_, i) => {
         const seat = SEATS[i % SEATS.length]
-        return {x: seat.x, y: seat.y, role: labels[i % labels.length]}
+        return {x: seat.x, y: seat.y, role: labels[i % labels.length], depth: seat.depth}
     })
 }
 
-/** 轮次内容 → 纯文本摘要（舞台气泡只回显一句话，去掉 Markdown 记号与代码块） */
-function plainText(src: string, max = 46): string {
+/** 轮次内容 → 纯文本（舞台气泡允许较长文本，超长由气泡滚动条承接） */
+function plainText(src: string, max = 240): string {
     const t = (src || '')
         .replace(/```[\s\S]*?```/g, ' ')
         .replace(/!\[[^\]]*]\([^)]*\)/g, ' ')
@@ -292,18 +301,22 @@ export default function SquadDetailPage() {
         }
     }, [id])
 
-    // 审批挂起 → 系统通知（用户不在界面的感知通道；120s×2 无响应后端自动批低危）
+    // 审批挂起 → 统一系统通知通道：窗口聚焦时不弹、失焦时节流，且遵守客户端通知开关。
+    // 另以 approvalId 去重，防同一挂起事件重发导致 Windows Toast 连弹；具体批准仍在工作台卡片完成。
+    const seenApprovalIdsRef = useRef<Set<string>>(new Set())
     useEffect(() => {
         let un: (() => void) | undefined
-        void (async () => {
-            let ok = await isPermissionGranted()
-            if (!ok) ok = (await requestPermission()) === 'granted'
-            void listen<{toolName?: string; approvalId?: string}>('agent-awaiting-approval', (e) => {
-                const tool = e.payload?.toolName || '敏感操作'
-                if (e.payload?.approvalId) setPendingApprovals((q) => q.some((x) => x.approvalId === e.payload!.approvalId) ? q : [...q, {approvalId: e.payload!.approvalId!, toolName: tool}])
-                if (ok) void sendNotification({title: '小分队请求授权', body: `${tool} 等待审批，120 秒无响应将自动通过`})
-            }).then((f) => { un = f })
-        })()
+        void listen<{toolName?: string; approvalId?: string}>('agent-awaiting-approval', (e) => {
+            const tool = e.payload?.toolName || '敏感操作'
+            const approvalId = e.payload?.approvalId
+            if (approvalId) {
+                setPendingApprovals((q) => q.some((x) => x.approvalId === approvalId) ? q : [...q, {approvalId, toolName: tool}])
+                if (seenApprovalIdsRef.current.has(approvalId)) return
+                seenApprovalIdsRef.current.add(approvalId)
+            }
+            // watched=true 时后端会等界面决策；watched=false 才有 120s×2 低危兜底，通知不再误承诺自动批准。
+            void notifyOSWhenHidden('小分队请求授权', `${tool} 等待审批，请在工作台处理`).catch(() => {})
+        }).then((f) => { un = f })
         return () => un?.()
     }, [])
     const [injectTarget, setInjectTarget] = useState<string>('')
@@ -518,13 +531,23 @@ export default function SquadDetailPage() {
         }
         return ''
     }, [rounds])
-    // 呼吸灯：谁在发言谁亮——事件状态优先，其次取最新一轮的发言者（群聊等无成员事件的回退）
+    // 呼吸灯：谁在发言谁亮——事件状态优先，其次取最新一轮的发言者
     const lastSpeakerId = rounds.length ? (rounds[rounds.length - 1].speakerAgentId ?? null) : null
+    /**
+     * 成员动作状态（舞台用）：
+     * - working/cheer/error：成员事件优先（执行中保持不动）
+     * - speaking：当前发言者（保持不动）
+     * - waiting：会话暂停 / 待审批门禁
+     * - idle：其余（含运行中非发言者 → 走动）
+     */
     const memberState = useCallback((agentId: string, role: string): string => {
         const ev = memberMotion[role]
         if (ev && ev !== 'idle') return ev
-        return isRunning && agentId === lastSpeakerId ? 'working' : 'idle'
-    }, [memberMotion, isRunning, lastSpeakerId])
+        const st = selectedSession?.status
+        if (st === 'paused' || (st && st.startsWith('awaiting'))) return 'waiting'
+        if (isRunning && agentId === lastSpeakerId) return 'speaking'
+        return 'idle'
+    }, [memberMotion, isRunning, lastSpeakerId, selectedSession?.status])
 
     if (loading) return <div className="squads squads--detail"><Spin spinning wrapperClassName="squads__spin"/></div>
     if (!squad) {
@@ -654,9 +677,13 @@ export default function SquadDetailPage() {
                         chatCard={chatCard}
                         canInject={canInject}
                         onPick={pickMember}
+                        pendingApprovals={pendingApprovals}
+                        onApprove={(id) => void invoke('squad_member_approval_resolve', {approvalId: id, decision: 'approve'}).then(() => setPendingApprovals((q) => q.filter((x) => x.approvalId !== id)))}
+                        onSkip={(id) => void invoke('squad_member_approval_resolve', {approvalId: id, decision: 'skip'}).then(() => setPendingApprovals((q) => q.filter((x) => x.approvalId !== id)))}
                     />
 
-                    {pendingApprovals.map((pa) => (
+                    {/* 对话视图：底部审批条；舞台视图改为气泡，见 StageView */}
+                    {view === 'dialog' && pendingApprovals.map((pa) => (
                         <div key={pa.approvalId} className="sw-round sw-round--gate">
                             <div className="sw-round__pa sw-round__pa--user">批</div>
                             <div className="sw-round__body">
@@ -798,48 +825,263 @@ const CrewBar = memo(function CrewBar({members, agents, appearanceOf, memberStat
     )
 })
 
-/** 像素舞台：会议室长桌场景 + 围坐成员 + 发言气泡回显 + 系统机器人 */
-const StageView = memo(function StageView({mode, members, agents, spots, appearanceOf, memberState, lastWords, systemWord, activeSpeakerId, chatCard, canInject, onPick}: {
+/** 舞台气泡打字机：固定宽度+高度，流式输出，超长可滚动且自动滚到底 */
+function StageTypewriter({text, speed = 24}: {text: string; speed?: number}) {
+    const [shown, setShown] = useState(0)
+    const bodyRef = useRef<HTMLDivElement>(null)
+    useEffect(() => {
+        if (!text) {
+            setShown(0)
+            return
+        }
+        setShown(0)
+        const id = window.setInterval(() => {
+            setShown((n) => {
+                if (n >= text.length) {
+                    window.clearInterval(id)
+                    return n
+                }
+                return n + 1
+            })
+        }, speed)
+        return () => window.clearInterval(id)
+    }, [text, speed])
+    // 新内容出来后自动向下滚动，保证最新字可见
+    useEffect(() => {
+        const el = bodyRef.current
+        if (!el) return
+        el.scrollTop = el.scrollHeight
+    }, [shown, text])
+    if (!text) return null
+    return (
+        <div ref={bodyRef} className="sw-walker__say__body">
+            {shown >= text.length ? text : text.slice(0, shown)}
+            {shown < text.length && <span className="sw-walker__say__caret">▌</span>}
+        </div>
+    )
+}
+
+/** 按 agentId 稳定散列 → 每人步频/相位（路径改由斥力引力模拟驱动） */
+function walkStyleFor(agentId: string, index: number): Record<string, string> {
+    let h = (index + 1) * 2654435761
+    for (let i = 0; i < agentId.length; i += 1) h = (Math.imul(h, 31) + agentId.charCodeAt(i)) >>> 0
+    return {
+        'walk-delay': `${-((h % 17) * 0.07)}s`,
+        'walk-bob': `${0.38 + ((h >> 5) % 5) * 0.04}s`,
+    }
+}
+
+/**
+ * 舞台群体游走：全场自由移动 + 相邻相斥、过远相吸（简化 boids）。
+ * - 忙（发言/执行/等待）的成员速度衰减到 0，定在原地；
+ * - 地板边界内活动（不穿墙、不飘上天花板）。
+ */
+type WalkerBody = {
+    id: string
+    x: number
+    y: number
+    vx: number
+    vy: number
+    flip: boolean
+}
+
+const WALK_BOUNDS = { minX: 5, maxX: 94, minY: 52, maxY: 90 }
+const WALK_SEP = 5.5   // % 单位：小于此距相斥
+const WALK_COH = 16    // % 单位：大于此距相吸
+const WALK_SPEED = 0.22 // 每 tick 最大位移（%）
+const WALK_TICK_MS = 80
+
+function useStageWalk(
+    keys: string[],
+    spawn: Array<{x: number; y: number}>,
+    frozen: boolean[],
+): WalkerBody[] {
+    const bodiesRef = useRef<WalkerBody[]>([])
+    const frozenRef = useRef(frozen)
+    frozenRef.current = frozen
+
+    // 初始化 / 成员变化时重播种（从座位出发）
+    useEffect(() => {
+        const prev = bodiesRef.current
+        const next = keys.map((id, i) => {
+            const old = prev.find((p) => p.id === id)
+            const s = spawn[i] || spawn[i % Math.max(spawn.length, 1)] || { x: 50, y: 70 }
+            return old ?? {
+                id,
+                x: s.x,
+                y: s.y,
+                vx: (Math.random() - 0.5) * 0.15,
+                vy: (Math.random() - 0.5) * 0.1,
+                flip: false,
+            }
+        })
+        bodiesRef.current = next
+    }, [keys.join('|'), spawn.length])
+
+    const [tick, setTick] = useState(0)
+    useEffect(() => {
+        const timer = window.setInterval(() => {
+            const list = bodiesRef.current
+            const frz = frozenRef.current
+            for (let i = 0; i < list.length; i += 1) {
+                const a = list[i]
+                if (frz[i]) {
+                    // 定住：速度快速衰减，位移清零
+                    a.vx *= 0.55
+                    a.vy *= 0.55
+                    if (Math.abs(a.vx) < 0.01) a.vx = 0
+                    if (Math.abs(a.vy) < 0.01) a.vy = 0
+                    continue
+                }
+                // 游走噪声（缓慢转弯）
+                a.vx += (Math.random() - 0.5) * 0.06
+                a.vy += (Math.random() - 0.5) * 0.05
+
+                // 斥力 / 引力
+                for (let j = 0; j < list.length; j += 1) {
+                    if (j === i) continue
+                    const b = list[j]
+                    const dx = a.x - b.x
+                    const dy = a.y - b.y
+                    const d = Math.hypot(dx, dy) || 0.01
+                    if (d < WALK_SEP) {
+                        const k = (WALK_SEP - d) / WALK_SEP * 0.09
+                        a.vx += (dx / d) * k
+                        a.vy += (dy / d) * k
+                    } else if (d > WALK_COH) {
+                        const k = Math.min(0.05, (d - WALK_COH) / WALK_COH * 0.04)
+                        a.vx -= (dx / d) * k
+                        a.vy -= (dy / d) * k
+                    }
+                }
+
+                // 限速
+                const sp = Math.hypot(a.vx, a.vy)
+                if (sp > WALK_SPEED) {
+                    a.vx = (a.vx / sp) * WALK_SPEED
+                    a.vy = (a.vy / sp) * WALK_SPEED
+                }
+
+                a.x += a.vx
+                a.y += a.vy * 0.65 // 纵向稍慢（地板透视）
+
+                // 边界：碰边减速转向
+                if (a.x < WALK_BOUNDS.minX) { a.x = WALK_BOUNDS.minX; a.vx = Math.abs(a.vx) * 0.6 }
+                if (a.x > WALK_BOUNDS.maxX) { a.x = WALK_BOUNDS.maxX; a.vx = -Math.abs(a.vx) * 0.6 }
+                if (a.y < WALK_BOUNDS.minY) { a.y = WALK_BOUNDS.minY; a.vy = Math.abs(a.vy) * 0.6 }
+                if (a.y > WALK_BOUNDS.maxY) { a.y = WALK_BOUNDS.maxY; a.vy = -Math.abs(a.vy) * 0.6 }
+
+                if (Math.abs(a.vx) > 0.02) a.flip = a.vx < 0
+            }
+            setTick((t) => t + 1)
+        }, WALK_TICK_MS)
+        return () => window.clearInterval(timer)
+    }, [])
+
+    // tick 变化时返回最新位置（ref 可变对象，需要触发重渲染）
+    return useMemo(() => bodiesRef.current, [tick])
+}
+
+/** 像素舞台：开放会议室 + 走动待机 + 发言/审批气泡 + 表情动作 */
+const StageView = memo(function StageView({mode, members, agents, spots, appearanceOf, memberState, lastWords, systemWord, activeSpeakerId, chatCard, canInject, onPick, pendingApprovals, onApprove, onSkip}: {
     mode: string; members: Members; agents: AgentInfo[];
-    spots: Array<{x: number; y: number; role: string}>;
+    spots: Array<{x: number; y: number; role: string; depth: 'near' | 'far'}>;
     appearanceOf: AppearanceOf; memberState: (agentId: string, role: string) => string;
     lastWords: Record<string, string>; systemWord: string; activeSpeakerId: string | null;
     chatCard: string | null; canInject: boolean;
-    onPick: (agentId: string) => void
+    onPick: (agentId: string) => void;
+    pendingApprovals?: Array<{approvalId: string; toolName: string}>;
+    onApprove?: (id: string) => void;
+    onSkip?: (id: string) => void;
 }) {
+    // PixelAgent 动作状态：与 memberState 对齐（含 waiting/thinking/speaking 等）
+    const agentMotion = (motion: string): AgentMotionState => {
+        if (motion === 'speaking' || motion === 'working' || motion === 'thinking' || motion === 'waiting'
+            || motion === 'cheer' || motion === 'error' || motion === 'handoff') {
+            return motion as AgentMotionState
+        }
+        return 'idle'
+    }
+    const isBusyPose = (motion: string) =>
+        motion === 'speaking' || motion === 'working' || motion === 'thinking' || motion === 'waiting'
+        || motion === 'cheer' || motion === 'error' || motion === 'handoff'
+
+    const memberList = members || []
+    const walkKeys = memberList.map((m, i) => m.agentId || String(i))
+    const spawn = memberList.map((_, i) => {
+        const s = spots[i % spots.length] || { x: 50, y: 70 }
+        return { x: s.x, y: s.y }
+    })
+    const frozenFlags = memberList.map((m) => isBusyPose(memberState(m.agentId, m.role)))
+    const bodies = useStageWalk(walkKeys, spawn, frozenFlags)
+    const bodyOf = (id: string, fallbackIndex: number) =>
+        bodies.find((b) => b.id === id) || bodies[fallbackIndex] || { x: 50, y: 70, flip: false, vx: 0, vy: 0, id }
+
     return (
         <div className="sw-stage" data-mode={mode}>
             <div className="sw-scene-frame">
                 <img className="sw-scene__bg" src={ROOM_BG} alt="" draggable={false}/>
-            </div>
-            {(members || []).map((m, i) => {
-                const spot = spots[i % spots.length]
-                const motion = memberState(m.agentId, m.role)
-                const anim = motion === 'working' ? 'is-working' : motion === 'speaking' ? 'is-speaking' : 'is-idle'
-                const word = lastWords[m.agentId] || ''
-                const talking = anim === 'is-working' || anim === 'is-speaking'
-                // 只有「正在说话的人」出气泡（含刚刚说完的那位），避免桌面被一堆气泡糊住
-                const showWord = !!word && (talking || m.agentId === activeSpeakerId)
-                return (
-                    <div
-                        key={m.id || i}
-                        className={`sw-walker ${anim}${spot.y >= FRONT_ROW_Y ? ' is-front' : ''}${chatCard === m.agentId ? ' is-selected' : ''}${showWord ? ' has-word' : ''}`}
-                        style={{left: `${spot.x}%`, top: `${spot.y}%`}}
-                        onClick={(e) => { e.stopPropagation(); if (!canInject) return; onPick(m.agentId) }}
-                        title={memberLabel(m, agents)}
-                    >
-                        {showWord && <div className={`sw-walker__say${talking ? ' is-talking' : ''}`}>{word}</div>}
-                        <div className="sw-walker__glow"/>
-                        <div className="sw-walker__pa"><PixelAgent appearance={appearanceOf(m.agentId)} size={72} motion={anim !== 'is-idle'} state={anim === 'is-working' ? 'working' : anim === 'is-speaking' ? 'speaking' : 'idle'}/></div>
-                        <div className="sw-walker__name">{memberLabel(m, agents)} · {spot.role}</div>
-                    </div>
-                )
-            })}
-            {/* 系统轮没有角色：用机器人像素站在桌上，系统消息同样回显到气泡 */}
-            <div className={`sw-robot-stand${systemWord ? ' has-word' : ''}`} style={{left: '74%', top: '66%'}} title="系统">
-                {systemWord && <div className="sw-walker__say is-sys">{systemWord}</div>}
-                <RobotPixel size={60}/>
-                <div className="sw-walker__name">系统</div>
+                {(members || []).map((m, i) => {
+                    const spot = spots[i % spots.length]
+                    const motion = memberState(m.agentId, m.role)
+                    const anim = isBusyPose(motion) ? `is-${motion}` : 'is-idle'
+                    const word = lastWords[m.agentId] || ''
+                    const talking = motion === 'speaking' || motion === 'working'
+                    const showWord = !!word && (talking || m.agentId === activeSpeakerId)
+                    const far = spot.depth === 'far'
+                    const walk = walkStyleFor(m.agentId || String(i), i)
+                    const body = bodyOf(m.agentId || String(i), i)
+                    return (
+                        <div
+                            key={m.id || i}
+                            className={`sw-walker ${anim}${far ? ' is-far' : ' is-near'}${body.y >= FRONT_ROW_Y ? ' is-front' : ''}${chatCard === m.agentId ? ' is-selected' : ''}${showWord ? ' has-word' : ''}${body.flip ? ' is-flip' : ''}`}
+                            style={{
+                                left: `${body.x}%`,
+                                top: `${body.y}%`,
+                                '--walk-delay': walk['walk-delay'],
+                                '--walk-bob': walk['walk-bob'],
+                            } as CSSProperties}
+                            onClick={(e) => { e.stopPropagation(); if (!canInject) return; onPick(m.agentId) }}
+                            title={memberLabel(m, agents)}
+                        >
+                            {showWord && (
+                                <div className={`sw-walker__say${talking ? ' is-talking' : ''}`}>
+                                    <StageTypewriter text={word} speed={talking ? 18 : 28}/>
+                                </div>
+                            )}
+                            <div className="sw-walker__glow"/>
+                            <div className="sw-walker__pa">
+                                <PixelAgent
+                                    appearance={appearanceOf(m.agentId)}
+                                    size={far ? 44 : 64}
+                                    motion={isBusyPose(motion)}
+                                    state={agentMotion(motion)}
+                                />
+                            </div>
+                            <div className="sw-walker__name">{memberLabel(m, agents)} · {spot.role}</div>
+                        </div>
+                    )
+                })}
+                {/* 系统机器人：左上角盆栽桌；系统消息 / 审批都走气泡 */}
+                <div className={`sw-robot-stand is-table${(systemWord || pendingApprovals?.length) ? ' has-word' : ''}`} style={{left: '10%', top: '52%'}} title="系统">
+                    {(systemWord || pendingApprovals?.length) ? (
+                        <div className="sw-walker__say is-sys">
+                            {systemWord && <StageTypewriter text={systemWord} speed={20}/>}
+                            {pendingApprovals?.map((pa) => (
+                                <div key={pa.approvalId} className="sw-say-approval">
+                                    <div className="sw-say-approval__title">⚠ 授权请求</div>
+                                    <div className="sw-say-approval__tool">{pa.toolName}</div>
+                                    <div className="sw-say-approval__actions">
+                                        <button type="button" className="sw-say-approval__btn is-ok" onClick={(e) => { e.stopPropagation(); onApprove?.(pa.approvalId) }}>批准</button>
+                                        <button type="button" className="sw-say-approval__btn" onClick={(e) => { e.stopPropagation(); onSkip?.(pa.approvalId) }}>跳过</button>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    ) : null}
+                    <div className="sw-walker__pa"><RobotPixel size={28}/></div>
+                    <div className="sw-walker__name">系统</div>
+                </div>
             </div>
         </div>
     )

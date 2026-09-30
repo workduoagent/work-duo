@@ -55,9 +55,42 @@ pub enum ApprovalOutcome {
 }
 
 /// 审批管理器（托管于 Tauri State）。
-/// 成员审批挂起注册表：approvalId → (squadId, toolName, 决策发送端)。前端工作台审批卡直达。
-static SQUAD_APPROVALS: std::sync::Mutex<Option<std::collections::HashMap<String, (String, String, oneshot::Sender<ApprovalOutcome>)>>> =
+/// 成员审批挂起注册表：approvalId → (squadId, agentId, toolName, 决策发送端)。前端工作台审批卡直达。
+static SQUAD_APPROVALS: std::sync::Mutex<Option<std::collections::HashMap<String, (String, String, String, oneshot::Sender<ApprovalOutcome>)>>> =
     std::sync::Mutex::new(None);
+
+/// 成员同工具授权短时记忆（复查修复 09-30）：用户对 (小分队, 成员, 工具) 显式批准一次后，
+/// TTL 内同类调用自动放行——架构师类成员连写 N 个文件不再连弹 N 次审批。
+/// 高危（L3）一律不走记忆；仅人工批准写入（240s 兜底自动批不写入，不自动续期）。
+static SQUAD_MEMBER_REMEMBER: std::sync::Mutex<Option<std::collections::HashMap<String, std::time::Instant>>> =
+    std::sync::Mutex::new(None);
+const SQUAD_MEMBER_REMEMBER_TTL: std::time::Duration = std::time::Duration::from_secs(600);
+
+fn member_remember_key(squad_id: &str, agent_id: &str, tool: &str) -> String {
+    format!("{squad_id}|{agent_id}|{tool}")
+}
+
+fn member_remember_hit(squad_id: &str, agent_id: &str, tool: &str) -> bool {
+    let key = member_remember_key(squad_id, agent_id, tool);
+    let mut g = SQUAD_MEMBER_REMEMBER.lock().unwrap_or_else(|e| e.into_inner());
+    let map = g.get_or_insert_with(std::collections::HashMap::new);
+    match map.get(&key) {
+        Some(t) if t.elapsed() < SQUAD_MEMBER_REMEMBER_TTL => true,
+        Some(_) => {
+            map.remove(&key);
+            false
+        }
+        None => false,
+    }
+}
+
+fn member_remember_insert(squad_id: &str, agent_id: &str, tool: &str) {
+    let key = member_remember_key(squad_id, agent_id, tool);
+    let mut g = SQUAD_MEMBER_REMEMBER.lock().unwrap_or_else(|e| e.into_inner());
+    let map = g.get_or_insert_with(std::collections::HashMap::new);
+    map.retain(|_, t| t.elapsed() < SQUAD_MEMBER_REMEMBER_TTL); // 顺带清理过期项
+    map.insert(key, std::time::Instant::now());
+}
 
 /// 列出某编队的待审批项（工作台拉取渲染）。
 pub fn pending_member_approvals(squad_id: &str) -> Vec<(String, String)> {
@@ -67,8 +100,8 @@ pub fn pending_member_approvals(squad_id: &str) -> Vec<(String, String)> {
         .as_ref()
         .map(|m| {
             m.iter()
-                .filter(|(_, (sid, _, _))| sid == squad_id)
-                .map(|(id, (_, tool, _))| (id.clone(), tool.clone()))
+                .filter(|(_, (sid, _, _, _))| sid == squad_id)
+                .map(|(id, (_, _, tool, _))| (id.clone(), tool.clone()))
                 .collect()
         })
         .unwrap_or_default()
@@ -77,13 +110,20 @@ pub fn pending_member_approvals(squad_id: &str) -> Vec<(String, String)> {
 /// 前端审批卡回传决策（approve/skip）。
 pub fn resolve_member_approval(approval_id: &str, decision: &str) -> bool {
     let outcome = if decision.eq_ignore_ascii_case("skip") { ApprovalOutcome::Skip } else { ApprovalOutcome::Approve };
-    SQUAD_APPROVALS
+    let approved = matches!(outcome, ApprovalOutcome::Approve);
+    let hit = SQUAD_APPROVALS
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .as_mut()
         .and_then(|m| m.remove(approval_id))
-        .map(|(_, _, tx)| tx.send(outcome).is_ok())
-        .unwrap_or(false)
+        .map(|(sid, aid, tool, tx)| {
+            if approved {
+                member_remember_insert(&sid, &aid, &tool);
+            }
+            tx.send(outcome).is_ok()
+        })
+        .unwrap_or(false);
+    hit
 }
 
 /// 审批管理器（托管于 Tauri State）。
@@ -92,6 +132,8 @@ pub struct ApprovalManager {
     pending: Arc<Mutex<HashMap<String, Pending>>>,
     /// 成员所属小分队：审批梯度判定键（工作台观看中挂起等决策 / 不在通知 120s×2 后低危自动批）。
     squad_id: Option<String>,
+    /// 成员智能体 id（成员上下文非空）：同工具授权短时记忆的主键之一。
+    member_agent_id: Option<String>,
 }
 
 impl ApprovalManager {
@@ -99,14 +141,17 @@ impl ApprovalManager {
         Self {
             pending: Arc::new(Mutex::new(HashMap::new())),
             squad_id: None,
+            member_agent_id: None,
         }
     }
 
     /// 成员上下文：审批梯度降级（工作台观看中=挂起等决策；不在=通知 120s×2 后低危自动批；L3 一律挂起）。
-    pub fn for_member(squad_id: String) -> Self {
+    /// 同工具授权短时记忆（复查修复）：本成员对同一工具 TTL 内已人工批准 → 自动放行。
+    pub fn for_member(squad_id: String, member_agent_id: String) -> Self {
         Self {
             pending: Arc::new(Mutex::new(HashMap::new())),
             squad_id: Some(squad_id),
+            member_agent_id: Some(member_agent_id),
         }
     }
 
@@ -128,6 +173,21 @@ impl ApprovalManager {
                 "[agent] approval: 成员审批梯度 watched={} unattended={} l3={} tool={} approval_id={}",
                 watched, unattended, l3, request.tool_name, request.approval_id,
             );
+            // 复查修复（09-30）：同工具授权短时记忆——本成员 TTL 内人工批准过同一工具（非 L3）
+            // → 直接放行，连写 N 个文件不再连弹 N 次审批。记忆仅由人工批准写入。
+            if !l3 {
+                if let Some(aid) = &self.member_agent_id {
+                    if member_remember_hit(sid, aid, &request.tool_name) {
+                        tracing::info!(
+                            "[agent] approval: 同工具短时记忆命中，自动放行 tool={} agent={aid}",
+                            request.tool_name
+                        );
+                        let (tx, rx) = oneshot::channel();
+                        let _ = tx.send(ApprovalOutcome::Approve);
+                        return rx;
+                    }
+                }
+            }
             if unattended && !l3 {
                 let (tx, rx) = oneshot::channel();
                 let _ = tx.send(ApprovalOutcome::Approve);
@@ -138,7 +198,7 @@ impl ApprovalManager {
                     .lock()
                     .unwrap_or_else(|e| e.into_inner())
                     .get_or_insert_with(std::collections::HashMap::new)
-                    .insert(request.approval_id.clone(), (sid.clone(), request.tool_name.clone(), oneshot::channel().0));
+                    .insert(request.approval_id.clone(), (sid.clone(), self.member_agent_id.clone().unwrap_or_default(), request.tool_name.clone(), oneshot::channel().0));
             }
             if !watched && !l3 {
                 let pending = self.pending.clone();

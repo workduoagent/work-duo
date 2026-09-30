@@ -19,7 +19,12 @@ import { normalizeAppearance } from './parse'
 import { snapshotAppearanceToLogo } from './snapshot'
 import { PixelAgent } from './PixelAgent'
 import { AppearancePicker, type DesignerSection } from './AppearancePicker'
-import type { AgentMotionState, PixelAgentAppearance } from './types'
+import type {
+  AgentMotionState,
+  BodyPose,
+  FaceExpression,
+  PixelAgentAppearance,
+} from './types'
 import './AppearanceModal.scss'
 
 export interface AppearanceModalProps {
@@ -53,6 +58,9 @@ export function AppearanceModal({
   const { message } = useNotify()
   const [draft, setDraft] = useState<PixelAgentAppearance>(() => normalizeAppearance(initial))
   const [state, setState] = useState<AgentMotionState>('idle')
+  const [expression, setExpression] = useState<FaceExpression | ''>('')
+  const [pose, setPose] = useState<BodyPose | ''>('')
+  const [previewSize, setPreviewSize] = useState(192)
   const [saving, setSaving] = useState(false)
   const [section, setSection] = useState<DesignerSection>('base')
 
@@ -61,6 +69,9 @@ export function AppearanceModal({
     if (open) {
       setDraft(normalizeAppearance(initial))
       setState('idle')
+      setExpression('')
+      setPose('')
+      setPreviewSize(192)
       setSaving(false)
       setSection('base')
     }
@@ -103,21 +114,74 @@ export function AppearanceModal({
         {/* 预览区 */}
         <div className="pixel-modal__preview">
           <div className="pixel-modal__stage">
-            <PixelAgent appearance={draft} state={state} size={192} motion />
+            <PixelAgent
+              appearance={draft}
+              state={state}
+              expression={(expression || undefined) as FaceExpression | undefined}
+              pose={(pose || undefined) as BodyPose | undefined}
+              size={previewSize}
+              motion
+            />
           </div>
           <div className="pixel-modal__play">
-            <span className="pixel-modal__play-label">动作试玩（不影响保存）</span>
+            <span className="pixel-modal__play-label">动作状态</span>
             <Segmented
               size="small"
               value={state}
-              onChange={(v) => setState(v as AgentMotionState)}
+              onChange={(v) => {
+                setState(v as AgentMotionState)
+                setExpression('')
+                setPose('')
+              }}
               options={[
                 { label: '待机', value: 'idle' },
                 { label: '工作', value: 'working' },
                 { label: '思考', value: 'thinking' },
                 { label: '出错', value: 'error' },
+                { label: '说话', value: 'speaking' },
+                { label: '庆祝', value: 'cheer' },
               ]}
             />
+            <span className="pixel-modal__play-label">表情（外部控制）</span>
+            <Segmented
+              size="small"
+              value={expression}
+              onChange={(v) => setExpression(v as FaceExpression | '')}
+              options={[
+                { label: '跟随', value: '' },
+                { label: '平静', value: 'neutral' },
+                { label: '开心', value: 'happy' },
+                { label: '难过', value: 'sad' },
+                { label: '生气', value: 'angry' },
+                { label: '惊讶', value: 'surprised' },
+                { label: '眨眼', value: 'wink' },
+              ]}
+            />
+            <span className="pixel-modal__play-label">动作（外部控制）</span>
+            <Segmented
+              size="small"
+              value={pose}
+              onChange={(v) => setPose(v as BodyPose | '')}
+              options={[
+                { label: '跟随', value: '' },
+                { label: '待机', value: 'idle' },
+                { label: '打字', value: 'working' },
+                { label: '思考', value: 'thinking' },
+                { label: '挥挥', value: 'waiting' },
+                { label: '递交', value: 'handoff' },
+              ]}
+            />
+            <span className="pixel-modal__play-label">缩放（等比）</span>
+            <input
+              className="pixel-modal__range"
+              type="range"
+              min={48}
+              max={256}
+              step={8}
+              value={previewSize}
+              onChange={(e) => setPreviewSize(Number(e.target.value))}
+            />
+            <span className="pixel-modal__size-tag">{previewSize}px</span>
           </div>
         </div>
 

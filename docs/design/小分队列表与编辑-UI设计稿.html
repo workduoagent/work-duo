@@ -6,7 +6,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
 <title>小分队列表 & 编辑表单 · UI 设计稿</title>
 <style>
-/* Zinc + 晴空蓝（与工作台一致） */
 :root{
   --bg:#ffffff; --bg-subtle:#fafafa; --bg-muted:#f4f4f5;
   --fg:#27272a; --fg-muted:#71717a; --fg-intense:#18181b;
@@ -17,7 +16,7 @@
   --success:#16a34a; --success-50:#dcfce7;
   --warning:#d97706; --warning-50:#fef3c7;
   --danger:#ef4444; --danger-50:#fee2e2;
-  --lilac:#8b5cf6; --lilac-50:#f5f3ff;
+  --purple:#8b5cf6; --purple-50:#f5f3ff;
   --shadow-sm:0 2px 12px rgba(0,0,0,.03);
   --shadow-md:0 8px 32px rgba(0,0,0,.05);
   --shadow-pop:0 16px 48px rgba(0,0,0,.1);
@@ -27,6 +26,12 @@
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{height:100%}
 body{font-family:var(--font);background:var(--bg);color:var(--fg);font-size:13px;line-height:1.5;overflow:hidden}
+
+/* lucide 风格线性图标 */
+.ic{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.ic--sm{width:13px;height:13px}
+.ic--md{width:16px;height:16px}
+.ic--lg{width:20px;height:20px}
 
 .page{display:flex;flex-direction:column;height:100vh;padding:20px 28px 28px;overflow-y:auto}
 
@@ -61,117 +66,91 @@ body{font-family:var(--font);background:var(--bg);color:var(--fg);font-size:13px
 }
 .pill--mode{background:var(--brand-100);color:var(--brand-800)}
 .pill--mode-pipe{background:#ecfeff;color:#0e7490}
-.pill--mode-chat{background:var(--lilac-50);color:#5b21b6}
+.pill--mode-chat{background:var(--purple-50);color:#6d28d9}
 .pill--live{background:var(--success-50);color:#16a34a}
 .pill--live-warn{background:var(--warning-50);color:var(--warning)}
 .pill .dot{width:6px;height:6px;border-radius:50%;background:currentColor;flex:none}
 .pill--live .dot{animation:pulse 1.6s infinite}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
 
-/* ===== 卡片网格 ===== */
-.grid{
-  display:grid;
-  grid-template-columns:repeat(auto-fill,minmax(320px,1fr));
-  gap:16px;
-}
+/* ===== 卡片 ===== */
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:16px}
 .card{
-  background:var(--bg);
-  border:1px solid var(--border);
-  border-radius:16px;
-  padding:18px;
-  display:flex;flex-direction:column;gap:14px;
+  background:var(--bg);border:1px solid var(--border);border-radius:16px;
+  padding:18px;display:flex;flex-direction:column;gap:14px;
   transition:.18s;
-  cursor:default;
 }
-.card:hover{
-  border-color:var(--brand-300);
-  box-shadow:var(--shadow-md);
-  transform:translateY(-2px);
-}
+.card:hover{border-color:var(--brand-300);box-shadow:var(--shadow-md);transform:translateY(-2px)}
 .card__head{display:flex;align-items:center;gap:12px}
 .card__avatar{
   width:48px;height:48px;border-radius:13px;flex:none;
-  background:linear-gradient(135deg,var(--brand-100),var(--brand-50));
+  background:var(--bg-muted);border:1px solid var(--border);
   display:flex;align-items:center;justify-content:center;
-  overflow:hidden;
+  overflow:hidden;color:var(--fg-muted);
 }
-.card__avatar svg,.card__avatar img{width:100%;height:100%;object-fit:cover}
+.card__avatar img{width:100%;height:100%;object-fit:cover}
 .card__titles{min-width:0;flex:1}
-.card__name{
-  font-size:15px;font-weight:700;color:var(--fg-intense);
-  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
-}
+.card__name{font-size:15px;font-weight:700;color:var(--fg-intense);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .card__tags{display:flex;align-items:center;gap:6px;margin-top:3px;flex-wrap:wrap}
 .card__desc{
   font-size:12.5px;color:var(--fg-muted);line-height:1.65;
-  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;
-  min-height:40px;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;min-height:40px;
 }
-/* 像素成员条 */
-.card__crew{display:flex;align-items:center;height:30px;gap:0}
+.card__crew{display:flex;align-items:center;height:28px;gap:0}
 .card__crew-slot{
-  width:28px;height:28px;border-radius:8px;overflow:hidden;
-  background:var(--bg-muted);border:2px solid var(--bg);
-  margin-left:-7px;flex:none;
+  width:26px;height:26px;border-radius:8px;overflow:hidden;
+  background:var(--bg-muted);border:2px solid var(--bg);margin-left:-6px;flex:none;
   display:flex;align-items:center;justify-content:center;
 }
 .card__crew-slot:first-child{margin-left:0}
-.card__crew-more{
-  margin-left:8px;font-size:11px;font-weight:600;color:var(--fg-muted);
-}
+.card__crew-slot img{width:100%;height:100%;object-fit:cover}
+.card__crew-more{margin-left:8px;font-size:11px;font-weight:600;color:var(--fg-muted)}
 .card__foot{
   display:flex;align-items:center;gap:8px;
-  padding-top:14px;border-top:1px solid var(--border-muted);
-  margin-top:auto;
+  padding-top:14px;border-top:1px solid var(--border-muted);margin-top:auto;
 }
-.card__foot .btn--solid{flex:1}
 
-/* ===== 弹窗遮罩 ===== */
+/* ===== 弹窗 ===== */
 .mask{
   position:fixed;inset:0;z-index:100;
-  background:rgba(24,24,27,.4);
-  backdrop-filter:blur(3px);
-  display:flex;align-items:center;justify-content:center;
-  padding:24px;
+  background:rgba(24,24,27,.4);backdrop-filter:blur(3px);
+  display:flex;align-items:center;justify-content:center;padding:24px;
 }
 .modal{
-  width:min(920px,100%);max-height:calc(100vh - 48px);
-  background:var(--bg);border-radius:18px;
-  box-shadow:var(--shadow-pop);
+  width:min(940px,100%);max-height:calc(100vh - 48px);
+  background:var(--bg);border-radius:18px;box-shadow:var(--shadow-pop);
   display:flex;flex-direction:column;overflow:hidden;
 }
 .modal__head{
   display:flex;align-items:flex-start;gap:14px;
-  padding:22px 26px 18px;
-  border-bottom:1px solid var(--border-muted);
+  padding:22px 26px 18px;border-bottom:1px solid var(--border-muted);
 }
 .modal__title{font-size:17px;font-weight:700;color:var(--fg-intense)}
 .modal__desc{margin-top:4px;font-size:12.5px;color:var(--fg-muted)}
 .modal__close{
   margin-left:auto;width:32px;height:32px;border-radius:9px;
   border:1px solid var(--border);background:var(--bg);
-  cursor:pointer;color:var(--fg-muted);font-size:15px;
+  cursor:pointer;color:var(--fg-muted);
   display:flex;align-items:center;justify-content:center;
 }
 .modal__close:hover{background:var(--bg-muted);color:var(--fg)}
-.modal__body{flex:1;min-height:0;overflow-y:auto;display:flex}
+.modal__body{flex:1;min-height:0;overflow-y:auto}
 .modal__foot{
   display:flex;align-items:center;justify-content:flex-end;gap:10px;
-  padding:16px 26px;border-top:1px solid var(--border-muted);
-  background:var(--bg-subtle);
+  padding:16px 26px;border-top:1px solid var(--border-muted);background:var(--bg-subtle);
 }
 
-/* ===== 编辑器：左侧步骤 + 右侧表单 ===== */
-.editor{display:flex;min-height:0;width:100%}
+/* ===== 编辑器：左侧栏导航 + 右侧表单 ===== */
+.editor{display:flex;min-height:0;width:100%;flex:1}
 .editor__nav{
-  width:180px;flex:none;padding:18px 12px;
+  width:188px;flex:none;padding:20px 12px;
   border-right:1px solid var(--border-muted);
   background:var(--bg-subtle);
   display:flex;flex-direction:column;gap:4px;
 }
 .editor__nav-item{
-  display:flex;align-items:center;gap:9px;
-  padding:10px 12px;border-radius:10px;
+  display:flex;align-items:center;gap:10px;
+  padding:11px 13px;border-radius:10px;
   font-size:13px;font-weight:600;color:var(--fg-muted);
   cursor:pointer;transition:.12s;border:1.5px solid transparent;
 }
@@ -180,27 +159,26 @@ body{font-family:var(--font);background:var(--bg);color:var(--fg);font-size:13px
   background:var(--brand-50);color:var(--brand-800);
   border-color:var(--brand-200);
 }
-.editor__nav-item i{font-style:normal;font-size:14px}
+.editor__nav-item .ic{opacity:.75}
+.editor__nav-item.is-on .ic{opacity:1}
 .editor__nav-item small{
-  margin-left:auto;font-size:10px;font-weight:600;
+  margin-left:auto;font-size:10px;font-weight:700;
   background:var(--brand-600);color:#fff;
-  padding:1px 6px;border-radius:999px;
+  padding:1px 7px;border-radius:999px;
+}
+.editor__nav-sep{
+  margin:10px 8px 6px;font-size:10px;font-weight:650;
+  color:var(--fg-muted);letter-spacing:.06em;text-transform:uppercase;
 }
 .editor__form{
-  flex:1;min-width:0;padding:22px 26px 28px;
+  flex:1;min-width:0;padding:24px 28px 28px;
   overflow-y:auto;display:flex;flex-direction:column;gap:18px;
 }
 
-/* 表单字段 */
+/* 表单 */
 .field{display:flex;flex-direction:column;gap:6px}
-.field__label{
-  font-size:12.5px;font-weight:650;color:var(--fg-intense);
-  display:flex;align-items:center;gap:5px;
-}
-.field__label .tip{
-  font-size:10px;color:var(--fg-muted);font-weight:400;
-  cursor:help;
-}
+.field__label{font-size:12.5px;font-weight:650;color:var(--fg-intense);display:flex;align-items:center;gap:5px}
+.field__label .tip{color:var(--fg-muted);cursor:help;display:inline-flex}
 .field__hint{font-size:11px;color:var(--fg-muted);line-height:1.5}
 .input,.select,.textarea{
   width:100%;border:1.5px solid var(--border);border-radius:10px;
@@ -216,56 +194,48 @@ body{font-family:var(--font);background:var(--bg);color:var(--fg);font-size:13px
 .field-row{display:grid;grid-template-columns:1fr 1fr;gap:16px}
 .field-row--3{grid-template-columns:1fr 1fr 1fr}
 
-/* 模式选择卡 */
-.mode-cards{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
-.mode-card{
-  border:1.5px solid var(--border);border-radius:12px;
-  padding:14px;cursor:pointer;transition:.15s;background:var(--bg);
-  text-align:left;
+/* 模式 Segmented（对齐现有 Segmented 控件） */
+.segmented{
+  display:inline-flex;border:1px solid var(--border);border-radius:10px;
+  overflow:hidden;background:var(--bg-subtle);
 }
-.mode-card:hover{border-color:var(--brand-300)}
-.mode-card.is-on{
-  border-color:var(--brand-600);
-  background:var(--brand-50);
-  box-shadow:0 0 0 3px color-mix(in srgb,var(--brand-500) 18%,transparent);
+.segmented__item{
+  display:flex;align-items:center;gap:6px;
+  padding:8px 16px;font-size:12.5px;font-weight:600;color:var(--fg-muted);cursor:pointer;
 }
-.mode-card__ico{font-size:20px;margin-bottom:6px}
-.mode-card__t{font-size:13px;font-weight:700;color:var(--fg-intense)}
-.mode-card__d{font-size:11px;color:var(--fg-muted);margin-top:3px;line-height:1.5}
+.segmented__item+.segmented__item{border-left:1px solid var(--border)}
+.segmented__item.is-on{background:var(--brand-600);color:#fff}
 
-/* 头像上传 */
-.avatar-pick{
-  display:flex;align-items:center;gap:14px;
-}
+/* 头像上传（用户上传，非像素） */
+.avatar-pick{display:flex;align-items:center;gap:14px}
 .avatar-pick__box{
-  width:64px;height:64px;border-radius:16px;
-  border:2px dashed var(--brand-300);
+  width:64px;height:64px;border-radius:16px;flex:none;
+  border:1.5px dashed var(--brand-300);
   background:var(--brand-50);
-  display:flex;align-items:center;justify-content:center;
-  cursor:pointer;overflow:hidden;flex:none;
-  transition:.15s;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;
+  cursor:pointer;color:var(--brand-600);transition:.15s;
 }
 .avatar-pick__box:hover{border-color:var(--brand-500);background:var(--brand-100)}
-.avatar-pick__box svg{width:52px;height:52px}
-.avatar-pick__meta{display:flex;flex-direction:column;gap:4px}
+.avatar-pick__box img{width:100%;height:100%;object-fit:cover;border-radius:15px}
+.avatar-pick__box small{font-size:9px;font-weight:600}
+.avatar-pick__meta{display:flex;flex-direction:column;gap:6px}
 
 /* 成员列表 */
 .member-list{display:flex;flex-direction:column;gap:10px}
 .member-card{
   display:flex;align-items:center;gap:12px;
-  padding:12px 14px;
-  border:1.5px solid var(--border);border-radius:12px;
-  background:var(--bg);transition:.15s;
+  padding:12px 14px;border:1.5px solid var(--border);border-radius:12px;background:var(--bg);transition:.15s;
 }
 .member-card:hover{border-color:var(--brand-300);box-shadow:var(--shadow-sm)}
-.member-card__pa{
-  width:42px;height:42px;border-radius:11px;overflow:hidden;
-  background:var(--bg-muted);flex:none;
-  display:flex;align-items:center;justify-content:center;
+.member-card__av{
+  width:40px;height:40px;border-radius:11px;overflow:hidden;flex:none;
+  background:var(--bg-muted);border:1px solid var(--border);
+  display:flex;align-items:center;justify-content:center;color:var(--fg-muted);
 }
+.member-card__av img{width:100%;height:100%;object-fit:cover}
 .member-card__info{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}
 .member-card__name{font-size:13px;font-weight:650;color:var(--fg-intense)}
-.member-card__role{font-size:11px;color:var(--fg-muted)}
+.member-card__id{font-size:11px;color:var(--fg-muted)}
 .member-card__selects{display:flex;gap:8px;flex:none}
 .member-card__selects .select{width:140px;padding:7px 10px;font-size:12px}
 .member-card__del{
@@ -274,32 +244,26 @@ body{font-family:var(--font);background:var(--bg);color:var(--fg);font-size:13px
   display:flex;align-items:center;justify-content:center;
 }
 .member-card__del:hover{background:var(--danger-50);color:var(--danger)}
-
 .add-member{
   display:flex;align-items:center;gap:10px;
-  padding:12px 14px;border:1.5px dashed var(--border);
-  border-radius:12px;background:var(--bg-subtle);
+  padding:12px 14px;border:1.5px dashed var(--border);border-radius:12px;background:var(--bg-subtle);
 }
 .add-member .select{flex:1}
 
 /* 开关行 */
 .switch-row{
   display:flex;align-items:center;justify-content:space-between;gap:14px;
-  padding:12px 14px;border:1.5px solid var(--border);
-  border-radius:12px;background:var(--bg);
+  padding:12px 14px;border:1.5px solid var(--border);border-radius:12px;background:var(--bg);
 }
 .switch-row__t{font-size:13px;font-weight:650;color:var(--fg-intense)}
 .switch-row__d{font-size:11px;color:var(--fg-muted);margin-top:2px}
 .switch{
-  width:40px;height:22px;border-radius:999px;
-  background:var(--border);position:relative;cursor:pointer;
-  transition:.15s;flex:none;
+  width:40px;height:22px;border-radius:999px;background:var(--border);
+  position:relative;cursor:pointer;transition:.15s;flex:none;
 }
 .switch::after{
-  content:'';position:absolute;top:2px;left:2px;
-  width:18px;height:18px;border-radius:50%;
-  background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.15);
-  transition:.15s;
+  content:'';position:absolute;top:2px;left:2px;width:18px;height:18px;
+  border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.15);transition:.15s;
 }
 .switch.is-on{background:var(--brand-600)}
 .switch.is-on::after{left:20px}
@@ -313,82 +277,110 @@ body{font-family:var(--font);background:var(--bg);color:var(--fg);font-size:13px
 }
 .mode-note b{font-weight:700}
 
-/* 资源标签 */
-.chips{display:flex;flex-wrap:wrap;gap:6px}
-.chip{
-  display:inline-flex;align-items:center;gap:5px;
-  padding:4px 11px;border-radius:999px;font-size:11.5px;font-weight:550;
-  border:1px solid var(--border);background:var(--bg-subtle);color:var(--fg-muted);
-  cursor:pointer;
+/* MCP 卡片：工具可折叠 + 内滚，工具多也不崩 */
+.mcp-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px}
+.mcp-card{
+  border:1.5px solid var(--border);border-radius:12px;background:var(--bg);
+  padding:0;overflow:hidden;display:flex;flex-direction:column;
 }
-.chip:hover{border-color:var(--brand-300);color:var(--brand-700)}
-.chip.is-on{background:var(--brand-600);border-color:var(--brand-600);color:#fff}
+.mcp-card__head{
+  display:flex;align-items:center;gap:10px;padding:13px 14px;cursor:pointer;
+}
+.mcp-card__head:hover{background:var(--bg-subtle)}
+.mcp-card__title{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:650;color:var(--fg-intense);min-width:0;flex:1}
+.mcp-card__title span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mcp-card__count{
+  font-size:10px;font-weight:650;padding:2px 7px;border-radius:999px;
+  background:var(--bg-muted);color:var(--fg-muted);flex:none;
+}
+.mcp-card__count.is-on{background:var(--brand-100);color:var(--brand-800)}
+.mcp-card__chev{color:var(--fg-muted);transition:transform .18s;flex:none}
+.mcp-card.is-open .mcp-card__chev{transform:rotate(90deg)}
+.mcp-card__tools{
+  display:none;flex-direction:column;gap:2px;
+  border-top:1px solid var(--border-muted);
+  padding:8px 10px 10px;
+  max-height:220px;overflow-y:auto;
+}
+.mcp-card.is-open .mcp-card__tools{display:flex}
+.mcp-card__tools::-webkit-scrollbar{width:6px}
+.mcp-card__tools::-webkit-scrollbar-thumb{background:var(--border);border-radius:999px}
+.mcp-card__toolbar{
+  display:flex;align-items:center;gap:6px;padding:2px 4px 6px;
+  position:sticky;top:0;background:var(--bg);z-index:1;
+}
+.mcp-card__toolbar button{
+  border:none;background:transparent;font-size:11px;font-weight:600;
+  color:var(--brand-600);cursor:pointer;padding:2px 6px;border-radius:5px;
+}
+.mcp-card__toolbar button:hover{background:var(--brand-50)}
+.tool-row{
+  display:flex;align-items:center;justify-content:space-between;gap:8px;
+  padding:6px 8px;border-radius:7px;font-size:12px;color:var(--fg);
+}
+.tool-row:hover{background:var(--bg-subtle)}
+.tool-row code{
+  font-size:11px;font-family:ui-monospace,Consolas,monospace;
+  background:var(--bg-muted);padding:1px 5px;border-radius:4px;color:var(--fg-muted);
+}
 
-/* 空态 */
-.empty{
-  text-align:center;padding:64px 20px;color:var(--fg-muted);
-}
-.empty__ico{
-  width:64px;height:64px;border-radius:18px;margin:0 auto 14px;
-  background:var(--brand-50);border:2px dashed var(--brand-200);
-  display:flex;align-items:center;justify-content:center;font-size:28px;
-}
-.empty__t{font-size:15px;font-weight:650;color:var(--fg-intense)}
-.empty__d{font-size:12.5px;margin-top:6px}
-
-/* 模板下拉 */
 .tpl-select{
   height:36px;border:1.5px solid var(--border);border-radius:10px;
-  padding:0 12px;font-family:inherit;font-size:13px;
-  background:var(--bg);color:var(--fg);min-width:150px;
+  padding:0 12px;font-family:inherit;font-size:13px;background:var(--bg);color:var(--fg);min-width:150px;
 }
-
-/* PixelAgent */
-.pixel-agent{display:block;image-rendering:pixelated}
-.pixel-agent .pa-fb{opacity:0}
-.pixel-agent.is-motion.pixel-agent--working .pa-fa,
-.pixel-agent.is-motion.pixel-agent--waiting .pa-fa,
-.pixel-agent.is-motion.pixel-agent--speaking .pa-fa{animation:pa-show-a .5s steps(1,end) infinite}
-.pixel-agent.is-motion.pixel-agent--working .pa-fb,
-.pixel-agent.is-motion.pixel-agent--waiting .pa-fb,
-.pixel-agent.is-motion.pixel-agent--speaking .pa-fb{animation:pa-show-b .5s steps(1,end) infinite}
-@keyframes pa-show-a{0%,49.9%{opacity:1}50%,100%{opacity:0}}
-@keyframes pa-show-b{0%,49.9%{opacity:0}50%,100%{opacity:1}}
 
 .note{
   position:fixed;left:16px;bottom:12px;z-index:200;
-  background:rgba(24,24,27,.9);color:#fafafa;
-  font-size:11px;padding:8px 12px;border-radius:8px;
-  max-width:360px;line-height:1.6;pointer-events:none;
+  background:rgba(24,24,27,.9);color:#fafafa;font-size:11px;
+  padding:8px 12px;border-radius:8px;max-width:380px;line-height:1.6;pointer-events:none;
 }
 .note b{color:#7dd3fc}
 </style>
 </head>
 <body>
+<!-- lucide 图标库（内联） -->
+<svg style="display:none">
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M5 12h14M12 5v14"/></symbol>
+  <symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M1 12h2M21 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4"/></symbol>
+  <symbol id="i-users" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></symbol>
+  <symbol id="i-users2" viewBox="0 0 24 24"><circle cx="9" cy="7" r="4"/><path d="M3 21v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2"/><path d="M16 3.13a4 4 0 0 1 0 7.75M21 21v-2a4 4 0 0 0-3-3.87"/></symbol>
+  <symbol id="i-zap" viewBox="0 0 24 24"><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/></symbol>
+  <symbol id="i-git" viewBox="0 0 24 24"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></symbol>
+  <symbol id="i-msg" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></symbol>
+  <symbol id="i-pencil" viewBox="0 0 24 24"><path d="M17 3a2.8 2.8 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"/></symbol>
+  <symbol id="i-upload" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
+  <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></symbol>
+  <symbol id="i-download" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></symbol>
+  <symbol id="i-server" viewBox="0 0 24 24"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><circle cx="6" cy="6" r="1"/><circle cx="6" cy="18" r="1"/></symbol>
+  <symbol id="i-sliders" viewBox="0 0 24 24"><line x1="4" y1="21" x2="4" y2="14M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></symbol>
+  <symbol id="i-puzzle" viewBox="0 0 24 24"><path d="M4 7h4V3a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v4h4v4h4v2a1 1 0 0 1-1 1h-4v4h-4v-4H9v4H5a1 1 0 0 1-1-1v-4H1V9h3z" stroke-width="1.6"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.5 9a9 9 0 0 1 14.9-3.4L23 10M1 14l4.6 4.4A9 9 0 0 0 20.5 15"/></symbol>
+  <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></symbol>
+  <symbol id="i-cpu" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 1v3M15 1v3M9 20v3M15 20v3M20 9h3M20 14h3M1 9h3M1 14h3"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></symbol>
+</svg>
+
 <div class="page">
-  <!-- 页头 -->
   <header class="head">
     <div>
       <h1 class="head__title">小分队协作</h1>
       <p class="head__lead">把多个智能体编成协作小组，按需选择编排式 / 流水线 / 群聊，协同攻克复杂任务。</p>
     </div>
     <div class="head__actions">
-      <select class="tpl-select" id="tplSel">
-        <option value="">⭐ 从模板新建</option>
-        <option>⭐ 全栈交付小队</option>
-        <option>⭐ 数据管道小队</option>
-        <option>⭐ 调研小队</option>
-      </select>
-      <button class="btn btn--soft" id="btnApi">⚙ API 服务</button>
-      <button class="btn btn--solid" id="btnCreate">＋ 新建小分队</button>
+      <select class="tpl-select"><option>从模板新建</option><option>全栈交付小队</option><option>数据管道小队</option><option>调研小队</option></select>
+      <button class="btn btn--ghost"><svg class="ic"><use href="#i-server"/></svg> API 服务</button>
+      <button class="btn btn--solid" id="btnCreate"><svg class="ic"><use href="#i-plus"/></svg> 新建小分队</button>
     </div>
   </header>
 
-  <!-- 卡片网格 -->
   <div class="grid" id="grid"></div>
 </div>
 
-<!-- 新建 / 编辑弹窗 -->
+<!-- 编辑弹窗 -->
 <div class="mask" id="mask" style="display:none">
   <div class="modal">
     <div class="modal__head">
@@ -396,328 +388,316 @@ body{font-family:var(--font);background:var(--bg);color:var(--fg);font-size:13px
         <div class="modal__title" id="modalTitle">新建小分队</div>
         <div class="modal__desc">组合多个智能体，按不同协作模式协同完成复杂任务。</div>
       </div>
-      <button class="modal__close" id="modalClose">✕</button>
+      <button class="modal__close" id="modalClose"><svg class="ic"><use href="#i-x"/></svg></button>
     </div>
-    <div class="modal__body">
+
+    <!-- 左侧栏导航 + 右侧表单（UI 布局；字段与现有一致） -->
+    <div class="modal__body" style="display:flex;min-height:0">
       <div class="editor">
-        <!-- 左侧步骤 -->
         <nav class="editor__nav" id="editorNav">
-          <div class="editor__nav-item is-on" data-step="basic"><i>⚙</i> 基本配置</div>
-          <div class="editor__nav-item" data-step="members"><i>👥</i> 成员与编排 <small>3</small></div>
-          <div class="editor__nav-item" data-step="strategy"><i>🎛</i> 运行策略</div>
-          <div class="editor__nav-item" data-step="resource"><i>🧩</i> 资源挂载</div>
+          <div class="editor__nav-sep">配置</div>
+          <div class="editor__nav-item is-on" data-step="basic"><svg class="ic"><use href="#i-settings"/></svg> 基本配置</div>
+          <div class="editor__nav-item" data-step="resource"><svg class="ic"><use href="#i-puzzle"/></svg> 资源挂载</div>
+          <div class="editor__nav-sep">编制</div>
+          <div class="editor__nav-item" data-step="members"><svg class="ic"><use href="#i-users"/></svg> 成员编排 <small>4</small></div>
+          <div class="editor__nav-sep">运行</div>
+          <div class="editor__nav-item" data-step="strategy"><svg class="ic"><use href="#i-sliders"/></svg> 运行策略</div>
         </nav>
-        <!-- 右侧表单 -->
         <div class="editor__form" id="editorForm"></div>
       </div>
     </div>
+
     <div class="modal__foot">
-      <button class="btn btn--ghost" id="btnExport">导出 JSON</button>
+      <button class="btn btn--ghost"><svg class="ic"><use href="#i-download"/></svg> 导出 JSON</button>
       <button class="btn btn--outline" id="btnCancel">取消</button>
-      <button class="btn btn--solid" id="btnSave">保存配置</button>
+      <button class="btn btn--solid">保存配置</button>
     </div>
   </div>
 </div>
 
 <div class="note">
-  <b>列表 + 编辑表单设计</b>：白底 Zinc · 卡片悬浮 · 像素成员条<br/>
-  编辑器左侧步骤导航 · 模式卡片选择 · 成员像素头像<br/>
-  点「新建小分队」看表单
+  <b>编辑器侧栏</b>：基本配置 → 资源挂载 → 成员编排 → 运行策略<br/>
+  协作模式放在「成员编排」顶部 · MCP 工具可折叠内滚 · 无知识库挂载
 </div>
 
 <script>
-/* ========== PixelAgent ========== */
-const PALETTE={
-  skin:{fair:'#FBE8DC',warm1:'#F6D7B0',warm2:'#E8B88A',tan:'#D9A066',deep:'#C68642',cool:'#E0C3A0'},
-  hair:{ink:'#1E1B14',brown:'#3D2B1F',chestnut:'#8B5A2B',amber:'#C47B2C',indigo:'#3D4F8C',rose:'#A64D63',silver:'#B8BEC4'},
-  outfit:{indigo:'#3D4F8C',emerald:'#2F6B4F',amber:'#C47B2C',rose:'#A64D63',sky:'#4A90C4',wine:'#7B3B4B',dark:'#3C4043',mid:'#6B7075',light:'#E8EAED',ink:'#1E1B14'},
-};
-function pixelAgentSVG({size=32,gender='male',skin='warm2',hair='ink',top='indigo',bottom='dark',shoes='ink',accessory='none',state='idle'}={}){
-  const S=PALETTE.skin[skin]||PALETTE.skin.warm2,H=PALETTE.hair[hair]||PALETTE.hair.ink;
-  const T=PALETTE.outfit[top]||PALETTE.outfit.indigo,B=PALETTE.outfit[bottom]||PALETTE.outfit.dark;
-  const SH=PALETTE.outfit[shoes]||PALETTE.outfit.ink;
-  const FACE='#2A2320';
-  let eyes=`<rect x="13" y="10" width="2" height="2" fill="${FACE}"/><rect x="19" y="10" width="2" height="2" fill="${FACE}"/>`;
-  let mouth=`<rect x="15" y="13" width="3" height="1" fill="${FACE}"/>`;
-  const hairRects=gender==='female'
-    ?`<rect x="10" y="4" width="12" height="3" fill="${H}"/><rect x="9" y="6" width="2" height="8" fill="${H}"/><rect x="21" y="6" width="2" height="8" fill="${H}"/><rect x="11" y="6" width="10" height="2" fill="${H}"/>`
-    :`<rect x="11" y="4" width="10" height="3" fill="${H}"/><rect x="10" y="6" width="12" height="2" fill="${H}"/>`;
-  let acc='';
-  if(accessory==='glasses') acc=`<rect x="12" y="10" width="4" height="2" fill="none" stroke="${FACE}" stroke-width="0.5"/><rect x="18" y="10" width="4" height="2" fill="none" stroke="${FACE}" stroke-width="0.5"/>`;
-  else if(accessory==='headset') acc=`<rect x="9" y="8" width="1" height="5" fill="#3C4043"/><rect x="22" y="8" width="1" height="5" fill="#3C4043"/><rect x="11" y="4" width="10" height="1" fill="#3C4043"/>`;
-  return `<svg class="pixel-agent" width="${size}" height="${size}" viewBox="0 0 32 32" shape-rendering="crispEdges">
-    <rect x="11" y="26" width="4" height="4" fill="${B}"/><rect x="17" y="26" width="4" height="4" fill="${B}"/>
-    <rect x="10" y="29" width="5" height="3" fill="${SH}"/><rect x="17" y="29" width="5" height="3" fill="${SH}"/>
-    <rect x="10" y="18" width="12" height="8" fill="${T}"/>
-    <rect x="14" y="16" width="4" height="2" fill="${S}"/>
-    <rect x="11" y="5" width="10" height="11" fill="${S}"/><rect x="10" y="6" width="12" height="9" fill="${S}"/>
-    ${hairRects}${eyes}${mouth}${acc}
-    <rect x="8" y="18" width="2" height="5" fill="${S}"/><rect x="22" y="18" width="2" height="5" fill="${S}"/>
-  </svg>`;
+/* 头像占位（用户上传，非像素） */
+function avatarBox(size, label){
+  return `<div class="card__avatar" style="width:${size}px;height:${size}px;border-radius:${Math.round(size*0.27)}px">
+    <svg class="ic ic--lg" style="opacity:.5"><use href="#i-users"/></svg>
+  </div>`;
 }
-
-const AGENTS=[
-  {id:'a1',name:'主管',ap:{gender:'male',skin:'warm2',hair:'ink',top:'indigo',bottom:'dark',shoes:'ink',accessory:'headset'}},
-  {id:'a2',name:'前端',ap:{gender:'female',skin:'warm1',hair:'rose',top:'rose',bottom:'ink',shoes:'wine'}},
-  {id:'a3',name:'后端',ap:{gender:'male',skin:'tan',hair:'brown',top:'emerald',bottom:'dark',shoes:'ink',accessory:'glasses'}},
-  {id:'a4',name:'测试',ap:{gender:'female',skin:'fair',hair:'amber',top:'sky',bottom:'ink',shoes:'ink'}},
-  {id:'a5',name:'文档',ap:{gender:'male',skin:'cool',hair:'silver',top:'amber',bottom:'dark',shoes:'ink'}},
-];
+function crewAvatar(){
+  return `<div class="card__crew-slot"><svg class="ic ic--sm" style="opacity:.45"><use href="#i-users"/></svg></div>`;
+}
 
 const SQUADS=[
-  {
-    name:'全栈交付小分队', mode:'编排', modeCls:'pill--mode',
-    live:'运行中', liveCls:'pill--live',
-    desc:'从前端到后端到回归测试的一条龙交付，主管统一调度，成员按专长分工。',
-    crew:['a1','a2','a3','a4','a5'],
-  },
-  {
-    name:'数据管道小队', mode:'流水线', modeCls:'pill--mode-pipe',
-    live:'', liveCls:'',
-    desc:'抽取 → 清洗 → 转换 → 加载，工位线性串流，前序产出自动喂后序。',
-    crew:['a3','a4','a2'],
-  },
-  {
-    name:'投研调研小队', mode:'群聊', modeCls:'pill--mode-chat',
-    live:'待决议', liveCls:'pill--live-warn',
-    desc:'多角色圆桌辩论，主笔收口提炼共识，可把行动项转入编排执行。',
-    crew:['a1','a3','a5','a2','a4'],
-  },
+  {name:'全栈交付小分队',mode:'编排式',modeCls:'pill--mode',live:'运行中',liveCls:'pill--live',
+   desc:'从前端到后端到回归测试的一条龙交付，主管统一调度，成员按专长分工。',n:5},
+  {name:'数据管道小队',mode:'流水线',modeCls:'pill--mode-pipe',live:'',liveCls:'',
+   desc:'抽取 → 清洗 → 转换 → 加载，工位线性串流，前序产出自动喂后序。',n:3},
+  {name:'投研调研小队',mode:'群聊',modeCls:'pill--mode-chat',live:'待决议',liveCls:'pill--live-warn',
+   desc:'多角色圆桌辩论，主笔收口提炼共识，可把行动项转入编排执行。',n:5},
 ];
 
-/* ===== 列表卡片 ===== */
-function renderGrid(){
-  document.getElementById('grid').innerHTML=SQUADS.map((s,i)=>`
-    <div class="card">
-      <div class="card__head">
-        <div class="card__avatar">${pixelAgentSVG({...AGENTS[0].ap,size:48})}</div>
-        <div class="card__titles">
-          <div class="card__name">${s.name}</div>
-          <div class="card__tags">
-            <span class="pill ${s.modeCls}">${s.mode}</span>
-            ${s.live?`<span class="pill ${s.liveCls}"><i class="dot"></i>${s.live}</span>`:''}
-          </div>
+document.getElementById('grid').innerHTML=SQUADS.map(s=>`
+  <div class="card">
+    <div class="card__head">
+      ${avatarBox(48)}
+      <div class="card__titles">
+        <div class="card__name">${s.name}</div>
+        <div class="card__tags">
+          <span class="pill ${s.modeCls}">${s.mode}</span>
+          ${s.live?`<span class="pill ${s.liveCls}"><i class="dot"></i>${s.live}</span>`:''}
         </div>
-      </div>
-      <div class="card__desc">${s.desc}</div>
-      <div class="card__crew">
-        ${s.crew.slice(0,8).map(id=>{
-          const a=AGENTS.find(x=>x.id===id);
-          return `<div class="card__crew-slot">${pixelAgentSVG({...a.ap,size:26})}</div>`;
-        }).join('')}
-        ${s.crew.length>8?`<span class="card__crew-more">+${s.crew.length-8}</span>`:''}
-      </div>
-      <div class="card__foot">
-        <button class="btn btn--soft btn--sm" onclick="openEditor('edit')">🚀 工作台</button>
-        <button class="btn btn--ghost btn--icon btn--sm" onclick="openEditor('edit')" title="编辑">✏️</button>
-        <button class="btn btn--ghost btn--icon btn--sm" title="打开空间目录">📁</button>
-        <button class="btn btn--danger-ghost btn--icon btn--sm" title="删除">🗑</button>
       </div>
     </div>
-  `).join('');
-}
-renderGrid();
+    <div class="card__desc">${s.desc}</div>
+    <div class="card__crew">
+      ${Array.from({length:Math.min(s.n,5)},crewAvatar).join('')}
+      ${s.n>5?`<span class="card__crew-more">+${s.n-5}</span>`:''}
+    </div>
+    <div class="card__foot">
+      <button class="btn btn--soft btn--sm" style="flex:1"><svg class="ic ic--sm"><use href="#i-play"/></svg> 工作台</button>
+      <button class="btn btn--ghost btn--icon btn--sm" title="编辑"><svg class="ic ic--sm"><use href="#i-pencil"/></svg></button>
+      <button class="btn btn--ghost btn--icon btn--sm" title="打开空间目录"><svg class="ic ic--sm"><use href="#i-folder"/></svg></button>
+      <button class="btn btn--danger-ghost btn--icon btn--sm" title="删除"><svg class="ic ic--sm"><use href="#i-trash"/></svg></button>
+    </div>
+  </div>
+`).join('');
 
-/* ===== 编辑器表单内容 ===== */
-const FORMS={
-  basic:()=>{
-    return `
-      <div class="field">
-        <div class="field__label">团队头像</div>
-        <div class="avatar-pick">
-          <div class="avatar-pick__box">${pixelAgentSVG({...AGENTS[0].ap,size:52})}</div>
-          <div class="avatar-pick__meta">
-            <div class="field__hint">点击上传 Logo，或使用像素形象快照</div>
-            <button class="btn btn--ghost btn--sm" style="align-self:flex-start">上传图片</button>
-          </div>
+/* ===== 表单内容（结构与现有一致，仅 UI 重绘） ===== */
+const PANES={
+  basic:`
+    <div class="field">
+      <div class="field__label">团队头像</div>
+      <div class="avatar-pick">
+        <div class="avatar-pick__box">
+          <svg class="ic ic--md"><use href="#i-upload"/></svg>
+          <small>上传</small>
+        </div>
+        <div class="avatar-pick__meta">
+          <div class="field__hint">支持 png / jpg，建议 512×512</div>
+          <button class="btn btn--ghost btn--sm" style="align-self:flex-start"><svg class="ic ic--sm"><use href="#i-image"/></svg> 选择图片</button>
         </div>
       </div>
-      <div class="field-row">
-        <div class="field">
-          <div class="field__label">名称</div>
-          <input class="input" placeholder="例如：全栈交付小分队"/>
-        </div>
-        <div class="field">
-          <div class="field__label">调用标识 <span class="tip" title="保存后固定，外部 API 用此标识调用">ⓘ</span></div>
+    </div>
+    <div class="field-row">
+      <div class="field">
+        <div class="field__label">名称</div>
+        <input class="input" placeholder="例如：大A 投研小队"/>
+      </div>
+      <div class="field">
+        <div class="field__label">调用标识 <span class="tip" title="保存后固定，外部 API 用此标识调用"><svg class="ic ic--sm"><use href="#i-info"/></svg></span></div>
+        <div style="display:flex;gap:8px">
           <input class="input" value="fullstack-delivery-squad"/>
-          <div class="field__hint">保存后不可修改，外部系统凭此调度</div>
+          <button class="btn btn--ghost btn--icon" title="重新生成"><svg class="ic"><use href="#i-refresh"/></svg></button>
         </div>
+        <div class="field__hint">保存后该标识固定不变，外部系统凭此调度</div>
+      </div>
+    </div>
+    <div class="field-row">
+      <div class="field">
+        <div class="field__label">工作区目录</div>
+        <input class="input" placeholder="/workspace/squad-fullstack"/>
       </div>
       <div class="field">
-        <div class="field__label">协作模式</div>
-        <div class="mode-cards">
-          <div class="mode-card is-on" onclick="pickMode(this)">
-            <div class="mode-card__ico">⚡</div>
-            <div class="mode-card__t">编排式</div>
-            <div class="mode-card__d">主管拆解委派，逐子任务执行后汇总</div>
+        <div class="field__label">允许文件输入</div>
+        <div class="switch-row">
+          <div>
+            <div class="switch-row__t">支持文件输入</div>
+            <div class="switch-row__d">随指令提交 / 画布输入节点挂载</div>
           </div>
-          <div class="mode-card" onclick="pickMode(this)">
-            <div class="mode-card__ico">🔗</div>
-            <div class="mode-card__t">流水线</div>
-            <div class="mode-card__d">成员线性串流，前步产出喂后步输入</div>
-          </div>
-          <div class="mode-card" onclick="pickMode(this)">
-            <div class="mode-card__ico">💬</div>
-            <div class="mode-card__t">群聊</div>
-            <div class="mode-card__d">共享黑板轮流发言，主笔收口</div>
-          </div>
+          <div class="switch is-on" onclick="this.classList.toggle('is-on')"></div>
         </div>
       </div>
-      <div class="field-row">
-        <div class="field">
-          <div class="field__label">工作区目录</div>
-          <input class="input" placeholder="/workspace/squad-fullstack"/>
-        </div>
-        <div class="field">
-          <div class="field__label">允许文件输入</div>
-          <div class="switch-row">
-            <div>
-              <div class="switch-row__t">支持文件输入</div>
-              <div class="switch-row__d">随指令提交 / 画布输入节点挂载</div>
+    </div>
+    <div class="field">
+      <div class="field__label">描述（可选）</div>
+      <textarea class="textarea" placeholder="这个小分队负责什么？"></textarea>
+    </div>
+  `,
+
+  members:`
+    <div class="field">
+      <div class="field__label">协作模式</div>
+      <div class="segmented">
+        <div class="segmented__item is-on"><svg class="ic ic--sm"><use href="#i-zap"/></svg> 编排式</div>
+        <div class="segmented__item"><svg class="ic ic--sm"><use href="#i-git"/></svg> 流水线</div>
+        <div class="segmented__item"><svg class="ic ic--sm"><use href="#i-msg"/></svg> 群聊</div>
+      </div>
+      <div class="field__hint">编排式：主管拆解委派 · 流水线：线性串流 · 群聊：轮流发言收口</div>
+    </div>
+    <div class="mode-note"><svg class="ic ic--sm"><use href="#i-info"/></svg> 当前模式：<b>编排式</b> — 主管拆解委派成员，逐子任务执行后汇总</div>
+    <div class="field">
+      <div class="field__label">大脑节点：主管智能体（Orchestrator）</div>
+      <select class="select"><option>选择主导者（拆解任务规划）</option><option>主管</option></select>
+      <div class="field__hint">独立于下方名单外，纯负责拆解任务规划</div>
+    </div>
+    <div class="field">
+      <div class="field__label">成员编制</div>
+      <div class="member-list">
+        ${['前端开发','后端开发','测试 / QA','文档'].map((role,i)=>`
+          <div class="member-card">
+            <div class="member-card__av"><svg class="ic"><use href="#i-users"/></svg></div>
+            <div class="member-card__info">
+              <div class="member-card__name">${['前端开发','后端开发','测试','文档'][i]}</div>
+              <div class="member-card__id">agent-${100+i}</div>
             </div>
-            <div class="switch is-on" onclick="this.classList.toggle('is-on')"></div>
-          </div>
-        </div>
-      </div>
-      <div class="field">
-        <div class="field__label">描述（可选）</div>
-        <textarea class="textarea" placeholder="这个小分队负责什么？"></textarea>
-      </div>
-    `;
-  },
-  members:()=>{
-    return `
-      <div class="mode-note">⚡ 已开启模式：<b>编排式</b> — 主管拆解委派成员，逐子任务执行后汇总</div>
-      <div class="field">
-        <div class="field__label">大脑节点：主管智能体</div>
-        <select class="select"><option>选择主导者（拆解任务规划）</option><option>主管</option></select>
-      </div>
-      <div class="field">
-        <div class="field__label">成员编制</div>
-        <div class="member-list">
-          ${AGENTS.slice(1).map((a,i)=>`
-            <div class="member-card">
-              <div class="member-card__pa">${pixelAgentSVG({...a.ap,size:38})}</div>
-              <div class="member-card__info">
-                <div class="member-card__name">${a.name}</div>
-                <div class="member-card__role">${['前端开发','后端开发','测试 / QA','文档'][i]||'成员'}</div>
-              </div>
-              <div class="member-card__selects">
-                <select class="select"><option>${['WORKER','WORKER','WORKER','CRITIC'][i]||'WORKER'}</option></select>
-                <select class="select"><option>${['前端','后端','测试','文档'][i]||'WORKER'}</option></select>
-              </div>
-              <button class="member-card__del">✕</button>
+            <div class="member-card__selects">
+              <select class="select"><option>WORKER</option><option>CRITIC</option></select>
+              <select class="select"><option>${role}</option></select>
             </div>
-          `).join('')}
-          <div class="add-member">
-            <select class="select"><option>＋ 添加成员智能体…</option></select>
-            <button class="btn btn--soft btn--sm">添加</button>
+            <button class="member-card__del"><svg class="ic ic--sm"><use href="#i-trash"/></svg></button>
+          </div>
+        `).join('')}
+        <div class="add-member">
+          <select class="select"><option>添加成员智能体…</option></select>
+          <button class="btn btn--soft btn--sm"><svg class="ic ic--sm"><use href="#i-plus"/></svg> 添加</button>
+        </div>
+      </div>
+    </div>
+  `,
+
+  strategy:`
+    <div class="field-row">
+      <div class="field">
+        <div class="field__label">工作流触发机制</div>
+        <div class="switch-row">
+          <div>
+            <div class="switch-row__t">定时触发</div>
+            <div class="switch-row__d">按 Cron 自动发起协作</div>
+          </div>
+          <div class="switch" onclick="this.classList.toggle('is-on')"></div>
+        </div>
+      </div>
+      <div class="field">
+        <div class="field__label">引擎容错保护</div>
+        <div class="switch-row">
+          <div>
+            <div class="switch-row__t">失败自动重试</div>
+            <div class="switch-row__d">单次失败最多重试 2 次</div>
+          </div>
+          <div class="switch is-on" onclick="this.classList.toggle('is-on')"></div>
+        </div>
+      </div>
+    </div>
+    <div class="field-row">
+      <div class="field">
+        <div class="field__label">Token 防洪堤</div>
+        <input class="input" value="50000" placeholder="0 = 不限"/>
+        <div class="field__hint">达到 80% 告警一次，100% 停止并收尾保留产物</div>
+      </div>
+      <div class="field">
+        <div class="field__label">最大轮次</div>
+        <input class="input" value="8"/>
+      </div>
+    </div>
+    <div class="switch-row">
+      <div>
+        <div class="switch-row__t">chat_then_execute</div>
+        <div class="switch-row__d">群聊汇总产出行动项后，自动转为委派任务续跑编排式 Wave</div>
+      </div>
+      <div class="switch is-on" onclick="this.classList.toggle('is-on')"></div>
+    </div>
+    <div class="field">
+      <div class="field__label">Cron 时间戳表达式</div>
+      <input class="input" placeholder="0 9 * * 1-5"/>
+    </div>
+    <div class="field">
+      <div class="field__label">自动触发伴随指令</div>
+      <textarea class="textarea" placeholder="定时触发时附带的默认任务描述…"></textarea>
+    </div>
+  `,
+
+  resource:`
+    <div class="field">
+      <div class="field__label">全局 MCP 服务扩展</div>
+      <div class="field__hint" style="margin-bottom:10px">勾选服务与工具；工具过多时卡片内滚动，不撑爆页面</div>
+      <div class="mcp-grid">
+        <div class="mcp-card is-open">
+          <div class="mcp-card__head" onclick="this.parentElement.classList.toggle('is-open')">
+            <div class="mcp-card__title"><svg class="ic"><use href="#i-server"/></svg> <span>文件读写</span></div>
+            <div class="switch is-on" onclick="event.stopPropagation();this.classList.toggle('is-on')"></div>
+            <div class="mcp-card__count is-on">3/3</div>
+            <svg class="ic ic--sm mcp-card__chev"><use href="#i-plus"/></svg>
+          </div>
+          <div class="mcp-card__tools">
+            <div class="mcp-card__toolbar">
+              <button onclick="event.stopPropagation()">全选</button>
+              <button onclick="event.stopPropagation()">清空</button>
+            </div>
+            <div class="tool-row"><code>read_file</code><div class="switch is-on" onclick="this.classList.toggle('is-on')"></div></div>
+            <div class="tool-row"><code>write_file</code><div class="switch is-on" onclick="this.classList.toggle('is-on')"></div></div>
+            <div class="tool-row"><code>list_dir</code><div class="switch is-on" onclick="this.classList.toggle('is-on')"></div></div>
+          </div>
+        </div>
+        <div class="mcp-card">
+          <div class="mcp-card__head" onclick="this.parentElement.classList.toggle('is-open')">
+            <div class="mcp-card__title"><svg class="ic"><use href="#i-server"/></svg> <span>网页搜索</span></div>
+            <div class="switch is-on" onclick="event.stopPropagation();this.classList.toggle('is-on')"></div>
+            <div class="mcp-card__count is-on">2/2</div>
+            <svg class="ic ic--sm mcp-card__chev"><use href="#i-plus"/></svg>
+          </div>
+          <div class="mcp-card__tools">
+            <div class="mcp-card__toolbar">
+              <button onclick="event.stopPropagation()">全选</button>
+              <button onclick="event.stopPropagation()">清空</button>
+            </div>
+            <div class="tool-row"><code>web_search</code><div class="switch is-on" onclick="this.classList.toggle('is-on')"></div></div>
+            <div class="tool-row"><code>fetch_page</code><div class="switch" onclick="this.classList.toggle('is-on')"></div></div>
+          </div>
+        </div>
+        <div class="mcp-card">
+          <div class="mcp-card__head" onclick="this.parentElement.classList.toggle('is-open')">
+            <div class="mcp-card__title"><svg class="ic"><use href="#i-server"/></svg> <span>数据库查询</span></div>
+            <div class="switch" onclick="event.stopPropagation();this.classList.toggle('is-on')"></div>
+            <div class="mcp-card__count">0/8</div>
+            <svg class="ic ic--sm mcp-card__chev"><use href="#i-plus"/></svg>
+          </div>
+          <div class="mcp-card__tools">
+            <div class="mcp-card__toolbar">
+              <button onclick="event.stopPropagation()">全选</button>
+              <button onclick="event.stopPropagation()">清空</button>
+            </div>
+            ${['query','execute','list_tables','describe_table','export_csv','import_csv','explain','kill_query'].map(t=>`
+              <div class="tool-row"><code>${t}</code><div class="switch" onclick="this.classList.toggle('is-on')"></div></div>
+            `).join('')}
           </div>
         </div>
       </div>
-    `;
-  },
-  strategy:()=>{
-    return `
-      <div class="switch-row">
-        <div>
-          <div class="switch-row__t">工作流定时触发</div>
-          <div class="switch-row__d">按 Cron 表达式自动发起协作</div>
-        </div>
-        <div class="switch" onclick="this.classList.toggle('is-on')"></div>
-      </div>
-      <div class="field-row">
-        <div class="field">
-          <div class="field__label">Token 预算上限</div>
-          <input class="input" value="50000" placeholder="0 = 不限"/>
-          <div class="field__hint">达到 80% 告警，100% 停止并收尾</div>
-        </div>
-        <div class="field">
-          <div class="field__label">最大轮次</div>
-          <input class="input" value="8"/>
-        </div>
-      </div>
-      <div class="switch-row">
-        <div>
-          <div class="switch-row__t">chat_then_execute</div>
-          <div class="switch-row__d">群聊汇总产出行动项后，自动转为委派任务续跑</div>
-        </div>
-        <div class="switch is-on" onclick="this.classList.toggle('is-on')"></div>
-      </div>
-      <div class="field">
-        <div class="field__label">Cron 表达式</div>
-        <input class="input" placeholder="0 9 * * 1-5"/>
-      </div>
-      <div class="field">
-        <div class="field__label">自动触发伴随指令</div>
-        <textarea class="textarea" placeholder="定时触发时附带的默认任务描述…"></textarea>
-      </div>
-    `;
-  },
-  resource:()=>{
-    return `
-      <div class="field">
-        <div class="field__label">全局 MCP 服务</div>
-        <div class="chips">
-          <span class="chip is-on">📄 文件读写</span>
-          <span class="chip is-on">🔍 网页搜索</span>
-          <span class="chip">🗄 数据库</span>
-          <span class="chip">📧 邮件</span>
-          <span class="chip is-on">🧠 知识库</span>
-        </div>
-      </div>
-      <div class="field">
-        <div class="field__label">技能</div>
-        <div class="chips">
-          <span class="chip is-on">文档分析</span>
-          <span class="chip">代码生成</span>
-          <span class="chip is-on">数据处理</span>
-        </div>
-      </div>
-      <div class="field">
-        <div class="field__label">知识库</div>
-        <div class="chips">
-          <span class="chip is-on">产品文档库</span>
-          <span class="chip is-on">API 规范文档</span>
-          <span class="chip">＋ 绑定知识库</span>
-        </div>
-      </div>
-    `;
-  },
+    </div>
+  `,
 };
 
 function openEditor(kind){
   document.getElementById('mask').style.display='flex';
   document.getElementById('modalTitle').textContent=kind==='edit'?'编辑小分队':'新建小分队';
-  document.getElementById('editorForm').innerHTML=FORMS.basic();
-  document.querySelectorAll('#editorNav .editor__nav-item').forEach((n,i)=>{
-    n.classList.toggle('is-on',i===0);
-  });
-}
-
-function pickMode(el){
-  el.parentElement.querySelectorAll('.mode-card').forEach(x=>x.classList.remove('is-on'));
-  el.classList.add('is-on');
+  document.getElementById('editorForm').innerHTML=PANES.basic;
+  document.querySelectorAll('#editorNav .editor__nav-item').forEach((t,i)=>t.classList.toggle('is-on',i===0));
 }
 
 document.getElementById('btnCreate').onclick=()=>openEditor('create');
 document.getElementById('modalClose').onclick=()=>document.getElementById('mask').style.display='none';
 document.getElementById('btnCancel').onclick=()=>document.getElementById('mask').style.display='none';
-document.getElementById('mask').addEventListener('click',(e)=>{
+document.getElementById('mask').addEventListener('click',e=>{
   if(e.target.id==='mask') document.getElementById('mask').style.display='none';
 });
 
-document.querySelectorAll('#editorNav .editor__nav-item').forEach(n=>{
-  n.addEventListener('click',()=>{
+document.querySelectorAll('#editorNav .editor__nav-item').forEach(t=>{
+  t.addEventListener('click',()=>{
     document.querySelectorAll('#editorNav .editor__nav-item').forEach(x=>x.classList.remove('is-on'));
-    n.classList.add('is-on');
-    document.getElementById('editorForm').innerHTML=FORMS[n.dataset.step]();
+    t.classList.add('is-on');
+    document.getElementById('editorForm').innerHTML=PANES[t.dataset.step];
   });
 });
 
-/* 轻交互 */
-document.addEventListener('click',(e)=>{
-  if(e.target.classList?.contains('chip')) e.target.classList.toggle('is-on');
+document.addEventListener('click',e=>{
+  const seg=e.target.closest('.segmented__item');
+  if(seg){
+    seg.parentElement.querySelectorAll('.segmented__item').forEach(x=>x.classList.remove('is-on'));
+    seg.classList.add('is-on');
+  }
 });
 </script>
 </body>

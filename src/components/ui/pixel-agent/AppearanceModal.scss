@@ -10,10 +10,11 @@
 
   /* ---------- 预览列 ---------- */
   &__preview {
-    flex: 0 0 248px;
+    flex: 0 0 280px;
     display: flex;
     flex-direction: column;
     gap: 10px;
+    min-width: 0;
   }
 
   &__stage {
@@ -26,6 +27,7 @@
     background:
       radial-gradient(ellipse 60% 8% at 50% 88%, rgba(0, 0, 0, 0.14), transparent),
       var(--color-background-muted, #f5f5f5);
+    overflow: hidden;
 
     .dark & {
       background:
@@ -37,13 +39,26 @@
   &__play {
     display: flex;
     flex-direction: column;
-    align-items: center;
+    align-items: stretch;
     gap: 6px;
   }
 
   &__play-label {
     font-size: 11px;
     color: var(--color-foreground-muted, #999);
+    margin-top: 2px;
+  }
+
+  &__range {
+    width: 100%;
+    accent-color: var(--color-brand-600, #0f8f6c);
+  }
+
+  &__size-tag {
+    align-self: center;
+    font-size: 11px;
+    color: var(--color-foreground-muted, #888);
+    font-variant-numeric: tabular-nums;
   }
 
   /* ---------- 大分类导航 ---------- */

@@ -1,11 +1,10 @@
 /**
- * 像素图层构建 v3（64×64 写实像素）——**唯一几何事实源**。
+ * 像素图层构建 v4（96×96 写实像素）——**唯一几何事实源**。
  *
- * - 整数网格（禁 0.5）；React 渲染与 SVG 快照共用本函数；
- * - 三阶明暗 + 外描边：轮廓清晰，接近会议室场景图的精确度；
- * - 表情（FaceExpression）与动作（BodyPose）解耦，可由外部独立动态控制；
- * - 动画仍用「帧矩形 + opacity」（pa-fa/pa-fb 等），静帧时过滤 B 帧；
- * - 图层顺序：腿/鞋 → 躯干/四肢 → 头/颈 → 发 → 表情 → 帽 → 配饰 → 道具/姿态手。
+ * - 96×96 整数网格：面部有足够像素做鼻梁/唇峰/眼睑；
+ * - 三阶以上明暗 + 外描边 + 软过渡影；
+ * - 表情（FaceExpression）与动作（BodyPose）解耦，外部可动态控制；
+ * - 动画仍用帧矩形 + opacity（pa-fa/pa-fb 等）。
  */
 import {
   BLUSH,
@@ -33,11 +32,9 @@ import {
 } from './types'
 
 export type { PixelRect } from './canvas'
-/** 兼容旧导入：五官固定墨色 */
 export const FEATURE_COLOR = INK
-
-/** 64×64 网格边长 */
-export const PIXEL_GRID = 64
+/** 96×96 网格 */
+export const PIXEL_GRID = 96
 
 interface Palette {
   skin: ToneSet
@@ -67,7 +64,6 @@ type Ctx = {
   p: Palette
   expression: FaceExpression
   pose: BodyPose
-  /** 动画帧矩形（附加在画布之后） */
   anim: PixelRect[]
 }
 
@@ -84,143 +80,135 @@ function pushAnim(
 }
 
 /* ============================================================
- * 1) 腿 + 鞋
+ * 1) 腿 + 鞋（y≈70–95）
  * ============================================================ */
 function drawLegs(ctx: Ctx): void {
   const { c, a, p } = ctx
   const isDress = a.top === 'f-dress'
-  const legY = 48
-  const legH = isDress ? 11 : 12
+  const legY = 72
+  const legH = isDress ? 14 : 16
 
-  // 大腿/小腿（先肤色，再盖裤）
-  c.rect(24, legY, 7, legH, p.skin.base)
-  c.rect(33, legY, 7, legH, p.skin.base)
-  // 腿内侧阴影
-  c.rect(29, legY + 2, 1, legH - 2, p.skin.shade)
-  c.rect(34, legY + 2, 1, legH - 2, p.skin.shade)
-  // 腿左缘高光
-  c.rect(24, legY + 1, 1, legH - 3, p.skin.light)
-  c.rect(33, legY + 1, 1, legH - 3, p.skin.light)
+  // 双腿
+  c.rect(34, legY, 11, legH, p.skin.base)
+  c.rect(51, legY, 11, legH, p.skin.base)
+  c.rect(43, legY + 2, 2, legH - 2, p.skin.shade)
+  c.rect(51, legY + 2, 2, legH - 2, p.skin.shade)
+  c.rect(34, legY + 2, 2, legH - 4, p.skin.light)
+  c.rect(51, legY + 2, 2, legH - 4, p.skin.light)
+  // 膝
+  c.rect(35, legY + 8, 9, 2, mix(p.skin.base, p.skin.shade, 0.35))
+  c.rect(52, legY + 8, 9, 2, mix(p.skin.base, p.skin.shade, 0.35))
 
   if (isDress) {
-    // 裙摆已盖大腿，只留小腿
-    c.rect(25, legY + 3, 5, legH - 3, p.skin.base)
-    c.rect(34, legY + 3, 5, legH - 3, p.skin.base)
-    c.rect(29, legY + 5, 1, legH - 5, p.skin.shade)
-    c.rect(34, legY + 5, 1, legH - 5, p.skin.shade)
+    c.rect(36, legY + 4, 8, legH - 4, p.skin.base)
+    c.rect(52, legY + 4, 8, legH - 4, p.skin.base)
+    c.rect(42, legY + 6, 2, legH - 6, p.skin.shade)
+    c.rect(52, legY + 6, 2, legH - 6, p.skin.shade)
   } else if (a.bottom === 'shorts') {
-    c.rect(23, legY, 9, 6, p.bottom.base)
-    c.rect(32, legY, 9, 6, p.bottom.base)
-    c.rect(23, legY, 1, 6, p.bottom.light)
-    c.rect(32, legY, 1, 6, p.bottom.light)
-    c.rect(30, legY, 1, 6, p.bottom.shade)
-    c.rect(40, legY, 1, 6, p.bottom.shade)
-    c.rect(23, legY + 5, 9, 1, p.bottom.deep)
-    c.rect(32, legY + 5, 9, 1, p.bottom.deep)
+    c.rect(32, legY, 15, 10, p.bottom.base)
+    c.rect(49, legY, 15, 10, p.bottom.base)
+    c.rect(32, legY, 2, 10, p.bottom.light)
+    c.rect(49, legY, 2, 10, p.bottom.light)
+    c.rect(45, legY, 2, 10, p.bottom.shade)
+    c.rect(62, legY, 2, 10, p.bottom.shade)
+    c.rect(32, legY + 9, 15, 1, p.bottom.deep)
+    c.rect(49, legY + 9, 15, 1, p.bottom.deep)
   } else if (a.bottom === 'skirt') {
-    c.rect(21, legY - 2, 22, 8, p.bottom.base)
-    c.rect(21, legY - 2, 1, 8, p.bottom.light)
-    c.rect(42, legY - 2, 1, 8, p.bottom.shade)
-    // 裙褶
-    c.rect(27, legY - 1, 1, 6, p.bottom.shade)
-    c.rect(33, legY - 1, 1, 6, p.bottom.shade)
-    c.rect(38, legY - 1, 1, 6, p.bottom.shade)
-    c.rect(21, legY + 5, 22, 1, p.bottom.deep)
-    c.rect(25, legY + 3, 5, 3, p.skin.base)
-    c.rect(34, legY + 3, 5, 3, p.skin.base)
-    c.rect(29, legY + 4, 1, 2, p.skin.shade)
-    c.rect(34, legY + 4, 1, 2, p.skin.shade)
+    c.rect(30, legY - 4, 36, 14, p.bottom.base)
+    c.rect(30, legY - 4, 2, 14, p.bottom.light)
+    c.rect(64, legY - 4, 2, 14, p.bottom.shade)
+    c.rect(40, legY - 2, 2, 11, p.bottom.shade)
+    c.rect(50, legY - 2, 2, 11, p.bottom.shade)
+    c.rect(58, legY - 2, 2, 11, p.bottom.shade)
+    c.rect(30, legY + 9, 36, 1, p.bottom.deep)
+    c.rect(36, legY + 4, 8, 5, p.skin.base)
+    c.rect(52, legY + 4, 8, 5, p.skin.base)
+    c.rect(42, legY + 5, 2, 4, p.skin.shade)
+    c.rect(52, legY + 5, 2, 4, p.skin.shade)
   } else {
-    // trousers / jeans
-    c.rect(23, legY, 9, legH, p.bottom.base)
-    c.rect(32, legY, 9, legH, p.bottom.base)
-    c.rect(23, legY, 1, legH, p.bottom.light)
-    c.rect(32, legY, 1, legH, p.bottom.light)
-    c.rect(30, legY, 1, legH, p.bottom.shade)
-    c.rect(40, legY, 1, legH, p.bottom.shade)
-    // 膝盖褶
-    c.rect(24, legY + 5, 7, 1, p.bottom.shade)
-    c.rect(33, legY + 5, 7, 1, p.bottom.shade)
+    c.rect(32, legY, 15, legH, p.bottom.base)
+    c.rect(49, legY, 15, legH, p.bottom.base)
+    c.rect(32, legY, 2, legH, p.bottom.light)
+    c.rect(49, legY, 2, legH, p.bottom.light)
+    c.rect(45, legY, 2, legH, p.bottom.shade)
+    c.rect(62, legY, 2, legH, p.bottom.shade)
+    c.rect(34, legY + 8, 11, 2, p.bottom.shade)
+    c.rect(51, legY + 8, 11, 2, p.bottom.shade)
     if (a.bottom === 'jeans') {
-      // 口袋线
-      c.rect(24, legY, 2, 3, p.bottom.shade)
-      c.rect(38, legY, 2, 3, p.bottom.shade)
+      c.rect(34, legY + 1, 3, 5, p.bottom.shade)
+      c.rect(59, legY + 1, 3, 5, p.bottom.shade)
     }
   }
 
   // 鞋
-  const sy = 59
+  const sy = 88
   switch (a.shoes) {
     case 'boots':
-      c.rect(22, sy - 2, 10, 6, p.shoes.base)
-      c.rect(32, sy - 2, 10, 6, p.shoes.base)
-      c.rect(22, sy - 2, 1, 6, p.shoes.light)
-      c.rect(32, sy - 2, 1, 6, p.shoes.light)
-      c.rect(31, sy - 2, 1, 6, p.shoes.shade)
-      c.rect(41, sy - 2, 1, 6, p.shoes.shade)
-      c.rect(22, sy + 3, 10, 1, p.shoes.deep)
-      c.rect(32, sy + 3, 10, 1, p.shoes.deep)
+      c.rect(31, sy - 4, 17, 10, p.shoes.base)
+      c.rect(48, sy - 4, 17, 10, p.shoes.base)
+      c.rect(31, sy - 4, 2, 10, p.shoes.light)
+      c.rect(48, sy - 4, 2, 10, p.shoes.light)
+      c.rect(46, sy - 4, 2, 10, p.shoes.shade)
+      c.rect(63, sy - 4, 2, 10, p.shoes.shade)
+      c.rect(31, sy + 5, 17, 1, p.shoes.deep)
+      c.rect(48, sy + 5, 17, 1, p.shoes.deep)
       break
     case 'heels':
-      c.rect(23, sy, 9, 2, p.shoes.base)
-      c.rect(32, sy, 9, 2, p.shoes.base)
-      c.rect(26, sy + 2, 2, 2, p.shoes.base)
-      c.rect(37, sy + 2, 2, 2, p.shoes.base)
-      c.rect(23, sy, 1, 2, p.shoes.light)
-      c.rect(32, sy, 1, 2, p.shoes.light)
-      c.rect(23, sy + 1, 9, 1, p.shoes.shade)
-      c.rect(32, sy + 1, 9, 1, p.shoes.shade)
+      c.rect(33, sy, 15, 3, p.shoes.base)
+      c.rect(48, sy, 15, 3, p.shoes.base)
+      c.rect(38, sy + 3, 3, 3, p.shoes.base)
+      c.rect(55, sy + 3, 3, 3, p.shoes.base)
+      c.rect(33, sy, 2, 3, p.shoes.light)
+      c.rect(48, sy, 2, 3, p.shoes.light)
+      c.rect(33, sy + 2, 15, 1, p.shoes.shade)
+      c.rect(48, sy + 2, 15, 1, p.shoes.shade)
       break
     case 'formal':
-      c.rect(22, sy, 10, 4, p.shoes.base)
-      c.rect(32, sy, 10, 4, p.shoes.base)
-      c.rect(22, sy, 10, 1, p.shoes.light)
-      c.rect(32, sy, 10, 1, p.shoes.light)
-      c.rect(22, sy + 3, 10, 1, p.shoes.deep)
-      c.rect(32, sy + 3, 10, 1, p.shoes.deep)
-      // 鞋带
-      c.rect(25, sy + 1, 4, 1, p.shoes.shade)
-      c.rect(35, sy + 1, 4, 1, p.shoes.shade)
+      c.rect(31, sy, 17, 7, p.shoes.base)
+      c.rect(48, sy, 17, 7, p.shoes.base)
+      c.rect(31, sy, 17, 2, p.shoes.light)
+      c.rect(48, sy, 17, 2, p.shoes.light)
+      c.rect(31, sy + 6, 17, 1, p.shoes.deep)
+      c.rect(48, sy + 6, 17, 1, p.shoes.deep)
+      c.rect(36, sy + 2, 7, 1, p.shoes.shade)
+      c.rect(53, sy + 2, 7, 1, p.shoes.shade)
       break
     default:
-      // sneakers
-      c.rect(22, sy, 10, 4, p.shoes.base)
-      c.rect(32, sy, 10, 4, p.shoes.base)
-      c.rect(22, sy, 1, 3, p.shoes.light)
-      c.rect(32, sy, 1, 3, p.shoes.light)
-      c.rect(22, sy + 3, 10, 1, '#F2F0EA')
-      c.rect(32, sy + 3, 10, 1, '#F2F0EA')
-      // 鞋带
-      c.rect(25, sy + 1, 5, 1, p.shoes.shade)
-      c.rect(35, sy + 1, 5, 1, p.shoes.shade)
-      c.rect(26, sy + 2, 3, 1, p.shoes.shade)
-      c.rect(36, sy + 2, 3, 1, p.shoes.shade)
+      c.rect(31, sy, 17, 7, p.shoes.base)
+      c.rect(48, sy, 17, 7, p.shoes.base)
+      c.rect(31, sy, 2, 5, p.shoes.light)
+      c.rect(48, sy, 2, 5, p.shoes.light)
+      c.rect(31, sy + 5, 17, 2, '#F2F0EA')
+      c.rect(48, sy + 5, 17, 2, '#F2F0EA')
+      c.rect(36, sy + 2, 8, 1, p.shoes.shade)
+      c.rect(53, sy + 2, 8, 1, p.shoes.shade)
+      c.rect(37, sy + 3, 5, 1, p.shoes.shade)
+      c.rect(54, sy + 3, 5, 1, p.shoes.shade)
       break
   }
 }
 
 /* ============================================================
- * 2) 躯干 + 四肢（衣）
+ * 2) 躯干 + 四肢（y≈38–70）
  * ============================================================ */
-function drawArms(ctx: Ctx, sleeveColor: ToneSet, sleeveLen: number): void {
+function drawArms(ctx: Ctx, sleeve: ToneSet, sleeveLen: number): void {
   const { c, p } = ctx
-  // 左臂（画面左）
-  c.rect(16, 31, 6, sleeveLen, sleeveColor.base)
-  c.rect(16, 31, 1, sleeveLen, sleeveColor.light)
-  c.rect(21, 31, 1, sleeveLen, sleeveColor.shade)
+  // 左臂
+  c.rect(24, 40, 10, sleeveLen, sleeve.base)
+  c.rect(24, 40, 2, sleeveLen, sleeve.light)
+  c.rect(32, 40, 2, sleeveLen, sleeve.shade)
   // 右臂
-  c.rect(42, 31, 6, sleeveLen, sleeveColor.base)
-  c.rect(42, 31, 1, sleeveLen, sleeveColor.light)
-  c.rect(47, 31, 1, sleeveLen, sleeveColor.shade)
+  c.rect(62, 40, 10, sleeveLen, sleeve.base)
+  c.rect(62, 40, 2, sleeveLen, sleeve.light)
+  c.rect(70, 40, 2, sleeveLen, sleeve.shade)
 
-  if (sleeveLen < 16) {
-    // 短袖：露小臂
-    c.rect(17, 31 + sleeveLen, 4, 16 - sleeveLen, p.skin.base)
-    c.rect(43, 31 + sleeveLen, 4, 16 - sleeveLen, p.skin.base)
-    c.rect(17, 31 + sleeveLen, 1, 16 - sleeveLen, p.skin.light)
-    c.rect(43, 31 + sleeveLen, 1, 16 - sleeveLen, p.skin.light)
-    c.rect(20, 31 + sleeveLen, 1, 16 - sleeveLen, p.skin.shade)
-    c.rect(46, 31 + sleeveLen, 1, 16 - sleeveLen, p.skin.shade)
+  if (sleeveLen < 22) {
+    c.rect(26, 40 + sleeveLen, 6, 22 - sleeveLen, p.skin.base)
+    c.rect(64, 40 + sleeveLen, 6, 22 - sleeveLen, p.skin.base)
+    c.rect(26, 40 + sleeveLen, 1, 22 - sleeveLen, p.skin.light)
+    c.rect(64, 40 + sleeveLen, 1, 22 - sleeveLen, p.skin.light)
+    c.rect(31, 40 + sleeveLen, 1, 22 - sleeveLen, p.skin.shade)
+    c.rect(69, 40 + sleeveLen, 1, 22 - sleeveLen, p.skin.shade)
   }
 }
 
@@ -228,172 +216,173 @@ function drawTorso(ctx: Ctx): void {
   const { c, a, p } = ctx
   const isDress = a.top === 'f-dress'
 
-  // 先铺上衣主体（含肩）
-  c.rect(19, 30, 26, 16, p.top.base)
-  // 肩高光 / 侧影
-  c.rect(19, 30, 26, 2, p.top.light)
-  c.rect(19, 30, 2, 16, p.top.light)
-  c.rect(43, 30, 2, 16, p.top.shade)
-  c.rect(19, 44, 26, 2, p.top.shade)
+  // 上衣主体
+  c.rect(28, 38, 40, 26, p.top.base)
+  c.rect(28, 38, 40, 3, p.top.light)
+  c.rect(28, 38, 3, 26, p.top.light)
+  c.rect(65, 38, 3, 26, p.top.shade)
+  c.rect(28, 62, 40, 2, p.top.shade)
+  // 胸侧影
+  c.rect(32, 46, 4, 12, mix(p.top.base, p.top.shade, 0.35))
+  c.rect(60, 46, 4, 12, mix(p.top.base, p.top.shade, 0.4))
 
-  const sleeveLen = a.top === 'm-tshirt' || a.top === 'f-tshirt' || a.top === 'f-blouse' || isDress ? 5 : 16
+  const sleeveLen = a.top === 'm-tshirt' || a.top === 'f-tshirt' || a.top === 'f-blouse' || isDress ? 8 : 22
   drawArms(ctx, p.top, sleeveLen)
 
   switch (a.top) {
     case 'm-tshirt':
     case 'f-tshirt': {
-      // 圆领
-      c.rect(27, 30, 10, 2, p.skin.base)
-      c.rect(27, 31, 10, 1, p.skin.shade)
-      c.rect(26, 30, 1, 2, p.top.shade)
-      c.rect(37, 30, 1, 2, p.top.shade)
-      // 袖口
-      c.rect(16, 35, 6, 1, p.top.deep)
-      c.rect(42, 35, 6, 1, p.top.deep)
+      c.rect(40, 38, 16, 3, p.skin.base)
+      c.rect(40, 40, 16, 1, p.skin.shade)
+      c.rect(38, 38, 2, 3, p.top.shade)
+      c.rect(56, 38, 2, 3, p.top.shade)
+      c.rect(24, 47, 10, 1, p.top.deep)
+      c.rect(62, 47, 10, 1, p.top.deep)
       break
     }
     case 'm-hoodie':
     case 'f-hoodie': {
-      // 帽沿堆在肩上
-      c.rect(22, 28, 20, 3, p.top.base)
-      c.rect(22, 28, 20, 1, p.top.light)
-      c.rect(22, 30, 20, 1, p.top.shade)
-      // 口袋
-      c.rect(24, 38, 16, 5, p.accent ? p.accent.base : p.top.shade)
-      c.rect(24, 38, 16, 1, p.accent ? p.accent.light : p.top.deep)
-      c.rect(24, 42, 16, 1, p.accent ? p.accent.deep : p.top.deep)
-      // 抽绳
-      c.rect(29, 33, 1, 5, '#F2F0EA')
-      c.rect(34, 33, 1, 5, '#F2F0EA')
-      c.rect(29, 37, 1, 1, p.top.shade)
-      c.rect(34, 37, 1, 1, p.top.shade)
-      // 帽绳口
-      c.rect(28, 32, 2, 2, p.top.deep)
-      c.rect(34, 32, 2, 2, p.top.deep)
+      c.rect(32, 35, 32, 5, p.top.base)
+      c.rect(32, 35, 32, 2, p.top.light)
+      c.rect(32, 39, 32, 1, p.top.shade)
+      c.rect(36, 54, 24, 8, p.accent ? p.accent.base : p.top.shade)
+      c.rect(36, 54, 24, 2, p.accent ? p.accent.light : p.top.deep)
+      c.rect(36, 61, 24, 1, p.accent ? p.accent.deep : p.top.deep)
+      c.rect(43, 45, 2, 8, '#F2F0EA')
+      c.rect(51, 45, 2, 8, '#F2F0EA')
+      c.rect(43, 52, 2, 1, p.top.shade)
+      c.rect(51, 52, 2, 1, p.top.shade)
+      c.rect(41, 43, 3, 3, p.top.deep)
+      c.rect(52, 43, 3, 3, p.top.deep)
       break
     }
     case 'm-shirt': {
-      // 门襟 + 纽扣
-      c.rect(31, 32, 2, 13, '#F4F1EA')
-      c.rect(31, 32, 1, 13, '#FFFFFF')
-      c.rect(32, 32, 1, 13, '#E4DFD4')
-      for (let i = 0; i < 4; i += 1) {
-        c.rect(31, 34 + i * 3, 2, 1, p.top.deep)
-      }
-      // 衣领
-      c.rect(26, 30, 5, 3, '#F4F1EA')
-      c.rect(33, 30, 5, 3, '#F4F1EA')
-      c.rect(26, 32, 5, 1, '#E4DFD4')
-      c.rect(33, 32, 5, 1, '#E4DFD4')
-      // 袖口
-      c.rect(16, 44, 6, 2, '#F4F1EA')
-      c.rect(42, 44, 6, 2, '#F4F1EA')
+      c.rect(46, 41, 3, 20, '#F4F1EA')
+      c.rect(46, 41, 2, 20, '#FFFFFF')
+      c.rect(48, 41, 1, 20, '#E4DFD4')
+      for (let i = 0; i < 5; i += 1) c.rect(46, 44 + i * 3, 3, 1, p.top.deep)
+      c.rect(38, 38, 8, 5, '#F4F1EA')
+      c.rect(50, 38, 8, 5, '#F4F1EA')
+      c.rect(38, 42, 8, 1, '#E4DFD4')
+      c.rect(50, 42, 8, 1, '#E4DFD4')
+      c.rect(24, 58, 10, 3, '#F4F1EA')
+      c.rect(62, 58, 10, 3, '#F4F1EA')
       break
     }
     case 'm-suit': {
-      // 衬衫 V 区
-      c.rect(28, 30, 8, 14, '#F4F1EA')
-      c.rect(28, 30, 2, 14, '#E8E2D6')
-      // 领带
+      c.rect(41, 38, 14, 22, '#F4F1EA')
+      c.rect(41, 38, 3, 22, '#E8E2D6')
       const tie = p.accent ?? tone('#8B2E3B')
-      c.rect(31, 32, 2, 11, tie.base)
-      c.rect(31, 32, 1, 11, tie.light)
-      c.rect(32, 32, 1, 11, tie.shade)
-      c.rect(30, 31, 4, 2, tie.base) // 结
-      // 翻领
-      c.rect(26, 30, 3, 10, p.top.shade)
-      c.rect(35, 30, 3, 10, p.top.shade)
-      c.rect(26, 30, 3, 1, p.top.light)
-      c.rect(35, 30, 3, 1, p.top.light)
-      // 袖口
-      c.rect(16, 44, 6, 1, '#F4F1EA')
-      c.rect(42, 44, 6, 1, '#F4F1EA')
+      c.rect(46, 41, 4, 16, tie.base)
+      c.rect(46, 41, 2, 16, tie.light)
+      c.rect(48, 41, 2, 16, tie.shade)
+      c.rect(44, 40, 8, 3, tie.base)
+      c.rect(38, 38, 4, 16, p.top.shade)
+      c.rect(54, 38, 4, 16, p.top.shade)
+      c.rect(38, 38, 4, 2, p.top.light)
+      c.rect(54, 38, 4, 2, p.top.light)
+      c.rect(24, 58, 10, 2, '#F4F1EA')
+      c.rect(62, 58, 10, 2, '#F4F1EA')
       break
     }
     case 'f-blouse': {
-      // 小翻领
-      c.rect(26, 30, 6, 3, '#F8F4EC')
-      c.rect(32, 30, 6, 3, '#F8F4EC')
-      c.rect(26, 32, 6, 1, '#E8E0D4')
-      c.rect(32, 32, 6, 1, '#E8E0D4')
-      // 蝴蝶结
+      c.rect(38, 38, 9, 4, '#F8F4EC')
+      c.rect(49, 38, 9, 4, '#F8F4EC')
+      c.rect(38, 41, 9, 1, '#E8E0D4')
+      c.rect(49, 41, 9, 1, '#E8E0D4')
       const bow = p.accent ?? tone('#C45C6A')
-      c.rect(29, 33, 6, 2, bow.base)
-      c.rect(28, 33, 2, 3, bow.base)
-      c.rect(34, 33, 2, 3, bow.base)
-      c.rect(31, 33, 2, 2, bow.light)
-      c.rect(28, 35, 2, 1, bow.shade)
-      c.rect(34, 35, 2, 1, bow.shade)
-      // 门襟扣
-      for (let i = 0; i < 3; i += 1) c.rect(31, 36 + i * 3, 2, 1, p.top.shade)
+      c.rect(43, 43, 10, 3, bow.base)
+      c.rect(41, 43, 3, 5, bow.base)
+      c.rect(52, 43, 3, 5, bow.base)
+      c.rect(46, 43, 3, 3, bow.light)
+      c.rect(41, 47, 3, 1, bow.shade)
+      c.rect(52, 47, 3, 1, bow.shade)
+      for (let i = 0; i < 4; i += 1) c.rect(46, 49 + i * 3, 3, 1, p.top.shade)
       break
     }
     case 'f-dress': {
-      // 腰线
-      const beltRaw = p.accent ?? p.top.deep
-      const belt = typeof beltRaw === 'string' ? {base: beltRaw, light: beltRaw, shade: beltRaw} : beltRaw
-      c.rect(21, 42, 22, 2, belt.base)
-      c.rect(21, 42, 22, 1, belt.light)
-      // 裙摆（覆盖到大腿）
-      c.rect(18, 44, 28, 10, p.top.base)
-      c.rect(18, 44, 2, 10, p.top.light)
-      c.rect(44, 44, 2, 10, p.top.shade)
-      c.rect(26, 46, 1, 7, p.top.shade)
-      c.rect(32, 46, 1, 7, p.top.shade)
-      c.rect(38, 46, 1, 7, p.top.shade)
-      c.rect(18, 53, 28, 1, p.top.deep)
-      // 领口
-      c.rect(27, 30, 10, 2, p.skin.base)
-      c.rect(27, 31, 10, 1, p.skin.shade)
+      const belt = p.accent ?? tone(p.top.deep)
+      c.rect(30, 58, 36, 3, belt.base)
+      c.rect(30, 58, 36, 1, belt.light)
+      c.rect(26, 61, 44, 16, p.top.base)
+      c.rect(26, 61, 3, 16, p.top.light)
+      c.rect(67, 61, 3, 16, p.top.shade)
+      c.rect(38, 63, 2, 12, p.top.shade)
+      c.rect(48, 63, 2, 12, p.top.shade)
+      c.rect(58, 63, 2, 12, p.top.shade)
+      c.rect(26, 76, 44, 1, p.top.deep)
+      c.rect(40, 38, 16, 3, p.skin.base)
+      c.rect(40, 40, 16, 1, p.skin.shade)
       break
     }
   }
 
-  // 手臂与躯干接缝阴影
-  c.rect(21, 31, 1, 12, p.top.shade)
-  c.rect(42, 31, 1, 12, p.top.shade)
+  c.rect(32, 40, 2, 18, p.top.shade)
+  c.rect(62, 40, 2, 18, p.top.shade)
 }
 
 /* ============================================================
- * 3) 头 + 颈
+ * 3) 头 + 颈（写实卵圆颅 + 颧/颌结构）
  * ============================================================ */
 function drawHead(ctx: Ctx): void {
   const { c, p } = ctx
+  const S = p.skin
+
   // 颈
-  c.rect(28, 25, 8, 6, p.skin.base)
-  c.rect(28, 25, 2, 6, p.skin.light)
-  c.rect(34, 25, 2, 6, p.skin.shade)
-  // 颈窝阴影
-  c.rect(29, 25, 6, 1, p.skin.deep)
+  c.rect(42, 32, 12, 8, S.base)
+  c.rect(42, 32, 2, 8, S.light)
+  c.rect(52, 32, 2, 8, S.shade)
+  c.rect(40, 32, 2, 6, S.shade)
+  c.rect(54, 32, 2, 6, S.shade)
+  c.rect(42, 32, 12, 1, S.deep)
+  c.rect(43, 33, 10, 1, mix(S.deep, S.base, 0.4))
 
-  // 头：椭圆 + 下颌
-  c.ellipse(32, 15, 11, 12, p.skin.base)
-  // 下巴收尖
-  c.rect(26, 24, 12, 3, p.skin.base)
-  c.rect(28, 26, 8, 1, p.skin.base)
+  // 颅骨：上宽下窄
+  c.ellipse(48, 18, 13, 15, S.base)
+  c.rect(36, 12, 2, 10, S.base)
+  c.rect(58, 12, 2, 10, S.base)
+  // 下颌 → 下巴
+  c.rect(38, 26, 20, 4, S.base)
+  c.rect(41, 30, 14, 2, S.base)
+  c.rect(44, 32, 8, 1, S.base)
+  // 下颌线
+  c.rect(38, 28, 3, 4, S.shade)
+  c.rect(55, 28, 3, 4, S.shade)
+  c.rect(42, 31, 12, 1, mix(S.shade, S.base, 0.35))
 
-  // 受光（左上）
-  c.rect(22, 6, 4, 10, p.skin.light)
-  c.rect(24, 5, 6, 3, p.skin.light)
-  c.rect(23, 8, 3, 3, p.skin.gloss)
-  // 背光（右侧 / 颧下）
-  c.rect(40, 8, 3, 12, p.skin.shade)
-  c.rect(38, 18, 5, 5, p.skin.shade)
-  c.rect(28, 22, 10, 3, p.skin.shade)
-  // 颧骨
-  c.rect(24, 17, 3, 2, p.skin.light)
-  c.rect(37, 17, 3, 2, p.skin.shade)
+  // 受光：左上额 → 颞
+  c.rect(37, 6, 8, 12, S.light)
+  c.rect(40, 5, 10, 4, S.light)
+  c.rect(39, 8, 5, 6, S.gloss)
+  c.rect(44, 6, 8, 3, mix(S.light, S.base, 0.4))
+  // 背光：右颅 + 颧下（保持肤色相，不发灰）
+  c.rect(57, 8, 5, 16, mix(S.base, S.shade, 0.55))
+  c.rect(59, 12, 3, 10, mix(S.base, S.shade, 0.7))
+  c.rect(54, 24, 8, 6, mix(S.base, S.shade, 0.5))
+  c.rect(52, 26, 8, 4, mix(S.base, S.shade, 0.4))
+  // 眼窝（极轻）
+  c.rect(37, 15, 10, 3, mix(S.base, S.shade, 0.1))
+  c.rect(49, 15, 10, 3, mix(S.base, S.shade, 0.13))
+  // 颧骨高光 / 颊侧影
+  c.rect(38, 21, 5, 3, S.light)
+  c.rect(36, 22, 3, 3, mix(S.light, S.base, 0.55))
+  c.rect(35, 24, 3, 4, mix(S.base, S.shade, 0.22))
+  c.rect(54, 21, 5, 3, mix(S.base, S.shade, 0.35))
+  c.rect(57, 23, 4, 5, mix(S.base, S.shade, 0.38))
+  // 颌下
+  c.rect(40, 29, 16, 2, mix(S.base, S.shade, 0.18))
 
   // 耳
-  c.rect(20, 13, 3, 6, p.skin.base)
-  c.rect(41, 13, 3, 6, p.skin.base)
-  c.rect(21, 14, 1, 4, p.skin.shade)
-  c.rect(42, 14, 1, 4, p.skin.shade)
-  c.rect(20, 13, 1, 2, p.skin.light)
-  c.rect(41, 13, 1, 2, p.skin.light)
-  // 耳内
-  c.rect(21, 15, 1, 2, p.skin.deep)
-  c.rect(42, 15, 1, 2, p.skin.deep)
+  c.rect(33, 16, 5, 10, S.base)
+  c.rect(58, 16, 5, 10, S.base)
+  c.rect(33, 16, 2, 3, S.light)
+  c.rect(61, 16, 2, 3, S.light)
+  c.rect(35, 18, 2, 6, S.shade)
+  c.rect(59, 18, 2, 6, S.shade)
+  c.rect(35, 20, 2, 3, S.deep)
+  c.rect(59, 20, 2, 3, S.deep)
+  c.rect(33, 25, 3, 2, mix(S.base, S.shade, 0.45))
+  c.rect(60, 25, 3, 2, mix(S.base, S.shade, 0.5))
 }
 
 /* ============================================================
@@ -403,240 +392,287 @@ function drawHair(ctx: Ctx): void {
   const { c, a, p } = ctx
   const H = p.hair
 
-  /** 发顶盖 + 侧发通用底 */
   const cap = () => {
-    c.rect(21, 3, 22, 6, H.base)
-    c.rect(20, 6, 24, 4, H.base)
-    c.rect(20, 9, 24, 2, H.base)
-    // 顶光
-    c.rect(22, 3, 12, 2, H.light)
-    c.rect(24, 4, 6, 1, H.gloss)
-    // 右侧暗部
-    c.rect(40, 5, 4, 8, H.shade)
+    c.rect(35, 4, 26, 8, H.base)
+    c.rect(34, 9, 28, 6, H.base)
+    c.rect(34, 14, 28, 3, H.base)
+    // 顶光 + 发丝
+    c.rect(37, 4, 14, 3, H.light)
+    c.rect(40, 5, 10, 2, H.gloss)
+    c.rect(42, 6, 5, 2, mix(H.gloss, H.light, 0.5))
+    c.rect(36, 9, 3, 6, H.light)
+    c.rect(37, 10, 2, 4, H.gloss)
+    // 侧影 + 发丝阴影
+    c.rect(58, 6, 6, 12, H.shade)
+    c.rect(55, 8, 3, 9, mix(H.base, H.shade, 0.55))
+    c.rect(42, 10, 2, 5, H.shade)
+    c.rect(50, 9, 2, 3, mix(H.base, H.shade, 0.4))
+    c.rect(34, 15, 28, 2, mix(H.base, H.shade, 0.35))
   }
 
   switch (a.hairStyle) {
     case 'm-buzz': {
-      c.rect(22, 4, 20, 4, H.base)
-      c.rect(21, 7, 22, 3, H.base)
-      c.rect(23, 3, 14, 2, H.light)
-      c.rect(38, 5, 5, 5, H.shade)
-      // 鬓角
-      c.rect(21, 10, 2, 3, H.shade)
-      c.rect(41, 10, 2, 3, H.shade)
+      c.rect(36, 5, 24, 6, H.base)
+      c.rect(35, 9, 26, 4, H.base)
+      c.rect(38, 4, 16, 3, H.light)
+      c.rect(56, 7, 6, 7, H.shade)
+      c.rect(35, 12, 3, 4, H.shade)
+      c.rect(58, 12, 3, 4, H.shade)
       break
     }
     case 'm-short': {
       cap()
-      c.rect(21, 10, 3, 4, H.base) // 左鬓
-      c.rect(40, 10, 3, 4, H.base)
-      c.rect(21, 13, 2, 2, H.shade)
-      c.rect(41, 13, 2, 2, H.shade)
-      // 刘海分缝
-      c.rect(30, 8, 2, 3, H.shade)
+      c.rect(35, 14, 4, 6, H.base)
+      c.rect(57, 14, 4, 6, H.base)
+      c.rect(35, 18, 3, 3, H.shade)
+      c.rect(58, 18, 3, 3, H.shade)
+      c.rect(46, 11, 3, 5, H.shade)
       break
     }
     case 'm-spiky': {
       cap()
-      // 刺
-      c.rect(23, 1, 3, 3, H.base)
-      c.rect(28, 0, 3, 4, H.base)
-      c.rect(33, 1, 3, 3, H.base)
-      c.rect(37, 0, 3, 3, H.base)
-      c.rect(23, 1, 1, 2, H.gloss)
-      c.rect(28, 0, 1, 3, H.gloss)
-      c.rect(22, 10, 2, 3, H.base)
-      c.rect(40, 10, 2, 3, H.base)
+      c.rect(38, 1, 5, 5, H.base)
+      c.rect(45, 0, 5, 6, H.base)
+      c.rect(52, 1, 5, 4, H.base)
+      c.rect(58, 0, 4, 4, H.base)
+      c.rect(38, 1, 2, 3, H.gloss)
+      c.rect(45, 0, 2, 4, H.gloss)
+      c.rect(35, 13, 3, 5, H.base)
+      c.rect(58, 13, 3, 5, H.base)
       break
     }
     case 'm-undercut': {
-      // 顶部厚、两侧短
-      c.rect(21, 2, 22, 8, H.base)
-      c.rect(20, 5, 24, 5, H.base)
-      c.rect(23, 1, 14, 3, H.base)
-      c.rect(24, 2, 8, 2, H.gloss)
-      c.rect(21, 9, 3, 3, H.shade)
-      c.rect(40, 9, 3, 3, H.shade)
-      // 梳向一侧的分缝
-      c.rect(28, 4, 12, 1, H.shade)
+      c.rect(35, 3, 26, 10, H.base)
+      c.rect(34, 7, 28, 7, H.base)
+      c.rect(38, 2, 18, 4, H.base)
+      c.rect(40, 3, 12, 3, H.gloss)
+      c.rect(35, 13, 4, 4, H.shade)
+      c.rect(57, 13, 4, 4, H.shade)
+      c.rect(43, 6, 16, 2, H.shade)
       break
     }
     case 'm-curly': {
-      c.rect(21, 3, 22, 7, H.base)
-      // 卷团
-      c.rect(19, 5, 4, 4, H.base)
-      c.rect(41, 5, 4, 4, H.base)
-      c.rect(23, 2, 5, 4, H.base)
-      c.rect(29, 1, 6, 4, H.base)
-      c.rect(36, 2, 5, 4, H.base)
-      c.rect(23, 2, 2, 2, H.gloss)
-      c.rect(30, 1, 2, 2, H.gloss)
-      c.rect(41, 5, 2, 2, H.shade)
-      c.rect(21, 9, 3, 3, H.base)
-      c.rect(40, 9, 3, 3, H.base)
+      c.rect(35, 4, 26, 9, H.base)
+      c.rect(32, 7, 5, 6, H.base)
+      c.rect(59, 7, 5, 6, H.base)
+      c.rect(37, 2, 7, 5, H.base)
+      c.rect(45, 1, 9, 5, H.base)
+      c.rect(53, 2, 7, 5, H.base)
+      c.rect(37, 2, 3, 3, H.gloss)
+      c.rect(47, 1, 3, 3, H.gloss)
+      c.rect(59, 7, 3, 3, H.shade)
+      c.rect(35, 13, 4, 5, H.base)
+      c.rect(57, 13, 4, 5, H.base)
       break
     }
     case 'f-long': {
       cap()
-      // 两侧长发
-      c.rect(18, 8, 4, 20, H.base)
-      c.rect(42, 8, 4, 20, H.base)
-      c.rect(18, 8, 1, 18, H.light)
-      c.rect(45, 8, 1, 18, H.shade)
-      // 发尾
-      c.rect(18, 26, 4, 3, H.shade)
-      c.rect(42, 26, 4, 3, H.shade)
-      // 刘海
-      c.rect(23, 8, 18, 3, H.base)
-      c.rect(23, 10, 6, 2, H.base)
-      c.rect(35, 10, 6, 2, H.base)
-      c.rect(28, 8, 8, 1, H.shade)
-      // 光泽
-      c.rect(20, 10, 2, 12, H.gloss)
-      c.rect(43, 12, 2, 10, H.shade)
+      c.rect(31, 10, 6, 28, H.base)
+      c.rect(59, 10, 6, 28, H.base)
+      c.rect(31, 10, 2, 24, H.light)
+      c.rect(63, 10, 2, 24, H.shade)
+      c.rect(31, 35, 6, 4, H.shade)
+      c.rect(59, 35, 6, 4, H.shade)
+      c.rect(37, 13, 22, 4, H.base)
+      c.rect(37, 16, 8, 3, H.base)
+      c.rect(51, 16, 8, 3, H.base)
+      c.rect(44, 13, 10, 2, H.shade)
+      c.rect(33, 14, 3, 16, H.gloss)
+      c.rect(61, 16, 3, 14, H.shade)
       break
     }
     case 'f-bob': {
       cap()
-      c.rect(18, 9, 4, 14, H.base)
-      c.rect(42, 9, 4, 14, H.base)
-      c.rect(18, 9, 1, 12, H.light)
-      c.rect(45, 9, 1, 12, H.shade)
-      c.rect(18, 21, 28, 3, H.base) // 发尾齐颚
-      c.rect(18, 23, 28, 1, H.shade)
-      c.rect(23, 8, 18, 3, H.base)
-      c.rect(23, 10, 5, 2, H.base)
-      c.rect(36, 10, 5, 2, H.base)
-      c.rect(21, 11, 2, 8, H.gloss)
+      c.rect(31, 12, 6, 18, H.base)
+      c.rect(59, 12, 6, 18, H.base)
+      c.rect(31, 12, 2, 16, H.light)
+      c.rect(63, 12, 2, 16, H.shade)
+      c.rect(31, 28, 34, 5, H.base)
+      c.rect(31, 32, 34, 2, H.shade)
+      c.rect(37, 13, 22, 4, H.base)
+      c.rect(37, 16, 7, 3, H.base)
+      c.rect(52, 16, 7, 3, H.base)
+      c.rect(33, 15, 3, 12, H.gloss)
       break
     }
     case 'f-twin': {
       cap()
-      // 双马尾
-      c.rect(14, 10, 5, 16, H.base)
-      c.rect(45, 10, 5, 16, H.base)
-      c.rect(14, 10, 1, 14, H.light)
-      c.rect(49, 10, 1, 14, H.shade)
-      // 发圈
-      c.rect(15, 12, 3, 2, p.accent ? p.accent.base : H.deep)
-      c.rect(46, 12, 3, 2, p.accent ? p.accent.base : H.deep)
-      // 尾端
-      c.rect(14, 24, 5, 3, H.shade)
-      c.rect(45, 24, 5, 3, H.shade)
-      // 刘海
-      c.rect(23, 8, 18, 3, H.base)
-      c.rect(24, 10, 6, 2, H.base)
-      c.rect(34, 10, 6, 2, H.base)
-      c.rect(22, 4, 6, 2, H.gloss)
+      c.rect(24, 13, 8, 22, H.base)
+      c.rect(64, 13, 8, 22, H.base)
+      c.rect(24, 13, 2, 18, H.light)
+      c.rect(70, 13, 2, 18, H.shade)
+      c.rect(25, 16, 5, 3, p.accent ? p.accent.base : H.deep)
+      c.rect(66, 16, 5, 3, p.accent ? p.accent.base : H.deep)
+      c.rect(24, 32, 8, 5, H.shade)
+      c.rect(64, 32, 8, 5, H.shade)
+      c.rect(37, 13, 22, 4, H.base)
+      c.rect(38, 16, 8, 3, H.base)
+      c.rect(50, 16, 8, 3, H.base)
+      c.rect(36, 5, 10, 3, H.gloss)
       break
     }
     case 'f-ponytail': {
       cap()
-      // 马尾（右侧后）
-      c.rect(43, 8, 5, 18, H.base)
-      c.rect(43, 8, 1, 16, H.light)
-      c.rect(47, 8, 1, 18, H.shade)
-      c.rect(43, 24, 5, 3, H.shade)
-      // 发圈
-      c.rect(43, 10, 4, 2, H.deep)
-      // 刘海
-      c.rect(23, 8, 18, 3, H.base)
-      c.rect(23, 10, 7, 2, H.base)
-      c.rect(35, 10, 6, 2, H.base)
-      c.rect(24, 3, 10, 2, H.gloss)
-      c.rect(21, 10, 2, 3, H.base)
+      c.rect(62, 10, 8, 26, H.base)
+      c.rect(62, 10, 2, 22, H.light)
+      c.rect(68, 10, 2, 26, H.shade)
+      c.rect(62, 33, 8, 5, H.shade)
+      c.rect(62, 14, 7, 3, H.deep)
+      c.rect(37, 13, 22, 4, H.base)
+      c.rect(37, 16, 9, 3, H.base)
+      c.rect(52, 16, 7, 3, H.base)
+      c.rect(40, 5, 14, 3, H.gloss)
+      c.rect(35, 14, 3, 5, H.base)
       break
     }
     case 'f-bun': {
       cap()
-      // 丸子
-      c.circle(32, 2, 4, H.base)
-      c.circle(31, 1, 2, H.gloss)
-      c.rect(28, 5, 8, 2, H.shade)
-      // 刘海
-      c.rect(23, 8, 18, 3, H.base)
-      c.rect(23, 10, 6, 2, H.base)
-      c.rect(35, 10, 6, 2, H.base)
-      c.rect(21, 9, 2, 4, H.base)
-      c.rect(41, 9, 2, 4, H.base)
+      c.circle(48, 3, 6, H.base)
+      c.circle(46, 2, 3, H.gloss)
+      c.rect(42, 8, 12, 3, H.shade)
+      c.rect(37, 13, 22, 4, H.base)
+      c.rect(37, 16, 8, 3, H.base)
+      c.rect(51, 16, 8, 3, H.base)
+      c.rect(35, 13, 3, 6, H.base)
+      c.rect(58, 13, 3, 6, H.base)
       break
     }
   }
 }
 
 /* ============================================================
- * 5) 表情
+ * 5) 表情（杏仁眼 + 立体鼻唇）
  * ============================================================ */
-function drawEyesBase(ctx: Ctx, openY = 14, openH = 4): void {
-  const { c } = ctx
-  // 眼眶外缘阴影
-  c.rect(23, openY - 1, 7, openH + 2, mix(EYE_WHITE, '#000000', 0.12))
-  c.rect(34, openY - 1, 7, openH + 2, mix(EYE_WHITE, '#000000', 0.12))
-  // 眼白
-  c.rect(24, openY, 5, openH, EYE_WHITE)
-  c.rect(35, openY, 5, openH, EYE_WHITE)
-}
-
-function drawIris(ctx: Ctx, cx: number, cy: number, iris = IRIS_DEFAULT): void {
-  const { c } = ctx
-  c.rect(cx - 1, cy - 1, 3, 3, iris)
-  c.rect(cx - 1, cy - 1, 3, 1, mix(iris, '#FFFFFF', 0.15))
-  c.rect(cx, cy, 1, 1, INK) // 瞳
-  c.rect(cx - 1, cy - 1, 1, 1, '#FFFFFF') // 高光
+function drawOneEye(
+  ctx: Ctx,
+  ox: number,
+  oy: number,
+  openH = 3,
+  irisY?: number,
+  irisCol?: string,
+): void {
+  const { c, a, p } = ctx
+  const S = p.skin
+  const iy = irisY ?? oy
+  // 眼眶皮肤影
+  c.rect(ox - 1, oy - 2, 8, openH + 4, mix(S.base, S.shade, 0.12))
+  // 上睑折痕
+  c.rect(ox - 1, oy - 1, 8, 1, mix(S.shade, S.base, 0.4))
+  // 眼裂
+  c.rect(ox, oy, 6, openH, EYE_WHITE)
+  c.rect(ox + 1, oy - 1, 4, 1, EYE_WHITE)
+  c.rect(ox, oy, 1, 1, mix(EYE_WHITE, '#C09080', 0.55))
+  c.rect(ox + 5, oy + openH - 1, 1, 1, mix(EYE_WHITE, S.shade, 0.35))
+  // 上睑线
+  c.rect(ox - 1, oy - 1, 8, 1, mix(INK, '#2A211C', 0.38))
+  c.rect(ox + 5, oy - 2, 1, 1, mix(INK, '#2A211C', 0.5))
+  // 下睑细影
+  c.rect(ox + 1, oy + openH, 4, 1, mix(S.shade, S.base, 0.35))
+  // 虹膜填满眼高
+  const iris = irisCol ?? IRIS_DEFAULT
+  const ih = openH
+  c.rect(ox + 1, iy, 4, ih, iris)
+  c.rect(ox + 1, iy, 4, 1, mix(iris, '#FFFFFF', 0.18))
+  c.rect(ox + 1, iy + ih - 1, 4, 1, mix(iris, '#000000', 0.32))
+  c.rect(ox + 2, iy, 2, ih, INK) // 瞳
+  c.rect(ox + 1, iy, 1, 1, '#FFFFFF')
+  c.rect(ox + 4, iy + 1, 1, 1, mix('#FFFFFF', iris, 0.35))
+  // 睫毛
+  if (a.gender === 'female') {
+    c.rect(ox, oy - 2, 6, 1, mix(INK, '#2A211C', 0.22))
+    c.rect(ox + 5, oy - 3, 1, 1, INK)
+    c.rect(ox + 1, oy - 2, 1, 1, mix(INK, '#2A211C', 0.35))
+  }
 }
 
 function drawBrow(ctx: Ctx, y: number, left = true, angry = false, sad = false): void {
   const { c, p } = ctx
-  const col = p.hair.deep
+  const col = mix(p.hair.deep, '#2A211C', 0.2)
+  const soft = mix(p.hair.deep, p.skin.base, 0.4)
+  const thin = ctx.a.gender === 'female'
   if (left) {
     if (angry) {
-      c.rect(23, y + 1, 2, 1, col)
-      c.rect(25, y, 3, 1, col)
-      c.rect(28, y - 1, 1, 1, col)
+      c.rect(36, y + 1, 3, 1, col)
+      c.rect(39, y, 5, 1, col)
+      c.rect(44, y - 1, 2, 1, col)
+      c.rect(36, y + 2, 3, 1, soft)
     } else if (sad) {
-      c.rect(23, y - 1, 2, 1, col)
-      c.rect(25, y, 3, 1, col)
-      c.rect(28, y + 1, 1, 1, col)
+      c.rect(36, y - 1, 3, 1, col)
+      c.rect(39, y, 5, 1, col)
+      c.rect(44, y + 1, 2, 1, col)
     } else {
-      c.rect(23, y, 2, 1, col)
-      c.rect(25, y - 1, 3, 1, col)
-      c.rect(28, y, 1, 1, col)
+      c.rect(36, y, 3, 1, col)
+      c.rect(39, y - 1, 5, 1, col)
+      c.rect(44, y, 2, 1, col)
+      if (!thin) c.rect(38, y + 1, 6, 1, soft)
     }
   } else if (angry) {
-    c.rect(35, y - 1, 1, 1, col)
-    c.rect(36, y, 3, 1, col)
-    c.rect(39, y + 1, 2, 1, col)
+    c.rect(57, y + 1, 2, 1, col)
+    c.rect(52, y, 5, 1, col)
+    c.rect(50, y - 1, 2, 1, col)
+    c.rect(57, y + 2, 3, 1, soft)
   } else if (sad) {
-    c.rect(35, y + 1, 1, 1, col)
-    c.rect(36, y, 3, 1, col)
-    c.rect(39, y - 1, 2, 1, col)
+    c.rect(57, y - 1, 2, 1, col)
+    c.rect(52, y, 5, 1, col)
+    c.rect(50, y + 1, 2, 1, col)
   } else {
-    c.rect(35, y, 1, 1, col)
-    c.rect(36, y - 1, 3, 1, col)
-    c.rect(39, y, 2, 1, col)
+    c.rect(57, y, 2, 1, col)
+    c.rect(52, y - 1, 5, 1, col)
+    c.rect(50, y, 2, 1, col)
+    if (!thin) c.rect(52, y + 1, 6, 1, soft)
   }
 }
 
 function drawNose(ctx: Ctx): void {
   const { c, p } = ctx
-  c.rect(31, 18, 1, 3, p.skin.shade)
-  c.rect(30, 21, 3, 1, p.skin.shade)
-  c.rect(31, 21, 1, 1, p.skin.deep)
-  c.rect(33, 20, 1, 1, p.skin.light)
+  const S = p.skin
+  // 鼻梁：只留两侧轻影 + 中间微亮
+  c.rect(45, 17, 1, 5, mix(S.base, S.shade, 0.22))
+  c.rect(50, 17, 1, 5, mix(S.base, S.shade, 0.18))
+  c.rect(47, 18, 2, 3, mix(S.light, S.base, 0.25))
+  // 鼻头
+  c.rect(45, 22, 6, 2, mix(S.base, S.light, 0.15))
+  c.rect(46, 21, 3, 1, S.light)
+  // 鼻翼 + 鼻孔
+  c.rect(43, 23, 2, 2, mix(S.base, S.shade, 0.28))
+  c.rect(51, 23, 2, 2, mix(S.base, S.shade, 0.32))
+  c.rect(44, 25, 2, 1, mix(S.shade, S.deep, 0.65))
+  c.rect(50, 25, 2, 1, mix(S.shade, S.deep, 0.7))
+  // 鼻底 + 人中
+  c.rect(45, 26, 6, 1, mix(S.base, S.shade, 0.28))
+  c.rect(47, 27, 1, 2, mix(S.base, S.shade, 0.15))
 }
 
 function drawMouthNeutral(ctx: Ctx): void {
-  const { c } = ctx
-  c.rect(29, 23, 6, 1, mix(LIP, INK, 0.35))
-  c.rect(30, 24, 4, 1, LIP)
-  c.rect(30, 23, 2, 1, lighten(LIP, 0.2))
+  const { c, p } = ctx
+  const S = p.skin
+  // 上唇（唇峰 + 唇珠）
+  c.rect(44, 28, 1, 1, mix(LIP, INK, 0.3))
+  c.rect(45, 27, 2, 1, mix(LIP, INK, 0.24))
+  c.rect(47, 28, 1, 1, mix(LIP, INK, 0.18)) // 唇珠
+  c.rect(48, 27, 2, 1, mix(LIP, INK, 0.24))
+  c.rect(51, 28, 1, 1, mix(LIP, INK, 0.3))
+  c.rect(45, 28, 6, 1, mix(LIP, INK, 0.45))
+  // 下唇（饱满 + 高光）
+  c.rect(44, 29, 8, 2, LIP)
+  c.rect(45, 29, 5, 1, lighten(LIP, 0.28))
+  c.rect(46, 30, 3, 1, lighten(LIP, 0.12))
+  c.rect(44, 31, 8, 1, mix(LIP, S.shade, 0.48))
+  // 唇角窝
+  c.rect(43, 28, 1, 2, mix(LIP, S.shade, 0.5))
+  c.rect(52, 28, 1, 2, mix(LIP, S.shade, 0.55))
+  c.rect(43, 30, 1, 1, mix(S.base, S.shade, 0.25))
+  c.rect(52, 30, 1, 1, mix(S.base, S.shade, 0.28))
 }
 
 function drawBlush(ctx: Ctx): void {
   const { c } = ctx
-  c.rect(23, 19, 3, 2, BLUSH)
-  c.rect(38, 19, 3, 2, BLUSH)
-  c.rect(23, 19, 1, 1, lighten(BLUSH, 0.25))
+  c.rect(36, 22, 5, 3, BLUSH)
+  c.rect(55, 22, 5, 3, BLUSH)
+  c.rect(35, 23, 1, 2, mix(BLUSH, '#FFFFFF', 0.4))
+  c.rect(60, 23, 1, 2, mix(BLUSH, '#FFFFFF', 0.4))
+  c.rect(37, 25, 4, 1, mix(BLUSH, '#FFFFFF', 0.5))
+  c.rect(55, 25, 4, 1, mix(BLUSH, '#FFFFFF', 0.5))
 }
 
 function drawFace(ctx: Ctx): void {
@@ -645,146 +681,144 @@ function drawFace(ctx: Ctx): void {
 
   switch (expression) {
     case 'happy': {
-      // 眯眼笑弧
-      c.rect(24, 16, 5, 1, INK)
-      c.rect(24, 15, 1, 1, INK)
-      c.rect(28, 15, 1, 1, INK)
-      c.rect(35, 16, 5, 1, INK)
-      c.rect(35, 15, 1, 1, INK)
-      c.rect(39, 15, 1, 1, INK)
-      drawBrow(ctx, 12, true)
-      drawBrow(ctx, 12, false)
-      // 露齿笑
-      c.rect(29, 22, 6, 3, MOUTH_IN)
-      c.rect(30, 22, 4, 1, TEETH)
-      c.rect(30, 24, 4, 1, LIP)
+      c.rect(38, 18, 6, 1, INK)
+      c.rect(38, 17, 1, 1, INK)
+      c.rect(43, 17, 1, 1, INK)
+      c.rect(52, 18, 6, 1, INK)
+      c.rect(52, 17, 1, 1, INK)
+      c.rect(57, 17, 1, 1, INK)
+      c.rect(39, 19, 4, 1, mix(INK, '#2A211C', 0.4))
+      c.rect(53, 19, 4, 1, mix(INK, '#2A211C', 0.4))
+      drawBrow(ctx, 14, true)
+      drawBrow(ctx, 14, false)
+      c.rect(43, 27, 10, 4, MOUTH_IN)
+      c.rect(44, 27, 8, 1, TEETH)
+      c.rect(44, 28, 8, 1, mix(TEETH, '#E8E0D4', 0.4))
+      c.rect(44, 29, 8, 1, LIP)
+      c.rect(42, 28, 1, 2, mix(LIP, INK, 0.28))
+      c.rect(53, 28, 1, 2, mix(LIP, INK, 0.28))
       drawBlush(ctx)
       break
     }
     case 'sad': {
-      drawEyesBase(ctx, 14, 3)
-      drawIris(ctx, 26, 15)
-      drawIris(ctx, 37, 15)
-      drawBrow(ctx, 12, true, false, true)
-      drawBrow(ctx, 12, false, false, true)
-      c.rect(30, 24, 4, 1, mix(LIP, INK, 0.4))
-      c.rect(31, 23, 2, 1, LIP)
-      // 眼角泪光
-      c.rect(23, 17, 1, 1, '#A8D4F0')
-      c.rect(40, 17, 1, 1, '#A8D4F0')
+      drawOneEye(ctx, 38, 16, 2, 16)
+      drawOneEye(ctx, 52, 16, 2, 16)
+      drawBrow(ctx, 14, true, false, true)
+      drawBrow(ctx, 14, false, false, true)
+      c.rect(45, 30, 1, 1, mix(LIP, INK, 0.48))
+      c.rect(50, 30, 1, 1, mix(LIP, INK, 0.48))
+      c.rect(46, 28, 4, 1, mix(LIP, INK, 0.42))
+      c.rect(46, 29, 4, 1, LIP)
+      c.rect(36, 20, 1, 1, '#A8D4F0')
+      c.rect(59, 20, 1, 1, '#A8D4F0')
       break
     }
     case 'angry': {
-      drawEyesBase(ctx, 15, 3)
-      drawIris(ctx, 26, 16, '#5A2018')
-      drawIris(ctx, 37, 16, '#5A2018')
-      drawBrow(ctx, 11, true, true)
-      drawBrow(ctx, 11, false, true)
-      c.rect(29, 23, 6, 2, MOUTH_IN)
-      c.rect(30, 23, 4, 1, mix(LIP, INK, 0.5))
+      drawOneEye(ctx, 38, 16, 2, 16, '#5A2018')
+      drawOneEye(ctx, 52, 16, 2, 16, '#5A2018')
+      drawBrow(ctx, 13, true, true)
+      drawBrow(ctx, 13, false, true)
+      c.rect(43, 28, 10, 3, MOUTH_IN)
+      c.rect(44, 28, 8, 1, mix(LIP, INK, 0.5))
+      c.rect(43, 27, 1, 1, mix(LIP, INK, 0.32))
+      c.rect(52, 27, 1, 1, mix(LIP, INK, 0.32))
       break
     }
     case 'surprised': {
-      drawEyesBase(ctx, 13, 5)
-      drawIris(ctx, 26, 15)
-      drawIris(ctx, 37, 15)
-      drawBrow(ctx, 10, true)
-      drawBrow(ctx, 10, false)
-      c.circle(32, 24, 2, MOUTH_IN)
-      c.circle(32, 24, 1, '#8B4040')
+      drawOneEye(ctx, 38, 15, 3, 15)
+      drawOneEye(ctx, 52, 15, 3, 15)
+      drawBrow(ctx, 12, true)
+      drawBrow(ctx, 12, false)
+      c.circle(48, 30, 3, MOUTH_IN)
+      c.circle(48, 29, 2, '#8B4040')
+      c.rect(45, 33, 6, 1, mix(LIP, INK, 0.28))
       break
     }
     case 'thinking': {
-      drawEyesBase(ctx, 14, 4)
-      // 瞳孔上瞟
-      drawIris(ctx, 26, 14)
-      drawIris(ctx, 37, 14)
-      drawBrow(ctx, 11, true)
-      drawBrow(ctx, 11, false)
-      c.rect(30, 23, 3, 1, mix(LIP, INK, 0.35))
-      c.rect(32, 22, 2, 1, mix(LIP, INK, 0.35))
+      drawOneEye(ctx, 38, 16, 2, 15)
+      drawOneEye(ctx, 52, 16, 2, 15)
+      drawBrow(ctx, 14, true)
+      drawBrow(ctx, 14, false)
+      c.rect(44, 28, 6, 1, mix(LIP, INK, 0.35))
+      c.rect(48, 29, 5, 1, LIP)
+      c.rect(51, 27, 1, 1, mix(LIP, INK, 0.28))
       break
     }
     case 'focused': {
-      drawEyesBase(ctx, 15, 3)
-      drawIris(ctx, 26, 16)
-      drawIris(ctx, 37, 16)
-      drawBrow(ctx, 12, true, true)
-      drawBrow(ctx, 12, false, true)
-      c.rect(30, 23, 5, 1, mix(LIP, INK, 0.4))
+      drawOneEye(ctx, 38, 16, 2, 16)
+      drawOneEye(ctx, 52, 16, 2, 16)
+      drawBrow(ctx, 14, true, true)
+      drawBrow(ctx, 14, false, true)
+      c.rect(44, 28, 8, 1, mix(LIP, INK, 0.42))
+      c.rect(44, 29, 8, 1, mix(LIP, INK, 0.22))
       break
     }
     case 'tired': {
-      // 半垂眼
-      c.rect(24, 15, 5, 2, EYE_WHITE)
-      c.rect(35, 15, 5, 2, EYE_WHITE)
-      c.rect(25, 16, 3, 1, IRIS_DEFAULT)
-      c.rect(36, 16, 3, 1, IRIS_DEFAULT)
-      c.rect(24, 14, 5, 1, mix(EYE_WHITE, INK, 0.25))
-      c.rect(35, 14, 5, 1, mix(EYE_WHITE, INK, 0.25))
-      drawBrow(ctx, 12, true, false, true)
-      drawBrow(ctx, 12, false, false, true)
-      c.rect(30, 23, 4, 1, mix(LIP, INK, 0.45))
-      // 眼袋
-      c.rect(24, 18, 5, 1, mix(LIP, '#8090A0', 0.35))
-      c.rect(35, 18, 5, 1, mix(LIP, '#8090A0', 0.35))
+      c.rect(38, 16, 6, 2, EYE_WHITE)
+      c.rect(52, 16, 6, 2, EYE_WHITE)
+      c.rect(38, 15, 6, 1, mix(EYE_WHITE, INK, 0.28))
+      c.rect(52, 15, 6, 1, mix(EYE_WHITE, INK, 0.28))
+      c.rect(39, 16, 4, 2, IRIS_DEFAULT)
+      c.rect(53, 16, 4, 2, IRIS_DEFAULT)
+      c.rect(40, 16, 2, 1, INK)
+      c.rect(54, 16, 2, 1, INK)
+      drawBrow(ctx, 14, true, false, true)
+      drawBrow(ctx, 14, false, false, true)
+      c.rect(44, 28, 7, 1, mix(LIP, INK, 0.45))
+      c.rect(38, 21, 7, 1, mix(LIP, '#8090A0', 0.32))
+      c.rect(51, 21, 7, 1, mix(LIP, '#8090A0', 0.32))
       break
     }
     case 'wink': {
-      // 右眼睁开
-      c.rect(34, 13, 7, 6, mix(EYE_WHITE, '#000000', 0.12))
-      c.rect(35, 14, 5, 4, EYE_WHITE)
-      drawIris(ctx, 37, 15)
-      // 左眼眨（眯眼弧）
-      c.rect(24, 16, 5, 1, INK)
-      c.rect(24, 15, 1, 1, INK)
-      c.rect(28, 15, 1, 1, INK)
-      drawBrow(ctx, 12, true)
-      drawBrow(ctx, 12, false)
-      c.rect(30, 23, 5, 1, mix(LIP, INK, 0.3))
-      c.rect(31, 22, 3, 1, LIP)
+      drawOneEye(ctx, 52, 16, 2, 16)
+      c.rect(38, 18, 6, 1, INK)
+      c.rect(38, 17, 1, 1, INK)
+      c.rect(43, 17, 1, 1, INK)
+      c.rect(37, 18, 1, 1, mix(INK, '#2A211C', 0.5))
+      drawBrow(ctx, 14, true)
+      drawBrow(ctx, 14, false)
+      c.rect(44, 28, 8, 1, mix(LIP, INK, 0.3))
+      c.rect(45, 27, 5, 1, LIP)
+      c.rect(45, 29, 5, 1, lighten(LIP, 0.2))
       drawBlush(ctx)
       break
     }
     case 'love': {
-      // 心形眼（简化为两颗心）
       const heart = (cx: number, cy: number) => {
         c.rect(cx - 1, cy, 2, 1, '#E2556A')
-        c.rect(cx - 2, cy + 1, 4, 1, '#E2556A')
-        c.rect(cx - 1, cy + 2, 2, 1, '#E2556A')
-        c.rect(cx, cy + 3, 1, 1, '#E2556A')
+        c.rect(cx - 3, cy + 1, 6, 1, '#E2556A')
+        c.rect(cx - 2, cy + 2, 4, 1, '#E2556A')
+        c.rect(cx - 1, cy + 3, 2, 1, '#E2556A')
+        c.rect(cx, cy + 4, 1, 1, '#E2556A')
         c.rect(cx - 1, cy, 1, 1, '#F090A0')
       }
-      heart(26, 14)
-      heart(37, 14)
-      drawBrow(ctx, 11, true)
-      drawBrow(ctx, 11, false)
-      c.rect(29, 23, 6, 2, MOUTH_IN)
-      c.rect(30, 23, 4, 1, TEETH)
+      heart(41, 16)
+      heart(54, 16)
+      drawBrow(ctx, 13, true)
+      drawBrow(ctx, 13, false)
+      c.rect(43, 27, 10, 4, MOUTH_IN)
+      c.rect(44, 27, 8, 1, TEETH)
+      c.rect(44, 29, 8, 1, LIP)
       drawBlush(ctx)
       break
     }
     case 'talk': {
-      drawEyesBase(ctx, 14, 4)
-      drawIris(ctx, 26, 15)
-      drawIris(ctx, 37, 15)
-      drawBrow(ctx, 12, true)
-      drawBrow(ctx, 12, false)
-      // 嘴两帧开合
-      pushAnim(ctx, 29, 23, 6, 1, mix(LIP, INK, 0.35), 'pa-fa')
-      pushAnim(ctx, 30, 23, 4, 1, LIP, 'pa-fa')
-      pushAnim(ctx, 29, 23, 6, 3, MOUTH_IN, 'pa-fb')
-      pushAnim(ctx, 30, 23, 4, 1, TEETH, 'pa-fb')
-      pushAnim(ctx, 30, 25, 4, 1, LIP, 'pa-fb')
+      drawOneEye(ctx, 38, 16, 2, 16)
+      drawOneEye(ctx, 52, 16, 2, 16)
+      drawBrow(ctx, 14, true)
+      drawBrow(ctx, 14, false)
+      pushAnim(ctx, 44, 28, 8, 1, mix(LIP, INK, 0.35), 'pa-fa')
+      pushAnim(ctx, 45, 28, 6, 1, LIP, 'pa-fa')
+      pushAnim(ctx, 43, 27, 10, 4, MOUTH_IN, 'pa-fb')
+      pushAnim(ctx, 44, 27, 8, 1, TEETH, 'pa-fb')
+      pushAnim(ctx, 44, 29, 8, 1, LIP, 'pa-fb')
       break
     }
     default: {
-      // neutral
-      drawEyesBase(ctx, 14, 4)
-      drawIris(ctx, 26, 15)
-      drawIris(ctx, 37, 15)
-      drawBrow(ctx, 12, true)
-      drawBrow(ctx, 12, false)
+      drawOneEye(ctx, 38, 16, 2, 16)
+      drawOneEye(ctx, 52, 16, 2, 16)
+      drawBrow(ctx, 14, true)
+      drawBrow(ctx, 14, false)
       drawMouthNeutral(ctx)
       break
     }
@@ -800,151 +834,142 @@ function drawHat(ctx: Ctx): void {
   const H = p.hat
   switch (a.hat) {
     case 'cap':
-      c.rect(21, 2, 22, 6, H.base)
-      c.rect(20, 7, 24, 2, H.base)
-      c.rect(16, 8, 32, 2, H.base) // 帽檐
-      c.rect(22, 2, 10, 2, H.light)
-      c.rect(40, 3, 3, 5, H.shade)
-      c.rect(16, 9, 32, 1, H.shade)
-      c.rect(30, 3, 4, 3, H.shade) // 帽钮
+      c.rect(35, 3, 26, 7, H.base)
+      c.rect(34, 8, 28, 4, H.base)
+      c.rect(28, 11, 40, 3, H.base)
+      c.rect(37, 3, 12, 2, H.light)
+      c.rect(56, 4, 5, 7, H.shade)
+      c.rect(28, 13, 40, 1, H.shade)
+      c.rect(45, 3, 6, 3, H.shade)
       break
     case 'beanie':
-      c.rect(21, 1, 22, 8, H.base)
-      c.rect(20, 8, 24, 3, H.base) // 翻边
-      c.rect(21, 1, 10, 2, H.light)
-      c.rect(40, 2, 3, 7, H.shade)
-      c.rect(20, 10, 24, 1, H.shade)
-      c.rect(20, 8, 24, 1, H.light)
-      // 纹理
-      for (let x = 22; x < 42; x += 3) c.rect(x, 3, 1, 6, H.shade)
+      c.rect(35, 2, 26, 8, H.base)
+      c.rect(34, 9, 28, 4, H.base)
+      c.rect(37, 2, 12, 2, H.light)
+      c.rect(56, 3, 5, 8, H.shade)
+      c.rect(34, 12, 28, 1, H.shade)
+      c.rect(34, 9, 28, 1, H.light)
+      for (let x = 37; x < 60; x += 4) c.rect(x, 3, 1, 7, H.shade)
       break
     case 'beret':
-      c.ellipse(32, 4, 12, 5, H.base)
-      c.rect(21, 6, 22, 3, H.base)
-      c.rect(30, 1, 3, 2, H.base) // 帽蒂
-      c.rect(24, 2, 8, 2, H.light)
-      c.rect(40, 4, 4, 4, H.shade)
+      c.ellipse(45, 5, 13, 5, H.base)
+      c.rect(33, 7, 24, 4, H.base)
+      c.rect(42, 1, 4, 3, H.base)
+      c.rect(37, 3, 10, 2, H.light)
+      c.rect(54, 4, 5, 5, H.shade)
+      c.rect(33, 10, 24, 1, H.shade)
       break
   }
 }
 
 /* ============================================================
- * 7) 配饰（高清晰度）
+ * 7) 配饰
  * ============================================================ */
 function drawAccessory(ctx: Ctx): void {
-  const { c, a, p } = ctx
+  const { c, a } = ctx
   const gold = tone('#D4A84B')
   switch (a.accessory) {
     case 'glasses-black': {
-      // 镜片
-      c.rect(23, 13, 7, 6, mix(EYE_WHITE, '#A8C8E0', 0.22))
-      c.rect(34, 13, 7, 6, mix(EYE_WHITE, '#A8C8E0', 0.22))
-      // 镜框（粗黑）
-      c.rect(22, 12, 9, 1, INK)
-      c.rect(22, 18, 9, 1, INK)
-      c.rect(22, 12, 1, 7, INK)
-      c.rect(30, 12, 1, 7, INK)
-      c.rect(33, 12, 9, 1, INK)
-      c.rect(33, 18, 9, 1, INK)
-      c.rect(33, 12, 1, 7, INK)
-      c.rect(41, 12, 1, 7, INK)
-      // 鼻梁
-      c.rect(30, 14, 4, 1, INK)
-      // 镜腿
-      c.rect(20, 13, 2, 1, INK)
-      c.rect(42, 13, 2, 1, INK)
-      // 镜片高光
-      c.rect(24, 14, 2, 2, '#FFFFFF')
-      c.rect(35, 14, 2, 2, '#FFFFFF')
-      c.rect(26, 16, 1, 1, '#FFFFFF')
+      c.rect(36, 14, 11, 8, mix(EYE_WHITE, '#A8C8E0', 0.16))
+      c.rect(49, 14, 11, 8, mix(EYE_WHITE, '#A8C8E0', 0.16))
+      c.rect(35, 13, 13, 1, INK)
+      c.rect(35, 21, 13, 1, INK)
+      c.rect(35, 13, 1, 9, INK)
+      c.rect(46, 13, 1, 9, INK)
+      c.rect(48, 13, 13, 1, INK)
+      c.rect(48, 21, 13, 1, INK)
+      c.rect(48, 13, 1, 9, INK)
+      c.rect(60, 13, 1, 9, INK)
+      c.rect(46, 15, 4, 1, INK)
+      c.rect(33, 15, 2, 1, INK)
+      c.rect(61, 15, 2, 1, INK)
+      c.rect(37, 15, 4, 1, '#FFFFFF')
+      c.rect(37, 16, 2, 1, '#FFFFFF')
+      c.rect(50, 15, 4, 1, '#FFFFFF')
+      c.rect(50, 16, 2, 1, '#FFFFFF')
+      c.rect(43, 18, 1, 1, '#FFFFFF')
+      c.rect(57, 18, 1, 1, '#FFFFFF')
       break
     }
     case 'glasses-round': {
-      c.rect(23, 13, 6, 5, mix(EYE_WHITE, '#A8C8E0', 0.22))
-      c.rect(35, 13, 6, 5, mix(EYE_WHITE, '#A8C8E0', 0.22))
-      // 圆框近似
-      c.rect(23, 12, 6, 1, INK)
-      c.rect(23, 17, 6, 1, INK)
-      c.rect(22, 13, 1, 5, INK)
-      c.rect(29, 13, 1, 5, INK)
-      c.rect(35, 12, 6, 1, INK)
-      c.rect(35, 17, 6, 1, INK)
-      c.rect(34, 13, 1, 5, INK)
-      c.rect(41, 13, 1, 5, INK)
-      c.rect(29, 14, 6, 1, INK)
-      c.rect(20, 13, 2, 1, INK)
-      c.rect(42, 13, 2, 1, INK)
-      c.rect(24, 13, 2, 2, '#FFFFFF')
-      c.rect(36, 13, 2, 2, '#FFFFFF')
+      c.rect(36, 14, 10, 7, mix(EYE_WHITE, '#A8C8E0', 0.16))
+      c.rect(50, 14, 10, 7, mix(EYE_WHITE, '#A8C8E0', 0.16))
+      c.rect(36, 13, 10, 1, INK)
+      c.rect(36, 20, 10, 1, INK)
+      c.rect(35, 14, 1, 7, INK)
+      c.rect(45, 14, 1, 7, INK)
+      c.rect(50, 13, 10, 1, INK)
+      c.rect(50, 20, 10, 1, INK)
+      c.rect(49, 14, 1, 7, INK)
+      c.rect(60, 14, 1, 7, INK)
+      c.rect(45, 16, 6, 1, INK)
+      c.rect(33, 15, 2, 1, INK)
+      c.rect(61, 15, 2, 1, INK)
+      c.rect(37, 14, 4, 1, '#FFFFFF')
+      c.rect(37, 15, 2, 1, '#FFFFFF')
+      c.rect(51, 14, 4, 1, '#FFFFFF')
+      c.rect(51, 15, 2, 1, '#FFFFFF')
       break
     }
     case 'earrings': {
-      // 垂坠耳环
-      c.rect(20, 18, 2, 1, gold.base)
-      c.rect(20, 19, 1, 3, gold.base)
-      c.rect(21, 20, 1, 2, gold.base)
-      c.rect(20, 19, 1, 1, gold.gloss)
-      c.rect(42, 18, 2, 1, gold.base)
-      c.rect(43, 19, 1, 3, gold.base)
-      c.rect(42, 20, 1, 2, gold.base)
-      c.rect(42, 19, 1, 1, gold.shade)
-      // 耳钉点
-      c.rect(20, 17, 1, 1, gold.gloss)
-      c.rect(43, 17, 1, 1, gold.gloss)
+      c.rect(33, 26, 3, 1, gold.base)
+      c.rect(33, 27, 2, 5, gold.base)
+      c.rect(35, 28, 1, 3, gold.base)
+      c.rect(33, 27, 1, 2, gold.gloss)
+      c.rect(60, 26, 3, 1, gold.base)
+      c.rect(61, 27, 2, 5, gold.base)
+      c.rect(60, 28, 1, 3, gold.base)
+      c.rect(60, 27, 1, 2, gold.shade)
+      c.rect(33, 25, 1, 1, gold.gloss)
+      c.rect(62, 25, 1, 1, gold.gloss)
       break
     }
     case 'scarf': {
-      const S = p.accent ?? tone('#B84A4A')
-      c.rect(22, 27, 20, 5, S.base)
-      c.rect(22, 27, 20, 1, S.light)
-      c.rect(22, 31, 20, 1, S.deep)
-      // 围巾褶
-      c.rect(25, 28, 1, 4, S.shade)
-      c.rect(31, 28, 1, 4, S.shade)
-      c.rect(37, 28, 1, 4, S.shade)
-      // 垂下的尾巴
-      c.rect(22, 31, 4, 10, S.base)
-      c.rect(22, 31, 1, 10, S.light)
-      c.rect(25, 31, 1, 10, S.shade)
-      c.rect(22, 40, 4, 1, S.deep)
+      const S = a.topAccent ? tone(resolveColor('outfit', a.topAccent)) : tone('#B84A4A')
+      c.rect(34, 34, 28, 7, S.base)
+      c.rect(34, 34, 28, 2, S.light)
+      c.rect(34, 40, 28, 1, S.deep)
+      c.rect(38, 35, 2, 6, S.shade)
+      c.rect(48, 35, 2, 6, S.shade)
+      c.rect(58, 35, 2, 6, S.shade)
+      c.rect(34, 40, 6, 14, S.base)
+      c.rect(34, 40, 2, 14, S.light)
+      c.rect(38, 40, 2, 14, S.shade)
+      c.rect(34, 53, 6, 1, S.deep)
       break
     }
     case 'headset': {
       const M = tone('#2F3540')
-      // 头梁
-      c.rect(21, 3, 22, 2, M.base)
-      c.rect(21, 3, 22, 1, M.light)
-      c.rect(22, 2, 20, 1, M.base)
-      // 耳罩
-      c.rect(17, 11, 5, 10, M.base)
-      c.rect(42, 11, 5, 10, M.base)
-      c.rect(17, 11, 5, 2, M.light)
-      c.rect(42, 11, 5, 2, M.light)
-      c.rect(17, 19, 5, 2, M.shade)
-      c.rect(42, 19, 5, 2, M.shade)
-      // 耳垫
-      c.rect(18, 13, 3, 6, mix(M.base, '#000000', 0.35))
-      c.rect(43, 13, 3, 6, mix(M.base, '#000000', 0.35))
-      // 麦克风杆
-      c.rect(20, 18, 1, 6, M.base)
-      c.rect(21, 23, 5, 1, M.base)
-      c.rect(25, 22, 2, 2, M.base)
-      c.rect(25, 22, 2, 1, '#6EC8E8')
+      c.rect(35, 3, 26, 3, M.base)
+      c.rect(35, 3, 26, 1, M.light)
+      c.rect(37, 2, 22, 1, M.base)
+      c.rect(29, 14, 7, 14, M.base)
+      c.rect(60, 14, 7, 14, M.base)
+      c.rect(29, 14, 7, 3, M.light)
+      c.rect(60, 14, 7, 3, M.light)
+      c.rect(29, 25, 7, 3, M.shade)
+      c.rect(60, 25, 7, 3, M.shade)
+      c.rect(31, 17, 4, 8, mix(M.base, '#000000', 0.35))
+      c.rect(61, 17, 4, 8, mix(M.base, '#000000', 0.35))
+      c.rect(30, 24, 2, 8, M.base)
+      c.rect(32, 31, 7, 1, M.base)
+      c.rect(37, 30, 3, 2, M.base)
+      c.rect(37, 30, 3, 1, '#6EC8E8')
       break
     }
     case 'cigarette': {
-      c.rect(38, 24, 6, 1, '#F2EFE8')
-      c.rect(43, 24, 2, 1, '#E8A060')
-      c.rect(45, 24, 1, 1, '#E2554A')
-      c.rect(46, 23, 1, 1, '#C8C8C8') // 烟雾
-      c.rect(47, 22, 1, 1, '#D8D8D8')
+      c.rect(54, 30, 9, 1, '#F2EFE8')
+      c.rect(61, 30, 3, 1, '#E8A060')
+      c.rect(63, 30, 1, 1, '#E2554A')
+      c.rect(65, 29, 1, 1, '#C8C8C8')
+      c.rect(66, 28, 1, 1, '#D8D8D8')
       break
     }
   }
 }
 
 /* ============================================================
- * 8) 姿态 / 道具 / 动画手
+ * 8) 姿态 / 道具
  * ============================================================ */
 function drawPose(ctx: Ctx): void {
   const { c, a, p, pose } = ctx
@@ -952,160 +977,135 @@ function drawPose(ctx: Ctx): void {
   const top = p.top
 
   if (pose === 'working') {
-    // 笔记本
-    c.rect(22, 36, 20, 12, '#2A2E36')
-    c.rect(23, 37, 18, 9, '#1A1E26')
-    // 代码行两帧
-    pushAnim(ctx, 25, 39, 8, 1, '#6BCB77', 'pa-fa')
-    pushAnim(ctx, 25, 41, 12, 1, '#6BCB77', 'pa-fa')
-    pushAnim(ctx, 25, 43, 6, 1, '#4A90C4', 'pa-fa')
-    pushAnim(ctx, 25, 39, 12, 1, '#6BCB77', 'pa-fb')
-    pushAnim(ctx, 25, 41, 6, 1, '#4A90C4', 'pa-fb')
-    pushAnim(ctx, 25, 43, 10, 1, '#6BCB77', 'pa-fb')
-    // 键盘座
-    c.rect(20, 47, 24, 4, '#3C4043')
-    c.rect(20, 47, 24, 1, '#5A6066')
-    c.rect(20, 50, 24, 1, '#2A2E32')
-    // 双手交替敲键
-    pushAnim(ctx, 24, 45, 5, 3, skin.base, 'pa-fa')
-    pushAnim(ctx, 24, 45, 5, 1, skin.light, 'pa-fa')
-    pushAnim(ctx, 35, 45, 5, 3, skin.base, 'pa-fb')
-    pushAnim(ctx, 35, 45, 5, 1, skin.light, 'pa-fb')
-    pushAnim(ctx, 35, 45, 5, 3, skin.shade, 'pa-fa')
-    pushAnim(ctx, 24, 45, 5, 3, skin.shade, 'pa-fb')
+    c.rect(32, 52, 32, 18, '#2A2E36')
+    c.rect(33, 53, 30, 14, '#1A1E26')
+    pushAnim(ctx, 36, 56, 12, 1, '#6BCB77', 'pa-fa')
+    pushAnim(ctx, 36, 59, 18, 1, '#6BCB77', 'pa-fa')
+    pushAnim(ctx, 36, 62, 10, 1, '#4A90C4', 'pa-fa')
+    pushAnim(ctx, 36, 56, 18, 1, '#6BCB77', 'pa-fb')
+    pushAnim(ctx, 36, 59, 10, 1, '#4A90C4', 'pa-fb')
+    pushAnim(ctx, 36, 62, 16, 1, '#6BCB77', 'pa-fb')
+    c.rect(30, 69, 36, 6, '#3C4043')
+    c.rect(30, 69, 36, 2, '#5A6066')
+    c.rect(30, 74, 36, 1, '#2A2E32')
+    pushAnim(ctx, 36, 66, 8, 4, skin.base, 'pa-fa')
+    pushAnim(ctx, 36, 66, 8, 1, skin.light, 'pa-fa')
+    pushAnim(ctx, 52, 66, 8, 4, skin.base, 'pa-fb')
+    pushAnim(ctx, 52, 66, 8, 1, skin.light, 'pa-fb')
+    pushAnim(ctx, 52, 66, 8, 4, skin.shade, 'pa-fa')
+    pushAnim(ctx, 36, 66, 8, 4, skin.shade, 'pa-fb')
   } else if (pose === 'thinking') {
-    // 右臂托腮
-    c.rect(42, 31, 6, 10, top.base)
-    c.rect(42, 31, 1, 10, top.light)
-    c.rect(47, 31, 1, 10, top.shade)
-    c.rect(39, 22, 5, 10, skin.base) // 前臂上抬
-    c.rect(39, 22, 1, 10, skin.light)
-    c.rect(43, 22, 1, 10, skin.shade)
-    c.rect(35, 20, 5, 4, skin.base) // 手贴腮
-    c.rect(35, 20, 5, 1, skin.light)
-    c.rect(35, 23, 5, 1, skin.shade)
-    // 思考点
-    pushAnim(ctx, 48, 6, 3, 3, '#6BA8E8', 'pa-dot1')
-    pushAnim(ctx, 52, 10, 3, 3, '#6BA8E8', 'pa-dot2')
-    pushAnim(ctx, 55, 14, 3, 3, '#6BA8E8', 'pa-dot3')
+    c.rect(62, 40, 10, 16, top.base)
+    c.rect(62, 40, 2, 16, top.light)
+    c.rect(70, 40, 2, 16, top.shade)
+    c.rect(56, 28, 8, 16, skin.base)
+    c.rect(56, 28, 2, 16, skin.light)
+    c.rect(63, 28, 1, 16, skin.shade)
+    c.rect(50, 25, 8, 6, skin.base)
+    c.rect(50, 25, 8, 1, skin.light)
+    c.rect(50, 30, 8, 1, skin.shade)
+    pushAnim(ctx, 72, 8, 4, 4, '#6BA8E8', 'pa-dot1')
+    pushAnim(ctx, 78, 14, 4, 4, '#6BA8E8', 'pa-dot2')
+    pushAnim(ctx, 82, 20, 4, 4, '#6BA8E8', 'pa-dot3')
   } else if (pose === 'error') {
-    // 惊叹号
-    pushAnim(ctx, 30, 0, 4, 10, '#E24B4B', 'pa-alert')
-    pushAnim(ctx, 30, 11, 4, 3, '#E24B4B', 'pa-alert')
-    pushAnim(ctx, 31, 1, 2, 7, lighten('#E24B4B', 0.2), 'pa-alert')
-    // 汗滴
-    pushAnim(ctx, 46, 8, 2, 2, '#7EC8F0', 'pa-drop')
-    pushAnim(ctx, 46, 10, 3, 3, '#7EC8F0', 'pa-drop')
-    // 抱头
-    c.rect(16, 14, 5, 8, skin.base)
-    c.rect(43, 14, 5, 8, skin.base)
-    c.rect(16, 14, 5, 1, skin.light)
-    c.rect(43, 14, 5, 1, skin.light)
+    pushAnim(ctx, 45, 0, 6, 14, '#E24B4B', 'pa-alert')
+    pushAnim(ctx, 45, 15, 6, 4, '#E24B4B', 'pa-alert')
+    pushAnim(ctx, 46, 1, 3, 10, lighten('#E24B4B', 0.2), 'pa-alert')
+    pushAnim(ctx, 68, 10, 3, 3, '#7EC8F0', 'pa-drop')
+    pushAnim(ctx, 68, 13, 4, 4, '#7EC8F0', 'pa-drop')
+    c.rect(26, 18, 8, 12, skin.base)
+    c.rect(62, 18, 8, 12, skin.base)
+    c.rect(26, 18, 8, 2, skin.light)
+    c.rect(62, 18, 8, 2, skin.light)
   } else if (pose === 'waiting') {
-    // 举手挥动
-    pushAnim(ctx, 44, 18, 6, 14, top.base, 'pa-fa')
-    pushAnim(ctx, 46, 14, 5, 5, skin.base, 'pa-fa')
-    pushAnim(ctx, 46, 14, 5, 1, skin.light, 'pa-fa')
-    pushAnim(ctx, 44, 22, 6, 14, top.base, 'pa-fb')
-    pushAnim(ctx, 46, 18, 5, 5, skin.base, 'pa-fb')
-    pushAnim(ctx, 46, 18, 5, 1, skin.light, 'pa-fb')
-    // 问号点
-    pushAnim(ctx, 50, 4, 4, 2, '#6BA8E8', 'pa-dot1')
-    pushAnim(ctx, 53, 6, 2, 2, '#6BA8E8', 'pa-dot1')
-    pushAnim(ctx, 51, 9, 2, 2, '#6BA8E8', 'pa-dot2')
-    pushAnim(ctx, 51, 12, 2, 2, '#6BA8E8', 'pa-dot3')
+    pushAnim(ctx, 64, 24, 10, 22, top.base, 'pa-fa')
+    pushAnim(ctx, 66, 18, 8, 8, skin.base, 'pa-fa')
+    pushAnim(ctx, 66, 18, 8, 2, skin.light, 'pa-fa')
+    pushAnim(ctx, 64, 30, 10, 22, top.base, 'pa-fb')
+    pushAnim(ctx, 66, 24, 8, 8, skin.base, 'pa-fb')
+    pushAnim(ctx, 66, 24, 8, 2, skin.light, 'pa-fb')
+    pushAnim(ctx, 74, 5, 6, 3, '#6BA8E8', 'pa-dot1')
+    pushAnim(ctx, 78, 9, 3, 3, '#6BA8E8', 'pa-dot1')
+    pushAnim(ctx, 76, 13, 3, 3, '#6BA8E8', 'pa-dot2')
+    pushAnim(ctx, 76, 18, 3, 3, '#6BA8E8', 'pa-dot3')
   } else if (pose === 'speaking') {
-    // 摊手
-    c.rect(12, 36, 7, 3, skin.base)
-    c.rect(12, 36, 7, 1, skin.light)
-    c.rect(45, 36, 7, 3, skin.base)
-    c.rect(45, 36, 7, 1, skin.light)
-    c.rect(12, 38, 7, 1, skin.shade)
-    c.rect(45, 38, 7, 1, skin.shade)
+    c.rect(18, 54, 10, 4, skin.base)
+    c.rect(18, 54, 10, 1, skin.light)
+    c.rect(68, 54, 10, 4, skin.base)
+    c.rect(68, 54, 10, 1, skin.light)
+    c.rect(18, 57, 10, 1, skin.shade)
+    c.rect(68, 57, 10, 1, skin.shade)
   } else if (pose === 'handoff') {
-    // 托箱推出
-    c.rect(18, 34, 28, 10, '#4A5560')
-    pushAnim(ctx, 18, 34, 28, 10, '#4A5560', 'pa-fa')
-    pushAnim(ctx, 20, 32, 28, 10, '#4A5560', 'pa-fb')
-    pushAnim(ctx, 20, 32, 28, 2, '#6A7580', 'pa-fb')
-    c.rect(18, 34, 28, 2, '#6A7580')
-    c.rect(30, 37, 4, 4, '#D4A84B') // 锁扣
-    // 前伸手臂
-    c.rect(14, 33, 6, 4, top.base)
-    c.rect(44, 33, 6, 4, top.base)
-    c.rect(14, 33, 6, 1, top.light)
-    c.rect(44, 33, 6, 1, top.light)
-    c.rect(12, 36, 4, 3, skin.base)
-    c.rect(48, 36, 4, 3, skin.base)
+    c.rect(28, 50, 40, 14, '#4A5560')
+    pushAnim(ctx, 28, 50, 40, 14, '#4A5560', 'pa-fa')
+    pushAnim(ctx, 30, 47, 40, 14, '#4A5560', 'pa-fb')
+    pushAnim(ctx, 30, 47, 40, 3, '#6A7580', 'pa-fb')
+    c.rect(28, 50, 40, 3, '#6A7580')
+    c.rect(45, 54, 6, 6, '#D4A84B')
+    c.rect(22, 48, 10, 5, top.base)
+    c.rect(64, 48, 10, 5, top.base)
+    c.rect(22, 48, 10, 2, top.light)
+    c.rect(64, 48, 10, 2, top.light)
+    c.rect(18, 54, 6, 4, skin.base)
+    c.rect(72, 54, 6, 4, skin.base)
   } else if (pose === 'cheer') {
-    // V 字举手
-    c.rect(12, 18, 5, 14, top.base)
-    c.rect(10, 14, 5, 5, skin.base)
-    c.rect(10, 14, 5, 1, skin.light)
-    c.rect(47, 18, 5, 14, top.base)
-    c.rect(49, 14, 5, 5, skin.base)
-    c.rect(49, 14, 5, 1, skin.light)
-    // 彩纸
-    pushAnim(ctx, 14, 4, 3, 3, '#6BCB77', 'pa-dot1')
-    pushAnim(ctx, 28, 1, 3, 3, '#E2556A', 'pa-dot2')
-    pushAnim(ctx, 42, 3, 3, 3, '#6BA8E8', 'pa-dot3')
-    pushAnim(ctx, 18, 8, 2, 2, '#D4A84B', 'pa-dot2')
-    pushAnim(ctx, 48, 7, 2, 2, '#D4A84B', 'pa-dot1')
+    c.rect(18, 26, 8, 22, top.base)
+    c.rect(15, 20, 8, 8, skin.base)
+    c.rect(15, 20, 8, 2, skin.light)
+    c.rect(70, 26, 8, 22, top.base)
+    c.rect(73, 20, 8, 8, skin.base)
+    c.rect(73, 20, 8, 2, skin.light)
+    pushAnim(ctx, 22, 5, 4, 4, '#6BCB77', 'pa-dot1')
+    pushAnim(ctx, 42, 1, 4, 4, '#E2556A', 'pa-dot2')
+    pushAnim(ctx, 62, 4, 4, 4, '#6BA8E8', 'pa-dot3')
+    pushAnim(ctx, 28, 11, 3, 3, '#D4A84B', 'pa-dot2')
+    pushAnim(ctx, 72, 10, 3, 3, '#D4A84B', 'pa-dot1')
   } else {
-    // idle：自然垂手已在躯干绘制；手持道具
     switch (a.heldProp) {
       case 'laptop': {
-        c.rect(11, 38, 8, 10, '#3C4043')
-        c.rect(12, 39, 6, 7, '#1A1E26')
-        c.rect(12, 39, 6, 1, '#5A90C4')
-        c.rect(11, 47, 8, 2, '#2A2E32')
+        c.rect(16, 56, 12, 15, '#3C4043')
+        c.rect(17, 57, 10, 11, '#1A1E26')
+        c.rect(17, 57, 10, 1, '#5A90C4')
+        c.rect(16, 70, 12, 2, '#2A2E32')
         break
       }
       case 'coffee-cup': {
-        c.rect(46, 38, 6, 8, '#F2EFE8')
-        c.rect(46, 38, 6, 1, '#FFFFFF')
-        c.rect(51, 40, 2, 3, '#E0DCD4') // 杯柄
-        c.rect(46, 41, 6, 1, '#8B5A3C') // 咖啡
-        c.rect(46, 45, 6, 1, '#D4D0C8')
-        // 热气
-        pushAnim(ctx, 48, 34, 1, 2, '#D8D8D8', 'pa-dot1')
-        pushAnim(ctx, 50, 33, 1, 2, '#D8D8D8', 'pa-dot2')
+        c.rect(68, 56, 9, 12, '#F2EFE8')
+        c.rect(68, 56, 9, 1, '#FFFFFF')
+        c.rect(76, 59, 3, 5, '#E0DCD4')
+        c.rect(68, 61, 9, 1, '#8B5A3C')
+        c.rect(68, 67, 9, 1, '#D4D0C8')
+        pushAnim(ctx, 71, 50, 1, 3, '#D8D8D8', 'pa-dot1')
+        pushAnim(ctx, 74, 48, 1, 3, '#D8D8D8', 'pa-dot2')
         break
       }
       case 'book': {
-        c.rect(11, 36, 8, 12, p.accent ? p.accent.base : '#8B3A4A')
-        c.rect(11, 36, 8, 1, p.accent ? p.accent.light : '#A84A5A')
-        c.rect(11, 47, 8, 1, p.accent ? p.accent.deep : '#5A2530')
-        c.rect(18, 36, 1, 12, '#F2EFE8') // 书页
-        c.rect(13, 39, 4, 1, '#F2EFE8')
-        c.rect(13, 41, 3, 1, '#F2EFE8')
+        c.rect(16, 52, 12, 18, a.topAccent ? tone(resolveColor('outfit', a.topAccent)).base : '#8B3A4A')
+        c.rect(16, 52, 12, 2, a.topAccent ? tone(resolveColor('outfit', a.topAccent)).light : '#A84A5A')
+        c.rect(16, 69, 12, 1, a.topAccent ? tone(resolveColor('outfit', a.topAccent)).deep : '#5A2530')
+        c.rect(27, 52, 1, 18, '#F2EFE8')
+        c.rect(19, 56, 6, 1, '#F2EFE8')
+        c.rect(19, 59, 5, 1, '#F2EFE8')
         break
       }
     }
-    // 静态双手
-    c.rect(16, 46, 5, 5, skin.base)
-    c.rect(16, 46, 5, 1, skin.light)
-    c.rect(16, 50, 5, 1, skin.shade)
-    c.rect(43, 46, 5, 5, skin.base)
-    c.rect(43, 46, 5, 1, skin.light)
-    c.rect(43, 50, 5, 1, skin.shade)
+    c.rect(24, 62, 8, 7, skin.base)
+    c.rect(24, 62, 8, 1, skin.light)
+    c.rect(24, 68, 8, 1, skin.shade)
+    c.rect(64, 62, 8, 7, skin.base)
+    c.rect(64, 62, 8, 1, skin.light)
+    c.rect(64, 68, 8, 1, skin.shade)
   }
 }
 
 /* ============================================================
  * 入口
  * ============================================================ */
-
-/**
- * 构建像素矩形。
- * 第二参可传 `AgentMotionState`（兼容）或 `{ state, expression, pose }`（精细控制）。
- */
 export function buildPixelRects(
   a: PixelAgentAppearance,
-  opts?: AgentMotionStateCompat | PixelRenderOptions,
+  opts?: AgentMotionState | PixelRenderOptions,
 ): PixelRect[] {
-  const options: PixelRenderOptions =
-    typeof opts === 'string' ? { state: opts } : (opts ?? {})
+  const options: PixelRenderOptions = typeof opts === 'string' ? { state: opts } : (opts ?? {})
   const { expression, pose } = resolveExpressionPose(options)
   const p = buildPalette(a)
   const c = new PixelCanvas(PIXEL_GRID)
@@ -1115,7 +1115,6 @@ export function buildPixelRects(
   drawTorso(ctx)
   drawHead(ctx)
   drawHair(ctx)
-  // 描边包住身体剪影（表情/配饰后画，避免被描边吃掉）
   c.outline(OUTLINE)
   drawFace(ctx)
   drawHat(ctx)
@@ -1124,5 +1123,3 @@ export function buildPixelRects(
 
   return [...c.toRects(), ...ctx.anim]
 }
-
-type AgentMotionStateCompat = AgentMotionState

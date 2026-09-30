@@ -282,6 +282,8 @@ body{font-family:var(--font);background:var(--bg);color:var(--fg);font-size:13px
 
 .note{position:fixed;right:12px;bottom:10px;z-index:99;background:rgba(24,24,27,.9);color:#fafafa;font-size:10.5px;padding:7px 11px;border-radius:8px;max-width:320px;line-height:1.55;pointer-events:none}
 .note b{color:#7dd3fc}
+.ic{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex:none;vertical-align:middle}
+.ic--sm{width:13px;height:13px}
 
 /* PixelAgent 帧动画 */
 .pixel-agent{display:block;image-rendering:pixelated}
@@ -316,6 +318,21 @@ body{font-family:var(--font);background:var(--bg);color:var(--fg);font-size:13px
 </style>
 </head>
 <body>
+<svg style="display:none">
+  <symbol id="i-zap" viewBox="0 0 24 24"><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/></symbol>
+  <symbol id="i-git" viewBox="0 0 24 24"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></symbol>
+  <symbol id="i-msg" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"/></symbol>
+  <symbol id="i-pause" viewBox="0 0 24 24"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></symbol>
+  <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.5 9a9 9 0 0 1 14.9-3.4L23 10M1 14l4.6 4.4A9 9 0 0 0 20.5 15"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></symbol>
+  <symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M1 12h2M21 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
+  <symbol id="i-msg2" viewBox="0 0 24 24"><path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 8.4 8.4 0 0 1-4-1L3 21l1.1-5A8.4 8.4 0 0 1 12 3a8.4 8.4 0 0 1 9 8.5z"/></symbol>
+  <symbol id="i-gamepad" viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 12h4M8 10v4M15 13h.01M18 11h.01"/></symbol>
+</svg>
 <div class="app">
   <header class="topbar">
     <button class="topbar__back">←</button>
@@ -323,14 +340,14 @@ body{font-family:var(--font);background:var(--bg);color:var(--fg);font-size:13px
     <div class="topbar__id">
       <div class="topbar__name">全栈交付小分队</div>
       <div class="topbar__meta">
-        <span class="pill pill--mode">⚡ 编排式</span>
+        <span class="pill pill--mode"><svg class="ic ic--sm" style="width:11px;height:11px"><use href="#i-zap"/></svg> 编排式</span>
         <span class="pill pill--live"><i class="dot"></i>运行中 · 00:12:34</span>
-        <span class="pill pill--muted">📁 /workspace/squad-fullstack</span>
+        <span class="pill pill--muted"><svg class="ic ic--sm" style="width:11px;height:11px"><use href="#i-folder"/></svg> /workspace/squad-fullstack</span>
       </div>
     </div>
     <div class="topbar__spacer"></div>
     <div class="crew" id="topCrew"></div>
-    <button class="btn btn--ghost btn--sm">⚙ 编辑编制</button>
+    <button class="btn btn--ghost btn--sm"><svg class="ic ic--sm"><use href="#i-settings"/></svg> 编辑编制</button>
     <button class="btn btn--ghost btn--sm">⋯</button>
   </header>
 
@@ -352,22 +369,22 @@ body{font-family:var(--font);background:var(--bg);color:var(--fg);font-size:13px
           <div class="scard__top"><i class="scard__pulse"></i><div class="scard__title">搭建订单管理前后端与回归</div></div>
           <div class="scard__meta"><span class="pill pill--live"><i class="dot"></i>运行中</span><span>09-29 18:12</span></div>
           <div class="scard__prog"><span>3/5</span><div class="scard__bar"><i style="width:60%"></i></div></div>
-          <div class="scard__ops"><button class="btn btn--ghost btn--icon btn--sm">⏸</button><button class="btn btn--ghost btn--icon btn--sm">⏹</button></div>
+          <div class="scard__ops"><button class="btn btn--ghost btn--icon btn--sm"><svg class="ic ic--sm"><use href="#i-pause"/></svg></button><button class="btn btn--ghost btn--icon btn--sm"><svg class="ic ic--sm"><use href="#i-stop"/></svg></button></div>
         </div>
         <div class="scard is-await">
           <div class="scard__top"><i class="scard__pulse scard__pulse--warn"></i><div class="scard__title">知识库检索性能优化方案评审</div></div>
-          <div class="scard__meta"><span class="pill" style="background:var(--warning-50);color:var(--warning)">⏸ 待决议</span><span>09-29 16:40</span></div>
-          <div class="scard__ops"><button class="btn btn--ghost btn--icon btn--sm">▶</button><button class="btn btn--ghost btn--icon btn--sm">⏹</button></div>
+          <div class="scard__meta"><span class="pill" style="background:var(--warning-50);color:var(--warning)">待决议</span><span>09-29 16:40</span></div>
+          <div class="scard__ops"><button class="btn btn--ghost btn--icon btn--sm"><svg class="ic ic--sm"><use href="#i-play"/></svg></button><button class="btn btn--ghost btn--icon btn--sm"><svg class="ic ic--sm"><use href="#i-stop"/></svg></button></div>
         </div>
         <div class="scard is-done">
           <div class="scard__top"><div class="scard__title">生成 Q3 数据管道报告</div></div>
-          <div class="scard__meta"><span class="pill" style="background:var(--success-50);color:#16a34a">✓ 已完成</span><span>09-28 22:05</span></div>
-          <div class="scard__ops"><button class="btn btn--ghost btn--icon btn--sm">↻</button><button class="btn btn--ghost btn--icon btn--sm">🗑</button></div>
+          <div class="scard__meta"><span class="pill" style="background:var(--success-50);color:#16a34a">已完成</span><span>09-28 22:05</span></div>
+          <div class="scard__ops"><button class="btn btn--ghost btn--icon btn--sm"><svg class="ic ic--sm"><use href="#i-refresh"/></svg></button><button class="btn btn--ghost btn--icon btn--sm"><svg class="ic ic--sm"><use href="#i-trash"/></svg></button></div>
         </div>
         <div class="scard is-fail">
           <div class="scard__top"><div class="scard__title">对接支付网关联调</div></div>
-          <div class="scard__meta"><span class="pill" style="background:var(--danger-50);color:var(--danger)">✕ 失败</span><span>09-28 15:20</span></div>
-          <div class="scard__ops"><button class="btn btn--ghost btn--icon btn--sm">↻</button><button class="btn btn--ghost btn--icon btn--sm">🗑</button></div>
+          <div class="scard__meta"><span class="pill" style="background:var(--danger-50);color:var(--danger)">失败</span><span>09-28 15:20</span></div>
+          <div class="scard__ops"><button class="btn btn--ghost btn--icon btn--sm"><svg class="ic ic--sm"><use href="#i-refresh"/></svg></button><button class="btn btn--ghost btn--icon btn--sm"><svg class="ic ic--sm"><use href="#i-trash"/></svg></button></div>
         </div>
       </div>
     </aside>
@@ -376,14 +393,14 @@ body{font-family:var(--font);background:var(--bg);color:var(--fg);font-size:13px
     <main class="panel main" data-view="stage">
       <div class="modebar">
         <span class="modebar__label">协作模式</span>
-        <div class="mode-tab is-on" data-mode="orchestrator"><span class="mode-tab__ico">⚡</span>编排式<span class="mode-tab__desc">主管委派</span></div>
-        <div class="mode-tab" data-mode="pipeline"><span class="mode-tab__ico">🔗</span>流水线<span class="mode-tab__desc">线性接力</span></div>
-        <div class="mode-tab" data-mode="chat"><span class="mode-tab__ico">💬</span>群聊<span class="mode-tab__desc">圆桌发言</span></div>
+        <div class="mode-tab is-on" data-mode="orchestrator"><span class="mode-tab__ico"><svg class="ic ic--sm"><use href="#i-zap"/></svg></span>编排式<span class="mode-tab__desc">主管委派</span></div>
+        <div class="mode-tab" data-mode="pipeline"><span class="mode-tab__ico"><svg class="ic ic--sm"><use href="#i-git"/></svg></span>流水线<span class="mode-tab__desc">线性接力</span></div>
+        <div class="mode-tab" data-mode="chat"><span class="mode-tab__ico"><svg class="ic ic--sm"><use href="#i-msg"/></svg></span>群聊<span class="mode-tab__desc">圆桌发言</span></div>
         <div class="modebar__spacer"></div>
         <span class="modebar__label">中间区</span>
         <div class="viewseg" id="viewSeg">
-          <div class="viewseg__item" data-view="dialog">💬 对话</div>
-          <div class="viewseg__item is-on" data-view="stage">🎮 舞台</div>
+          <div class="viewseg__item" data-view="dialog"><svg class="ic ic--sm"><use href="#i-msg2"/></svg> 对话</div>
+          <div class="viewseg__item is-on" data-view="stage"><svg class="ic ic--sm"><use href="#i-gamepad"/></svg> 舞台</div>
         </div>
       </div>
 
@@ -696,7 +713,7 @@ function openChatCard(id){
     <div class="chat-card__head">
       <div class="chat-card__ava">${pixelAgentSVG({...m.ap,size:32})}</div>
       <div class="chat-card__name">${m.name}</div>
-      <button class="chat-card__x" id="chatClose">✕</button>
+      <button class="chat-card__x" id="chatClose"><svg class="ic ic--sm"><use href="#i-x"/></svg></button>
     </div>
     <div class="chat-card__msg" id="chatMsg">${replies[id]||'你好，有什么要补充的吗？'}</div>
     <div class="chat-card__modes" id="chatModes">
