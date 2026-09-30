@@ -655,6 +655,21 @@ export default function SquadDetailPage() {
                         onPick={pickMember}
                     />
 
+                    {pendingApprovals.map((pa) => (
+                        <div key={pa.approvalId} className="sw-round sw-round--gate">
+                            <div className="sw-round__pa sw-round__pa--user">批</div>
+                            <div className="sw-round__body">
+                                <div className="sw-round__head"><span className="sw-round__name">授权请求</span><span className="sw-badge sw-badge--gate">成员待审批</span></div>
+                                <div className="sw-round__content">
+                                    成员请求执行：{pa.toolName}
+                                    <div style={{display: 'flex', gap: 8, marginTop: 8}}>
+                                        <Button variant="solid" size="sm" onClick={() => void invoke('squad_member_approval_resolve', {approvalId: pa.approvalId, decision: 'approve'}).then(() => setPendingApprovals((q) => q.filter((x) => x.approvalId !== pa.approvalId)))}>批准</Button>
+                                        <Button variant="outline" size="sm" onClick={() => void invoke('squad_member_approval_resolve', {approvalId: pa.approvalId, decision: 'skip'}).then(() => setPendingApprovals((q) => q.filter((x) => x.approvalId !== pa.approvalId)))}>跳过</Button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    ))}
                     <TimelineView
                         rounds={rounds}
                         members={squad.members}
@@ -904,21 +919,6 @@ const TimelineView = memo(function TimelineView({rounds, members, agents, appear
                     </div>
                 )
             })}
-            {pendingApprovals.map((pa) => (
-                <div key={pa.approvalId} className="sw-round sw-round--gate">
-                    <div className="sw-round__pa sw-round__pa--user">批</div>
-                    <div className="sw-round__body">
-                        <div className="sw-round__head"><span className="sw-round__name">授权请求</span><span className="sw-badge sw-badge--gate">成员待审批</span></div>
-                        <div className="sw-round__content">
-                            成员请求执行：{pa.toolName}
-                            <div style={{display: 'flex', gap: 8, marginTop: 8}}>
-                                <Button variant="solid" size="sm" onClick={() => void invoke('squad_member_approval_resolve', {approvalId: pa.approvalId, decision: 'approve'}).then(() => setPendingApprovals((q) => q.filter((x) => x.approvalId !== pa.approvalId)))}>批准</Button>
-                                <Button variant="outline" size="sm" onClick={() => void invoke('squad_member_approval_resolve', {approvalId: pa.approvalId, decision: 'skip'}).then(() => setPendingApprovals((q) => q.filter((x) => x.approvalId !== pa.approvalId)))}>跳过</Button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            ))}
             {(planPending || checkpointPending) && (
                 <div className="sw-round sw-round--gate">
                     <div className="sw-round__pa sw-round__pa--user">禁</div>
