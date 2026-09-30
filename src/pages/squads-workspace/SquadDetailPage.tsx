@@ -15,10 +15,11 @@ import {memberLabel, agentAppearanceOf, type BoardRound, type SquadBoardView} fr
 // 舞台背景：等距像素风会议室（椅子已由像素小人站位表达，换图时同步核对 SEATS 坐标）
 import ROOM_BG from '@/assets/images/squad-meeting-room.png'
 
-const ACTIVE_STATUSES = ['running', 'paused', 'awaiting_checkpoint', 'awaiting_delivery']
+const ACTIVE_STATUSES = ['running', 'paused', 'awaiting_plan', 'awaiting_checkpoint', 'awaiting_delivery']
 const STATUS_PILL: Record<string, {label: string; cls: string}> = {
     running: {label: '运行中', cls: 'live'},
     paused: {label: '已暂停', cls: 'muted'},
+    awaiting_plan: {label: '⏸ 计划待批准', cls: 'await'},
     awaiting_checkpoint: {label: '⏸ 待决议', cls: 'await'},
     awaiting_delivery: {label: '📦 待确认交付', cls: 'await'},
     done: {label: '✓ 已完成', cls: 'done'},

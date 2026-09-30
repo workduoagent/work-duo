@@ -99,6 +99,13 @@ pub fn run() {
                     Ok(_) => {}
                     Err(e) => tracing::warn!("[startup] 孤儿轮次清扫失败：{e}"),
                 }
+                // S3 批次3（§4.10-3）：小分队启动清扫——上一进程遗留的半终态会话（running/门禁挂起/
+                // paused）已无存活协程，收敛为 failed 才允许 Resume 重入。（复查修复 #7：从 api server
+                // 启动点解耦到此处，避免与 squad_api_enabled 开关/服务存废耦合。）
+                let swept = agent::squad::squad_orchestrator::sweep_stale_squad_sessions(&handle).await;
+                if swept > 0 {
+                    tracing::info!("[startup] 小分队半终态清扫：{swept} 个会话收敛为 failed");
+                }
                 // 拉起小分队定时调度器与 API 触发服务（二者均依赖数据库就绪）。
                 agent::squad::squad_scheduler::start_scheduler(handle.clone());
                 agent::squad::squad_api_server::start_api_server(handle.clone());

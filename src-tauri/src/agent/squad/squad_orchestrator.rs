@@ -1408,6 +1408,12 @@ async fn squad_checkpoint_hang(
             content: note.to_string(),
         },
     );
+    // 复查修复 #1（09-29）：L2 检查点挂起写独立状态（对齐 L4 awaiting_delivery，前端已预留识别）。
+    let _ = sqlx::query("UPDATE agent_squad_session SET status='awaiting_checkpoint', updated_at=? WHERE id=?")
+        .bind(now_ms())
+        .bind(session_id)
+        .execute(pool)
+        .await;
     let decision = match wait_checkpoint_gate(session_id, squad_cancel).await {
         Some(d) => d,
         // 取消路径也要摘除 gate，防注册表残留（session_id 每次 run 都新建，残留即永久泄漏）。
@@ -1417,6 +1423,12 @@ async fn squad_checkpoint_hang(
         }
     };
     remove_checkpoint_gate(session_id);
+    // 决议后回写运行态（继续 → 下一波；返工 → 本波重跑，均处于运行中）。
+    let _ = sqlx::query("UPDATE agent_squad_session SET status='running', updated_at=? WHERE id=?")
+        .bind(now_ms())
+        .bind(session_id)
+        .execute(pool)
+        .await;
     let decision_normalized = normalize_checkpoint_decision(&decision);
     let follow = if decision_normalized == "rework" {
         "↩️ 检查点决议：返工本波任务。"
@@ -2088,6 +2100,12 @@ pub async fn run_squad_task(
             "⏸️ 计划待批准（L1 计划门禁）：\n{}\n\n请在运行控制台批准或拒绝本次委派计划。",
             plan_text
         );
+        // 复查修复 #1（09-29）：L1 门禁挂起写独立状态（此前停 'running'，外部观测不出「卡在门禁」）。
+        let _ = sqlx::query("UPDATE agent_squad_session SET status='awaiting_plan', updated_at=? WHERE id=?")
+            .bind(now_ms())
+            .bind(&session_id)
+            .execute(&pool)
+            .await;
         let _ = sqlx::query(
             "INSERT INTO agent_squad_round (id, squad_id, session_id, speaker_agent_id, role, content, kind, created_at) VALUES (?, ?, ?, ?, ?, ?, 'plan', ?)",
         )
@@ -2118,6 +2136,12 @@ pub async fn run_squad_task(
             finish_squad_session(app, &pool, &squad.squad_id, &session_id, "cancelled", "委派计划未获批准，协作已取消").await;
             return session_id;
         }
+        // 复查修复 #1：批准后回写运行态（拒绝路径由 finish_squad_session 写 cancelled）。
+        let _ = sqlx::query("UPDATE agent_squad_session SET status='running', updated_at=? WHERE id=?")
+            .bind(now_ms())
+            .bind(&session_id)
+            .execute(&pool)
+            .await;
         let _ = sqlx::query(
             "INSERT INTO agent_squad_round (id, squad_id, session_id, speaker_agent_id, role, content, kind, created_at) VALUES (?, ?, ?, NULL, '系统', ?, 'system', ?)",
         )
@@ -2397,7 +2421,7 @@ pub async fn sweep_stale_squad_sessions(app: &AppHandle) -> usize {
         Err(_) => return 0,
     };
     match sqlx::query(
-        "UPDATE agent_squad_session SET status='failed', updated_at=? WHERE status IN ('running','awaiting_delivery','paused')",
+        "UPDATE agent_squad_session SET status='failed', updated_at=? WHERE status IN ('running','awaiting_plan','awaiting_checkpoint','awaiting_delivery','paused')",
     )
     .bind(now_ms())
     .execute(&pool)
@@ -3539,7 +3563,8 @@ async fn run_squad_pipeline(
                 .execute(pool)
                 .await;
                 let _ = sqlx::query(
-                    "UPDATE agent_squad_session SET status='done', snapshot=?, updated_at=? WHERE id=?",
+                    // 复查修复 #2（09-29）：DAG 环失败是 failed 终态（此前误写 'done'，与 pack status='failed' 矛盾）。
+                    "UPDATE agent_squad_session SET status='failed', snapshot=?, updated_at=? WHERE id=?",
                 )
                 .bind(&e)
                 .bind(now_ms())
@@ -4156,15 +4181,18 @@ async fn run_squad_chat(
     let sum_cfg = match summarizer_member {
         Some(m) => &m.agent,
         None => {
-            tracing::warn!("[squad] chat: 无可用汇总主笔");
-            events::emit_squad_session_done(
+            // 复查修复 #5（09-29）：无汇总主笔也要写终态（此前只发事件不落库，会话僵尸 'running'；
+            // 当前 load_squad 保证 members 非空使该分支不可达，此处兜底防未来回归）。
+            tracing::warn!("[squad] chat: 无可用汇总主笔，会话按失败收尾");
+            finish_squad_session(
                 app,
-                &events::SquadSessionDonePayload {
-                    squad_id: squad.squad_id.clone(),
-                    session_id: session_id.to_string(),
-                    summary: blackboard.clone(),
-                },
-            );
+                pool,
+                &squad.squad_id,
+                session_id,
+                "failed",
+                "无可用汇总主笔，会话按失败收尾（讨论黑板保留在轮次记录中）",
+            )
+            .await;
             return;
         }
     };

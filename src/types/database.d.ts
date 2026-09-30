@@ -213,7 +213,7 @@ export interface AgentSquadChatConfigRow {
 }
 
 /** 小分队协作运行表（agent_squad_session）行映射。
- * - squad_id：所属团队；mode：协作模式快照；status：运行状态（running/done/cancelled/failed/awaiting_delivery）；
+ * - squad_id：所属团队；mode：协作模式快照；status：运行状态（running/awaiting_plan/awaiting_checkpoint/awaiting_delivery/paused/done/cancelled/failed）；
  * - snapshot：运行态快照（JSON，可空）；
  * - board_json / contract_json / pack_json：S1/S2 增量列（黑板状态板 / Mission Contract / Delivery Pack）。
  */

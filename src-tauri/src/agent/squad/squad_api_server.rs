@@ -54,7 +54,7 @@ pub fn start_api_server(app: AppHandle) {
                 Err(_) => return (false, 3939u16),
             };
             // S3 批次3（§4.10-3）：启动清扫——上一进程遗留半终态会话收敛为 failed。
-            crate::agent::squad::squad_orchestrator::sweep_stale_squad_sessions(&app).await;            let enabled = read_cfg(&pool, "squad_api_enabled").await.as_deref() == Some("true");
+            let enabled = read_cfg(&pool, "squad_api_enabled").await.as_deref() == Some("true");
             let port = read_cfg(&pool, "squad_api_port")
                 .await
                 .and_then(|s| s.parse::<u16>().ok())

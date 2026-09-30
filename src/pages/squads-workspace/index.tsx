@@ -267,6 +267,7 @@ export function memberLabel(m: { role?: string; agentId: string }, agents: Agent
 const LIVE_LABELS: Record<string, string> = {
     running: '协作中',
     paused: '已暂停',
+    awaiting_plan: '计划待批准',
     awaiting_checkpoint: '待检查点决议',
     awaiting_delivery: '待确认交付',
 }
