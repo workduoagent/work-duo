@@ -92,6 +92,54 @@ fn member_remember_insert(squad_id: &str, agent_id: &str, tool: &str) {
     map.insert(key, std::time::Instant::now());
 }
 
+/// 成员 run 结束/取消时清理该成员的全局审批 sender 与短时授权记忆。
+/// 防止取消后的 approvalId 残留在 SQUAD_APPROVALS，后续 UI 继续看到旧卡或误路由。
+pub fn clear_member_approvals(squad_id: &str, agent_id: &str) -> usize {
+    let mut removed = 0usize;
+    let mut g = SQUAD_APPROVALS.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(map) = g.as_mut() {
+        let ids: Vec<String> = map
+            .iter()
+            .filter(|(_, (sid, aid, _, _))| sid == squad_id && aid == agent_id)
+            .map(|(id, _)| id.clone())
+            .collect();
+        for id in ids {
+            if let Some((_, _, _, tx)) = map.remove(&id) {
+                let _ = tx.send(ApprovalOutcome::Skip);
+                removed += 1;
+            }
+        }
+    }
+    drop(g);
+    let prefix = format!("{squad_id}|{agent_id}|");
+    let mut rg = SQUAD_MEMBER_REMEMBER.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(map) = rg.as_mut() {
+        map.retain(|key, _| !key.starts_with(&prefix));
+    }
+    if removed > 0 {
+        tracing::info!("[agent] 成员任务结束清理审批：squad={} agent={} removed={}", squad_id, agent_id, removed);
+    }
+    removed
+}
+
+/// 成员执行函数持有的 RAII 清理守卫：正常完成、取消、超时、panic 早退均清理。
+pub struct MemberApprovalGuard {
+    squad_id: String,
+    agent_id: String,
+}
+
+impl MemberApprovalGuard {
+    pub fn new(squad_id: impl Into<String>, agent_id: impl Into<String>) -> Self {
+        Self { squad_id: squad_id.into(), agent_id: agent_id.into() }
+    }
+}
+
+impl Drop for MemberApprovalGuard {
+    fn drop(&mut self) {
+        clear_member_approvals(&self.squad_id, &self.agent_id);
+    }
+}
+
 /// 列出某编队的待审批项（工作台拉取渲染）。
 pub fn pending_member_approvals(squad_id: &str) -> Vec<(String, String)> {
     SQUAD_APPROVALS
@@ -107,11 +155,12 @@ pub fn pending_member_approvals(squad_id: &str) -> Vec<(String, String)> {
         .unwrap_or_default()
 }
 
-/// 前端审批卡回传决策（approve/skip）。
+/// 前端审批卡回传决策（approve/skip）。成员审批表里保存的是真实挂起 sender，
+/// 因此批准会直接唤醒成员 pipeline，而不是只删除一个 dummy sender。
 pub fn resolve_member_approval(approval_id: &str, decision: &str) -> bool {
     let outcome = if decision.eq_ignore_ascii_case("skip") { ApprovalOutcome::Skip } else { ApprovalOutcome::Approve };
     let approved = matches!(outcome, ApprovalOutcome::Approve);
-    let hit = SQUAD_APPROVALS
+    SQUAD_APPROVALS
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .as_mut()
@@ -122,8 +171,22 @@ pub fn resolve_member_approval(approval_id: &str, decision: &str) -> bool {
             }
             tx.send(outcome).is_ok()
         })
-        .unwrap_or(false);
-    hit
+        .unwrap_or(false)
+}
+
+/// 无人值守低危审批的 2×120s 兜底：只唤醒真实 sender，不写「人工记住」缓存。
+fn auto_resolve_member_approval(approval_id: &str) -> bool {
+    let entry = SQUAD_APPROVALS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_mut()
+        .and_then(|m| m.remove(approval_id));
+    entry
+        .map(|(_, _, tool, tx)| {
+            tracing::info!("[agent] approval: 宽限两轮（240s）无响应，低危自动批准 approval_id={} tool={tool}", approval_id);
+            tx.send(ApprovalOutcome::Approve).is_ok()
+        })
+        .unwrap_or(false)
 }
 
 /// 审批管理器（托管于 Tauri State）。
@@ -159,8 +222,9 @@ impl ApprovalManager {
     /// 返回 (request, rx)：request 用于推前端，rx 用于阻塞等待用户决策。
     #[tracing::instrument(skip_all)]
     pub async fn suspend(&self, request: ApprovalRequest) -> oneshot::Receiver<ApprovalOutcome> {
-        // 成员上下文梯度降级（用户设计）：工作台观看中 → 挂起等界面决策；不在 → 通知 120s×2 后
-        // 低危自动批（推荐方案）；L3 高危一律保持挂起（tool_round 300s 超时兜底）。
+        // 成员上下文梯度降级（用户设计）：工作台观看中 → 挂起等决策；不在 → 通知 120s×2 后
+        // 低危自动批；L3 高危一律保持挂起。成员审批使用全局表保存真实 sender，
+        // squad_member_approval_resolve 才能直接唤醒当前 pipeline。
         if let Some(sid) = &self.squad_id {
             let (watched, unattended) = crate::agent::squad::squad_orchestrator::approval_gradeline(sid);
             let l3 = request
@@ -169,53 +233,52 @@ impl ApprovalManager {
                 .and_then(|m| m.get("l3"))
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false);
+            let aid = self.member_agent_id.clone().unwrap_or_default();
             tracing::info!(
                 "[agent] approval: 成员审批梯度 watched={} unattended={} l3={} tool={} approval_id={}",
                 watched, unattended, l3, request.tool_name, request.approval_id,
             );
-            // 复查修复（09-30）：同工具授权短时记忆——本成员 TTL 内人工批准过同一工具（非 L3）
-            // → 直接放行，连写 N 个文件不再连弹 N 次审批。记忆仅由人工批准写入。
-            if !l3 {
-                if let Some(aid) = &self.member_agent_id {
-                    if member_remember_hit(sid, aid, &request.tool_name) {
-                        tracing::info!(
-                            "[agent] approval: 同工具短时记忆命中，自动放行 tool={} agent={aid}",
-                            request.tool_name
-                        );
-                        let (tx, rx) = oneshot::channel();
-                        let _ = tx.send(ApprovalOutcome::Approve);
-                        return rx;
-                    }
-                }
+            if !l3 && member_remember_hit(sid, &aid, &request.tool_name) {
+                tracing::info!("[agent] approval: 同工具短时记忆命中，自动放行 tool={} agent={aid}", request.tool_name);
+                let (tx, rx) = oneshot::channel();
+                let _ = tx.send(ApprovalOutcome::Approve);
+                return rx;
             }
+            // 保持既有 unattended 语义：低危工具立即放行，不进入审批表；L3 仍必须挂起。
             if unattended && !l3 {
                 let (tx, rx) = oneshot::channel();
                 let _ = tx.send(ApprovalOutcome::Approve);
                 return rx;
             }
-            {
-                SQUAD_APPROVALS
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .get_or_insert_with(std::collections::HashMap::new)
-                    .insert(request.approval_id.clone(), (sid.clone(), self.member_agent_id.clone().unwrap_or_default(), request.tool_name.clone(), oneshot::channel().0));
-            }
+            let (tx, rx) = oneshot::channel();
+            let approval_id = request.approval_id.clone();
+            let tool_name = request.tool_name.clone();
+            SQUAD_APPROVALS
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .get_or_insert_with(std::collections::HashMap::new)
+                .insert(approval_id.clone(), (sid.clone(), aid, tool_name, tx));
             if !watched && !l3 {
-                let pending = self.pending.clone();
-                let approval_id = request.approval_id.clone();
+                // 无人值守已在上方立即放行；这里仅覆盖「有人不在工作台」的 2×120s 低危兜底。
                 tokio::spawn(async move {
                     for _ in 0..2 {
                         tokio::time::sleep(std::time::Duration::from_secs(120)).await;
-                        if !pending.lock().await.contains_key(&approval_id) { return }
+                        let exists = SQUAD_APPROVALS
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .as_ref()
+                            .map(|m| m.contains_key(&approval_id))
+                            .unwrap_or(false);
+                        if !exists { return; }
                     }
-                    let mut p = pending.lock().await;
-                    if let Some(pr) = p.remove(&approval_id) {
-                        tracing::info!("[agent] approval: 宽限两轮（240s）无响应，低危自动批准 approval_id={} tool={}", approval_id, pr.request.tool_name);
-                        let _ = pr.tx.send(ApprovalOutcome::Approve);
-                    }
+                    let _ = auto_resolve_member_approval(&approval_id);
                 });
             }
+            // 成员审批不再写入 self.pending；全局表保存的就是实际唤醒 sender。
+            return rx;
         }
+
+        // 单 Agent 审批：保留原有 manager-local pending + grant_key 机制。
         let (tx, rx) = oneshot::channel();
         let approval_id = request.approval_id.clone();
         let tool_name = request.tool_name.clone();
@@ -262,10 +325,26 @@ impl ApprovalManager {
         }
     }
 
-    /// 超时/取消时清理挂起项（避免内存泄漏）。
+    /// 超时/取消时清理挂起项（避免内存泄漏）。成员上下文同时清理全局真实 sender，
+    /// 否则 tool_round 超时后旧 approvalId 仍会留在工作台列表并继续触发通知。
     pub async fn cancel(&self, approval_id: &str) {
-        let removed = self.pending.lock().await.remove(approval_id).is_some();
-        tracing::info!("[agent] approval: 清理 approval_id={} removed={}", approval_id, removed);
+        let removed_local = self.pending.lock().await.remove(approval_id).is_some();
+        let removed_member = if self.squad_id.is_some() {
+            let entry = SQUAD_APPROVALS
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .as_mut()
+                .and_then(|m| m.remove(approval_id));
+            entry
+                .map(|(_, _, _, tx)| tx.send(ApprovalOutcome::Skip).is_ok())
+                .unwrap_or(false)
+        } else {
+            false
+        };
+        tracing::info!(
+            "[agent] approval: 清理 approval_id={} local_removed={} member_removed={}",
+            approval_id, removed_local, removed_member
+        );
     }
 
     /// 读取挂起中的原始请求（host_grant 写入需要其中的 host_meta / run_id 上下文）。
@@ -298,5 +377,53 @@ impl ApprovalManager {
     pub async fn current_request(&self) -> Option<ApprovalRequest> {
         let pending = self.pending.lock().await;
         pending.values().next().map(|p| p.request.clone())
+    }
+}
+
+
+#[cfg(test)]
+mod member_approval_tests {
+    use super::*;
+    use crate::agent::types::ApprovalRequest;
+
+    fn req(id: &str, tool: &str) -> ApprovalRequest {
+        ApprovalRequest {
+            approval_id: id.into(),
+            tool_name: tool.into(),
+            description: "test".into(),
+            args: "{}".into(),
+            kind: "other".into(),
+            hint: None,
+            reason: None,
+            grant_key: None,
+            domain: None,
+            host_meta: None,
+            run_id: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn member_approval_resolve_wakes_real_sender_and_remembers_tool() {
+        let manager = ApprovalManager::for_member("sq-test".into(), "agent-test".into());
+        let rx = manager.suspend(req("ap-test-1", "native__write_file")).await;
+        assert!(pending_member_approvals("sq-test").iter().any(|(id, tool)| id == "ap-test-1" && tool == "native__write_file"));
+        assert!(resolve_member_approval("ap-test-1", "approve"));
+        assert!(matches!(rx.await.unwrap(), ApprovalOutcome::Approve));
+        // 同成员同工具在 TTL 内再次请求应自动放行，且不会新增 pending 卡。
+        let rx2 = manager.suspend(req("ap-test-2", "native__write_file")).await;
+        assert!(pending_member_approvals("sq-test").iter().all(|(id, _)| id != "ap-test-2"));
+        assert!(matches!(rx2.await.unwrap(), ApprovalOutcome::Approve));
+        clear_member_approvals("sq-test", "agent-test");
+    }
+
+    #[tokio::test]
+    async fn member_approval_guard_cleans_pending_sender() {
+        let manager = ApprovalManager::for_member("sq-guard".into(), "agent-guard".into());
+        let _rx = manager.suspend(req("ap-guard-1", "native__write_file")).await;
+        assert_eq!(pending_member_approvals("sq-guard").len(), 1);
+        {
+            let _guard = MemberApprovalGuard::new("sq-guard", "agent-guard");
+        }
+        assert!(pending_member_approvals("sq-guard").is_empty());
     }
 }

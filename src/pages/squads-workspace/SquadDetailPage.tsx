@@ -337,6 +337,21 @@ export default function SquadDetailPage() {
     // 成员待审批卡（工作台可见即可批；后端 120s×2 兜底自动批）
     const [pendingApprovals, setPendingApprovals] = useState<Array<{ approvalId: string; toolName: string }>>([])
 
+    // 后端返回 false = approvalId 已超时/已由取消或自动策略消费；此时不能把卡片静默移除，
+    // 否则用户会以为「批准」成功但成员仍停在别的审批上。
+    const resolveMemberApproval = useCallback(async (approvalId: string, decision: 'approve' | 'skip') => {
+        try {
+            const ok = await invoke<boolean>('squad_member_approval_resolve', {approvalId, decision})
+            if (ok) {
+                setPendingApprovals((q) => q.filter((x) => x.approvalId !== approvalId))
+            } else {
+                message.warning('该授权请求已失效或已被其他路径处理，请刷新审批列表')
+            }
+        } catch (e) {
+            message.error(`授权决议失败：${e instanceof Error ? e.message : String(e)}`)
+        }
+    }, [message])
+
     function toggleUnattended() {
         const next = !unattended
         setUnattended(next)
@@ -678,8 +693,8 @@ export default function SquadDetailPage() {
                         canInject={canInject}
                         onPick={pickMember}
                         pendingApprovals={pendingApprovals}
-                        onApprove={(id) => void invoke('squad_member_approval_resolve', {approvalId: id, decision: 'approve'}).then(() => setPendingApprovals((q) => q.filter((x) => x.approvalId !== id)))}
-                        onSkip={(id) => void invoke('squad_member_approval_resolve', {approvalId: id, decision: 'skip'}).then(() => setPendingApprovals((q) => q.filter((x) => x.approvalId !== id)))}
+                        onApprove={(id) => void resolveMemberApproval(id, 'approve')}
+                        onSkip={(id) => void resolveMemberApproval(id, 'skip')}
                     />
 
                     {/* 对话视图：底部审批条；舞台视图改为气泡，见 StageView */}

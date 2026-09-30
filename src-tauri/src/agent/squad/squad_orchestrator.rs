@@ -3275,6 +3275,11 @@ async fn run_member_subtask(
     };
 
     // 成员无人值守上下文：审批自动批准（2026-09-30 卡死根因修复——写文件审批挂起 300s 白等）。
+    // RAII 守卫确保成员 run 结束/取消/超时后清理全局审批 sender 与同工具记忆。
+    let _approval_guard = crate::agent::hitl::approval::MemberApprovalGuard::new(
+        squad_id.to_string(),
+        cfg.agent_id.clone(),
+    );
     let approval = ApprovalManager::for_member(squad_id.to_string(), cfg.agent_id.clone());
     let recovery = RecoveryHub::new();
 
