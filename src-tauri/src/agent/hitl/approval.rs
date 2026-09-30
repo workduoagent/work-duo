@@ -55,7 +55,6 @@ pub enum ApprovalOutcome {
 }
 
 /// 审批管理器（托管于 Tauri State）。
-#[derive(Clone, Default)]
 /// 成员审批挂起注册表：approvalId → (squadId, toolName, 决策发送端)。前端工作台审批卡直达。
 static SQUAD_APPROVALS: std::sync::Mutex<Option<std::collections::HashMap<String, (String, String, oneshot::Sender<ApprovalOutcome>)>>> =
     std::sync::Mutex::new(None);
@@ -87,6 +86,8 @@ pub fn resolve_member_approval(approval_id: &str, decision: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// 审批管理器（托管于 Tauri State）。
+#[derive(Clone, Default)]
 pub struct ApprovalManager {
     pending: Arc<Mutex<HashMap<String, Pending>>>,
     /// 成员所属小分队：审批梯度判定键（工作台观看中挂起等决策 / 不在通知 120s×2 后低危自动批）。

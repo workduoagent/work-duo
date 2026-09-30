@@ -619,8 +619,6 @@ pub async fn squad_set_unattended(squad_id: String, on: bool) -> Result<(), Stri
     Ok(crate::agent::squad::squad_orchestrator::squad_set_unattended(&squad_id, on))
 }
 
-/// 回传审批决策。20260919002：agent_id 缺省时路由到唯一在跑任务（多任务并行须显式传）。
-#[tauri::command]
 /// 工作台审批卡回传成员审批决策。
 #[tauri::command]
 pub async fn squad_member_approval_resolve(approval_id: String, decision: String) -> Result<bool, String> {
@@ -633,6 +631,8 @@ pub async fn squad_pending_approvals(squad_id: String) -> Result<Vec<(String, St
     Ok(crate::agent::hitl::approval::pending_member_approvals(&squad_id))
 }
 
+/// 回传审批决策。20260919002：agent_id 缺省时路由到唯一在跑任务（多任务并行须显式传）。
+#[tauri::command]
 pub async fn submit_approval_decision(
     app: AppHandle,
     runtime: State<'_, AgentRuntime>,
