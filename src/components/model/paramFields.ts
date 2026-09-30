@@ -147,6 +147,12 @@ export function getParamFields(category: string): ParamFieldDef[] {
         { key: 'normalize', label: '归一化', control: 'switch' },
         { key: 'maxInputTokens', label: '单条最大输入 Token', control: 'number', min: 1, step: 1 },
       ]
+    case 'image':
+      return [
+        { key: 'size', label: '缺省尺寸', hint: '如 1024x1024 / 1536x1024 / 1024x1536（以服务商支持为准）', control: 'text' },
+        { key: 'quality', label: '质量', hint: 'auto / standard / hd（gpt-image 系为 auto/low/medium/high，按服务商语义透传）', control: 'text' },
+        { key: 'n', label: '单次张数', hint: '固定 1（避免批量刷成本）', control: 'number', min: 1, max: 1, step: 1 },
+      ]
     case 'rerank':
       return [
         { key: 'topN', label: '返回数量', hint: '返回相关性最高的 N 条', control: 'number', min: 1, step: 1 },

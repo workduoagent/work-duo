@@ -234,6 +234,10 @@ pub struct AgentRuntimeConfig {
     /// 已绑定的服务器档案（服务器托管，agent_server_ref JOIN server_host）：
     /// 非空时注册 `host__*` 工具族并走 HostAuthz 独立授权域。
     pub server_bindings: Vec<crate::host::types::ServerBinding>,
+    /// 是否已配置启用的图片生成模型（models 表 category='image' 且 enabled=1）：
+    /// true 时注册 `native__generate_image` 并进入 planner 能力大纲（提示与能力同源）。
+    /// load_config 每 run 查询一次，配置增删即时生效。
+    pub image_gen_enabled: bool,
 }
 
 /* ================= 三层流水线架构（意图分流 → DAG 规划 → 微 ReAct 执行） ================= */
@@ -562,7 +566,8 @@ pub struct SquadToolProfile {
 /// 工具族 → 工具全名清单（原生工具静态映射；MCP 工具不进族，按全名单列）。
 pub fn tool_family_members(family: &str) -> &'static [&'static str] {
     match family {
-        // 写族：一切能产出/修改文件内容的工具（含沙箱代码执行——写文件的旁路）
+        // 写族：一切能产出/修改文件内容的工具（含沙箱代码执行——写文件的旁路）。
+        // generate_image：AI 生图产物落工作区且按张计费成本高——禁写角色（CRITIC 等）一并禁用。
         "write" => &[
             "native__write_file",
             "native__edit_file",
@@ -571,6 +576,7 @@ pub fn tool_family_members(family: &str) -> &'static [&'static str] {
             "native__run_python_sandbox",
             "native__run_node_sandbox",
             "native__execute_command",
+            "native__generate_image",
         ],
         // 执行族：代码/命令运行（沙箱写文件即经由它）
         "execute" => &[

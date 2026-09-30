@@ -794,6 +794,16 @@ category 取值：decision（决策）/ code_pattern（代码模式）/ user_pre
         crate::host::authz::gc_expired(app).await;
     }
 
+    // 图片生成能力开关（image 模型大类）：已配置启用 → 注册 native__generate_image 并进大纲
+    //（提示与能力同源）。每 run 查询一次，模型增删即时生效。
+    let image_gen_enabled = sqlx::query_scalar::<_, i64>(
+        "SELECT 1 FROM models WHERE category = 'image' AND enabled = 1 LIMIT 1",
+    )
+    .fetch_optional(&pool)
+    .await
+    .map_err(|e| format!("查询图片生成模型失败：{e}"))?
+    .is_some();
+
     Ok(AgentRuntimeConfig {
         agent_id: agent_id.to_string(),
         system_prompt,
@@ -816,5 +826,6 @@ category 取值：decision（决策）/ code_pattern（代码模式）/ user_pre
         plugin_tools,
         kb_ids,
         server_bindings,
+        image_gen_enabled,
     })
 }

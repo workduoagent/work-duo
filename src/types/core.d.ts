@@ -22,6 +22,7 @@ import type { PixelAgentAppearance } from '@/components/ui/pixel-agent'
 export type ModelCategory =
   | 'text'
   | 'multimodal'
+  | 'image'
   | 'stt'
   | 'tts'
   | 'embedding'

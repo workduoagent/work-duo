@@ -1472,8 +1472,9 @@ pub async fn list_squad_tool_catalog(
     // memory_mode 传 active 让 anchor_memory 进入候选；此处仅为候选目录，成员实际可用
     // 集仍由其自身配置 + 工具面裁剪决定。
     let mut reg = crate::agent::engine::tools::ToolRegistry::new();
-    crate::agent::engine::native::register_native_tools(&mut reg, &app, false, "active");
-    crate::agent::engine::native::register_native_tools(&mut reg, &app, true, "active");
+    let image_gen = crate::agent::engine::native::image_model_available(&app).await;
+    crate::agent::engine::native::register_native_tools(&mut reg, &app, false, "active", image_gen);
+    crate::agent::engine::native::register_native_tools(&mut reg, &app, true, "active", image_gen);
     let mut native_tools = reg.tool_names();
     native_tools.sort();
     // MCP 工具：该智能体（含全局并入）实际挂载的清单，给全名 mcp__{server}__{tool}。

@@ -45,6 +45,7 @@ use std::net::{IpAddr, SocketAddr};
 
 mod exec;
 mod fs;
+mod image;
 mod kb;
 mod memory;
 mod net;
@@ -53,6 +54,7 @@ pub use exec::*;
 pub use fs::*;
 pub use memory::*;
 pub use net::*;
+pub use image::*;
 
 pub(crate) fn def(name: &str, description: &str, properties: Value, required: &[&str]) -> Value {
     json!({
@@ -561,7 +563,12 @@ fn is_post_completion_recommendation(graph: &KnowledgeGraph, session_id: &str) -
 /* ----------------------------- register_native_tools ----------------------------- */
 
 
-pub fn register_native_tools(registry: &mut ToolRegistry, app: &AppHandle, sandbox_enabled: bool, memory_mode: &str) {
+pub fn register_native_tools(registry: &mut ToolRegistry, app: &AppHandle, sandbox_enabled: bool, memory_mode: &str, image_gen_enabled: bool) {
+    // S-image 批次：图片生成工具——仅在已配置启用的 image 大类模型时注册
+    // （提示与能力同源红线：planner 大纲不列出必然失败的能力）。
+    if image_gen_enabled {
+        registry.register(Arc::new(image::GenerateImageTool { app: app.clone() }));
+    }
     registry.register(Arc::new(ReadFileTool));
     registry.register(Arc::new(WriteFileTool { app: app.clone() }));
     registry.register(Arc::new(ArchiveArtifactTool { app: app.clone() }));

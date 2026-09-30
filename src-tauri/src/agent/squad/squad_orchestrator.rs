@@ -3250,7 +3250,7 @@ async fn run_member_subtask(
 
     // 工具注册表（镜像 run_task 分支 B：原生 + MCP；Skill 不再注册为工具，改由 run_subtask 注入 prompt）。
     let mut base = ToolRegistry::new();
-    native::register_native_tools(&mut base, app, cfg.allow_sandbox, &cfg.memory_mode);
+    native::register_native_tools(&mut base, app, cfg.allow_sandbox, &cfg.memory_mode, cfg.image_gen_enabled);
     let mut by_server: BTreeMap<String, Vec<mcp_adapter::MountedMcpTool>> = Default::default();
     for t in &cfg.mcp_tools {
         by_server.entry(t.mcp_id.clone()).or_default().push(t.clone());

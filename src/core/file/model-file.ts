@@ -68,6 +68,13 @@ export interface EmbeddingModelParams {
   maxInputTokens: number // 单条最大输入 token
 }
 
+/** 图片生成模型参数（OpenAI Images 兼容；按张计费，无 token 概念） */
+export interface ImageModelParams {
+  size: string // 缺省尺寸，如 1024x1024 / 1536x1024 / 1024x1536（以服务商支持为准）
+  quality: string // 质量：auto / standard / hd（gpt-image-1 用 auto/low/medium/high，按服务商语义透传）
+  n: number // 单次生成张数（固定 1，避免批量刷成本）
+}
+
 /** 重排序（Rerank）模型参数 */
 export interface RerankModelParams {
   topN: number // 返回 Top-N 结果
@@ -104,6 +111,7 @@ export interface ModelConfig {
   tts?: TtsModelParams
   embedding?: EmbeddingModelParams
   rerank?: RerankModelParams
+  image?: ImageModelParams
   createdAt: string // ISO 时间字符串（与 SQLite 的 epoch 毫秒在 mapper 层互转）
   updatedAt: string
 }
@@ -119,6 +127,7 @@ const MODEL_CATEGORY_LABELS: Record<string, string> = {
   tts: '文字转语音',
   embedding: '向量模型',
   rerank: '重排序',
+  image: '图片生成',
 }
 
 /** 模型大类展示名（兜底回退原 value）。分类固定、与代码参数结构严格对应，不进 scenario_category 字典。 */
@@ -242,6 +251,15 @@ export function createEmptyModel(category: string): ModelConfig {
           responseFormat: 'mp3',
           instructions: '',
           stream: false,
+        },
+      }
+    case 'image':
+      return {
+        ...base,
+        image: {
+          size: '1024x1024',
+          quality: 'auto',
+          n: 1,
         },
       }
     case 'embedding':

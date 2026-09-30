@@ -74,6 +74,16 @@ function resolveProbe(
       body: JSON.stringify({ query: 'hi', texts: ['hi'], raw_scores: false }),
     }
   }
+  // 图片生成端点 /images/generations：POST 真实最小生成（1 张，size 取分类配置缺省）
+  // —— 生成按张计费，测试即真实消耗一张；GET 对该端点恒 405，可达性探测无意义。
+  if (/\/images\/generations$/i.test(target)) {
+    const size = (typeof config?.size === 'string' && config.size) || '1024x1024'
+    return {
+      url: target,
+      method: 'POST',
+      body: JSON.stringify({ model, prompt: 'a single small red circle on white background', n: 1, size }),
+    }
+  }
   // 其它已知资源（audio / images / models / moderations 等）→ GET 可达性探测
   if (/\/(audio|images|models|moderations)\b/i.test(target)) {
     return { url: target, method: 'GET' }

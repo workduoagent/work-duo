@@ -4,7 +4,7 @@
 
 /** 模型接入配置表（models）行映射。
  * - 基础信息 + 启用状态；
- * - category 决定模型大类（text / multimimodal / stt / tts / embedding / rerank，对应 types/core 的 ModelCategory）；
+ * - category 决定模型大类（text / multimimodal / image / stt / tts / embedding / rerank，对应 types/core 的 ModelCategory）；
  * - provider 对应 ModelProvider；
  * - config：该类别专属参数（对应 ModelConfig 的 category 子对象，如 text/multimodal/...）序列化后的 JSON 字符串；
  *   异构参数不拆列，统一以 JSON 落库，后续新增参数只需改 ModelConfig 子结构，无需改表。
