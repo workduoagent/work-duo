@@ -737,7 +737,7 @@ pub async fn run_plugin(
                 finalize(&mut result, app, spec, params, agent_id, session_id, source, start).await;
                 return result;
             }
-            let (mamba_root, rc) = match mamba.setup(app) {
+            let (mamba_root, rc) = match mamba.setup(app).await {
                 Ok(x) => x,
                 Err(e) => {
                     result.error_type = Some("Internal".into());

@@ -5,7 +5,8 @@
 - **🔴 Rust 改动必须重启 App 才生效**；改完 *.rs 的验证排在重启后。
 - 依赖：AI 只写 package.json 不装；重型前端库动态 import()+shims.d.ts。
 - SQLite workduo.db；TS 访问层 src/core/mapper/*（禁组件直写 SQL）；DDL 单一事实源 src/assets/sql/{init,updater}.sql，**DDL 变更必查 mapper 三要素**。**Agent 表=`agent_info`**（llm_id 外键），Rust 只 SELECT，写入=前端 agent-mapper.ts；MCP `agent_ui_*` 可自助建 Agent（无人值守须 isActive/autoToolExecMode/allowSandbox=true+planAutoApproveMode='never'+memoryMode）。
-- cargo 沙箱自验：source ~/.workbuddy/msvc-env.sh && CARGO_TARGET_DIR=target-sb cargo test/check。
+- cargo 沙箱自验：source ~/.workbuddy/msvc-env.sh && CARGO_TARGET_DIR=target-sb cargo test/check。**target-sb 冷编缺 protoc（lance-encoding 构建脚本）会失败**，本机自验改用默认 `target/` 增量 `cargo check`（约 5 分钟）；偶发 `invoked.timestamp 拒绝访问` 多因有残留 cargo 进程，重跑即可。
+- **Python 运行时镜像源（2026-10-01）**：`.mambarc` **禁止写死单一镜像**——清华 TUNA anaconda 已对 micromamba UA 返 403，中科大可用、官方源兜底，阿里/腾讯该路径 404 下线。`mamba_manager.rs` 现为「探活选源 + 失败换源重试一次」，逃生阀 `WD_MAMBA_MIRROR=ustc|tuna|official`。
 
 ## 内建 MCP（77 工具，2026-09-24）
 - 127.0.0.1:18755/mcp（Streamable HTTP）：引擎+发现+UI 意图共 **77**。**每模块必有 *_list**；UI 回包 {ok,data} 信封；agent_get_run_trace 外层 {"trace":{…}} 须先剥；#8 per-run（get 必传 run_id）。前端桥 mcpBridge.ts；连接器 ~/.workbuddy/mcp.json→workduo-mcp(type:http)。

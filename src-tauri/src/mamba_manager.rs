@@ -40,6 +40,289 @@ const DEFAULT_ENV: &str = "default";
 /// 默认 Python 版本：调用方未指定 `python_version` 时使用。
 const DEFAULT_PYTHON: &str = "3.11";
 
+/// 镜像源逃生开关：`WD_MAMBA_MIRROR=ustc|tuna|official` 强制指定镜像；
+/// 缺省（或 `auto`）按 [`MIRRORS`] 顺序探活自动选择。
+const MIRROR_ENV: &str = "WD_MAMBA_MIRROR";
+
+/// 单个镜像源档案。
+///
+/// - `id`：稳定标识，写入 `.mambarc` 注释行（`# workduo-mamba-mirror: <id>`）用于识别与黑名单。
+/// - `channels`：写入 `.mambarc` 的 channel 列表，顺序即优先级。
+/// - `probe`：探活样本 URL（各镜像都有的 `noarch/repodata.json`，体量小、命中率高）。
+struct MirrorProfile {
+    id: &'static str,
+    label: &'static str,
+    channels: &'static [&'static str],
+    probe: &'static str,
+}
+
+/// 镜像源候选（**按优先级排列**）。
+///
+/// 背景（2026-10-01 实测）：清华 TUNA 的 anaconda 镜像对 micromamba 这类非浏览器 UA
+/// 直接返回 **403**（HTML 提示「您访问使用的软件带有非常用软件的特征」），导致
+/// `micromamba create` 全部 subdir 加载失败。故默认改为中科大（实测 200），
+/// 清华降为次选（仅在其恢复时命中），最后用官方源兜底（境外，慢但最稳）。
+/// 阿里云 / 腾讯云已下线 `/anaconda/...` 路径（实测 404），不再纳入候选。
+const MIRRORS: &[MirrorProfile] = &[
+    MirrorProfile {
+        id: "ustc",
+        label: "中科大",
+        channels: &[
+            "https://mirrors.ustc.edu.cn/anaconda/cloud/conda-forge/",
+            "https://mirrors.ustc.edu.cn/anaconda/pkgs/main/",
+            "https://mirrors.ustc.edu.cn/anaconda/pkgs/msys2/",
+        ],
+        probe: "https://mirrors.ustc.edu.cn/anaconda/pkgs/main/noarch/repodata.json",
+    },
+    MirrorProfile {
+        id: "tuna",
+        label: "清华",
+        channels: &[
+            "https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud/conda-forge/",
+            "https://mirrors.tuna.tsinghua.edu.cn/anaconda/pkgs/main/",
+            "https://mirrors.tuna.tsinghua.edu.cn/anaconda/pkgs/msys2/",
+        ],
+        probe: "https://mirrors.tuna.tsinghua.edu.cn/anaconda/pkgs/main/noarch/repodata.json",
+    },
+    MirrorProfile {
+        id: "official",
+        label: "官方源",
+        channels: &[
+            "https://conda.anaconda.org/conda-forge/",
+            "https://repo.anaconda.com/pkgs/main/",
+            "https://repo.anaconda.com/pkgs/msys2/",
+        ],
+        probe: "https://repo.anaconda.com/pkgs/main/noarch/repodata.json",
+    },
+];
+
+/// 本进程已选定的镜像源 id（避免每次 setup 都发起探活请求）。
+static CHOSEN_MIRROR: std::sync::OnceLock<std::sync::Mutex<Option<String>>> = std::sync::OnceLock::new();
+/// 本次进程内已判定不可用的镜像源 id（换源重试时不再选中）。
+static DEAD_MIRRORS: std::sync::OnceLock<std::sync::Mutex<Vec<String>>> = std::sync::OnceLock::new();
+
+fn chosen_slot() -> &'static std::sync::Mutex<Option<String>> {
+    CHOSEN_MIRROR.get_or_init(|| std::sync::Mutex::new(None))
+}
+
+fn dead_slot() -> &'static std::sync::Mutex<Vec<String>> {
+    DEAD_MIRRORS.get_or_init(|| std::sync::Mutex::new(Vec::new()))
+}
+
+fn chosen_mirror_id() -> Option<String> {
+    chosen_slot().lock().ok().and_then(|g| g.clone())
+}
+
+fn set_chosen_mirror(id: &str) {
+    if let Ok(mut g) = chosen_slot().lock() {
+        *g = Some(id.to_string());
+    }
+}
+
+fn clear_chosen_mirror() {
+    if let Ok(mut g) = chosen_slot().lock() {
+        *g = None;
+    }
+}
+
+fn is_dead_mirror(id: &str) -> bool {
+    dead_slot()
+        .lock()
+        .map(|g| g.iter().any(|d| d == id))
+        .unwrap_or(false)
+}
+
+/// 标记某镜像源不可用（换源重试前调用，保证下一次选择不会再次命中它）。
+fn mark_mirror_dead(id: &str) {
+    if let Ok(mut g) = dead_slot().lock() {
+        if !g.iter().any(|d| d == id) {
+            g.push(id.to_string());
+        }
+    }
+}
+
+/// 生成 `.mambarc` 内容：首行注释写明「自动生成、手改会被覆盖」，第二行为镜像标识
+/// （`# workduo-mamba-mirror: <id>`），供 [`rc_mirror_id`] 反解，实现「已生成则复用、失效则换源」。
+fn rc_content(m: &MirrorProfile) -> String {
+    let mut s = String::from("# 由 WorkDuo 自动生成：镜像源由启动探活选择，手动修改会被覆盖。\n");
+    s.push_str(&format!("# workduo-mamba-mirror: {}\n", m.id));
+    s.push_str("channels:\n");
+    for c in m.channels {
+        s.push_str(&format!("  - {c}\n"));
+    }
+    s.push_str("show_channel_urls: true\n");
+    s.push_str("ssl_verify: true\n");
+    s
+}
+
+/// 从 `.mambarc` 内容反解镜像源 id（无法识别返回 None，如用户手写的旧文件）。
+fn rc_mirror_id(content: &str) -> Option<String> {
+    content
+        .lines()
+        .find_map(|l| l.trim().strip_prefix("# workduo-mamba-mirror:"))
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+}
+
+/// 写入 `.mambarc`（内容一致时跳过，避免无意义的文件 mtime 抖动）。
+fn write_rc(rc: &Path, m: &MirrorProfile) -> Result<(), String> {
+    let content = rc_content(m);
+    if std::fs::read_to_string(rc).map(|c| c == content).unwrap_or(false) {
+        return Ok(());
+    }
+    std::fs::write(rc, content).map_err(|e| format!("写入 .mambarc 失败：{e}"))
+}
+
+/// 探活：GET 该镜像的 repodata 样本，2xx 视为可用。
+///
+/// 平台自身操作（环境管理 / 依赖安装）不受沙箱断网策略影响，此处为 Rust 侧直连，
+/// 未注入任何代理阻断 env。单次 8s 超时，网络异常一律按「不可用」处理（不阻塞启动）。
+async fn mirror_alive(m: &MirrorProfile) -> bool {
+    let client = match reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(8))
+        .build()
+    {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+    match client
+        .get(m.probe)
+        .header(reqwest::header::USER_AGENT, "WorkDuo/1.0")
+        .send()
+        .await
+    {
+        Ok(resp) => resp.status().is_success(),
+        Err(_) => false,
+    }
+}
+
+/// 确保 `.mambarc` 指向一个**当前可用**的镜像源，返回该镜像档案。
+///
+/// 选择顺序：
+/// 1. `WD_MAMBA_MIRROR` 强制指定（跳过探活，尊重用户显式选择）；
+/// 2. 本进程已选定过（缓存在 [`CHOSEN_MIRROR`]，同一进程内只探活一次）；
+/// 3. 已存在的 `.mambarc`：反解其镜像 id 并探活，仍可用则**原样复用**（零网络开销的稳态路径）；
+/// 4. 按 [`MIRRORS`] 顺序探活，取第一个可用者写入（已标记为 dead 的源跳过）；
+/// 5. 全部不可用（离线场景）：已有配置则保留，否则写入首选镜像，把错误交给 micromamba 报出。
+async fn ensure_mambarc(rc: &Path) -> Result<&'static MirrorProfile, String> {
+    // 1) 环境变量强制指定
+    if let Ok(v) = std::env::var(MIRROR_ENV) {
+        let v = v.trim().to_ascii_lowercase();
+        if matches!(v.as_str(), "auto" | "") {
+            // 显式 auto：走自动流程
+        } else if let Some(m) = MIRRORS.iter().find(|m| m.id == v) {
+            write_rc(rc, m)?;
+            set_chosen_mirror(m.id);
+            return Ok(m);
+        } else {
+            tracing::warn!("[mamba] {MIRROR_ENV}={v} 无法识别（可选 ustc/tuna/official），回退自动选择");
+        }
+    }
+
+    // 2) 本进程已选定
+    if let Some(id) = chosen_mirror_id() {
+        if let Some(m) = MIRRORS.iter().find(|m| m.id == id) {
+            write_rc(rc, m)?;
+            return Ok(m);
+        }
+    }
+
+    // 3) 已有配置：反解镜像 id 后探活复用
+    let existing_id = std::fs::read_to_string(rc)
+        .ok()
+        .and_then(|c| rc_mirror_id(&c));
+    if let Some(id) = existing_id {
+        if let Some(m) = MIRRORS.iter().find(|m| m.id == id) {
+            if !is_dead_mirror(m.id) && mirror_alive(m).await {
+                set_chosen_mirror(m.id);
+                return Ok(m);
+            }
+            tracing::warn!("[mamba] 镜像源 {}（{}）探活失败，尝试切换其他镜像", m.id, m.label);
+        }
+    }
+
+    // 4) 顺序探活，取第一个可用者
+    for m in MIRRORS.iter() {
+        if is_dead_mirror(m.id) {
+            continue;
+        }
+        if mirror_alive(m).await {
+            write_rc(rc, m)?;
+            set_chosen_mirror(m.id);
+            tracing::info!("[mamba] 已选择镜像源：{}（{}）", m.id, m.label);
+            return Ok(m);
+        }
+    }
+
+    // 5) 全不可用（离线）：保留原配置，否则写首选
+    let fallback = &MIRRORS[0];
+    if !rc.exists() {
+        write_rc(rc, fallback)?;
+    }
+    Ok(fallback)
+}
+
+/// 判定 stderr 是否属于「镜像源故障」——只有这类失败才值得换源重试，
+/// 语法错 / 依赖冲突 etc. 换源无意义（避免无谓的二次探活与等待）。
+fn is_mirror_failure(stderr: &str) -> bool {
+    let s = stderr;
+    s.contains("403")
+        || s.contains("404")
+        || s.contains("repodata")
+        || s.contains("Subdir")
+        || s.contains("not loaded")
+        || s.contains("Transfer finalized")
+        || s.contains("Connection")
+        || s.contains("timed out")
+}
+
+/// 换源：把当前镜像标记为 dead、清空进程内选择，重新走 [`ensure_mambarc`]。
+/// 返回切换后的新镜像（与旧镜像不同才算切换成功）。
+async fn rotate_mirror(rc: &Path) -> Option<&'static MirrorProfile> {
+    let old = chosen_mirror_id().or_else(|| {
+        std::fs::read_to_string(rc)
+            .ok()
+            .and_then(|c| rc_mirror_id(&c))
+    });
+    if let Some(id) = &old {
+        mark_mirror_dead(id);
+    }
+    clear_chosen_mirror();
+    match ensure_mambarc(rc).await {
+        Ok(m) if Some(m.id.to_string()) != old => {
+            tracing::warn!("[mamba] 镜像源切换：{:?} → {}（{}），重试一次", old, m.id, m.label);
+            Some(m)
+        }
+        _ => None,
+    }
+}
+
+/// 执行一条 micromamba 命令；若失败且判定为镜像源故障，自动换源后**重试一次**。
+///
+/// `make_args` 由调用方给出（依赖 `mamba_root` / `rc` 构造参数），保证换源后用新
+/// `--rc-file` 重新执行同一语义的命令。
+pub(crate) async fn run_mamba_with_mirror_fallback<F>(
+    app: &AppHandle,
+    mamba_root: &Path,
+    rc: &Path,
+    make_args: F,
+) -> Result<(String, String, Option<i32>), String>
+where
+    F: Fn(&Path, &Path) -> Vec<String>,
+{
+    let (stdout, stderr, code) = run_sidecar(app, make_args(mamba_root, rc), None, &[]).await?;
+    if code == Some(0) {
+        return Ok((stdout, stderr, code));
+    }
+    if !is_mirror_failure(&stderr) {
+        return Ok((stdout, stderr, code));
+    }
+    match rotate_mirror(rc).await {
+        Some(_) => run_sidecar(app, make_args(mamba_root, rc), None, &[]).await,
+        None => Ok((stdout, stderr, code)),
+    }
+}
+
 /// 沙箱依赖安装：不做白名单限制。任何检测到的缺失模块都交由 selfheal 自动安装
 /// （`micromamba install`），用户明确：沙箱就该自由装依赖，限白名单等于阉割沙箱。
 
@@ -94,9 +377,13 @@ impl MambaManager {
     }
 
     /// 步骤一 + 步骤二：在 `$RESOURCES/mamba_root` 下创建运行时目录并校验写入权限；
-    /// 若缺失则生成 `.mambarc`。返回 `(mamba_root, rc_file)` 两个已就绪的路径。
+    /// 并确保 `.mambarc` 指向一个**当前可用**的镜像源（见 [`ensure_mambarc`]）。
+    /// 返回 `(mamba_root, rc_file)` 两个已就绪的路径。
     /// 权限被拒时返回友好提示，引导用户将软件移动到非系统盘（如 D 盘）。
-    pub(crate) fn setup(&self, app: &AppHandle) -> Result<(PathBuf, PathBuf), String> {
+    ///
+    /// 说明：此函数为 `async` —— 首次调用（或已选镜像失效时）需要对候选镜像发起
+    /// 一次轻量探活，避免写死单一镜像后「镜像挂了就永久建不了环境」。
+    pub(crate) async fn setup(&self, app: &AppHandle) -> Result<(PathBuf, PathBuf), String> {
         let base_dir = Self::base_dir(app);
         let mamba_root = base_dir.join("mamba_root");
 
@@ -110,18 +397,9 @@ impl MambaManager {
             return Err(format!("创建运行时目录失败：{e}"));
         }
 
-        // 步骤二：若 .mambarc 不存在，动态写入国内镜像源配置。
+        // 步骤二：确保 .mambarc 指向可用镜像源（探活结果在本进程内缓存，稳态不产生网络开销）。
         let rc = base_dir.join(".mambarc");
-        if !rc.exists() {
-            let content = r#"channels:
-  - https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud/conda-forge/
-  - https://mirrors.tuna.tsinghua.edu.cn/anaconda/pkgs/main/
-  - defaults
-show_channel_urls: true
-ssl_verify: true
-"#;
-            std::fs::write(&rc, content).map_err(|e| format!("写入 .mambarc 失败：{e}"))?;
-        }
+        ensure_mambarc(&rc).await?;
         Ok((mamba_root, rc))
     }
 }
@@ -532,7 +810,7 @@ pub async fn init_mamba_env(
     env_name: Option<String>,
     python_version: Option<String>,
 ) -> Result<String, String> {
-    let (mamba_root, rc) = mgr.setup(&app)?;
+    let (mamba_root, rc) = mgr.setup(&app).await?;
 
     let env = env_name.unwrap_or_else(|| DEFAULT_ENV.to_string());
     let py = python_version.unwrap_or_else(|| DEFAULT_PYTHON.to_string());
@@ -544,21 +822,33 @@ pub async fn init_mamba_env(
 
     // 全局选项（root-prefix + rc-file）必须前置；仅安装解释器本身，
     // 第三方依赖交给后续的 install_mamba_packages。
-    let mut args = global_args(&mamba_root, &rc);
-    args.extend([
-        "create".into(),
-        "-n".into(),
-        env.clone(),
-        format!("python={py}"),
-        "-y".into(),
-    ]);
-
-    let (stdout, stderr, code) = run_sidecar(&app, args, None, &[]).await?;
+    // 镜像源故障（403 / repodata 加载失败）自动换源重试一次。
+    let env_c = env.clone();
+    let py_c = py.clone();
+    let (stdout, stderr, code) = run_mamba_with_mirror_fallback(
+        &app,
+        &mamba_root,
+        &rc,
+        |root, rc| {
+            let mut a = global_args(root, rc);
+            a.extend([
+                "create".into(),
+                "-n".into(),
+                env_c.clone(),
+                format!("python={py_c}"),
+                "-y".into(),
+            ]);
+            a
+        },
+    )
+    .await?;
     match code {
         Some(0) => Ok(format!(
             "Python 环境（{env}）创建完成（纯净环境，仅含 python={py}）。\n{stdout}"
         )),
-        Some(c) => Err(format!("创建 Python 环境失败（退出码 {c}）：\n{stderr}")),
+        Some(c) => Err(format!(
+            "创建 Python 环境失败（退出码 {c}）：\n{stderr}\n（已自动尝试切换镜像源；仍失败可用环境变量 {MIRROR_ENV}=official 强制官方源）"
+        )),
         None => Err(format!("创建 Python 环境进程异常终止，未收到退出码：\n{stderr}")),
     }
 }
@@ -575,7 +865,7 @@ pub async fn list_mamba_packages(
     mgr: State<'_, MambaManager>,
     env_name: Option<String>,
 ) -> Result<Vec<PackageInfo>, String> {
-    let (mamba_root, rc) = mgr.setup(&app)?;
+    let (mamba_root, rc) = mgr.setup(&app).await?;
 
     let env = env_name.unwrap_or_else(|| DEFAULT_ENV.to_string());
 
@@ -611,7 +901,7 @@ pub async fn install_mamba_packages(
     env_name: Option<String>,
     packages: Vec<String>,
 ) -> Result<String, String> {
-    let (mamba_root, rc) = mgr.setup(&app)?;
+    let (mamba_root, rc) = mgr.setup(&app).await?;
 
     if packages.is_empty() {
         return Err("未指定任何要安装的依赖。".into());
@@ -625,13 +915,23 @@ pub async fn install_mamba_packages(
         return Err(format!("{env} 环境尚未创建，请先调用 init_mamba_env。"));
     }
 
-    let mut args = global_args(&mamba_root, &rc);
-    args.extend(["install".into(), "-n".into(), env.clone(), "-y".into()]);
-    for p in &packages {
-        args.push(p.clone());
-    }
-
-    let (stdout, stderr, code) = run_sidecar(&app, args, None, &[]).await?;
+    // 安装同样走换源重试：镜像 repodata 403 是安装失败的高频原因。
+    let env_c = env.clone();
+    let pkgs_c = packages.clone();
+    let (stdout, stderr, code) = run_mamba_with_mirror_fallback(
+        &app,
+        &mamba_root,
+        &rc,
+        |root, rc| {
+            let mut a = global_args(root, rc);
+            a.extend(["install".into(), "-n".into(), env_c.clone(), "-y".into()]);
+            for p in &pkgs_c {
+                a.push(p.clone());
+            }
+            a
+        },
+    )
+    .await?;
     match code {
         Some(0) => Ok(format!(
             "依赖安装完成：{}\n{}",
@@ -657,7 +957,7 @@ pub async fn uninstall_mamba_packages(
     env_name: Option<String>,
     packages: Vec<String>,
 ) -> Result<String, String> {
-    let (mamba_root, rc) = mgr.setup(&app)?;
+    let (mamba_root, rc) = mgr.setup(&app).await?;
 
     if packages.is_empty() {
         return Err("未指定任何要移除的依赖。".into());
@@ -699,7 +999,7 @@ pub async fn reset_mamba_env(
     env_name: Option<String>,
     python_version: Option<String>,
 ) -> Result<String, String> {
-    let (mamba_root, rc) = mgr.setup(&app)?;
+    let (mamba_root, rc) = mgr.setup(&app).await?;
 
     let env = env_name.unwrap_or_else(|| DEFAULT_ENV.to_string());
     let py = python_version.unwrap_or_else(|| DEFAULT_PYTHON.to_string());
@@ -736,16 +1036,26 @@ pub async fn reset_mamba_env(
         }
     }
 
-    // 阶段二：重建最纯净环境。
-    let mut create_args = global_args(&mamba_root, &rc);
-    create_args.extend([
-        "create".into(),
-        "-n".into(),
-        env.clone(),
-        format!("python={py}"),
-        "-y".into(),
-    ]);
-    let (stdout, stderr, code) = run_sidecar(&app, create_args, None, &[]).await?;
+    // 阶段二：重建最纯净环境（镜像源故障自动换源重试一次）。
+    let env_c = env.clone();
+    let py_c = py.clone();
+    let (stdout, stderr, code) = run_mamba_with_mirror_fallback(
+        &app,
+        &mamba_root,
+        &rc,
+        |root, rc| {
+            let mut a = global_args(root, rc);
+            a.extend([
+                "create".into(),
+                "-n".into(),
+                env_c.clone(),
+                format!("python={py_c}"),
+                "-y".into(),
+            ]);
+            a
+        },
+    )
+    .await?;
     match code {
         Some(0) => Ok(format!(
             "{env} 已重置为纯净环境（仅 python={py}），所有旧依赖已清空。\n{stdout}"
@@ -877,18 +1187,23 @@ pub(crate) async fn install_packages_silent(
     env: &str,
     packages: &[String],
 ) -> Result<String, String> {
-    let (mamba_root, rc) = mgr.setup(app)?;
+    let (mamba_root, rc) = mgr.setup(app).await?;
     let env_path = mamba_root.join("envs").join(env);
     if !env_path.exists() {
         return Err(format!("{env} 环境尚未创建，无法安装依赖。"));
     }
     let specs: Vec<String> = packages.iter().map(|p| normalize_pkg(p)).collect();
-    let mut args = global_args(&mamba_root, &rc);
-    args.extend(["install".into(), "-n".into(), env.to_string(), "-y".into()]);
-    for s in &specs {
-        args.push(s.clone());
-    }
-    let (_stdout, stderr, code) = run_sidecar(app, args, None, &[]).await?;
+    let env_c = env.to_string();
+    let specs_c = specs.clone();
+    let (_stdout, stderr, code) = run_mamba_with_mirror_fallback(app, &mamba_root, &rc, |root, rc| {
+        let mut a = global_args(root, rc);
+        a.extend(["install".into(), "-n".into(), env_c.clone(), "-y".into()]);
+        for s in &specs_c {
+            a.push(s.clone());
+        }
+        a
+    })
+    .await?;
     // 依赖安装审计（2026-09-24 安全增强批次）：只记录不拦截（用户决策）。
     crate::sandbox_audit::audit_dep_install(app, "python", env, &specs, code == Some(0));
     match code {
@@ -962,7 +1277,7 @@ pub async fn run_python_script(
     env_name: Option<String>,
     script_path: String,
 ) -> Result<String, String> {
-    let (mamba_root, rc) = mgr.setup(&app)?;
+    let (mamba_root, rc) = mgr.setup(&app).await?;
 
     let env = env_name.unwrap_or_else(|| DEFAULT_ENV.to_string());
 
@@ -1031,7 +1346,7 @@ pub async fn run_python_in_sandbox(
     script_path: String,
     cwd: Option<&Path>,
 ) -> Result<ScriptRunResult, String> {
-    let (mamba_root, rc) = mgr.setup(app)?;
+    let (mamba_root, rc) = mgr.setup(app).await?;
 
     let env = env_name.unwrap_or_else(|| DEFAULT_ENV.to_string());
 
@@ -1134,7 +1449,7 @@ pub async fn list_mamba_envs(
     app: AppHandle,
     mgr: State<'_, MambaManager>,
 ) -> Result<Vec<EnvInfo>, String> {
-    let (mamba_root, rc) = mgr.setup(&app)?;
+    let (mamba_root, rc) = mgr.setup(&app).await?;
     let mut envs: Vec<EnvInfo> = Vec::new();
 
     // 受保护默认环境始终在列首。
@@ -1167,7 +1482,7 @@ pub async fn delete_mamba_env(
     mgr: State<'_, MambaManager>,
     env_name: String,
 ) -> Result<String, String> {
-    let (mamba_root, rc) = mgr.setup(&app)?;
+    let (mamba_root, rc) = mgr.setup(&app).await?;
 
     // 受保护默认环境不允许删除。
     if env_name == DEFAULT_ENV {
@@ -1202,22 +1517,27 @@ pub async fn delete_mamba_env(
 /// 由调用方（setup 钩子）记录日志，不阻塞应用启动。
 pub async fn ensure_default_env(app: &AppHandle) -> Result<(), String> {
     let mgr = MambaManager::new();
-    let (mamba_root, rc) = mgr.setup(app)?;
+    let (mamba_root, rc) = mgr.setup(app).await?;
 
     let env_path = mamba_root.join("envs").join(DEFAULT_ENV);
     if env_path.exists() {
         return Ok(());
     }
 
-    let mut args = global_args(&mamba_root, &rc);
-    args.extend([
-        "create".into(),
-        "-n".into(),
-        DEFAULT_ENV.to_string(),
-        format!("python={}", DEFAULT_PYTHON),
-        "-y".into(),
-    ]);
-    let (_, stderr, code) = run_sidecar(app, args, None, &[]).await?;
+    // 镜像源故障自动换源重试一次（清华 403 场景：切到中科大 / 官方源后即可成功）。
+    let (_, stderr, code) =
+        run_mamba_with_mirror_fallback(app, &mamba_root, &rc, |root, rc| {
+            let mut a = global_args(root, rc);
+            a.extend([
+                "create".into(),
+                "-n".into(),
+                DEFAULT_ENV.to_string(),
+                format!("python={}", DEFAULT_PYTHON),
+                "-y".into(),
+            ]);
+            a
+        })
+        .await?;
     match code {
         Some(0) => Ok(()),
         Some(c) => Err(format!("创建默认环境失败（退出码 {c}）：\n{stderr}")),
@@ -1248,5 +1568,36 @@ mod tests {
         // 两者皆无 → 空列表（调用方据此跳过注入）。
         let none = pythonpath_env(None, None).unwrap();
         assert!(none.is_empty());
+    }
+
+    /// 镜像源标识写入后可被反解（保证「已生成的 .mambarc 可复用 / 可识别失效」）。
+    #[test]
+    fn rc_content_roundtrip_mirror_id() {
+        let m = &MIRRORS[0];
+        let content = rc_content(m);
+        assert_eq!(rc_mirror_id(&content), Some(m.id.to_string()));
+        // 用户手写（无标记）的旧文件：反解为 None → 走探活重写流程。
+        assert_eq!(rc_mirror_id("channels:\n  - defaults\n"), None);
+    }
+
+    /// 不再写死清华源：默认候选首选必须是中科大（清华实测 403）。
+    #[test]
+    fn default_mirror_is_not_tuna() {
+        assert_eq!(MIRRORS[0].id, "ustc");
+        assert!(MIRRORS.iter().any(|m| m.id == "tuna"));
+        assert!(MIRRORS.iter().any(|m| m.id == "official"));
+    }
+
+    /// 只有镜像源类故障才触发换源重试；脚本/依赖类错误不得误判。
+    #[test]
+    fn mirror_failure_detection() {
+        assert!(is_mirror_failure(
+            "Transfer finalized, status: 403 [https://mirrors.tuna.../repodata.json]"
+        ));
+        assert!(is_mirror_failure("Subdir pkgs/main/noarch not loaded!"));
+        assert!(!is_mirror_failure(
+            "ModuleNotFoundError: No module named 'pandas'"
+        ));
+        assert!(!is_mirror_failure("SyntaxError: invalid syntax"));
     }
 }
