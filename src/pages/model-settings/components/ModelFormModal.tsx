@@ -260,7 +260,9 @@ export function ModelFormModal({
                                     <Input
                                         value={draft.baseUrl}
                                         status={errStatus('baseUrl')}
-                                        placeholder="完整接口地址，如 https://api.openai.com/v1/chat/completions"
+                                        placeholder={draft.category === 'image'
+                                            ? '完整 Images API 地址，如 https://api.openai.com/v1/images/generations（须以 /images/generations 结尾）'
+                                            : '完整接口地址，如 https://api.openai.com/v1/chat/completions'}
                                         onChange={(e) => patch({baseUrl: e.target.value})}
                                     />
                                     <span className="mfm__hint">填写可直接调用的完整地址（含端点路径），不做拼接</span>

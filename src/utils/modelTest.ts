@@ -188,6 +188,10 @@ function classify(code: number, elapsedMs: number, body?: string): ModelTestResu
   }
   // 400 / 422：请求体格式不被服务端接受（服务已响应 ⇒ 网络可达、URL 正确；仅探测体的字段名不匹配）
   if (code === 400 || code === 422) {
+    // 图片模型误配到对话端点：服务端会报 "requires the Images API" —— 这时 URL 恰恰是错的，给定向建议
+    if (/images api|image model/i.test(detail ?? '')) {
+      return { ok: false, level: 'warn', message: withDetail(`图片生成模型必须走 Images API：请把接口地址改为以 /images/generations 结尾（HTTP ${code}）`), status: code, elapsedMs }
+    }
     return { ok: false, level: 'warn', message: withDetail(`网络可达，服务已响应（HTTP ${code}，探测请求体格式不被接受，URL 正确即可）`), status: code, elapsedMs }
   }
   // 429：触发限流（网络可达）
