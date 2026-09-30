@@ -297,8 +297,9 @@ export default function SquadDetailPage() {
         void (async () => {
             let ok = await isPermissionGranted()
             if (!ok) ok = (await requestPermission()) === 'granted'
-            void listen<{toolName?: string}>('agent-awaiting-approval', (e) => {
+            void listen<{toolName?: string; approvalId?: string}>('agent-awaiting-approval', (e) => {
                 const tool = e.payload?.toolName || '敏感操作'
+                if (e.payload?.approvalId) setPendingApprovals((q) => q.some((x) => x.approvalId === e.payload!.approvalId) ? q : [...q, {approvalId: e.payload!.approvalId!, toolName: tool}])
                 if (ok) void sendNotification({title: '小分队请求授权', body: `${tool} 等待审批，120 秒无响应将自动通过`})
             }).then((f) => { un = f })
         })()
@@ -319,6 +320,8 @@ export default function SquadDetailPage() {
     const [checkpointPending, setCheckpointPending] = useState(false)
     // 手动无人值守开关：开 = 该队审批/门禁不再等决策（低危自动按推荐方案，L3 高危仍挂起）
     const [unattended, setUnattended] = useState(false)
+    // 成员待审批卡（工作台可见即可批；后端 120s×2 兜底自动批）
+    const [pendingApprovals, setPendingApprovals] = useState<Array<{ approvalId: string; toolName: string }>>([])
 
     function toggleUnattended() {
         const next = !unattended
@@ -366,7 +369,7 @@ export default function SquadDetailPage() {
     }, [id])
 
     useEffect(() => {
-        const t = setInterval(() => { void reloadSessions() }, 30000)
+        const t = setInterval(() => { void reloadSessions() }, 10000)
         return () => clearInterval(t)
     }, [reloadSessions])
 
@@ -678,8 +681,9 @@ export default function SquadDetailPage() {
                                     <div className="sw-input-box__footer"><Button variant="solid" size="sm" disabled={!prompt.trim() || starting} onClick={() => void handleStart()}>{starting ? '启动中…' : '开始运行'}</Button></div>
                                 </div>
                             ) : canInject ? (
-                                <>
-                                    <div className="sw-composer__row">
+                                <div className="sw-input-box sw-inject-box">
+                                    <div className="sw-input-box__resizer" title="向上拖动调整输入框高度" onMouseDown={startInputResize}/>
+                                    <div className="sw-inject-bar">
                                         <span className="sw-modebar__label">目标</span>
                                         {(squad.members || []).map((m) => (
                                             <div key={m.id || m.agentId} className={`sw-member-pick${injectTarget === m.agentId ? ' is-on' : ''}`} onClick={() => setInjectTarget(m.agentId)}>
@@ -688,7 +692,7 @@ export default function SquadDetailPage() {
                                             </div>
                                         ))}
                                     </div>
-                                    <div className="sw-composer__row">
+                                    <div className="sw-inject-bar">
                                         <span className="sw-modebar__label">方式</span>
                                         <div className="sw-seg">
                                             {([['soft', '打断'], ['hard', '强打断'], ['pre_talk', '预嘱']] as const).map(([v, l]) => (
@@ -699,12 +703,17 @@ export default function SquadDetailPage() {
                                             {injectMode === 'soft' ? '打断：其下一轮生效' : injectMode === 'hard' ? '强打断：优先处理' : '预嘱：任务启动时注入'}
                                         </span>
                                     </div>
-                                    <div className="sw-input-box">
-                                        <div className="sw-input-box__resizer" title="向上拖动调整输入框高度" onMouseDown={startInputResize}/>
-                                        <textarea rows={2} placeholder="补充说明、纠偏指令…" value={injectText} onChange={(e) => setInjectText(e.target.value)} style={{height: inputHeight}}/>
-                                        <div className="sw-input-box__footer"><Button variant="solid" size="sm" disabled={injectBusy || !injectText.trim()} onClick={() => void handleInject()}>{injectBusy ? '发送中…' : '发送'}</Button></div>
+                                    <textarea rows={2} placeholder="补充说明、纠偏指令…" value={injectText} onChange={(e) => setInjectText(e.target.value)} style={{height: inputHeight}}/>
+                                    <div className="sw-input-box__footer">
+                                        <span className="sw-inject-hint">
+                                            {(() => {
+                                                const t = (squad.members || []).find((m) => m.agentId === injectTarget)
+                                                return t ? `将送达：${memberLabel(t, agents)}` : '先在上方选择一位成员'
+                                            })()}
+                                        </span>
+                                        <Button variant="solid" size="sm" disabled={injectBusy || !injectText.trim()} onClick={() => void handleInject()}>{injectBusy ? '发送中…' : '发送'}</Button>
                                     </div>
-                                </>
+                                </div>
                             ) : (
                                 <div className="sw-composer__row sw-composer__row--center"><span className="sw-inject-hint">{selectedSession?.status === 'paused' ? '协作已暂停，可在左侧卡片恢复。' : selectedSession?.status === 'awaiting_delivery' ? '交付待确认：请在上方决议条操作。' : '该会话已结束，可重跑或新建任务。'}</span></div>
                             )}
@@ -895,6 +904,21 @@ const TimelineView = memo(function TimelineView({rounds, members, agents, appear
                     </div>
                 )
             })}
+            {pendingApprovals.map((pa) => (
+                <div key={pa.approvalId} className="sw-round sw-round--gate">
+                    <div className="sw-round__pa sw-round__pa--user">批</div>
+                    <div className="sw-round__body">
+                        <div className="sw-round__head"><span className="sw-round__name">授权请求</span><span className="sw-badge sw-badge--gate">成员待审批</span></div>
+                        <div className="sw-round__content">
+                            成员请求执行：{pa.toolName}
+                            <div style={{display: 'flex', gap: 8, marginTop: 8}}>
+                                <Button variant="solid" size="sm" onClick={() => void invoke('squad_member_approval_resolve', {approvalId: pa.approvalId, decision: 'approve'}).then(() => setPendingApprovals((q) => q.filter((x) => x.approvalId !== pa.approvalId)))}>批准</Button>
+                                <Button variant="outline" size="sm" onClick={() => void invoke('squad_member_approval_resolve', {approvalId: pa.approvalId, decision: 'skip'}).then(() => setPendingApprovals((q) => q.filter((x) => x.approvalId !== pa.approvalId)))}>跳过</Button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            ))}
             {(planPending || checkpointPending) && (
                 <div className="sw-round sw-round--gate">
                     <div className="sw-round__pa sw-round__pa--user">禁</div>

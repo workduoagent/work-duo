@@ -147,6 +147,8 @@ pub fn run() {
             agent::commands::run_squad_task,
             agent::commands::cancel_squad_task,
             agent::commands::squad_watch_heartbeat,
+            agent::commands::squad_member_approval_resolve,
+            agent::commands::squad_pending_approvals,
             agent::commands::squad_watch_off,
             agent::commands::squad_set_unattended,
             agent::commands::squad_pause,

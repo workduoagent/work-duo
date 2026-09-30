@@ -56,6 +56,37 @@ pub enum ApprovalOutcome {
 
 /// 审批管理器（托管于 Tauri State）。
 #[derive(Clone, Default)]
+/// 成员审批挂起注册表：approvalId → (squadId, toolName, 决策发送端)。前端工作台审批卡直达。
+static SQUAD_APPROVALS: std::sync::Mutex<Option<std::collections::HashMap<String, (String, String, oneshot::Sender<ApprovalOutcome>)>>> =
+    std::sync::Mutex::new(None);
+
+/// 列出某编队的待审批项（工作台拉取渲染）。
+pub fn pending_member_approvals(squad_id: &str) -> Vec<(String, String)> {
+    SQUAD_APPROVALS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_ref()
+        .map(|m| {
+            m.iter()
+                .filter(|(_, (sid, _, _))| sid == squad_id)
+                .map(|(id, (_, tool, _))| (id.clone(), tool.clone()))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// 前端审批卡回传决策（approve/skip）。
+pub fn resolve_member_approval(approval_id: &str, decision: &str) -> bool {
+    let outcome = if decision.eq_ignore_ascii_case("skip") { ApprovalOutcome::Skip } else { ApprovalOutcome::Approve };
+    SQUAD_APPROVALS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_mut()
+        .and_then(|m| m.remove(approval_id))
+        .map(|(_, _, tx)| tx.send(outcome).is_ok())
+        .unwrap_or(false)
+}
+
 pub struct ApprovalManager {
     pending: Arc<Mutex<HashMap<String, Pending>>>,
     /// 成员所属小分队：审批梯度判定键（工作台观看中挂起等决策 / 不在通知 120s×2 后低危自动批）。
@@ -100,6 +131,13 @@ impl ApprovalManager {
                 let (tx, rx) = oneshot::channel();
                 let _ = tx.send(ApprovalOutcome::Approve);
                 return rx;
+            }
+            {
+                SQUAD_APPROVALS
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .get_or_insert_with(std::collections::HashMap::new)
+                    .insert(request.approval_id.clone(), (sid.clone(), request.tool_name.clone(), oneshot::channel().0));
             }
             if !watched && !l3 {
                 let pending = self.pending.clone();
