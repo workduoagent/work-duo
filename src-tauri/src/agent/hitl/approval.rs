@@ -189,6 +189,21 @@ fn auto_resolve_member_approval(approval_id: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// 审批挂起超时兜底（单 Agent）：用户不点弹窗时任务不能永久挂死。
+pub const SINGLE_AGENT_APPROVAL_TIMEOUT_SECS: u64 = 300;
+/// 审批挂起超时兜底（小分队成员）：2026-10-01 复盘——此前沿用 300s 一刀切，用户
+/// 打开工作台时审批常已被超时 Skip，LLM 随后原样重试同一工具 → 新 approvalId →
+/// 系统通知连发而界面无卡（通知循环）。成员场景给足 15 分钟决策窗口。
+pub const MEMBER_APPROVAL_TIMEOUT_SECS: u64 = 900;
+
+/// `ApprovalManager::suspend` 的返回。`needs_emit=false` 表示审批在进入任何挂起表
+/// 之前已被策略短路（同工具短时记忆命中 / 无人值守低危自动批）：调用方不得再向
+/// 前端广播「等待授权」事件，否则会渲染一张永远无法决议、点掉还报「已失效」的死卡。
+pub struct SuspendOutcome {
+    pub rx: oneshot::Receiver<ApprovalOutcome>,
+    pub needs_emit: bool,
+}
+
 /// 审批管理器（托管于 Tauri State）。
 #[derive(Clone, Default)]
 pub struct ApprovalManager {
@@ -197,6 +212,27 @@ pub struct ApprovalManager {
     squad_id: Option<String>,
     /// 成员智能体 id（成员上下文非空）：同工具授权短时记忆的主键之一。
     member_agent_id: Option<String>,
+}
+
+impl ApprovalManager {
+    /// 是否处于小分队成员上下文（决定事件分流与超时策略）。
+    pub fn is_member(&self) -> bool {
+        self.squad_id.is_some()
+    }
+
+    /// 成员所属小分队 id（仅成员上下文非空；供成员审批事件携带，前端按队过滤）。
+    pub fn member_squad_id(&self) -> Option<&str> {
+        self.squad_id.as_deref()
+    }
+
+    /// 审批挂起超时兜底：成员 900s（给工作台决策留足窗口），单 Agent 维持 300s。
+    pub fn approval_timeout_secs(&self) -> u64 {
+        if self.squad_id.is_some() {
+            MEMBER_APPROVAL_TIMEOUT_SECS
+        } else {
+            SINGLE_AGENT_APPROVAL_TIMEOUT_SECS
+        }
+    }
 }
 
 impl ApprovalManager {
@@ -219,9 +255,11 @@ impl ApprovalManager {
     }
 
     /// 挂起等待决策：注册 pending 并立即返回接收端，由调用方 `await`。
-    /// 返回 (request, rx)：request 用于推前端，rx 用于阻塞等待用户决策。
+    /// 2026-10-01 复盘：挂起注册必须先于前端事件广播（调用方在 `needs_emit=true`
+    /// 时才发事件），用户秒点批准不会命中「已失效」；策略短路（记忆/无人值守）时
+    /// `needs_emit=false`，前端不弹卡。
     #[tracing::instrument(skip_all)]
-    pub async fn suspend(&self, request: ApprovalRequest) -> oneshot::Receiver<ApprovalOutcome> {
+    pub async fn suspend(&self, request: ApprovalRequest) -> SuspendOutcome {
         // 成员上下文梯度降级（用户设计）：工作台观看中 → 挂起等决策；不在 → 通知 120s×2 后
         // 低危自动批；L3 高危一律保持挂起。成员审批使用全局表保存真实 sender，
         // squad_member_approval_resolve 才能直接唤醒当前 pipeline。
@@ -242,13 +280,13 @@ impl ApprovalManager {
                 tracing::info!("[agent] approval: 同工具短时记忆命中，自动放行 tool={} agent={aid}", request.tool_name);
                 let (tx, rx) = oneshot::channel();
                 let _ = tx.send(ApprovalOutcome::Approve);
-                return rx;
+                return SuspendOutcome { rx, needs_emit: false };
             }
             // 保持既有 unattended 语义：低危工具立即放行，不进入审批表；L3 仍必须挂起。
             if unattended && !l3 {
                 let (tx, rx) = oneshot::channel();
                 let _ = tx.send(ApprovalOutcome::Approve);
-                return rx;
+                return SuspendOutcome { rx, needs_emit: false };
             }
             let (tx, rx) = oneshot::channel();
             let approval_id = request.approval_id.clone();
@@ -275,7 +313,7 @@ impl ApprovalManager {
                 });
             }
             // 成员审批不再写入 self.pending；全局表保存的就是实际唤醒 sender。
-            return rx;
+            return SuspendOutcome { rx, needs_emit: true };
         }
 
         // 单 Agent 审批：保留原有 manager-local pending + grant_key 机制。
@@ -292,7 +330,7 @@ impl ApprovalManager {
             tool_name,
             self.pending.lock().await.len(),
         );
-        rx
+        SuspendOutcome { rx, needs_emit: true }
     }
 
     /// 前端回传决策：唤醒对应挂起的任务。无匹配 id 时返回 false（已超时/不存在）。
@@ -405,25 +443,39 @@ mod member_approval_tests {
     #[tokio::test]
     async fn member_approval_resolve_wakes_real_sender_and_remembers_tool() {
         let manager = ApprovalManager::for_member("sq-test".into(), "agent-test".into());
-        let rx = manager.suspend(req("ap-test-1", "native__write_file")).await;
+        assert!(manager.is_member());
+        assert_eq!(manager.approval_timeout_secs(), MEMBER_APPROVAL_TIMEOUT_SECS);
+        let suspended = manager.suspend(req("ap-test-1", "native__write_file")).await;
+        assert!(suspended.needs_emit, "真实挂起必须广播事件，否则工作台无卡");
         assert!(pending_member_approvals("sq-test").iter().any(|(id, tool)| id == "ap-test-1" && tool == "native__write_file"));
         assert!(resolve_member_approval("ap-test-1", "approve"));
-        assert!(matches!(rx.await.unwrap(), ApprovalOutcome::Approve));
-        // 同成员同工具在 TTL 内再次请求应自动放行，且不会新增 pending 卡。
-        let rx2 = manager.suspend(req("ap-test-2", "native__write_file")).await;
+        assert!(matches!(suspended.rx.await.unwrap(), ApprovalOutcome::Approve));
+        // 同成员同工具在 TTL 内再次请求应自动放行（策略短路）：不新增 pending 卡，也不再广播事件。
+        let suspended2 = manager.suspend(req("ap-test-2", "native__write_file")).await;
+        assert!(!suspended2.needs_emit, "同工具记忆命中属策略短路，再广播会渲染无法决议的死卡");
         assert!(pending_member_approvals("sq-test").iter().all(|(id, _)| id != "ap-test-2"));
-        assert!(matches!(rx2.await.unwrap(), ApprovalOutcome::Approve));
+        assert!(matches!(suspended2.rx.await.unwrap(), ApprovalOutcome::Approve));
         clear_member_approvals("sq-test", "agent-test");
     }
 
     #[tokio::test]
     async fn member_approval_guard_cleans_pending_sender() {
         let manager = ApprovalManager::for_member("sq-guard".into(), "agent-guard".into());
-        let _rx = manager.suspend(req("ap-guard-1", "native__write_file")).await;
+        let suspended = manager.suspend(req("ap-guard-1", "native__write_file")).await;
+        assert!(suspended.needs_emit);
         assert_eq!(pending_member_approvals("sq-guard").len(), 1);
         {
             let _guard = MemberApprovalGuard::new("sq-guard", "agent-guard");
         }
         assert!(pending_member_approvals("sq-guard").is_empty());
+    }
+
+    #[tokio::test]
+    async fn single_agent_approval_keeps_short_timeout_and_emit() {
+        let manager = ApprovalManager::new();
+        assert!(!manager.is_member());
+        assert_eq!(manager.approval_timeout_secs(), SINGLE_AGENT_APPROVAL_TIMEOUT_SECS);
+        let suspended = manager.suspend(req("ap-single-1", "native__write_file")).await;
+        assert!(suspended.needs_emit);
     }
 }

@@ -649,6 +649,27 @@ pub fn emit_awaiting_approval(app: &AppHandle, req: &ApprovalRequest) {
     emit(app, EVT_APPROVAL, req);
 }
 
+/// 小分队成员高危操作挂起（2026-10-01 复盘 P3）：与单 Agent 通道分流成独立事件名，
+/// agent-studio 的全局事件桥（只订阅 `agent-awaiting-approval`）不会再把成员审批
+/// 误路由进正在运行的单 Agent 会话——此前会污染会话状态、代发系统通知，且 studio
+/// 的批准按钮对成员审批是查不到挂起项的死路。
+pub const EVT_SQUAD_APPROVAL: &str = "squad-awaiting-approval";
+
+/// 成员审批事件负载：ApprovalRequest 打平 + squadId。前端工作台按 squadId 过滤，
+/// 防止后台其他编队的审批串进当前工作台的卡片列表。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MemberApprovalEvent<'a> {
+    #[serde(flatten)]
+    pub request: &'a ApprovalRequest,
+    pub squad_id: &'a str,
+}
+
+/// 成员高危操作挂起：携带所属小分队 id 推给前端工作台。
+pub fn emit_member_awaiting_approval(app: &AppHandle, req: &ApprovalRequest, squad_id: &str) {
+    emit(app, EVT_SQUAD_APPROVAL, &MemberApprovalEvent { request: req, squad_id });
+}
+
 /// 方案推荐挂起（Agent 主动询问用户，等待前端选择）。
 pub fn emit_choice_needed(app: &AppHandle, req: &ChoiceRequest) {
     emit(app, EVT_CHOICE_NEEDED, req);

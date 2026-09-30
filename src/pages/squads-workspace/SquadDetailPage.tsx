@@ -301,12 +301,16 @@ export default function SquadDetailPage() {
         }
     }, [id])
 
-    // 审批挂起 → 统一系统通知通道：窗口聚焦时不弹、失焦时节流，且遵守客户端通知开关。
+    // 成员审批独立事件通道（2026-10-01 复盘 P3）：后端成员审批改发 squad-awaiting-approval，
+    // agent-studio 全局桥（只订阅 agent-awaiting-approval）不再把成员审批误路由进单 Agent 会话。
+    // 通知走统一系统通知通道：窗口聚焦时不弹、失焦时节流，且遵守客户端通知开关；
     // 另以 approvalId 去重，防同一挂起事件重发导致 Windows Toast 连弹；具体批准仍在工作台卡片完成。
     const seenApprovalIdsRef = useRef<Set<string>>(new Set())
     useEffect(() => {
         let un: (() => void) | undefined
-        void listen<{toolName?: string; approvalId?: string}>('agent-awaiting-approval', (e) => {
+        void listen<{toolName?: string; approvalId?: string; squadId?: string}>('squad-awaiting-approval', (e) => {
+            // 按队过滤：后台其他编队的成员审批不串进当前工作台的卡片/通知。
+            if (id && e.payload?.squadId && e.payload.squadId !== id) return
             const tool = e.payload?.toolName || '敏感操作'
             const approvalId = e.payload?.approvalId
             if (approvalId) {
@@ -318,7 +322,7 @@ export default function SquadDetailPage() {
             void notifyOSWhenHidden('小分队请求授权', `${tool} 等待审批，请在工作台处理`).catch(() => {})
         }).then((f) => { un = f })
         return () => un?.()
-    }, [])
+    }, [id])
     const [injectTarget, setInjectTarget] = useState<string>('')
     const [injectMode, setInjectMode] = useState<'soft' | 'hard' | 'pre_talk'>('soft')
     const [injectText, setInjectText] = useState('')
@@ -351,6 +355,25 @@ export default function SquadDetailPage() {
             message.error(`授权决议失败：${e instanceof Error ? e.message : String(e)}`)
         }
     }, [message])
+
+    // 待审批列表对账（2026-10-01 复盘 P1）：此前审批卡只能靠挂起瞬间的实时事件出现，
+    // 页面刷新/切走再回来/晚打开工作台都会永久丢卡——后端还在挂起、通知还在发，界面无卡。
+    // 现在挂载即拉取 + 与观看心跳同频对账；后端列表是唯一事实源，超时/取消的僵尸卡一并清掉。
+    const refreshPendingApprovals = useCallback(async () => {
+        if (!id) return
+        try {
+            const rows = await invoke<Array<[string, string]>>('squad_pending_approvals', {squadId: id})
+            setPendingApprovals(rows.map(([approvalId, toolName]) => ({approvalId, toolName})))
+        } catch {
+            // 拉取失败保留本地卡不清空，等下一轮对账
+        }
+    }, [id])
+    useEffect(() => {
+        if (!id) return
+        void refreshPendingApprovals()
+        const t = setInterval(() => void refreshPendingApprovals(), 5000)
+        return () => clearInterval(t)
+    }, [id, refreshPendingApprovals])
 
     function toggleUnattended() {
         const next = !unattended
@@ -706,8 +729,8 @@ export default function SquadDetailPage() {
                                 <div className="sw-round__content">
                                     成员请求执行：{pa.toolName}
                                     <div style={{display: 'flex', gap: 8, marginTop: 8}}>
-                                        <Button variant="solid" size="sm" onClick={() => void invoke('squad_member_approval_resolve', {approvalId: pa.approvalId, decision: 'approve'}).then(() => setPendingApprovals((q) => q.filter((x) => x.approvalId !== pa.approvalId)))}>批准</Button>
-                                        <Button variant="outline" size="sm" onClick={() => void invoke('squad_member_approval_resolve', {approvalId: pa.approvalId, decision: 'skip'}).then(() => setPendingApprovals((q) => q.filter((x) => x.approvalId !== pa.approvalId)))}>跳过</Button>
+                                        <Button variant="solid" size="sm" onClick={() => void resolveMemberApproval(pa.approvalId, 'approve')}>批准</Button>
+                                        <Button variant="outline" size="sm" onClick={() => void resolveMemberApproval(pa.approvalId, 'skip')}>跳过</Button>
                                     </div>
                                 </div>
                             </div>

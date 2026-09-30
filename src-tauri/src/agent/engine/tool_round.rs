@@ -19,8 +19,17 @@ use crate::agent::engine::runtime::{clip, now_ms};
 
 /// 工具返回结果物理截断阈值（字符）。防止超大输出撑爆上下文、无谓消耗 Token。
 const MAX_TOOL_OUTPUT_LENGTH: usize = 15000;
-/// 敏感工具审批挂起超时（秒）。超时与「停止」都收敛到拒绝分支，不新增状态通路。
-const APPROVAL_TIMEOUT_SECS: u64 = 300;
+
+/// 审批 Skip 回灌给 LLM 的文案。成员上下文更强硬地阻止重试——2026-10-01 复盘：
+/// 审批超时 Skip 后模型常原样重发同一工具，每次重试都是新 approvalId、新系统通知，
+/// 形成「通知连发而界面无卡」的循环。
+fn approval_skip_note(member: bool) -> &'static str {
+    if member {
+        "用户未授权该操作（已跳过）。不要再次请求同一工具；请改用其他方案或继续执行后续步骤"
+    } else {
+        "用户跳过执行（未授权），按原计划继续后续步骤"
+    }
+}
 
 /// 单轮工具执行结果统计（供连续错误熔断判定）。
 pub(crate) struct ToolRoundStats {
@@ -331,12 +340,22 @@ pub(crate) async fn run_tool_calls_round(
 
         // Host 挂起：弹 host 审批卡（ApprovalManager 同通道，前端按 domain=host 分型渲染）。
         if let Some(req) = host_approval_req.take() {
-            events::emit_awaiting_approval(app, &req);
+            // 先注册后广播（2026-10-01 复盘 P4）：挂起表里已有 sender 再发事件，用户秒点
+            // 批准不会命中「已失效」；已被策略短路（同工具记忆/无人值守低危）时不广播，
+            // 否则会渲染一张永远无法决议的死卡。成员审批走独立事件通道并携带 squadId（P3）。
             let approval_id = req.approval_id.clone();
-            let rx = approval.suspend(req).await;
+            let suspended = approval.suspend(req.clone()).await;
+            if suspended.needs_emit {
+                if let Some(sid) = approval.member_squad_id() {
+                    events::emit_member_awaiting_approval(app, &req, sid);
+                } else {
+                    events::emit_awaiting_approval(app, &req);
+                }
+            }
+            let skip_note = approval_skip_note(approval.is_member());
             let host_outcome: ApprovalOutcome = match timeout(
-                Duration::from_secs(APPROVAL_TIMEOUT_SECS),
-                rx,
+                Duration::from_secs(approval.approval_timeout_secs()),
+                suspended.rx,
             )
             .await
             {
@@ -373,7 +392,7 @@ pub(crate) async fn run_tool_calls_round(
                     messages.push(json!({
                         "role": "tool",
                         "tool_call_id": call_id,
-                        "content": "用户跳过执行（未授权），按原计划继续后续步骤"
+                        "content": skip_note
                     }));
                     continue;
                 }
@@ -396,12 +415,20 @@ pub(crate) async fn run_tool_calls_round(
                 host_meta: None,
                 run_id: cfg.round_id.clone(),
             };
-            events::emit_awaiting_approval(app, &req);
-            let rx = approval.suspend(req).await;
+            // 先注册后广播 + 成员事件分流，语义同上方 Host 挂起点（2026-10-01 复盘 P3/P4）。
+            let suspended = approval.suspend(req.clone()).await;
+            if suspended.needs_emit {
+                if let Some(sid) = approval.member_squad_id() {
+                    events::emit_member_awaiting_approval(app, &req, sid);
+                } else {
+                    events::emit_awaiting_approval(app, &req);
+                }
+            }
+            let skip_note = approval_skip_note(approval.is_member());
             // 超时/停止与既有语义一致：走 Skip 分支（详见静态敏感块注释）。
             let approval_outcome: ApprovalOutcome = match timeout(
-                Duration::from_secs(APPROVAL_TIMEOUT_SECS),
-                rx,
+                Duration::from_secs(approval.approval_timeout_secs()),
+                suspended.rx,
             )
             .await
             {
@@ -445,7 +472,7 @@ pub(crate) async fn run_tool_calls_round(
                     messages.push(json!({
                         "role": "tool",
                         "tool_call_id": call_id,
-                        "content": "用户跳过执行（未授权），按原计划继续后续步骤"
+                        "content": skip_note
                     }));
                     continue;
                 }
@@ -465,15 +492,23 @@ pub(crate) async fn run_tool_calls_round(
                 host_meta: None,
                 run_id: cfg.round_id.clone(),
             };
-            events::emit_awaiting_approval(app, &req);
-            let rx = approval.suspend(req).await;
+            // 先注册后广播 + 成员事件分流，语义同上方 Host 挂起点（2026-10-01 复盘 P3/P4）。
+            let suspended = approval.suspend(req.clone()).await;
+            if suspended.needs_emit {
+                if let Some(sid) = approval.member_squad_id() {
+                    events::emit_member_awaiting_approval(app, &req, sid);
+                } else {
+                    events::emit_awaiting_approval(app, &req);
+                }
+            }
+            let skip_note = approval_skip_note(approval.is_member());
             // 审批挂起设独立超时，避免用户不点弹窗导致任务永久挂起。
             // 超时与「停止」(`cancel_all` drop Sender) 都走拒绝分支，不新增状态通路。
             // 三态：`Ok(Ok)`=前端决策；`Ok(Err)`=Sender 被 drop（停止触发，通道关闭）；
             // `Err`=超时（清理 pending 条目后自动拒绝）。
             let approval_outcome: ApprovalOutcome = match timeout(
-                Duration::from_secs(APPROVAL_TIMEOUT_SECS),
-                rx,
+                Duration::from_secs(approval.approval_timeout_secs()),
+                suspended.rx,
             )
             .await
             {
@@ -516,7 +551,7 @@ pub(crate) async fn run_tool_calls_round(
                     messages.push(json!({
                         "role": "tool",
                         "tool_call_id": call_id,
-                        "content": "用户跳过执行（未授权），按原计划继续后续步骤"
+                        "content": skip_note
                     }));
                     continue;
                 }
