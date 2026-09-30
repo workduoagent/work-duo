@@ -58,24 +58,23 @@ pub enum ApprovalOutcome {
 #[derive(Clone, Default)]
 pub struct ApprovalManager {
     pending: Arc<Mutex<HashMap<String, Pending>>>,
-    /// 成员无人值守上下文：不挂起等决策，所有审批自动批准并留痕（2026-09-30 工作台卡死根因——
-    /// 成员写文件触发审批挂起，工作台无审批卡可点，白等 300s 超时才 Skip）。
-    auto_approve: bool,
+    /// 成员所属小分队：审批梯度判定键（工作台观看中挂起等决策 / 不在通知 120s×2 后低危自动批）。
+    squad_id: Option<String>,
 }
 
 impl ApprovalManager {
     pub fn new() -> Self {
         Self {
             pending: Arc::new(Mutex::new(HashMap::new())),
-            auto_approve: false,
+            squad_id: None,
         }
     }
 
-    /// 成员无人值守上下文专用：审批自动批准（工具面裁剪已控制风险边界）。
-    pub fn new_auto_approve() -> Self {
+    /// 成员上下文：审批梯度降级（工作台观看中=挂起等决策；不在=通知 120s×2 后低危自动批；L3 一律挂起）。
+    pub fn for_member(squad_id: String) -> Self {
         Self {
             pending: Arc::new(Mutex::new(HashMap::new())),
-            auto_approve: true,
+            squad_id: Some(squad_id),
         }
     }
 
@@ -83,16 +82,40 @@ impl ApprovalManager {
     /// 返回 (request, rx)：request 用于推前端，rx 用于阻塞等待用户决策。
     #[tracing::instrument(skip_all)]
     pub async fn suspend(&self, request: ApprovalRequest) -> oneshot::Receiver<ApprovalOutcome> {
-        // 成员无人值守上下文：直接自动批准（留痕），不注册 pending、不阻塞。
-        if self.auto_approve {
+        // 成员上下文梯度降级（用户设计）：工作台观看中 → 挂起等界面决策；不在 → 通知 120s×2 后
+        // 低危自动批（推荐方案）；L3 高危一律保持挂起（tool_round 300s 超时兜底）。
+        if let Some(sid) = &self.squad_id {
+            let (watched, unattended) = crate::agent::squad::squad_orchestrator::approval_gradeline(sid);
+            let l3 = request
+                .host_meta
+                .as_ref()
+                .and_then(|m| m.get("l3"))
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
             tracing::info!(
-                "[agent] approval: 成员无人值守上下文自动批准 tool={} approval_id={}",
-                request.tool_name,
-                request.approval_id,
+                "[agent] approval: 成员审批梯度 watched={} unattended={} l3={} tool={} approval_id={}",
+                watched, unattended, l3, request.tool_name, request.approval_id,
             );
-            let (tx, rx) = oneshot::channel();
-            let _ = tx.send(ApprovalOutcome::Approve);
-            return rx;
+            if unattended && !l3 {
+                let (tx, rx) = oneshot::channel();
+                let _ = tx.send(ApprovalOutcome::Approve);
+                return rx;
+            }
+            if !watched && !l3 {
+                let pending = self.pending.clone();
+                let approval_id = request.approval_id.clone();
+                tokio::spawn(async move {
+                    for _ in 0..2 {
+                        tokio::time::sleep(std::time::Duration::from_secs(120)).await;
+                        if !pending.lock().await.contains_key(&approval_id) { return }
+                    }
+                    let mut p = pending.lock().await;
+                    if let Some(pr) = p.remove(&approval_id) {
+                        tracing::info!("[agent] approval: 宽限两轮（240s）无响应，低危自动批准 approval_id={} tool={}", approval_id, pr.request.tool_name);
+                        let _ = pr.tx.send(ApprovalOutcome::Approve);
+                    }
+                });
+            }
         }
         let (tx, rx) = oneshot::channel();
         let approval_id = request.approval_id.clone();

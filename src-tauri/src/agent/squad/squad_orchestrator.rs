@@ -2721,6 +2721,7 @@ async fn run_delegated_waves(
                         app,
                         &agent_cfg,
                         &role,
+                        &squad.squad_id,
                         session_c.as_str(),
                         &prompt_s,
                         &ws,
@@ -3160,6 +3161,8 @@ async fn run_member_subtask(
     app: &AppHandle,
     member_cfg: &AgentRuntimeConfig,
     member_role: &str,
+    // 审批梯度键：所属小分队 id（工作台观看中挂起等决策 / 不在自动批）。
+    squad_id: &str,
     // S0-4d：metrics 归属的 squad 会话 id（成员自身的 graph session 与此不同）。
     metrics_session: &str,
     prompt: &str,
@@ -3248,7 +3251,7 @@ async fn run_member_subtask(
     };
 
     // 成员无人值守上下文：审批自动批准（2026-09-30 卡死根因修复——写文件审批挂起 300s 白等）。
-    let approval = ApprovalManager::new_auto_approve();
+    let approval = ApprovalManager::for_member(squad_id.to_string());
     let recovery = RecoveryHub::new();
 
     // S0-4b（2026-09-28）：成员执行过 per-agent 锁（v1.4 §11/§9）——此前成员 pipeline 完全
@@ -3446,7 +3449,7 @@ async fn run_pipeline_node(
     };
     let mut last_err: Option<String> = None;
     for attempt in 0..retry {
-        match run_member_subtask(app, &member.agent, &member.role, session_id, &prompt.to_string(), &ws, unattended, Some(cancel), inject_hook.clone(), &member.tool_profile).await {
+        match run_member_subtask(app, &member.agent, &member.role, squad_id, session_id, &prompt.to_string(), &ws, unattended, Some(cancel), inject_hook.clone(), &member.tool_profile).await {
             Ok(o) => {
                 out = o;
                 break;
