@@ -25,6 +25,12 @@ import { invoke } from '@tauri-apps/api/core'
 import { testXfyun } from '@/core/model/iflytek'
 import type { ModelConfig } from '@/core/file/model-file'
 
+/** 卡片摘要：只显示级别 + 状态码（长报错经复制图标获取，避免撑爆卡片）。 */
+export function shortTestMessage(r: ModelTestResult): string {
+  const code = r.status ? `HTTP ${r.status}` : '未收到响应'
+  return r.level === 'success' ? `连通成功 · ${code}` : `连通失败 · ${code}`
+}
+
 export interface ModelTestResult {
   ok: boolean
   /** 三态：success=连通成功 / warn=网络可达但有提示（鉴权、路径、方法、请求体等） / error=不可达或服务端错误 */

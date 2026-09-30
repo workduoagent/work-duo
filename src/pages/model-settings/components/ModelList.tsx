@@ -6,14 +6,14 @@
  * 删除走二次确认弹窗（复用 ui/Modal）。
  */
 import {useState} from 'react'
-import {Pencil, Trash2, Zap, Wrench} from 'lucide-react'
+import {Pencil, Trash2, Zap, Wrench, Copy, Check} from 'lucide-react'
 import {Card, Button, Switch, Modal, SpinnerIcon} from '@/components/ui'
 import {
     PROVIDER_OPTIONS,
     getModelCategoryLabel,
     type ModelConfig,
 } from '@/core/file/model-file'
-import {testModelConnection, type ModelTestResult} from '@/utils/modelTest'
+import {testModelConnection, shortTestMessage, type ModelTestResult} from '@/utils/modelTest'
 import './ModelList.scss'
 
 /**
@@ -74,6 +74,7 @@ export function ModelList({
     const [pendingDelete, setPendingDelete] = useState<ModelConfig | null>(null)
     const [testingId, setTestingId] = useState<string | null>(null)
     const [results, setResults] = useState<Record<string, ModelTestResult>>({})
+    const [copiedId, setCopiedId] = useState<string | null>(null)
 
     async function handleTest(m: ModelConfig) {
         if (testingId === m.id) return
@@ -81,6 +82,22 @@ export function ModelList({
         const r = await testModelConnection(m)
         setResults((prev) => ({...prev, [m.id]: r}))
         setTestingId(null)
+    }
+
+    // 复制完整报错到剪贴板（摘要只显示状态码，详情由用户自行粘贴查看）
+    async function copyTestResult(id: string, text: string) {
+        try {
+            await navigator.clipboard.writeText(text)
+        } catch {
+            const ta = document.createElement('textarea')
+            ta.value = text
+            document.body.appendChild(ta)
+            ta.select()
+            document.execCommand('copy')
+            ta.remove()
+        }
+        setCopiedId(id)
+        window.setTimeout(() => setCopiedId((cur) => (cur === id ? null : cur)), 1500)
     }
 
     if (loading) {
@@ -182,9 +199,21 @@ export function ModelList({
                                     title={result.message}
                                 >
                                     <span className="model-card__test-dot"/>
-                                    {result.message}
+                                    {/* 摘要只显示级别 + 状态码；完整报错经复制图标获取（防长报错撑爆卡片） */}
+                                    {shortTestMessage(result)}
                                     {typeof result.elapsedMs === 'number' && (
                                         <span className="model-card__test-ms">· {result.elapsedMs}ms</span>
+                                    )}
+                                    {!result.ok && (
+                                        <Button
+                                            variant="ghost"
+                                            size="icon-sm"
+                                            aria-label="复制完整报错信息"
+                                            title="复制完整报错信息"
+                                            onClick={() => void copyTestResult(m.id, result.message)}
+                                        >
+                                            {copiedId === m.id ? <Check size={13}/> : <Copy size={13}/>}
+                                        </Button>
                                     )}
                                 </div>
                             )}

@@ -6,7 +6,7 @@
  * 分类参数区复用公共组件 ParamFieldsForm（智能体向导「步骤2 选择模型」用的是同一个）。
  */
 import {useEffect, useState} from 'react'
-import {Zap, Wrench} from 'lucide-react'
+import {Zap, Wrench, Copy, Check} from 'lucide-react'
 import {
     Button,
     Input,
@@ -24,7 +24,7 @@ import {
     MODEL_CATEGORY_OPTIONS,
     type ModelConfig,
 } from '@/core/file/model-file'
-import {testModelConnection, type ModelTestResult} from '@/utils/modelTest'
+import {testModelConnection, shortTestMessage, type ModelTestResult} from '@/utils/modelTest'
 import './ModelFormModal.scss'
 
 export interface ModelFormModalProps {
@@ -66,6 +66,23 @@ export function ModelFormModal({
     const [saving, setSaving] = useState(false)
     const [testing, setTesting] = useState(false)
     const [testResult, setTestResult] = useState<ModelTestResult | null>(null)
+    const [copied, setCopied] = useState(false)
+
+    // 复制完整报错到剪贴板（摘要只显示状态码，详情由用户自行粘贴查看）
+    async function copyTestResult(text: string) {
+        try {
+            await navigator.clipboard.writeText(text)
+        } catch {
+            const ta = document.createElement('textarea')
+            ta.value = text
+            document.body.appendChild(ta)
+            ta.select()
+            document.execCommand('copy')
+            ta.remove()
+        }
+        setCopied(true)
+        window.setTimeout(() => setCopied(false), 1500)
+    }
 
     // 每次打开时重置草稿（编辑 → 深拷贝原值；新增 → 该分类的默认参数）
     useEffect(() => {
@@ -73,6 +90,7 @@ export function ModelFormModal({
         setDraft(model ? structuredClone(model) : createEmptyModel(category === 'all' ? 'text' : category))
         setErrors(new Set())
         setTestResult(null)
+        setCopied(false)
     }, [open, model, category])
 
     const activeCategory = draft.category
@@ -159,10 +177,23 @@ export function ModelFormModal({
                         {testResult && (
                             <span
                                 className={`mfm__test-result mfm__test-result--${testResult.level}`}
+                                title={testResult.message}
                             >
                 <span className="mfm__test-dot" />
-                {testResult.message}
+                {/* 摘要只显示级别 + 状态码；完整报错经复制图标获取（防长报错撑爆卡片） */}
+                {shortTestMessage(testResult)}
               </span>
+                        )}
+                        {testResult && !testResult.ok && (
+                            <Button
+                                variant="ghost"
+                                size="icon-sm"
+                                aria-label="复制完整报错信息"
+                                title="复制完整报错信息"
+                                onClick={() => void copyTestResult(testResult.message)}
+                            >
+                                {copied ? <Check size={13}/> : <Copy size={13}/>}
+                            </Button>
                         )}
                     </div>
                     <div className="mfm__footer-actions">
