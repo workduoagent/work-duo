@@ -141,6 +141,8 @@ const TOOL_DISPLAY: Record<string, string> = {
   ask_user_choice: '询问用户选择',
   'native__anchor_memory': '锚定记忆',
   anchor_memory: '锚定记忆',
+  'native__generate_image': '生成图片',
+  generate_image: '生成图片',
 }
 function toolDisplay(t: ToolStep): string {
   if (TOOL_DISPLAY[t.toolName]) return TOOL_DISPLAY[t.toolName]

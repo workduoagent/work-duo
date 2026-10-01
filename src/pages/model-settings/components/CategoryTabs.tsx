@@ -7,6 +7,7 @@ import {
   FunctionSquare,
   Filter,
   Layers,
+  Palette,
 } from 'lucide-react'
 import './CategoryTabs.scss'
 
@@ -19,6 +20,7 @@ const ICON_BY_VALUE: Record<string, ReactNode> = {
   tts: <Volume2 size={18} />,
   embedding: <FunctionSquare size={18} />,
   rerank: <Filter size={18} />,
+  image: <Palette size={18} />,
 }
 const DEFAULT_ICON: ReactNode = <Filter size={18} />
 

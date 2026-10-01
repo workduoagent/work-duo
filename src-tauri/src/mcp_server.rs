@@ -1692,7 +1692,7 @@ step/totalSteps 来自规划事件（未规划或 SIMPLE_CHAT 为 0/0）；lastT
         ),
         tool(
             "agent_list_models",
-            "【模块发现】读取 workduo.db.models，列出全部可用模型。返回每行含 id/name/model_name/provider/category/enabled/tool_calls/description/config。\n用途：为 agent_ui_create 的 llmId/ttsId/sttId 选值。category∈{text,multimodal,tts,stt,embedding,rerank}；大脑(llmId)必须选 category∈{text,multimodal} 且 enabled=1 的模型；需工具调用的智能体优先选 tool_calls=1 的模型。\n⚠️ config 字段=该模型的「默认参数副本」（JSON 字符串，内容即其所属 category 对应的参数对象，如 multimodal 模型 config 为温度/TopP/maxTokens/visionDetail 等）。**选中某模型后，必须把 config 解析成对象、原样作为 llmConfig（或 ttsConfig/sttConfig）写入**——这等价于 UI 步骤2「选中模型自动复制默认参数」行为；若留空 llmConfig，等价于用户从未点开参数卡，模型将以无参方式调用，属漏配。返回 {rows:[...], count}。",
+            "【模块发现】读取 workduo.db.models，列出全部可用模型。返回每行含 id/name/model_name/provider/category/enabled/tool_calls/description/config。\n用途：为 agent_ui_create 的 llmId/ttsId/sttId 选值。category∈{text,multimodal,tts,stt,embedding,rerank,image}；大脑(llmId)必须选 category∈{text,multimodal} 且 enabled=1 的模型；需工具调用的智能体优先选 tool_calls=1 的模型。category=image（图片生成）模型不作大脑：存在 enabled=1 的 image 模型时引擎自动注册 native__generate_image 工具，全体智能体经该工具生图（全局取最新启用的 image 模型）。\n⚠️ config 字段=该模型的「默认参数副本」（JSON 字符串，内容即其所属 category 对应的参数对象，如 multimodal 模型 config 为温度/TopP/maxTokens/visionDetail 等）。**选中某模型后，必须把 config 解析成对象、原样作为 llmConfig（或 ttsConfig/sttConfig）写入**——这等价于 UI 步骤2「选中模型自动复制默认参数」行为；若留空 llmConfig，等价于用户从未点开参数卡，模型将以无参方式调用，属漏配。返回 {rows:[...], count}。",
             json!({ "type": "object", "properties": {} }),
         ),
         tool(

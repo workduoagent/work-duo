@@ -1,75 +1,75 @@
 {
- "llm": "79809b8f-3210-4b1b-9f99-c9524c24cd22",
+ "llm": "25ed1ef1-7d24-4adc-83ff-b4edf05e7f0c",
  "agents": [
   {
-   "identifier": "arch-tech-lead",
-   "id": "b582141c-463a-418b-8ce4-ff49e181fd67"
+   "identifier": "pm-product",
+   "id": "6a4ab0ab-4d67-4e61-8ab5-7a5e944d07a4"
   },
   {
-   "identifier": "dev-java-backend",
-   "id": "356ee17f-c819-4890-a1da-f8ab430dcd15"
+   "identifier": "arch-tech-lead",
+   "id": "8fa8a3dc-b4f5-4cd7-8eb6-cb313f951665"
   },
   {
    "identifier": "dev-python-backend",
-   "id": "31a57105-d600-4505-af94-fef18e5f2a5c"
+   "id": "96ac3cb5-4ca1-4718-b1ee-4d952c196e90"
+  },
+  {
+   "identifier": "dev-java-backend",
+   "id": "3db39a06-5409-4150-bb88-a3a66f21c05c"
   },
   {
    "identifier": "dev-react-frontend",
-   "id": "ed100835-64f9-4a64-bd68-5c44ab9687a9"
-  },
-  {
-   "identifier": "dev-tauri-rust",
-   "id": "291f3b88-2c1a-4653-abfb-c368c0f8d6a3"
+   "id": "7f21e9f7-1dd1-4b7f-b5e2-5ae4bddffff0"
   },
   {
    "identifier": "dev-vue-frontend",
-   "id": "c38a08f4-8f1f-4b8f-b8f3-ec494b739424"
+   "id": "d0b20edd-7eb4-4eb2-b639-11d8e58389de"
   },
   {
-   "identifier": "int-delivery",
-   "id": "d51693a9-39ef-4fcd-9908-8713f55c444d"
-  },
-  {
-   "identifier": "pm-product",
-   "id": "e1e068d3-15c3-4c06-ab8c-ad5bb3b6ddee"
+   "identifier": "dev-tauri-rust",
+   "id": "2d9e4a6f-9d94-487a-b43d-e54e82136279"
   },
   {
    "identifier": "qa-test-engineer",
-   "id": "b2eb1553-e51c-44bf-82d6-12763761e451"
+   "id": "d27d6743-1c2f-48d8-b555-5df5a891594c"
   },
   {
    "identifier": "review-code-critic",
-   "id": "600d951e-a9b5-48be-8e64-2436b0875e7c"
+   "id": "90fcc2f3-9e3f-4f79-bb99-31c91c42c45b"
+  },
+  {
+   "identifier": "int-delivery",
+   "id": "00bd27d8-16e4-4328-89ab-b0831f499084"
   }
  ],
  "skills": {
-  "skill-task-breakdown": "b4bc025d-5d2e-45a5-86fc-5cc9896b24e9",
-  "skill-delivery-pack": "b4e408b8-2bc1-4694-9cd4-e98ccec2b6b4",
-  "skill-code-review-checklist": "51710507-4167-4a8d-b0a0-8bd789030e38",
-  "skill-test-case-design": "d56628f1-d611-4571-b67c-b42583736718",
-  "skill-api-contract": "5e59a25f-5202-4059-944f-4546c2ae0b44",
-  "skill-eng-standards": "d9196f4a-157b-464c-a15a-a9eafb1a89c0"
+  "skill-task-breakdown": "528958c8-5c8e-429f-b6fe-6517eb2d04a2",
+  "skill-delivery-pack": "901eaf77-41ab-46dd-8faa-27e28f4510ab",
+  "skill-code-review-checklist": "ebae38fd-5558-4e2f-aa40-741d71c2153c",
+  "skill-test-case-design": "0982fae9-b547-4d90-93a7-155edd7594e0",
+  "skill-api-contract": "f06984f2-05f1-4fc6-a33e-033148c175b1",
+  "skill-eng-standards": "be4dd7d1-e829-4da0-851d-3511029d0e19"
  },
  "plugins": {
-  "plugin-vue-build": "473d5d60-8f7c-49b7-a4a0-1b2e3c82a9da",
-  "plugin-changelog-draft": "8cdb98bf-14b1-4329-8365-b075e22df02a",
-  "plugin-md-toc": "e7d20fa4-b2ac-4e84-a182-a24dfb622994",
-  "plugin-ts-typecheck": "ad054932-090c-4c87-a094-96baabed4ebf",
-  "plugin-diff-summary": "4c3cade4-dc2f-4769-9873-2ff984974cd8",
-  "plugin-pytest-runner": "eed31674-41c7-48ae-8e75-4dcfa471b28d",
-  "plugin-coverage-report": "d1c586e1-4f6b-453c-b9a6-416d5230f06d",
-  "plugin-code-stats": "b8a3607c-9bd3-4cf4-9273-fc00a947cf06",
-  "plugin-sql-migrate-check": "3894a685-01dc-4b3e-97ba-ae6282aa0ad2",
-  "plugin-openapi-lint": "3517fd7f-a76c-48f0-8e60-293bd9f927d1",
-  "plugin-test-report-md": "477c96a8-5bd9-4c04-9ca9-1dadbdebf7eb",
-  "plugin-java-build": "1432677e-fa21-4706-a41d-0ee97e41d283",
-  "plugin-cargo-check": "1fa8f029-680d-4015-9dbf-347735ad0ed2"
+  "plugin-vue-build": "54ed1cf1-fe10-4ebd-a2ae-45928f00b771",
+  "plugin-changelog-draft": "f7f46b06-923c-4920-9858-c85722d5a264",
+  "plugin-md-toc": "ffad6d0e-a0cd-4948-b9f1-42da00e04e59",
+  "plugin-ts-typecheck": "66cd7496-6eed-4f09-9251-87ad30780d9b",
+  "plugin-diff-summary": "f1c39ddd-0544-4f15-a778-6ed3da097532",
+  "plugin-pytest-runner": "7e17a18b-742a-479d-a050-f7741ac46ade",
+  "plugin-coverage-report": "92102593-a89c-427a-a0d2-6b295ada6ebc",
+  "plugin-code-stats": "6b0ca905-2ecd-4cc6-8028-849543ebbc2c",
+  "plugin-sql-migrate-check": "7b4652b0-7ed8-4549-920d-008853658638",
+  "plugin-openapi-lint": "aa4fdaea-98c3-4f7f-bd5a-fa76995b1545",
+  "plugin-test-report-md": "c5397bc0-65cd-4934-b60a-12d86b349cec",
+  "plugin-java-build": "c72fcbe8-d466-4ef4-b101-87d8ae5c48df",
+  "plugin-cargo-check": "3143e7f1-34e1-403c-83d4-7098c94ac1b3"
  },
  "kbs": {
-  "kb-pitfalls": "8ce3f922-faa7-4691-acad-a67b0cfe1aa3",
-  "kb-test-assets": "1fb38d34-b683-4e35-ac84-e048985868f3",
-  "kb-adr": "3e370cc8-731b-458c-b94d-4cbd62da7ee8",
-  "kb-product-prd": "11b91896-2cbd-4880-abd0-a2facfb89c88",
-  "kb-eng-standards": "14572e34-1593-42a7-8ccf-8f366a42b314"
+  "kb-pitfalls": "d5aa69e7-68d2-473e-a02b-c1a09d45f89b",
+  "kb-test-assets": "38bdf3b4-7ac1-4934-8ba7-9310b3ed9587",
+  "kb-adr": "a00f0e78-b3c3-49d7-a619-9aac8460a468",
+  "kb-product-prd": "b6820e04-1139-4a53-89e7-2a1cf53eb322",
+  "kb-eng-standards": "0f2a2654-934a-49cc-89aa-98e232e6335e"
  }
 }
