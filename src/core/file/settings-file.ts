@@ -83,7 +83,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   sessionIdleHours: 24,
   httpAllowedHosts: [],
   accent: 'minimal',
-  mcpBindAddr: '127.0.0.1',
+  mcpBindAddr: '0.0.0.0',
   mcpLocalTrust: true,
 }
 

@@ -309,8 +309,8 @@ export function SecurityPanel({ settings, onChange }: Props) {
           style={{ width: 220 }}
           onChange={(v) => onChange({ mcpBindAddr: String(v) })}
           options={[
-            { value: '127.0.0.1', label: '仅本机（127.0.0.1）' },
             { value: '0.0.0.0', label: '局域网（0.0.0.0）' },
+            { value: '127.0.0.1', label: '仅本机（127.0.0.1）' },
           ]}
         />
       </SettingItem>

@@ -288,10 +288,10 @@ pub fn start_mcp_server(app: AppHandle) {
                 .await
                 .and_then(|s| s.parse::<u16>().ok())
                 .unwrap_or(18755);
-            // F001 信任协议：监听地址可配置（127.0.0.1 默认 / 0.0.0.0 内网互通）；本机信任默认开
+            // F001 信任协议：监听地址默认 0.0.0.0（内网互通，外部请求强制设备凭证）；显式设 127.0.0.1 才回环
             let bind_addr = match read_cfg(&pool, "mcp_bind_addr").await.as_deref() {
-                Some("0.0.0.0") => "0.0.0.0".to_string(),
-                _ => "127.0.0.1".to_string(),
+                Some("127.0.0.1") => "127.0.0.1".to_string(),
+                _ => "0.0.0.0".to_string(),
             };
             let local_trust = read_cfg(&pool, "mcp_local_trust").await.as_deref() != Some("false");
             (enabled, port, bind_addr, local_trust)
