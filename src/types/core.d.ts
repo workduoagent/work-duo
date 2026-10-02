@@ -626,7 +626,7 @@ export interface SquadMemory {
 }
 
 /**
- * 服务器档案（server_host）领域模型（服务器托管，设计稿 .workspace/.design/server-hosting-design.md）。
+ * 服务器档案（server_host）领域模型（服务器托管，设计稿 .workspace/.future/server-hosting-design.md）。
  * 凭证只读出指纹 hint，任何接口不含明文。
  */
 export interface ServerHost {

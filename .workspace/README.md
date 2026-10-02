@@ -7,8 +7,7 @@
 |---|---|---|
 | `.memory/` | **工程记忆**：按日期 `yyyy-MM-dd.md` 记当日项目整体进展与结论；`CURRENT.md` 记「当前进行中 / 下一步」 | ✅ |
 | `.norms/` | **规范**：前端 / 后端开发规范、提交协作规范（工具只 commit、用户本人 push） | ✅ |
-| `.design/` | **定稿设计**：已实施落地的引擎/架构设计文档 | ✅ |
-| `.future/` | **版本方案**：各版本需求方案与特性设计稿（规划中 / 未开工） | ✅ |
+| `.future/` | **需求与设计文档**：版本方案稿、定稿设计、UI 设计稿（MD+HTML 同需求子目录规整） | ✅ |
 | `.sys_tool/` | **系统工具**：workduo-mcp（MCP 驱动脚本与技能）、single-agent-capability(-v2) 能力测评套件 | ✅ |
 | `.agents/` | **预制 Agent**：可整套导入实例的 Agent 套装（原 docs/Agent市场），按类分子目录 | ✅ |
 | `.eval-results/` | **运行产物**：workduo-mcp / capability / squad 等跑案例的结果 | ❌ gitignore |
