@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Database, RotateCcw, Globe, Plus, Trash2, ShieldAlert, RefreshCw, Pencil, Check, X, Link2 } from 'lucide-react'
+import { listen } from '@tauri-apps/api/event'
+import { CheckCircle2, Database, RotateCcw, Globe, Plus, Trash2, ShieldAlert, RefreshCw, Pencil, Check, X, Link2 } from 'lucide-react'
 import { invoke } from '@tauri-apps/api/core'
 import { Button, Input, Popconfirm, Alert, Modal, Select, Switch } from '@/components/ui'
 import { SettingItem } from './SettingItem'
@@ -81,12 +82,31 @@ export function SecurityPanel({ settings, onChange }: Props) {
   const [pairExpiresAt, setPairExpiresAt] = useState(0)
   const [pairLeft, setPairLeft] = useState(0)
   const [renaming, setRenaming] = useState<{ id: string; value: string } | null>(null)
+  /** 配对成功实时态：非空时弹窗切换为「配对成功」视图，短暂停留后自动关闭 */
+  const [pairedOk, setPairedOk] = useState<string | null>(null)
 
   const loadDevices = useCallback(() => {
     void invoke<PairedDevice[]>('mcp_pairing_devices')
       .then((list) => setDevices(Array.isArray(list) ? list : []))
       .catch(() => setDevices([]))
   }, [])
+
+  // 配对成功事件（Rust /pair 成功后 emit）：切成功视图 → 1.6s 自动关闭并刷新设备列表
+  useEffect(() => {
+    if (!pairOpen) return
+    const un = listen<{ name?: string }>('mcp-pairing-success', (e) => {
+      setPairedOk(e.payload?.name ?? '新设备')
+      setPairLeft(0)
+      setTimeout(() => {
+        setPairedOk(null)
+        setPairOpen(false)
+        loadDevices()
+      }, 1600)
+    })
+    return () => {
+      void un.then((f) => f())
+    }
+  }, [pairOpen, loadDevices])
 
   useEffect(() => {
     loadDevices()
@@ -408,32 +428,44 @@ export function SecurityPanel({ settings, onChange }: Props) {
           loadDevices()
         }}
       >
-        <div style={{ textAlign: 'center', padding: '8px 0 16px' }}>
-          <div style={{ fontSize: 40, letterSpacing: 12, fontWeight: 700, fontFamily: 'ui-monospace, Consolas, monospace' }}>
-            {pairCode}
+        {pairedOk ? (
+          <div style={{ textAlign: 'center', padding: '24px 0 16px' }}>
+            <CheckCircle2 size={44} style={{ color: 'var(--color-success)' }} />
+            <div style={{ fontSize: 16, fontWeight: 600, marginTop: 10 }}>配对成功</div>
+            <div style={{ color: 'var(--color-foreground-muted)', marginTop: 6 }}>
+              设备「{pairedOk}」已获得访问凭证，窗口即将关闭
+            </div>
           </div>
-          <div style={{ color: 'var(--color-foreground-muted)', marginTop: 8 }}>
-            剩余 {Math.floor(pairLeft / 60)}:{String(pairLeft % 60).padStart(2, '0')}
-            （过期后请重新发起）
-          </div>
-        </div>
-        <Alert
-          type="info"
-          showIcon
-          message="在新设备上执行配对请求"
-          description={
-            <pre style={{ margin: 0, whiteSpace: 'pre-wrap', fontSize: 12 }}>
-              {`POST http://<本机IP>:18755/pair
+        ) : (
+          <>
+            <div style={{ textAlign: 'center', padding: '8px 0 16px' }}>
+              <div style={{ fontSize: 40, letterSpacing: 12, fontWeight: 700, fontFamily: 'ui-monospace, Consolas, monospace' }}>
+                {pairCode}
+              </div>
+              <div style={{ color: 'var(--color-foreground-muted)', marginTop: 8 }}>
+                剩余 {Math.floor(pairLeft / 60)}:{String(pairLeft % 60).padStart(2, '0')}
+                （过期后请重新发起）
+              </div>
+            </div>
+            <Alert
+              type="info"
+              showIcon
+              message="在新设备上执行配对请求"
+              description={
+                <pre style={{ margin: 0, whiteSpace: 'pre-wrap', fontSize: 12 }}>
+                  {`POST http://<本机IP>:18755/pair
 Content-Type: application/json
 
 {"name": "设备名", "code": "${pairCode}"}`}
-            </pre>
-          }
-        />
-        <div style={{ color: 'var(--color-foreground-muted)', fontSize: 12, marginTop: 12 }}>
-          配对成功后设备获得专属令牌（仅此一次返回明文），在客户端 mcpServers 配置中以
-          <code> headers: {'{ Authorization: "Bearer <token>" }'}</code> 携带访问。配对成功后本弹窗可直接关闭。
-        </div>
+                </pre>
+              }
+            />
+            <div style={{ color: 'var(--color-foreground-muted)', fontSize: 12, marginTop: 12 }}>
+              配对成功后设备获得专属令牌（仅此一次返回明文），在客户端 mcpServers 配置中以
+              <code> headers: {'{ Authorization: "Bearer <token>" }'}</code> 携带访问。配对成功后本弹窗会自动关闭。
+            </div>
+          </>
+        )}
       </Modal>
 
       <h3 className="set-section__title">恢复</h3>

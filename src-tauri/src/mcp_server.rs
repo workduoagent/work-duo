@@ -2461,12 +2461,18 @@ async fn handle_pair(app: &AppHandle, body: &[u8]) -> Result<Value, (&'static st
     *pairing_slot().lock().unwrap_or_else(|e| e.into_inner()) = None;
     tracing::info!("[mcp] 设备配对成功：{name}（指纹 {fingerprint}）");
 
+    // 实时通知前端：设置页配对弹窗立即显示成功并自动关闭（F001 交互闭环）
+    let _ = app.emit(
+        "mcp-pairing-success",
+        json!({ "deviceId": &id, "name": &name, "fingerprint": &fingerprint }),
+    );
+
     Ok(json!({
         "ok": true,
         "token": token,
-        "deviceId": id,
-        "name": name,
-        "fingerprint": fingerprint,
+        "deviceId": &id,
+        "name": &name,
+        "fingerprint": &fingerprint,
         "usage": "在客户端 mcpServers 配置加 headers: { Authorization: \"Bearer <token>\" }"
     }))
 }
