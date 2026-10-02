@@ -1,5 +1,5 @@
 /**
- * 知识库 Markdown 渲染器（富渲染分支）。
+ * 知识库 Markdown 渲染器（富渲染分支）——对话气泡的多模态输出面。
  *
  * 插件栈（对齐用户推荐表）：
  *  - remark-gfm         表格 / 删除线 / 任务列表等 GFM 语法
@@ -7,16 +7,18 @@
  *  - rehype-katex       将公式渲染为 KaTeX HTML（需引入 katex CSS）
  *  - rehype-highlight   代码块语法高亮（需引入 highlight.js 主题 CSS）
  *  - mermaid             ```mermaid 围栏代码块渲染为流程图 / 时序图（SVG）
+ *  - echarts             ```echarts / ```echarts-json 围栏渲染为 ECharts 图表（option JSON）
  *
- * 样式：katex.min.css 与 highlight.js 主题在组件内引入；mermaid 直接产出内联 SVG，无需额外 CSS。
+ * mermaid / echarts 由 rich-blocks.tsx 提供（动态 import 按需分包 + 流式防抖 + 主题跟随）。
+ * 样式：katex.min.css 与 highlight.js 主题在组件内引入；.md-mermaid / .md-echarts 样式在 root.scss。
  */
-import { memo, useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useEffect, useMemo, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
 import rehypeHighlight from 'rehype-highlight'
-import mermaid from 'mermaid'
+import { EChartsBlock, MermaidBlock } from './rich-blocks'
 import 'katex/dist/katex.min.css'
 // 注意：不在此引入 highlight.js 的预置主题 CSS（如 styles/github.css）。
 // 那些主题把 .hljs 背景硬编码为浅色、token 颜色按白底调校，暗色下会整块刷白、语法色崩坏。
@@ -44,10 +46,9 @@ export interface MarkdownRendererProps {
   componentsExt?: Record<string, React.FC<any>>
 }
 
-// mermaid 仅初始化一次；render 在每次代码块挂载时调用
-mermaid.initialize({ startOnLoad: false, theme: 'default', securityLevel: 'loose' })
+// mermaid / echarts 渲染组件见 rich-blocks.tsx（防抖 + 动态分包 + 主题跟随）。
 
-/** 递归抽取 React 节点中的纯文本（用于 mermaid 源码）。 */
+/** 递归抽取 React 节点中的纯文本（用于提取围栏代码块源码）。 */
 function extractText(node: unknown): string {
   if (node == null) return ''
   if (typeof node === 'string' || typeof node === 'number') return String(node)
@@ -58,40 +59,63 @@ function extractText(node: unknown): string {
   return ''
 }
 
-/** 单个 mermaid 代码块：挂载后调用 mermaid.render 产出 SVG。 */
-function MermaidBlock({ code }: { code: string }) {
-  const ref = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    let active = true
-    const id = `mermaid-${Math.random().toString(36).slice(2)}`
-    mermaid
-      .render(id, code)
-      .then((r: { svg: string }) => {
-        if (active && ref.current) ref.current.innerHTML = r.svg
-      })
-      .catch((e: unknown) => {
-        if (active && ref.current) {
-          ref.current.innerHTML = `<pre class="md-mermaid__error">Mermaid 渲染失败：${
-            e instanceof Error ? e.message : String(e)
-          }</pre>`
-        }
-      })
-    return () => {
-      active = false
-    }
-  }, [code])
-  return <div className="md-mermaid" ref={ref} />
+/**
+ * 把模型常见的 LaTeX 定界符归一化为 remark-math 认识的美元定界：
+ * `\[...\]` → `$$...$$`（显示公式）、`\(...\)` → `$...$`（行内公式）。
+ * 只处理普通文本段——fenced code / 行内 code span 内的 `\[`（如数组转义示意）不误伤。
+ * 流式安全：未闭合 fence 原样保留（按 fence 段跳过），闭合后自然参与转换。
+ */
+export function normalizeMathDelimiters(src: string): string {
+  const parts: string[] = []
+  const re = /(```[\s\S]*?(?:```|$)|~~~[\s\S]*?(?:~~~|$)|`[^`\n]*`)/g
+  let last = 0
+  for (const m of src.matchAll(re)) {
+    parts.push(plain(src.slice(last, m.index)), m[0])
+    last = m.index + m[0].length
+  }
+  parts.push(plain(src.slice(last)))
+  return parts.join('')
+
+  function plain(s: string): string {
+    // 先显示后行内：\[\] 整块先吃掉；块内的 \(\)/\[\] 剥壳为纯内容（已处于数学态，留壳会污染 KaTeX）
+    return s
+      .replace(/\\\[([\s\S]*?)\\\]/g, (_m, p1: string) => `$$${p1.replace(/\\([()[\]])/g, '$1')}$$`)
+      .replace(/\\\(([\s\S]*?)\\\)/g, (_m, p1: string) => `$${p1}$`)
+  }
 }
 
-// 自定义组件：拦截 ```mermaid 围栏（其 <code> 带 language-mermaid 类），改为渲染 MermaidBlock；
+/** 廉价预筛 + 结构确认：该 JSON 块是否为 ECharts option（模型常把图表写成 ```json）。 */
+export function looksLikeEchartsOption(code: string): boolean {
+  if (!/"series"/.test(code)) return false
+  try {
+    const parsed: unknown = JSON.parse(code)
+    const o = parsed as Record<string, unknown>
+    if (!o || typeof o !== 'object' || Array.isArray(o)) return false
+    if (!('series' in o)) return false
+    // series 存在即基本确认；再校验任一常见坐标系/组件键，进一步压低误判
+    return ['xAxis', 'yAxis', 'radar', 'geo', 'polar', 'calendar', 'dataset', 'parallel', 'legend', 'tooltip'].some(
+      (k) => k in o,
+    )
+  } catch {
+    return false
+  }
+}
+
+// 自定义组件：拦截富渲染围栏（其 <code> 带 language-xxx 类）：
+//   ```mermaid → MermaidBlock；```echarts / ```echarts-json → EChartsBlock；
+//   ```json（长得像 ECharts option）→ EChartsBlock（模型不按 echarts 语言出牌的兜底）；
 // 其余代码块交给默认 <pre><code>（rehype-highlight 已加 hljs 类）。
 const mdComponentsBase = {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   pre(props: any) {
     const child = props.children as { props?: { className?: string; children?: unknown } } | undefined
     const cn = child?.props?.className
-    if (cn && /language-mermaid/.test(cn)) {
-      return <MermaidBlock code={extractText(child?.props?.children).trim()} />
+    const lang = /language-([\w-]+)/.exec(cn ?? '')?.[1] ?? ''
+    const code = extractText(child?.props?.children).trim()
+    if (lang === 'mermaid') return <MermaidBlock code={code} />
+    if (lang === 'echarts' || lang === 'echarts-json') return <EChartsBlock code={code} />
+    if ((lang === 'json' || lang === 'json5') && looksLikeEchartsOption(code)) {
+      return <EChartsBlock code={code} />
     }
     return <pre>{props.children as React.ReactNode}</pre>
   },
@@ -178,7 +202,7 @@ function MarkdownRendererInner({
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         components={mdComponents as any}
       >
-        {content}
+        {normalizeMathDelimiters(content)}
       </ReactMarkdown>
     </div>
   )
