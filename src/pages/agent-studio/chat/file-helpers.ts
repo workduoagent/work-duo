@@ -117,6 +117,74 @@ export function extractFilePaths(content: string): string[] {
   return out
 }
 
+/** 图片扩展名 → MIME（气泡内联渲染 data URL 用）。 */
+export const IMAGE_MIME_BY_EXT: Record<string, string> = {
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  gif: 'image/gif',
+  webp: 'image/webp',
+  bmp: 'image/bmp',
+  ico: 'image/x-icon',
+  svg: 'image/svg+xml',
+}
+
+export function isImageExt(ext: string): boolean {
+  return ext.toLowerCase() in IMAGE_MIME_BY_EXT
+}
+
+/** 路径解析：绝对路径（盘符/UNC/根斜杠）原样；相对路径（含裸文件名）按工作空间拼接。 */
+export function resolveImagePath(p: string, workspace?: string | null): string {
+  if (/^[A-Za-z]:[\\/]/.test(p) || /^\\\\/.test(p) || p.startsWith('/')) return p
+  const ws = (workspace ?? '').replace(/[\\/]+$/, '')
+  if (!ws) return p
+  return `${ws}/${p.replace(/^\.?[\\/]/, '')}`
+}
+
+/** 裸图片文件名识别（与 FILE_PATH_RE 互补，专收「demo-cat.png」这类无目录前缀的相对名）。
+ *  字符类不含 ASCII 括号——否则 markdown `![](...)` 的 `(` 会被吞进匹配、`](` 前缀跳过失效；
+ *  中文括号保留（中文文件名常见）。 */
+const BARE_IMAGE_NAME_RE =
+  /(?<![\w\\/.\-])[\w\u4e00-\u9fff·（）[\]【】\-]+\.(?:png|jpe?g|webp|gif|bmp|ico)(?![\w.])/gi
+
+/**
+ * 提取正文中可内联渲染的图片路径：
+ *  - 从 extractFilePaths 的全路径命中里挑图片扩展名；
+ *  - 再补一轮裸文件名（跳过已被全路径覆盖、以及 markdown `](` 紧邻的——后者由 MarkdownRenderer 自己出图）。
+ * 返回按出现顺序去重的路径数组（相对/绝对原样，不改写）。
+ */
+export function extractImageMentions(content: string, allPaths: string[]): string[] {
+  const out: string[] = []
+  const seen = new Set<string>()
+  const push = (raw: string) => {
+    const key = raw.toLowerCase()
+    if (!key || seen.has(key)) return
+    seen.add(key)
+    out.push(raw)
+  }
+  for (const p of allPaths) {
+    if (isImageExt(p.split('.').pop() ?? '')) push(p)
+  }
+  for (const m of content.matchAll(BARE_IMAGE_NAME_RE)) {
+    const idx = m.index ?? 0
+    // markdown 图片/链接语法交给 MarkdownRenderer，避免双份渲染
+    if (content.slice(Math.max(0, idx - 2), idx) === '](') continue
+    const raw = m[0]
+    const lower = raw.toLowerCase()
+    // 已被某个全路径覆盖（同一路径的尾段），不重复出卡
+    if (
+      allPaths.some((p) => {
+        const lp = p.toLowerCase()
+        return lp === lower || lp.endsWith('/' + lower) || lp.endsWith('\\' + lower)
+      })
+    ) {
+      continue
+    }
+    if (isImageExt(raw.split('.').pop() ?? '')) push(raw)
+  }
+  return out
+}
+
 export function formatDuration(ms: number): string {
   if (!ms || ms < 0) return '0.0s'
   return `${(ms / 1000).toFixed(1)}s`

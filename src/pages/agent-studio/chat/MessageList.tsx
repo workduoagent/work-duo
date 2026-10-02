@@ -44,6 +44,8 @@ interface MessageListProps {
   copyError: (message: string) => void
   copyMessageRecord: (m: ChatMessage) => void
   setPreviewSrc: (v: string | null) => void
+  /** 会话绑定的工作空间绝对路径（气泡内联图片按它解析相对路径）。 */
+  workspace?: string | null
 }
 
 export function MessageList(props: MessageListProps) {
@@ -65,6 +67,7 @@ export function MessageList(props: MessageListProps) {
     copyError,
     copyMessageRecord,
     setPreviewSrc,
+    workspace,
   } = props
 
   return (
@@ -350,7 +353,7 @@ export function MessageList(props: MessageListProps) {
               {/* 文件路径卡片：从正文提取路径渲染。打字进行中（最后一条且流式）不渲染——
                   否则正文里的路径先打完整，卡片会提前挂出打断阅读（#20260918011 真机反馈）。 */}
               {m.role === 'agent' && !(isLastAgent && isStreaming) && (
-                <FilePathCards content={isLastAgent ? displayedContent : m.content} />
+                <FilePathCards content={isLastAgent ? displayedContent : m.content} workspace={workspace} />
               )}
               {m.role === 'agent' && m.completedAt && (
                 <MessageActions

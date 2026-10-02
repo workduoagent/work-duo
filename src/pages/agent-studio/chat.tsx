@@ -712,6 +712,7 @@ commandActionRef.current = (key: string) => {
           copyError={copyError}
           copyMessageRecord={copyMessageRecord}
           setPreviewSrc={setPreviewSrc}
+          workspace={workspaceDir}
         />
 
         {/* 底部输入工具条：仿 WorkBuddy 的大圆角输入框，工具按钮内嵌在框底 */}

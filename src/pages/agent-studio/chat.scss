@@ -472,6 +472,186 @@
     font-family: var(--font-mono, monospace);
   }
 
+  /* 气泡内联图片缩略图（点击进全屏预览器） */
+  &__img-cards {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 6px;
+  }
+
+  &__img-card {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 6px;
+    max-width: 240px;
+    border-radius: 10px;
+    border: 1px solid var(--color-border);
+    background: var(--color-background-subtle);
+    cursor: zoom-in;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+
+    &:hover {
+      border-color: var(--color-brand-300, var(--color-brand-600));
+      box-shadow: var(--shadow-sm);
+    }
+
+    &.is-loading {
+      cursor: wait;
+    }
+
+    .dark & {
+      background: #1a1a1a;
+      border-color: #2f2f2f;
+
+      &:hover {
+        border-color: #444;
+      }
+    }
+  }
+
+  &__img-thumb {
+    display: block;
+    width: 100%;
+    height: 150px;
+    object-fit: contain;
+    border-radius: 6px;
+    background: var(--color-background-soft, #f0f0f0);
+  }
+
+  &__img-loading {
+    width: 200px;
+    height: 120px;
+    border-radius: 6px;
+    background: linear-gradient(
+      100deg,
+      var(--color-background-soft, #f0f0f0) 40%,
+      var(--color-background-subtle) 50%,
+      var(--color-background-soft, #f0f0f0) 60%
+    );
+    background-size: 200% 100%;
+    animation: agent-chat-img-shimmer 1.2s ease-in-out infinite;
+  }
+
+  &__img-name {
+    max-width: 228px;
+    font-size: 0.72rem;
+    color: var(--color-foreground-muted);
+    text-align: left;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* 全屏图片预览器（Lightbox） */
+  &__lightbox {
+    position: fixed;
+    inset: 0;
+    z-index: 3000;
+    display: flex;
+    flex-direction: column;
+    background: rgba(0, 0, 0, 0.82);
+    backdrop-filter: blur(4px);
+  }
+
+  &__lightbox-stage {
+    flex: 1 1 auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    min-height: 0;
+  }
+
+  &__lightbox-img {
+    max-width: 92vw;
+    max-height: 86vh;
+    object-fit: contain;
+    border-radius: 4px;
+    box-shadow: 0 8px 40px rgba(0, 0, 0, 0.45);
+    cursor: grab;
+    transition: transform 0.12s ease-out;
+    user-select: none;
+    -webkit-user-drag: none;
+
+    &.is-dragging {
+      cursor: grabbing;
+      transition: none;
+    }
+  }
+
+  &__lightbox-close {
+    position: absolute;
+    top: 16px;
+    right: 16px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    border: none;
+    background: rgba(255, 255, 255, 0.12);
+    color: #fff;
+    cursor: pointer;
+    transition: background-color 0.15s ease;
+
+    &:hover {
+      background: rgba(255, 255, 255, 0.24);
+    }
+  }
+
+  &__lightbox-toolbar {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 10px 16px 14px;
+
+    button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 34px;
+      height: 34px;
+      border-radius: 8px;
+      border: none;
+      background: rgba(255, 255, 255, 0.12);
+      color: #fff;
+      cursor: pointer;
+      transition: background-color 0.15s ease, transform 0.1s ease;
+
+      &:hover {
+        background: rgba(255, 255, 255, 0.24);
+      }
+
+      &:active {
+        transform: scale(0.92);
+      }
+    }
+  }
+
+  &__lightbox-title {
+    max-width: 320px;
+    margin-right: 8px;
+    font-size: 0.78rem;
+    color: rgba(255, 255, 255, 0.85);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  &__lightbox-zoom {
+    min-width: 44px;
+    margin-right: 6px;
+    font-size: 0.72rem;
+    color: rgba(255, 255, 255, 0.65);
+    font-family: var(--font-mono, monospace);
+    text-align: center;
+  }
+
   &__avatar {
     width: 38px;
     height: 38px;

@@ -9,6 +9,7 @@ import type * as React from 'react'
 import type { ReactElement } from 'react'
 import { ChevronDown, ChevronRight, ClipboardList, Copy, File, FileArchive, FileCode, FileImage, FileSpreadsheet, FileText, RefreshCw, Volume2 } from 'lucide-react'
 import { openPath } from '@tauri-apps/plugin-opener'
+import { readFile } from '@tauri-apps/plugin-fs'
 import { useNotify } from '@/components/ui/notify'
 import { MarkdownRenderer } from '@/components/markdown/MarkdownRenderer'
 import { ToolStepLine } from '../session/ToolStepLine'
@@ -17,15 +18,21 @@ import { makeRemarkKbCites } from '../session/remarkKbCites'
 import { isTauri } from '@/core/config'
 import { stripWinVerbatim, stripWinVerbatimInText } from '@/utils/pathDisplay'
 import type { AgentInfo } from '@/types/core'
+import { ImageLightbox } from './image-lightbox'
+import type { LightboxImage } from './image-lightbox'
 import type { ChatMessage, ChatSegment } from './types'
 import type { ToolStep } from '../session/types'
 import type { KbHit } from '../session/KbSearchCitations'
 import {
   extractFilePaths,
+  extractImageMentions,
   FILE_CODE_EXTS,
   FILE_IMAGE_EXTS,
   FILE_SPREADSHEET_EXTS,
   FILE_TEXT_EXTS,
+  IMAGE_MIME_BY_EXT,
+  isImageExt,
+  resolveImagePath,
   ringColor,
 } from './file-helpers'
 
@@ -136,7 +143,7 @@ function fileIconAndColor(ext: string): { icon: React.ElementType; color: string
 }
 
 /** 文件路径卡片：显示文件名、扩展名、类型图标，点击用系统默认应用打开。 */
-function FilePathCard({ path }: { path: string }) {
+export function FilePathCard({ path }: { path: string }) {
   const { message } = useNotify()
   const slashIdx = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'))
   const fileName = slashIdx >= 0 ? path.slice(slashIdx + 1) : path
@@ -175,17 +182,136 @@ function FilePathCard({ path }: { path: string }) {
   )
 }
 
-/** 单条消息的文件卡片列表（仅在存在可识别路径时渲染）。 */
-export function FilePathCards({ content }: { content: string }) {
+/* ------------------------------------------------------------------ *
+ * 气泡内联图片：识别回复中的图片路径 → 预载（fs readFile → data URL）→
+ * 缩略图直出，点击进全屏预览器（下载/目录资源/旋转/缩放）。
+ * ---------------------------------------------------------------- */
+
+interface LoadedImage {
+  dataUrl: string
+  bytes: Uint8Array
+}
+
+/** 图片预载缓存（模块级，按绝对路径去重；同一图片在多气泡/重渲染间共享）。 */
+const imageDataCache = new Map<string, Promise<LoadedImage | null>>()
+
+function toBase64(bytes: Uint8Array): string {
+  let bin = ''
+  const chunk = 0x8000
+  for (let i = 0; i < bytes.length; i += chunk) {
+    bin += String.fromCharCode(...bytes.subarray(i, i + chunk))
+  }
+  return btoa(bin)
+}
+
+function loadImageFile(absPath: string, ext: string): Promise<LoadedImage | null> {
+  let hit = imageDataCache.get(absPath)
+  if (!hit) {
+    hit = (async () => {
+      try {
+        if (!isTauri) return null
+        const bytes = await readFile(absPath)
+        const mime = IMAGE_MIME_BY_EXT[ext] ?? 'application/octet-stream'
+        return { dataUrl: `data:${mime};base64,${toBase64(bytes)}`, bytes }
+      } catch {
+        return null
+      }
+    })()
+    imageDataCache.set(absPath, hit)
+  }
+  return hit
+}
+
+/** 气泡内联图片卡：预载成功渲染缩略图（点击进 Lightbox）；失败回退通用文件卡，加载中出占位。 */
+function InlineImageCard({
+  rawPath,
+  workspace,
+  onOpen,
+}: {
+  rawPath: string
+  workspace?: string | null
+  onOpen: (img: LightboxImage) => void
+}) {
+  const abs = useMemo(() => resolveImagePath(rawPath, workspace), [rawPath, workspace])
+  const slashIdx = Math.max(abs.lastIndexOf('/'), abs.lastIndexOf('\\'))
+  const fileName = slashIdx >= 0 ? abs.slice(slashIdx + 1) : abs
+  const ext = (fileName.split('.').pop() ?? '').toLowerCase()
+  const [loaded, setLoaded] = useState<LoadedImage | null>(null)
+  const [failed, setFailed] = useState(false)
+  useEffect(() => {
+    let alive = true
+    setLoaded(null)
+    setFailed(false)
+    loadImageFile(abs, ext).then((r) => {
+      if (alive) {
+        if (r) setLoaded(r)
+        else setFailed(true)
+      }
+    })
+    return () => {
+      alive = false
+    }
+  }, [abs, ext])
+
+  if (failed) return <FilePathCard path={rawPath} />
+  if (!loaded) {
+    return (
+      <div className="agent-chat__img-card is-loading" title={`加载图片：${rawPath}`}>
+        <div className="agent-chat__img-loading" />
+      </div>
+    )
+  }
+  return (
+    <button
+      type="button"
+      className="agent-chat__img-card"
+      title={`预览：${rawPath}`}
+      onClick={() => onOpen({ path: abs, name: fileName, dataUrl: loaded.dataUrl, bytes: loaded.bytes })}
+    >
+      <img className="agent-chat__img-thumb" src={loaded.dataUrl} alt={fileName} draggable={false} />
+      <span className="agent-chat__img-name">{fileName}</span>
+    </button>
+  )
+}
+
+/** 单条消息的文件卡片列表：图片路径渲染内联缩略图（点击全屏预览），其余渲染通用文件卡。 */
+export function FilePathCards({
+  content,
+  workspace,
+}: {
+  content: string
+  workspace?: string | null
+}) {
+  const [preview, setPreview] = useState<LightboxImage | null>(null)
   // 去掉 Windows 逐字前缀 `\\?\`（Rust canonicalize 产物），卡片名称/标题/打开都用干净路径
   const paths = useMemo(() => extractFilePaths(content).map(stripWinVerbatim), [content])
-  if (paths.length === 0) return null
+  const imagePaths = useMemo(
+    () => extractImageMentions(content, paths).map(stripWinVerbatim),
+    [content, paths],
+  )
+  const fileCards = useMemo(
+    () => paths.filter((p) => !isImageExt(p.split('.').pop() ?? '')),
+    [paths],
+  )
+  if (paths.length === 0 && imagePaths.length === 0) return null
   return (
-    <div className="agent-chat__file-cards">
-      {paths.map((p) => (
-        <FilePathCard key={p} path={p} />
-      ))}
-    </div>
+    <>
+      {imagePaths.length > 0 && (
+        <div className="agent-chat__img-cards">
+          {imagePaths.map((p) => (
+            <InlineImageCard key={p} rawPath={p} workspace={workspace} onOpen={setPreview} />
+          ))}
+        </div>
+      )}
+      {fileCards.length > 0 && (
+        <div className="agent-chat__file-cards">
+          {fileCards.map((p) => (
+            <FilePathCard key={p} path={p} />
+          ))}
+        </div>
+      )}
+      {preview && <ImageLightbox image={preview} onClose={() => setPreview(null)} />}
+    </>
   )
 }
 
