@@ -1,5 +1,5 @@
 /**
- * 路由页面「服务器」：服务器托管管理面（设计稿 docs/server-hosting-design.md）。
+ * 路由页面「服务器」：服务器托管管理面（设计稿 .workspace/.design/server-hosting-design.md）。
  *
  * 卡片风格对齐 skill-hub / mcp-hub（header + 卡片网格）；凭证只展示指纹 hint，
  * 明文仅在新填 / 重填时经内存一次性传给 Rust 加密入库。

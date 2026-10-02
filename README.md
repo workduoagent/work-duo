@@ -366,7 +366,7 @@ flowchart LR
 
 ### 4.8 内置技能包：`workduo-mcp`
 
-仓库自带一份生产级技能样本，位于 `docs/skills/workduo-mcp/`：
+仓库自带一份生产级技能样本，位于 `.workspace/.sys_tool/workduo-mcp/`：
 
 | 项 | 内容 |
 |---|---|
@@ -389,7 +389,7 @@ flowchart LR
 
 ### 4.10 技能相关的评测与门禁脚本
 
-位于 `docs/skills/workduo-mcp/scripts/`，直连内建 MCP Server，**只做参数编排与断言**；发现能力缺口应回流到 MCP 工具层修补，而非绕过 MCP 自写替代实现。
+位于 `.workspace/.sys_tool/workduo-mcp/scripts/`，直连内建 MCP Server，**只做参数编排与断言**；发现能力缺口应回流到 MCP 工具层修补，而非绕过 MCP 自写替代实现。
 
 | 类别 | 脚本 | 用途 |
 |---|---|---|
@@ -423,4 +423,4 @@ flowchart LR
 
 ---
 
-> 本文档依据当前代码实际状态梳理（2026-10-02 复核）。「技能能力」一章（§四）对应 `docs/skills/workduo-mcp/SKILL.md`、`src-tauri/src/agent/plugins/skill_{adapter,tools}.rs`、`src-tauri/src/agent/engine/config_loader.rs` 的当前实现。具体实现细节以 `src/`、`src-tauri/`、`docs/`、`前端开发规范.md` 为准。
+> 本文档依据当前代码实际状态梳理（2026-10-02 复核）。「技能能力」一章（§四）对应 `.workspace/.sys_tool/workduo-mcp/SKILL.md`、`src-tauri/src/agent/plugins/skill_{adapter,tools}.rs`、`src-tauri/src/agent/engine/config_loader.rs` 的当前实现。具体实现细节以 `src/`、`src-tauri/`、`docs/`、`前端开发规范.md` 为准。

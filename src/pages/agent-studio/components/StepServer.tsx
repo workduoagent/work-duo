@@ -1,5 +1,5 @@
 /**
- * 向导步骤 7：绑定服务器（服务器托管，设计稿 docs/server-hosting-design.md）。
+ * 向导步骤 7：绑定服务器（服务器托管，设计稿 .workspace/.design/server-hosting-design.md）。
  *
  * 从 ServerHub 已录入的 server_host 取候选，勾选即写入 agent_server_ref
  * （第一个选中的为 primary / 默认 Host）。绑定后智能体获得 12 个 host__* 工具

@@ -233,7 +233,7 @@ function LiveTimer({sinceMs}: {sinceMs: number}) {
     return <span className="sw-pill sw-pill--live"><i className="sw-dot"/>运行中 · {hms}</span>
 }
 
-/** 小分队工作台（像素舞台 v3，严格按设计稿 docs/design/小分队工作台-UI设计稿.html） */
+/** 小分队工作台（像素舞台 v3，严格按设计稿 .workspace/.future/design/小分队工作台-UI设计稿.html） */
 export default function SquadDetailPage() {
     const nav = useNavigate()
     const {message} = useNotify()

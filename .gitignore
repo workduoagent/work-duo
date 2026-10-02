@@ -48,3 +48,6 @@ eval-workspace-p4proj/
 
 # 运行时产物（小分队工作区/交接箱/记忆），不进 git
 src-tauri/.wd_mem/
+
+# .workspace 运行时产物（测评/跑案例结果），不进 git
+.workspace/.eval-results/

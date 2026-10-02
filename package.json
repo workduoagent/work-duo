@@ -14,9 +14,9 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "tauri": "tauri dev",
-    "release:gate": "node docs/skills/workduo-mcp/scripts/release_gate.mjs",
-    "squad:eval": "node --experimental-sqlite docs/skills/workduo-mcp/scripts/squad_eval_harness.mjs run",
-    "squad:gate": "node --experimental-sqlite docs/skills/workduo-mcp/scripts/squad_eval_harness.mjs gate --out docs/eval-results/squad-20260929-final"
+    "release:gate": "node .workspace/.sys_tool/workduo-mcp/scripts/release_gate.mjs",
+    "squad:eval": "node --experimental-sqlite .workspace/.sys_tool/workduo-mcp/scripts/squad_eval_harness.mjs run",
+    "squad:gate": "node --experimental-sqlite .workspace/.sys_tool/workduo-mcp/scripts/squad_eval_harness.mjs gate --out .workspace/.eval-results/squad-20260929-final"
   },
   "dependencies": {
     "@monaco-editor/react": "^4.7.0",
