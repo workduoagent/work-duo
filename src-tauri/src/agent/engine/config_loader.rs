@@ -788,7 +788,7 @@ category 取值：decision（决策）/ code_pattern（代码模式）/ user_pre
         .filter_map(|r| r.try_get::<Option<String>, _>("kb_id").ok().flatten())
         .collect();
 
-    // 服务器托管（Host）：绑定档案 + 过期 host_grant GC（设计稿 .workspace/.future/server-hosting-design.md）
+    // 服务器托管（Host）：绑定档案 + 过期 host_grant GC（设计稿 .workspace/.future/服务器托管/server-hosting-design.md）
     let server_bindings = crate::host::types::load_bindings(app, agent_id).await?;
     if !server_bindings.is_empty() {
         crate::host::authz::gc_expired(app).await;

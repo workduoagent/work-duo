@@ -2,15 +2,15 @@
 
 **所有需求/设计文档的唯一归口**：规划中未开工的方案稿、已实施落地的定稿设计、配套 UI 设计稿，都在这里。
 
-| 内容 | 说明 |
+| 子目录 | 说明 |
 |---|---|
-| `server-hosting-design.md` | 服务器托管（Host）定稿设计——被 `src/types/*`、`server-hub`、`config_loader.rs` 注释引用 |
-| `native-tools.md` | Agent 原生工具（21 个 `native__*`）契约清单——backend.md 指向的事实源 |
+| `服务器托管/` | Host 定稿设计 `server-hosting-design.md`——被 `src/types/*`、`server-hub`、`config_loader.rs` 注释引用 |
+| `原生工具/` | Agent 原生工具（21 个 `native__*`）契约清单 `native-tools.md`——backend.md 指向的事实源 |
 | `小分队/` | **MD+HTML 同需求子目录规整范例**：`小分队完整设计方案-20260925.md` + `UI设计稿/`（3 份 HTML，被 `SquadDetailPage.tsx` 引用） |
 
 ## 组织约定
 
-1. **一个需求一个单元**：既有 MD 说明又有设计 HTML 的，新建**需求同名子目录**规整在一起（如 `小分队/`），不要 MD 与 HTML 分散两处；纯 MD 方案直接平铺。
+1. **一个需求一个子目录**：每个需求/主题独立子目录（需求短名命名，中文直用）；既有 MD 说明又有设计 HTML 的（如 `小分队/`），HTML 收在需求目录内的 `UI设计稿/` 子目录，MD 与 HTML 不分散两处。
 2. **命名**：`<主题>-<yyyy-MM-dd>.md`；子目录用需求短名（中文直用）。
 3. **状态标记**：方案稿在文首标注「规划中 / 已实施（指向 commit）/ 已废弃」；长期废弃的移入 `archive/`。
 4. **引用纪律**：代码注释引用这里的文档用**完整相对路径**，移动文档时全仓搜索旧路径同步更新。

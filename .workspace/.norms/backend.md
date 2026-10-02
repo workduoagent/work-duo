@@ -9,7 +9,7 @@
 | `agent/plugins/` | Skill / 本地插件 / MCP 适配与脚本沙箱 |
 | `agent/hitl/` | 审批、计划门禁、恢复门禁（oneshot 通道零死锁） |
 | `agent/knowledge/` | 记忆、`.wd_mem` 双轨、知识库检索、向量 |
-| `agent/engine/native/` | Agent 原生工具（21 个 `native__*`，契约清单见 `.workspace/.future/native-tools.md`） |
+| `agent/engine/native/` | Agent 原生工具（21 个 `native__*`，契约清单见 `.workspace/.future/原生工具/native-tools.md`） |
 | `agent/squad/` `host/` | 小分队编排、服务器托管 |
 | `mcp_server.rs` | 内建 MCP Server（98 工具契约面，变更需同步 SKILL 文档） |
 

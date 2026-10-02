@@ -532,7 +532,7 @@ export interface PluginRunLogRow {
   created_at: number
 }
 
-/** 服务器托管主表（server_host）行映射。字段语义见 .workspace/.future/server-hosting-design.md §4.1。 */
+/** 服务器托管主表（server_host）行映射。字段语义见 .workspace/.future/服务器托管/server-hosting-design.md §4.1。 */
 export interface ServerHostRow {
   id: string
   name: string
