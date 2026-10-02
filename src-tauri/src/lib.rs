@@ -167,6 +167,10 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             mcp::sync_mcp_tools,
             mcp::call_mcp_tool,
+            mcp_server::mcp_pairing_start,
+            mcp_server::mcp_pairing_devices,
+            mcp_server::mcp_pairing_revoke,
+            mcp_server::mcp_pairing_rename,
             mcp_oauth::mcp_oauth_begin,
             mcp_oauth::mcp_oauth_wait,
             mcp_oauth::mcp_oauth_refresh,

@@ -136,6 +136,18 @@ CREATE TABLE IF NOT EXISTS mcp_info
     updated_at   INTEGER NOT NULL
 );
 
+
+-- MCP 内建 Server 配对设备（F001 信任协议）：token 只存 SHA-256 哈希，明文仅配对时一次性返回
+CREATE TABLE IF NOT EXISTS mcp_paired_device
+(
+    id           TEXT    PRIMARY KEY,
+    name         TEXT    NOT NULL,
+    token_hash   TEXT    NOT NULL UNIQUE,
+    fingerprint  TEXT    NOT NULL,
+    created_at   INTEGER NOT NULL,
+    last_seen    INTEGER NOT NULL
+);
+
 -- ============ MCP 工具定义表（mcp_tool_definition） ============
 -- 行映射见 src/types/database.d.ts 的 McpToolDefinitionRow。
 -- 由 PostgreSQL 设计（llm_mcp_tool_definition）转 SQLite：

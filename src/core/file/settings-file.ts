@@ -45,6 +45,10 @@ export interface AppSettings {
   sessionIdleHours: number
   /** HTTP 请求主机白名单（对应 app_config.http_allowed_hosts）；空数组 = 不限制，非空 = 仅允许命中主机（含其子域） */
   httpAllowedHosts: string[]
+  /** 内建 MCP Server 监听地址（app_config.mcp_bind_addr）：127.0.0.1 默认 / 0.0.0.0 内网互通，重启生效 */
+  mcpBindAddr: string
+  /** 内建 MCP Server 本机信任（app_config.mcp_local_trust）：开启时回环无凭证请求放行（浏览器页面除外），默认开启 */
+  mcpLocalTrust: boolean
   /** 主品牌色调（对应 app_config.accent）：minimal / sky / mint / lilac，默认 minimal（简约） */
   accent: AccentTheme
 }
@@ -62,6 +66,8 @@ export const CONFIG_KEYS = {
   sessionIdleHours: 'session_idle_hours',
   httpAllowedHosts: 'http_allowed_hosts',
   accent: 'accent',
+  mcpBindAddr: 'mcp_bind_addr',
+  mcpLocalTrust: 'mcp_local_trust',
 } as const
 
 /** 各设置的出厂默认值（缺失时回退）。 */
@@ -77,6 +83,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   sessionIdleHours: 24,
   httpAllowedHosts: [],
   accent: 'minimal',
+  mcpBindAddr: '127.0.0.1',
+  mcpLocalTrust: true,
 }
 
 /** 网络代理模式下拉选项（运行期）。 */
@@ -97,6 +105,7 @@ const RAW_STRING_KEYS = new Set<string>([
   CONFIG_KEYS.knowledgeBasePath,
   CONFIG_KEYS.vectorPath,
   CONFIG_KEYS.httpAllowedHosts,
+  CONFIG_KEYS.mcpBindAddr,
 ])
 
 function parseValue<T>(raw: string | undefined, fallback: T): T {
@@ -183,6 +192,8 @@ export async function loadSettings(): Promise<AppSettings> {
     ),
     httpAllowedHosts: parseHostAllowlist(all[k.httpAllowedHosts]),
     accent: parseAccent(all[k.accent]),
+    mcpBindAddr: parseValue<string>(all[k.mcpBindAddr], DEFAULT_SETTINGS.mcpBindAddr),
+    mcpLocalTrust: parseValue<boolean>(all[k.mcpLocalTrust], DEFAULT_SETTINGS.mcpLocalTrust),
   }
 }
 
@@ -209,6 +220,8 @@ export async function saveSettings(next: AppSettings): Promise<void> {
       serializeValue(k.sessionIdleHours, next.sessionIdleHours),
     ),
     setRawConfig(k.accent, serializeValue(k.accent, next.accent)),
+    setRawConfig(k.mcpBindAddr, serializeValue(k.mcpBindAddr, next.mcpBindAddr)),
+    setRawConfig(k.mcpLocalTrust, serializeValue(k.mcpLocalTrust, next.mcpLocalTrust)),
   ])
 }
 

@@ -48,7 +48,7 @@ WorkDuo 内建 MCP Server 是标准 Streamable HTTP 端点，可注册到**任�
 
 - 传输类型：Streamable HTTP（不同客户端字段名可能为 `http` / `streamable-http` / `sse`，以你的工具为准）。
 - URL：`http://127.0.0.1:18755/mcp`
-- 鉴权：无（仅本机回环 `127.0.0.1`，无需 `headers` / `env`）。
+- 鉴权（F001 信任协议，2026-10-02 起）：本机回环且「本机信任」开启时免凭证；跨设备/关闭本机信任须配对获取设备令牌，以 `headers: { Authorization: "Bearer <token>" }` 携带。本机令牌文件 `%APPDATA%/com.workduo/mcp-token.txt`（驱动脚本自动读取）。配对入口：WorkDuo 设置→安全中心。
 - 仅本机可用，**需 WorkDuo 处于运行状态**。
 
 标准 `mcpServers` 配置示例（键名以你所用工具为准）：

@@ -3,8 +3,23 @@
 //       轨迹解包与 KB 事件提取 / 增量日志抓取。业务断言放各脚本，本库不做断言。
 // 用法：import { initMcp, callTool, pollRun, … } from './agent_task_driver.mjs'
 import http from 'node:http'
+import fs from 'node:fs'
+import path from 'node:path'
 
 export const MCP = { host: '127.0.0.1', port: 18755, path: '/mcp' }
+
+// F001 信任协议：凭证自动携带——WD_MCP_TOKEN 环境变量优先，其次应用数据目录 mcp-token.txt
+//（设置→安全中心「本机默认」设备；跨设备调用改用配对获得的设备令牌）。
+function resolveMcpToken() {
+  if (process.env.WD_MCP_TOKEN) return process.env.WD_MCP_TOKEN.trim()
+  try {
+    const p = path.join(process.env.APPDATA || '', 'com.workduo', 'mcp-token.txt')
+    return fs.readFileSync(p, 'utf8').trim() || null
+  } catch {
+    return null
+  }
+}
+const MCP_TOKEN = resolveMcpToken()
 
 let SESSION = null
 let idc = 0
@@ -13,6 +28,7 @@ function post(body, { timeoutMs = 200000 } = {}) {
   return new Promise((resolve, reject) => {
     const payload = JSON.stringify(body)
     const headers = { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream', 'Content-Length': Buffer.byteLength(payload) }
+    if (MCP_TOKEN) headers['Authorization'] = `Bearer ${MCP_TOKEN}`
     if (SESSION) headers['Mcp-Session-Id'] = SESSION
     const req = http.request({ ...MCP, method: 'POST', headers, timeout: timeoutMs }, (res) => {
       if (!SESSION && res.headers['mcp-session-id']) SESSION = res.headers['mcp-session-id']

@@ -664,3 +664,15 @@ ALTER TABLE agent_squad_member ADD COLUMN tool_profile_json TEXT;
 -- 群聊汇总产出行动项后自动转 Wave 续跑（行动项 → 委派任务，复用编排式波次循环）。
 -- 0=关（默认，维持纯讨论收口）；1=开。
 ALTER TABLE agent_squad_chat_config ADD COLUMN execute_actions INTEGER NOT NULL DEFAULT 0;
+
+-- ---------- v39：MCP 内建 Server 信任协议（F001）——配对设备表 ----------
+-- token 只存 SHA-256 哈希；明文仅在 /pair 配对成功时一次性返回给设备。
+CREATE TABLE IF NOT EXISTS mcp_paired_device
+(
+    id           TEXT    PRIMARY KEY,
+    name         TEXT    NOT NULL,
+    token_hash   TEXT    NOT NULL UNIQUE,
+    fingerprint  TEXT    NOT NULL,
+    created_at   INTEGER NOT NULL,
+    last_seen    INTEGER NOT NULL
+);

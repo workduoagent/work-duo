@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Database, RotateCcw, Globe, Plus, Trash2, ShieldAlert, RefreshCw } from 'lucide-react'
+import { Database, RotateCcw, Globe, Plus, Trash2, ShieldAlert, RefreshCw, Pencil, Check, X, Link2 } from 'lucide-react'
 import { invoke } from '@tauri-apps/api/core'
-import { Button, Input, Popconfirm, Alert } from '@/components/ui'
+import { Button, Input, Popconfirm, Alert, Modal, Select, Switch } from '@/components/ui'
 import { SettingItem } from './SettingItem'
 import { DEFAULT_SETTINGS, type AppSettings } from '@/core/file/settings-file'
 
@@ -61,11 +61,72 @@ async function fetchGuardStatus(): Promise<SandboxGuardStatus | null> {
   }
 }
 
+/** 已配对设备（对应 Rust mcp_pairing_devices 返回行，无任何凭证字段）。 */
+interface PairedDevice {
+  id: string
+  name: string
+  fingerprint: string
+  createdAt: number
+  lastSeen: number
+}
+
 /** 安全中心分区：本地数据存储位置说明 + 沙箱审计回显 + 重置所有设置为默认。 */
 export function SecurityPanel({ settings, onChange }: Props) {
   const [auditLogs, setAuditLogs] = useState<SandboxAuditEntry[]>([])
   const [auditLoading, setAuditLoading] = useState(false)
   const [guardStatus, setGuardStatus] = useState<SandboxGuardStatus | null>(null)
+  const [devices, setDevices] = useState<PairedDevice[]>([])
+  const [pairOpen, setPairOpen] = useState(false)
+  const [pairCode, setPairCode] = useState('')
+  const [pairExpiresAt, setPairExpiresAt] = useState(0)
+  const [pairLeft, setPairLeft] = useState(0)
+  const [renaming, setRenaming] = useState<{ id: string; value: string } | null>(null)
+
+  const loadDevices = useCallback(() => {
+    void invoke<PairedDevice[]>('mcp_pairing_devices')
+      .then((list) => setDevices(Array.isArray(list) ? list : []))
+      .catch(() => setDevices([]))
+  }, [])
+
+  useEffect(() => {
+    loadDevices()
+  }, [loadDevices])
+
+  // 配对码倒计时
+  useEffect(() => {
+    if (!pairOpen || !pairExpiresAt) return
+    const tick = () => setPairLeft(Math.max(0, Math.ceil((pairExpiresAt - Date.now()) / 1000)))
+    tick()
+    const t = setInterval(tick, 1000)
+    return () => clearInterval(t)
+  }, [pairOpen, pairExpiresAt])
+
+  const startPairing = useCallback(() => {
+    void invoke<{ code: string; expiresInMs: number }>('mcp_pairing_start')
+      .then((r) => {
+        setPairCode(r.code)
+        setPairExpiresAt(Date.now() + (r.expiresInMs || 120_000))
+        setPairOpen(true)
+      })
+      .catch(() => setPairOpen(false))
+  }, [])
+
+  const revokeDevice = useCallback(
+    (id: string) => {
+      void invoke<boolean>('mcp_pairing_revoke', { id }).then(loadDevices)
+    },
+    [loadDevices],
+  )
+
+  const renameDevice = useCallback(() => {
+    if (!renaming) return
+    const name = renaming.value.trim()
+    if (!name) return
+    void invoke<boolean>('mcp_pairing_rename', { id: renaming.id, name }).then(() => {
+      setRenaming(null)
+      loadDevices()
+    })
+  }, [renaming, loadDevices])
 
   // 拉取审计日志（挂载时一次；刷新按钮手动触发——依赖数组必须为空，
   // 否则 setAuditLoading(true) → 依赖变化 → effect 重跑 → 死循环闪屏（实测踩坑）。
@@ -236,6 +297,144 @@ export function SecurityPanel({ settings, onChange }: Props) {
           )}
         </div>
       </SettingItem>
+
+      <h3 className="set-section__title">内建 MCP Server</h3>
+
+      <SettingItem
+        title={<span className="set-item__title-inline"><span className="set-item__title-icon"><Globe size={15} /></span>监听地址</span>}
+        description="默认仅本机访问（127.0.0.1）。切换为 0.0.0.0 后局域网设备可经「设备配对」接入，外部请求必须持有效设备凭证；修改后需重启应用生效。"
+      >
+        <Select
+          value={settings.mcpBindAddr}
+          style={{ width: 220 }}
+          onChange={(v) => onChange({ mcpBindAddr: String(v) })}
+          options={[
+            { value: '127.0.0.1', label: '仅本机（127.0.0.1）' },
+            { value: '0.0.0.0', label: '局域网（0.0.0.0）' },
+          ]}
+        />
+      </SettingItem>
+
+      <SettingItem
+        title={<span className="set-item__title-inline"><span className="set-item__title-icon"><ShieldAlert size={15} /></span>本机信任</span>}
+        description="开启时，本机发起的无凭证请求放行（既有本机编码工具零改造；浏览器网页除外——带 Origin 的无凭证请求一律拒绝）。关闭后本机调用也必须携带设备凭证。"
+        control={
+          <Switch checked={settings.mcpLocalTrust} onChange={(v) => onChange({ mcpLocalTrust: v })} />
+        }
+      />
+
+      <SettingItem
+        title={<span className="set-item__title-inline"><span className="set-item__title-icon"><Link2 size={15} /></span>已配对设备</span>}
+        description="外接设备凭配对获得的专属令牌访问内建 MCP Server（服务端只存令牌哈希，吊销即时生效）。「本机默认」设备的令牌文件位于应用数据目录 mcp-token.txt。"
+        control={
+          <Button variant="soft" size="sm" onClick={startPairing}>
+            <Plus size={14} />
+            配对新设备
+          </Button>
+        }
+      >
+        <div className="set-hosts">
+          {devices.length === 0 && <div className="set-mem-empty">暂无已配对设备</div>}
+          {devices.map((d) => (
+            <div className="set-hosts__row" key={d.id}>
+              {renaming?.id === d.id ? (
+                <>
+                  <Input
+                    autoFocus
+                    defaultValue={renaming.value}
+                    onChange={(e) => setRenaming({ id: d.id, value: e.target.value })}
+                    onPressEnter={renameDevice}
+                  />
+                  <button type="button" className="set-mem-item__del" title="确认" onClick={renameDevice}>
+                    <Check size={15} />
+                  </button>
+                  <button
+                    type="button"
+                    className="set-mem-item__del"
+                    title="取消"
+                    onClick={() => setRenaming(null)}
+                  >
+                    <X size={15} />
+                  </button>
+                </>
+              ) : (
+                <>
+                  <span className="set-sec-path" style={{ flex: 1, minWidth: 0 }}>
+                    <code>
+                      {d.name}（指纹 {d.fingerprint}）· 最近活跃{' '}
+                      {d.lastSeen ? new Date(d.lastSeen).toLocaleString() : '从未'}
+                    </code>
+                  </span>
+                  <button
+                    type="button"
+                    className="set-mem-item__del"
+                    title="重命名"
+                    onClick={() => setRenaming({ id: d.id, value: d.name })}
+                  >
+                    <Pencil size={15} />
+                  </button>
+                  <Popconfirm
+                    title={`吊销设备「${d.name}」？`}
+                    description="吊销后该设备令牌立即失效，需重新配对才能访问。"
+                    okText="吊销"
+                    cancelText="取消"
+                    onConfirm={() => revokeDevice(d.id)}
+                  >
+                    <button type="button" className="set-mem-item__del" title="吊销">
+                      <Trash2 size={15} />
+                    </button>
+                  </Popconfirm>
+                </>
+              )}
+            </div>
+          ))}
+        </div>
+      </SettingItem>
+
+      <Modal
+        open={pairOpen}
+        title="配对新设备"
+        width={520}
+        centered
+        footer={null}
+        onOpenChange={(o) => {
+          if (!o) {
+            setPairOpen(false)
+            loadDevices()
+          }
+        }}
+        onCancel={() => {
+          setPairOpen(false)
+          loadDevices()
+        }}
+      >
+        <div style={{ textAlign: 'center', padding: '8px 0 16px' }}>
+          <div style={{ fontSize: 40, letterSpacing: 12, fontWeight: 700, fontFamily: 'ui-monospace, Consolas, monospace' }}>
+            {pairCode}
+          </div>
+          <div style={{ color: 'var(--color-foreground-muted)', marginTop: 8 }}>
+            剩余 {Math.floor(pairLeft / 60)}:{String(pairLeft % 60).padStart(2, '0')}
+            （过期后请重新发起）
+          </div>
+        </div>
+        <Alert
+          type="info"
+          showIcon
+          message="在新设备上执行配对请求"
+          description={
+            <pre style={{ margin: 0, whiteSpace: 'pre-wrap', fontSize: 12 }}>
+              {`POST http://<本机IP>:18755/pair
+Content-Type: application/json
+
+{"name": "设备名", "code": "${pairCode}"}`}
+            </pre>
+          }
+        />
+        <div style={{ color: 'var(--color-foreground-muted)', fontSize: 12, marginTop: 12 }}>
+          配对成功后设备获得专属令牌（仅此一次返回明文），在客户端 mcpServers 配置中以
+          <code> headers: {'{ Authorization: "Bearer <token>" }'}</code> 携带访问。配对成功后本弹窗可直接关闭。
+        </div>
+      </Modal>
 
       <h3 className="set-section__title">恢复</h3>
 

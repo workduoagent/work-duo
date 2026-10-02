@@ -275,10 +275,10 @@ fn column_value(row: &sqlx::sqlite::SqliteRow, col: &sqlx::sqlite::SqliteColumn)
 /// 启动内建 MCP Server（在 app setup 中调用，独立 std 线程）。
 pub fn start_mcp_server(app: AppHandle) {
     std::thread::spawn(move || {
-        let (enabled, port) = tauri::async_runtime::block_on(async {
+        let (enabled, port, bind_addr, local_trust) = tauri::async_runtime::block_on(async {
             let pool = match get_pool(&app).await {
                 Ok(p) => p,
-                Err(_) => return (true, 18755u16), // 未就绪时按默认启用
+                Err(_) => return (true, 18755u16, "127.0.0.1".to_string(), true), // 未就绪时按默认启用
             };
             let enabled = read_cfg(&pool, "mcp_server_enabled")
                 .await
@@ -288,7 +288,13 @@ pub fn start_mcp_server(app: AppHandle) {
                 .await
                 .and_then(|s| s.parse::<u16>().ok())
                 .unwrap_or(18755);
-            (enabled, port)
+            // F001 信任协议：监听地址可配置（127.0.0.1 默认 / 0.0.0.0 内网互通）；本机信任默认开
+            let bind_addr = match read_cfg(&pool, "mcp_bind_addr").await.as_deref() {
+                Some("0.0.0.0") => "0.0.0.0".to_string(),
+                _ => "127.0.0.1".to_string(),
+            };
+            let local_trust = read_cfg(&pool, "mcp_local_trust").await.as_deref() != Some("false");
+            (enabled, port, bind_addr, local_trust)
         });
 
         if !enabled {
@@ -296,7 +302,13 @@ pub fn start_mcp_server(app: AppHandle) {
             return;
         }
 
-        let addr = format!("127.0.0.1:{port}");
+        // F001 信任协议：确保存在「本机默认」配对设备，并把明文 token 写入用户目录文件
+        //（本机编码工具可直读显式携带；本机信任开启时回环请求亦可免凭证）。
+        if let Err(e) = tauri::async_runtime::block_on(ensure_default_device(&app)) {
+            tracing::warn!("[mcp] 本机默认设备初始化失败（鉴权仍生效，仅缺默认设备）：{e}");
+        }
+
+        let addr = format!("{bind_addr}:{port}");
         let listener = match TcpListener::bind(&addr) {
             Ok(l) => l,
             Err(e) => {
@@ -304,12 +316,12 @@ pub fn start_mcp_server(app: AppHandle) {
                 return;
             }
         };
-        tracing::info!("[mcp] WorkDuo 内建 MCP Server 已启动：{addr}/mcp");
+        tracing::info!("[mcp] WorkDuo 内建 MCP Server 已启动：{addr}/mcp（本机信任={local_trust}）");
         for stream in listener.incoming() {
             match stream {
                 Ok(s) => {
                     let app2 = app.clone();
-                    std::thread::spawn(move || handle_conn(s, app2));
+                    std::thread::spawn(move || handle_conn(s, app2, local_trust));
                 }
                 Err(e) => tracing::info!("[mcp] accept 错误：{e}"),
             }
@@ -318,7 +330,7 @@ pub fn start_mcp_server(app: AppHandle) {
 }
 
 /// 处理单个 HTTP 连接。
-fn handle_conn(mut stream: TcpStream, app: AppHandle) {
+fn handle_conn(mut stream: TcpStream, app: AppHandle, local_trust: bool) {
     let _ = stream.set_read_timeout(Some(Duration::from_secs(30)));
 
     let request = {
@@ -364,14 +376,69 @@ fn handle_conn(mut stream: TcpStream, app: AppHandle) {
         (method, path, headers, body)
     };
 
-    if request.1 != "/mcp" {
+    let (method, path, headers, body) = request;
+    let is_loopback = stream.peer_addr().map(|a| a.ip().is_loopback()).unwrap_or(false);
+
+    // F001 信任协议：/pair 配对端点——唯一免鉴权入口（配对本身产出凭证），凭 6 位码换设备专属 Token。
+    if path == "/pair" {
+        if method != "POST" {
+            let _ = stream.write_all(
+                b"HTTP/1.1 405 Method Not Allowed\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+            );
+            return;
+        }
+        match tauri::async_runtime::block_on(handle_pair(&app, &body)) {
+            Ok(v) => write_json(&mut stream, "200 OK", &v),
+            Err((status, msg)) => {
+                tracing::warn!("[mcp] 配对失败：{msg}（peer loopback={is_loopback}）");
+                write_json(&mut stream, status, &json!({ "ok": false, "error": msg }));
+            }
+        }
+        return;
+    }
+
+    if path != "/mcp" {
         let _ = stream.write_all(
             b"HTTP/1.1 404 Not Found\r\nContent-Type: application/json\r\nContent-Length: 20\r\nConnection: close\r\n\r\n{\"error\":\"not found\"}",
         );
         return;
     }
 
-    if request.0 == "GET" {
+    // F001 鉴权闸门：Bearer 命中已配对设备 → 放行（记 last_seen）；
+    // 无凭证时——带 Origin 头（浏览器页面，无法静默抑制）一律 403；
+    // 本机回环且本机信任开启 → 放行（既有本机编码工具零改造）；其余 401。
+    match tauri::async_runtime::block_on(authorize(&app, &headers, is_loopback, local_trust)) {
+        Access::Device(id) => {
+            tauri::async_runtime::block_on(async {
+                if let Ok(pool) = get_pool(&app).await {
+                    let _ = sqlx::query("UPDATE mcp_paired_device SET last_seen = ? WHERE id = ?")
+                        .bind(now_ms())
+                        .bind(&id)
+                        .execute(&pool)
+                        .await;
+                }
+            });
+        }
+        Access::LocalTrust => {}
+        Access::Deny => {
+            let status = if headers.contains_key("origin") {
+                "403 Forbidden"
+            } else {
+                "401 Unauthorized"
+            };
+            tracing::warn!(
+                "[mcp] 拒绝未授权请求：status={status} path={path} loopback={is_loopback}"
+            );
+            write_json(
+                &mut stream,
+                status,
+                &json!({ "error": "unauthorized", "hint": "请在 WorkDuo 设置→安全中心 完成设备配对" }),
+            );
+            return;
+        }
+    }
+
+    if method == "GET" {
         // MCP Streamable HTTP：GET 用于服务端→客户端 SSE 通道，保持打开并心跳。
         let _ = stream.write_all(
             b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nConnection: keep-alive\r\n\r\n: mcp-connected\r\n\r\n",
@@ -387,19 +454,19 @@ fn handle_conn(mut stream: TcpStream, app: AppHandle) {
         return;
     }
 
-    if request.0 != "POST" {
+    if method != "POST" {
         let _ = stream.write_all(
             b"HTTP/1.1 405 Method Not Allowed\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
         );
         return;
     }
 
-    let accept = request.2.get("accept").cloned().unwrap_or_default();
+    let accept = headers.get("accept").cloned().unwrap_or_default();
     let use_sse = accept.to_lowercase().contains("text/event-stream");
-    let session_id = request.2.get("mcp-session-id").cloned();
+    let session_id = headers.get("mcp-session-id").cloned();
 
     let resp: Option<(Value, Option<String>)> = tauri::async_runtime::block_on(async {
-        let body_str = String::from_utf8_lossy(&request.3);
+        let body_str = String::from_utf8_lossy(&body);
         let parsed: Value = match serde_json::from_str(&body_str) {
             Ok(v) => v,
             Err(e) => {
@@ -2207,4 +2274,360 @@ fn tool(name: &str, description: &str, input_schema: Value) -> Value {
         "description": description,
         "inputSchema": input_schema
     })
+}
+
+
+/* ============================ F001 信任协议（配对制鉴权） ============================ */
+//
+// 语义（2026-10-02 用户定案，详见 .workspace/.fix/F001.md）：
+// - `Authorization: Bearer <device_token>` 命中已配对设备 → 放行（设备令牌服务端只存 SHA-256 哈希）；
+// - 无凭证时：带 Origin 头（浏览器页面，无法静默抑制）一律 403；本机回环且本机信任 → 放行；其余 401；
+// - `/pair` 配对端点：设置页发起 2 分钟配对窗口并显示 6 位码，客户端凭码换取设备专属 Token（仅此一次返回明文）；
+// - 监听地址 `mcp_bind_addr`（默认 127.0.0.1，可切 0.0.0.0 内网互通，切换即强制依赖配对信任）。
+
+use rand::{Rng, RngCore};
+use sha2::{Digest, Sha256};
+
+const PAIR_WINDOW_MS: i64 = 120_000;
+const PAIR_MAX_ATTEMPTS: u32 = 5;
+const DEFAULT_DEVICE_NAME: &str = "本机默认";
+const TOKEN_FILE_NAME: &str = "mcp-token.txt";
+
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+fn sha256_hex(s: &str) -> String {
+    let mut h = Sha256::new();
+    h.update(s.as_bytes());
+    h.finalize().iter().map(|b| format!("{b:02x}")).collect()
+}
+
+fn random_hex(bytes: usize) -> String {
+    let mut buf = vec![0u8; bytes];
+    rand::thread_rng().fill_bytes(&mut buf);
+    buf.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// 配对会话：设置页 `mcp_pairing_start` 发起，`/pair` 消费。
+struct PairingSession {
+    code: String,
+    expires_at_ms: i64,
+    attempts: u32,
+}
+
+static PAIRING: OnceLock<Mutex<Option<PairingSession>>> = OnceLock::new();
+fn pairing_slot() -> &'static Mutex<Option<PairingSession>> {
+    PAIRING.get_or_init(|| Mutex::new(None))
+}
+
+/// 鉴权决策（纯函数）：无凭证时——浏览器页面（带 Origin）必拒；本机回环且本机信任放行；其余拒。
+/// 带 token 的请求不走本函数（命中即放行、不命中直接拒，不回退本机信任——伪造/已吊销凭证不应混过）。
+fn decide_access(has_origin: bool, is_loopback: bool, local_trust: bool) -> bool {
+    if has_origin {
+        return false;
+    }
+    is_loopback && local_trust
+}
+
+/// 鉴权结果：Device=命中已配对设备（记 last_seen）；LocalTrust=本机回环免凭证；Deny=拒绝。
+enum Access {
+    Device(String),
+    LocalTrust,
+    Deny,
+}
+
+async fn authorize(
+    app: &AppHandle,
+    headers: &HashMap<String, String>,
+    is_loopback: bool,
+    local_trust: bool,
+) -> Access {
+    let token = headers
+        .get("authorization")
+        .and_then(|v| v.strip_prefix("Bearer ").map(|s| s.trim().to_string()))
+        .filter(|s| !s.is_empty());
+
+    let Some(token) = token else {
+        return if decide_access(headers.contains_key("origin"), is_loopback, local_trust) {
+            Access::LocalTrust
+        } else {
+            Access::Deny
+        };
+    };
+
+    let Ok(pool) = get_pool(app).await else {
+        return Access::Deny;
+    };
+    let hash = sha256_hex(&token);
+    let hit = sqlx::query("SELECT id FROM mcp_paired_device WHERE token_hash = ?")
+        .bind(&hash)
+        .fetch_optional(&pool)
+        .await
+        .ok()
+        .flatten();
+    match hit {
+        Some(row) => match row.try_get::<String, _>("id") {
+            Ok(id) => Access::Device(id),
+            Err(_) => Access::Deny,
+        },
+        // 带了凭证却不匹配：明确拒绝（含已吊销设备），不回退本机信任
+        None => Access::Deny,
+    }
+}
+
+/// 配对码校验（纯函数，可单测）：未配对 / 过期 / 超限 / 错码。
+fn check_pair(code: &str, sess: Option<&PairingSession>, now_ms: i64) -> Result<(), &'static str> {
+    let Some(s) = sess else {
+        return Err("未进入配对模式：请先在 WorkDuo 设置→安全中心 发起配对");
+    };
+    if now_ms > s.expires_at_ms {
+        return Err("配对码已过期，请在 WorkDuo 重新发起配对");
+    }
+    if s.attempts >= PAIR_MAX_ATTEMPTS {
+        return Err("尝试次数过多，请在 WorkDuo 重新发起配对");
+    }
+    if s.code != code {
+        return Err("配对码错误");
+    }
+    Ok(())
+}
+
+/// /pair 配对端点：{name, code} → 200 {ok, token, deviceId, name, fingerprint}；失败 4xx/5xx。
+async fn handle_pair(app: &AppHandle, body: &[u8]) -> Result<Value, (&'static str, String)> {
+    let parsed: Value = serde_json::from_slice(body)
+        .map_err(|_| ("400 Bad Request", "请求体不是合法 JSON".to_string()))?;
+    let name_raw = parsed
+        .get("name")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .unwrap_or("未命名设备");
+    let name: String = name_raw.chars().take(64).collect();
+    let code = parsed
+        .get("code")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+
+    // 校验配对码（错码计次；过期/超限要求重新发起）
+    let mut wrong_code = false;
+    let check_err: Option<&'static str> = {
+        let mut guard = pairing_slot().lock().unwrap_or_else(|e| e.into_inner());
+        match guard.as_mut() {
+            None => Some(check_pair(&code, None, now_ms()).unwrap_err()),
+            Some(s) => match check_pair(&code, Some(s), now_ms()) {
+                Ok(()) => None,
+                Err(e) => {
+                    if e == "配对码错误" {
+                        s.attempts += 1;
+                        wrong_code = true;
+                    }
+                    Some(e)
+                }
+            },
+        }
+    };
+    if let Some(msg) = check_err {
+        if wrong_code {
+            tracing::warn!("[mcp] 配对码错误（peer loopback=?）");
+        }
+        return Err(("403 Forbidden", msg.to_string()));
+    }
+
+    let token = random_hex(32);
+    let hash = sha256_hex(&token);
+    let fingerprint: String = hash.chars().take(8).collect();
+    let id = random_hex(16);
+    let pool = get_pool(app)
+        .await
+        .map_err(|e| ("500 Internal Server Error", format!("数据库未就绪：{e}")))?;
+    sqlx::query(
+        "INSERT INTO mcp_paired_device (id, name, token_hash, fingerprint, created_at, last_seen) VALUES (?,?,?,?,?,?)",
+    )
+    .bind(&id)
+    .bind(&name)
+    .bind(&hash)
+    .bind(&fingerprint)
+    .bind(now_ms())
+    .bind(now_ms())
+    .execute(&pool)
+    .await
+    .map_err(|e| ("500 Internal Server Error", format!("设备入库失败：{e}")))?;
+    *pairing_slot().lock().unwrap_or_else(|e| e.into_inner()) = None;
+    tracing::info!("[mcp] 设备配对成功：{name}（指纹 {fingerprint}）");
+
+    Ok(json!({
+        "ok": true,
+        "token": token,
+        "deviceId": id,
+        "name": name,
+        "fingerprint": fingerprint,
+        "usage": "在客户端 mcpServers 配置加 headers: { Authorization: \"Bearer <token>\" }"
+    }))
+}
+
+/// 确保存在「本机默认」设备，并把明文 token 写入用户数据目录文件（本机编码工具显式携带用）。
+/// 文件仅在创建设备时写入；用户删除文件后可吊销「本机默认」并重启应用重新生成。
+async fn ensure_default_device(app: &AppHandle) -> Result<(), String> {
+    let pool = get_pool(app).await.map_err(|e| e.to_string())?;
+    let have: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM mcp_paired_device WHERE name = ?")
+        .bind(DEFAULT_DEVICE_NAME)
+        .fetch_one(&pool)
+        .await
+        .map_err(|e| e.to_string())?;
+    if have > 0 {
+        return Ok(());
+    }
+    let token = random_hex(32);
+    let hash = sha256_hex(&token);
+    let fingerprint: String = hash.chars().take(8).collect();
+    let id = random_hex(16);
+    sqlx::query(
+        "INSERT INTO mcp_paired_device (id, name, token_hash, fingerprint, created_at, last_seen) VALUES (?,?,?,?,?,?)",
+    )
+    .bind(&id)
+    .bind(DEFAULT_DEVICE_NAME)
+    .bind(&hash)
+    .bind(&fingerprint)
+    .bind(now_ms())
+    .bind(now_ms())
+    .execute(&pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("无法定位数据目录：{e}"))?;
+    std::fs::create_dir_all(&dir).map_err(|e| format!("创建数据目录失败：{e}"))?;
+    let file = dir.join(TOKEN_FILE_NAME);
+    std::fs::write(&file, format!("{token}\n"))
+        .map_err(|e| format!("写入本机 token 文件失败：{e}"))?;
+    tracing::info!("[mcp] 本机默认设备已创建，token 文件：{}", file.display());
+    Ok(())
+}
+
+/* --------------------------- 设备管理命令（设置→安全中心） --------------------------- */
+
+#[tauri::command]
+pub fn mcp_pairing_start() -> Result<Value, String> {
+    let code: String = format!("{:06}", rand::thread_rng().gen_range(0..1_000_000));
+    *pairing_slot().lock().unwrap_or_else(|e| e.into_inner()) = Some(PairingSession {
+        code: code.clone(),
+        expires_at_ms: now_ms() + PAIR_WINDOW_MS,
+        attempts: 0,
+    });
+    tracing::info!("[mcp] 发起配对：2 分钟窗口已开启");
+    Ok(json!({ "code": code, "expiresInMs": PAIR_WINDOW_MS }))
+}
+
+#[tauri::command]
+pub async fn mcp_pairing_devices(app: AppHandle) -> Result<Vec<Value>, String> {
+    let pool = get_pool(&app).await.map_err(|e| e.to_string())?;
+    let rows = sqlx::query(
+        "SELECT id, name, fingerprint, created_at, last_seen FROM mcp_paired_device ORDER BY created_at ASC",
+    )
+    .fetch_all(&pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    Ok(rows
+        .iter()
+        .map(|r| {
+            json!({
+                "id": r.try_get::<String, _>("id").unwrap_or_default(),
+                "name": r.try_get::<String, _>("name").unwrap_or_default(),
+                "fingerprint": r.try_get::<String, _>("fingerprint").unwrap_or_default(),
+                "createdAt": r.try_get::<i64, _>("created_at").unwrap_or_default(),
+                "lastSeen": r.try_get::<i64, _>("last_seen").unwrap_or_default(),
+            })
+        })
+        .collect())
+}
+
+#[tauri::command]
+pub async fn mcp_pairing_revoke(app: AppHandle, id: String) -> Result<bool, String> {
+    let pool = get_pool(&app).await.map_err(|e| e.to_string())?;
+    let res = sqlx::query("DELETE FROM mcp_paired_device WHERE id = ?")
+        .bind(&id)
+        .execute(&pool)
+        .await
+        .map_err(|e| e.to_string())?;
+    let revoked = res.rows_affected() > 0;
+    if revoked {
+        tracing::info!("[mcp] 设备已吊销：{id}");
+    }
+    Ok(revoked)
+}
+
+#[tauri::command]
+pub async fn mcp_pairing_rename(app: AppHandle, id: String, name: String) -> Result<bool, String> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err("设备名不能为空".to_string());
+    }
+    let name: String = name.chars().take(64).collect();
+    let pool = get_pool(&app).await.map_err(|e| e.to_string())?;
+    let res = sqlx::query("UPDATE mcp_paired_device SET name = ? WHERE id = ?")
+        .bind(&name)
+        .bind(&id)
+        .execute(&pool)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(res.rows_affected() > 0)
+}
+
+/// 统一 JSON 响应写出（严格单 \r\n\r\n 分隔，Content-Length 与实体一致）。
+fn write_json(stream: &mut TcpStream, status: &str, payload: &Value) {
+    let body = serde_json::to_vec(payload).unwrap_or_default();
+    let head = format!(
+        "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        body.len()
+    );
+    let _ = stream.write_all(head.as_bytes());
+    let _ = stream.write_all(&body);
+}
+
+#[cfg(test)]
+mod trust_tests {
+    use super::*;
+
+    #[test]
+    fn decide_access_matrix() {
+        // 浏览器页面（带 Origin）无论本机/远程一律拒
+        assert!(!decide_access(true, true, true));
+        assert!(!decide_access(true, false, true));
+        // 本机回环 + 本机信任 → 放行；本机信任关 → 拒
+        assert!(decide_access(false, true, true));
+        assert!(!decide_access(false, true, false));
+        // 远程无凭证 → 拒
+        assert!(!decide_access(false, false, true));
+    }
+
+    #[test]
+    fn pair_code_lifecycle() {
+        let s = PairingSession { code: "123456".into(), expires_at_ms: 1_000, attempts: 0 };
+        // 未进入配对模式
+        assert!(check_pair("123456", None, 0).is_err());
+        // 过期
+        assert!(check_pair("123456", Some(&s), 1_001).is_err());
+        // 错码
+        assert!(check_pair("000000", Some(&s), 500).is_err());
+        // 正确
+        assert!(check_pair("123456", Some(&s), 500).is_ok());
+        // 超限锁定
+        let locked = PairingSession { code: "123456".into(), expires_at_ms: 1_000, attempts: PAIR_MAX_ATTEMPTS };
+        assert!(check_pair("123456", Some(&locked), 500).is_err());
+    }
+
+    #[test]
+    fn token_hash_is_deterministic() {
+        let h1 = sha256_hex("abc");
+        assert_eq!(h1, sha256_hex("abc"));
+        assert_ne!(h1, sha256_hex("abd"));
+        assert_eq!(h1.chars().take(8).count(), 8);
+    }
 }
