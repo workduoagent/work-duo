@@ -82,6 +82,45 @@ pub fn run() {
         .setup(|app| -> Result<(), Box<dyn std::error::Error>> {
             // 统一日志初始化（必须在任何 tracing 宏调用之前）。
             crate::logging::init_logging(app.handle());
+
+            // 开机窗口尺寸兼容（笔记本小屏）：tauri.conf.json 里的 1200×1000 / min 1200×800
+            // 在小屏 + 任务栏下会超高（高度直接顶穿任务栏），用户每次都要手动缩小。
+            // 这里按当前显示器工作区（系统已扣除任务栏）收敛初始与最小尺寸：
+            // 大屏不受影响（仍用配置值），小屏自动缩到可见区内并居中。
+            {
+                use tauri::{LogicalSize, Manager};
+                if let Some(win) = app.get_webview_window("main") {
+                    // 窗口所在显示器优先（多屏时跟窗口走），取不到再退主屏
+                    let mon = win
+                        .current_monitor()
+                        .ok()
+                        .flatten()
+                        .or_else(|| app.primary_monitor().ok().flatten());
+                    if let Some(mon) = mon {
+                        let sf = mon.scale_factor();
+                        // 工作区是物理像素，配置是逻辑像素——按缩放比换算
+                        let avail_w = mon.work_area().size.width as f64 / sf;
+                        let avail_h = mon.work_area().size.height as f64 / sf;
+                        let cfg = app
+                            .config()
+                            .app
+                            .windows
+                            .iter()
+                            .find(|w| w.label == "main")
+                            .cloned();
+                        if let Some(cfg) = cfg {
+                            let w = cfg.width.min(avail_w).max(320.0);
+                            let h = cfg.height.min(avail_h).max(240.0);
+                            // 最小尺寸同步收敛：避免 min > 可见区导致无法缩进屏幕
+                            let min_w = cfg.min_width.unwrap_or(0.0).min(w);
+                            let min_h = cfg.min_height.unwrap_or(0.0).min(h);
+                            let _ = win.set_min_size(Some(LogicalSize::new(min_w, min_h)));
+                            let _ = win.set_size(LogicalSize::new(w, h));
+                            let _ = win.center();
+                        }
+                    }
+                }
+            }
             // 后台静默确保 Agent 默认环境（default）存在；失败仅日志，不阻塞启动。
             // 严格延后：先 await DB 连接池就绪闸门，杜绝启动早期组件未就绪导致的空指针 / 连接断裂。
             let handle = app.handle().clone();
