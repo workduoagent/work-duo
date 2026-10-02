@@ -8,29 +8,30 @@
 
 ### 1.1 总体架构
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│  表现层（React 19 + TypeScript + Vite + antd v5）                    │
-│  - 页面（pages/*）、组件（components/ui 封装层）、状态（Redux Toolkit）│
-│  - 通过 @tauri-apps/api invoke 调用后端命令；listen 订阅引擎事件流   │
-└───────────────────────────────┬─────────────────────────────────────┘
-                                 │  Tauri IPC（命令 + 事件，二进制通道）
-┌───────────────────────────────┴─────────────────────────────────────┐
-│  桌面壳（Rust / Tauri 2）                                            │
-│  - lib.rs：应用入口、命令注册（generate_handler!）、Capability 校验  │
-│  - agent/*：智能体分层执行引擎（意图 → 规划 → 流水线）               │
-│  - mcp.rs / mamba_manager.rs / fs_helper.rs：生态适配与系统桥接      │
-└───────────────────────────────┬─────────────────────────────────────┘
-                                 │
-        ┌────────────────────────┼───────────────────────────────┐
-        ▼                        ▼                                ▼
-  云端 LLM API            本地 SQLite（workduo.db）       本机文件系统（.wd_mem/）
-  （OpenAI 兼容 /            （app_config / models /        （产物、记忆、会话摘要，
-   讯飞 WS 签名）             mcp_info / agent_* /            PathGuard 沙箱边界）
-                               knowledge_base /               ┌──────────────┐
-                               agent_memories …）             │ micromamba   │
-                                                             │ Python 沙箱   │
-                                                             └──────────────┘
+```mermaid
+flowchart TB
+    subgraph PRESENT["表现层 · React 19 + TypeScript + Vite 7"]
+        UI["页面 pages<br/>组件 components/ui 封装层<br/>状态 Redux Toolkit"]
+    end
+
+    subgraph SHELL["桌面壳 · Rust / Tauri 2"]
+        LIB["lib.rs<br/>命令注册 · Capability 校验"]
+        ENGINE["agent/ 智能体分层执行引擎<br/>意图 → 规划 → 流水线"]
+        ADAPTER["mcp · mamba_manager · fs_helper<br/>生态适配与系统桥接"]
+    end
+
+    LLM["云端 LLM API<br/>OpenAI 兼容 · 讯飞 WS 签名"]
+    DB["本地 SQLite · workduo.db<br/>app_config · models · agent_* · knowledge_base"]
+    FS["本机文件系统 · .wd_mem<br/>产物 · 记忆 · 会话摘要（PathGuard 边界）"]
+    PY["micromamba · Python 沙箱"]
+
+    UI -->|"invoke 调用命令 · listen 订阅事件"| LIB
+    LIB --- ENGINE
+    ENGINE --- ADAPTER
+    ENGINE -->|"HTTP 流式推理（客户端不做本地重推理）"| LLM
+    ENGINE --- DB
+    ADAPTER --- PY
+    ENGINE --- FS
 ```
 
 ### 1.2 技术栈总览
@@ -89,27 +90,32 @@
 
 ### 2.3 后端 `src-tauri/src/agent/` 模块（引擎分层）
 
-| 文件 | 职责 |
-|---|---|
-| `commands.rs` | 所有 `#[tauri::command]` 入口（run_agent_task / 审批 / 取消 / 记忆 6 命令 / 附件分片 / 归档）；`load_config` 组装运行时配置并注入召回记忆与沉淀引导 |
-| `runtime.rs` | 调度引擎：组装 ToolRegistry（原生+Skill+MCP）、驱动三段式链路、Token 窗口裁剪、取消信号链、**记忆模式「强制」档的引擎级后置沉淀 `forced_memory_settle`** |
-| `intent.rs` | 意图分流（规则短路 + LLM 轻量分类，失败降级 COMPOSITE），发射 `intent_classified` 事件 |
-| `planner.rs` | DAG 规划（`temperature=0` 确定性，≤5 步，失败降级单任务） |
-| `pipeline.rs` | 微 ReAct 执行（`MAX_SUBTASK_ITERATIONS=8`，无进展熔断，子任务独立上下文）；支持 `plan_override` / `pre_completed` / `initial_context` 续跑分支 |
-| `native.rs` | 原生工具（read/edit/write file、list_dir、execute_command、run_python_sandbox、archive_artifact、**anchor_memory**）+ `ToolRegistry` |
-| `tools.rs` | 工具契约（AgentTool / ToolError / PermissionLevel / ToolContext + PathGuard 沙箱） |
-| `skill_adapter.rs` `mcp_adapter.rs` | Skill / MCP 生态适配封装 |
-| `approval.rs` | 高危操作人机审批（oneshot 通道零死锁） |
-| `recovery.rs` | 失败自愈/恢复建议 |
-| `verifier.rs` | 产物/结果校验 |
-| `artifacts.rs` | 产物归档与读取（`read_artifact` 内容读取 API） |
-| `round_compactor.rs` | 上下文压缩（长会话摘要，省 token） |
-| `memory.rs` | 记忆读写（list/heatmap/anchor/update/delete/recall + top-K 自动召回 + 分支收敛后发射 `agent-memory-anchored`） |
-| `wd_mem.rs` | 工作区记忆双轨（`.wd_mem/` 磁盘态 + 会话摘要） |
-| `events.rs` | 前后端事件契约与推送（`intent_classified`、`tool_started/finished`、`plan_generated`、`plan_branch_generated`、`step_*`、`thinking_chunk`、`token_update`、`artifact_created`、`agent-task-done/error`、`memory_recalled`、`memory_anchored`、`context_compacted`） |
-| `types.rs` `context.rs` `mod.rs` | 类型定义、上下文、模块装配 |
+引擎已按职责分层（`src-tauri/src/agent/`），下表为当前真实结构：
 
-其余后端：`lib.rs`（入口/命令注册）、`mcp.rs`（MCP 同步与调用）、`mamba_manager.rs`（micromamba 环境/包/脚本执行）、`fs_helper.rs`（路径规范化）、`main.rs`、`build.rs`。
+| 位置 | 文件 | 职责 |
+|---|---|---|
+| 根 | `commands.rs` | 所有 `#[tauri::command]` 入口（运行任务 / 审批 / 取消 / 记忆 / 附件分片 / 归档） |
+| 根 | `delivery.rs` | 结果投递与回复落库 |
+| 根 | `events.rs` `types.rs` `mod.rs` | 前后端事件契约、领域类型、模块装配 |
+| **`engine/`** | `runtime.rs` | 调度核心：组装 ToolRegistry（原生 + 插件 + Skill + MCP）、驱动三段式链路、Token 窗口裁剪、取消信号链、强制档记忆沉淀 |
+| | `config_loader.rs` | **运行时配置装配**：读 `agent_info` 及其 `*_ref` 关联，绑定模型 / 技能 / MCP / 插件 / 知识库；`MAX_SKILLS=3` 等配额在此兜底 |
+| | `intent.rs` | 意图分流（规则短路 + LLM 轻量分类，失败降级 COMPOSITE） |
+| | `planner.rs` | DAG 规划（`temperature=0` 确定性，≤5 步，失败降级单任务） |
+| | `pipeline.rs` | 微 ReAct 执行、子任务轮次预算、熔断、**技能知识注入 `build_skill_guidance`** |
+| | `tools.rs` `tool_round.rs` `policy.rs` `protocol.rs` | 工具契约（AgentTool / ToolError / PermissionLevel / ToolBehavior）、轮次分级、危险信号策略、协议定义 |
+| | `llm.rs` `token_estimate.rs` `graph.rs` `round_compactor.rs` `simple_chat.rs` `verifier.rs` `context.rs` | LLM 网关、Token 估算、知识图谱、上下文压缩、直答快路径、结果校验、上下文类型 |
+| **`plugins/`** | `skill_adapter.rs` | 技能 → 引擎的适配层（`SkillToolWrapper`） |
+| | `skill_tools.rs` | **技能随包工具**：解析 `tools.json` → 注册 `skill__{ns}__{slug}`，执行走插件沙箱 |
+| | `plugin_adapter.rs` `plugin_runner.rs` `plugin_commands.rs` | 本地插件装配、脚本沙箱执行内核（脚本须定义 `run(args)`，运行壳由 Runner 拼装，自动注入 FS / 网络守卫）、插件管理命令 |
+| | `mcp_adapter.rs` | MCP 工具 → AgentTool 适配 |
+| **`hitl/`** | `approval.rs` `plan_approval.rs` `choice.rs` `recovery.rs` | 高危操作审批、计划门禁、向用户提问、失败自愈 / 恢复建议（oneshot 通道零死锁） |
+| **`knowledge/`** | `memory.rs` `wd_mem.rs` `knowledge.rs` `embedding.rs` `vector_store.rs` | 长期记忆（召回 / 锚定 / 热力图）、工作区 `.wd_mem/` 双轨、知识库检索、向量适配 |
+| **`artifact/`** | `artifacts.rs` `artifact_index.rs` | 产物归档、索引与读取 |
+| **`squad/`** | `squad_orchestrator.rs` `squad_scheduler.rs` `squad_api_server.rs` `config.rs` | 智能体分组协作：编排、调度、外部 API、编队配置 |
+
+其余后端：`lib.rs`（入口 / 命令注册）、`mcp.rs`（MCP 客户端，接入外部 Server）、`mcp_server.rs`（**内建 MCP Server**，暴露本机工具面）、`mcp_oauth.rs`、`mamba_manager.rs`（Python 环境）、`bun_manager.rs`（JS 运行时）、`sandbox_audit.rs`、`logging.rs`（本地日期滚动）、`fs_helper.rs`（路径规范化）、`net.rs`、`ws_snapshot.rs`、`main.rs`、`build.rs`。
+
+> 历史上曾含 `native.rs`（原生工具集中实现），现已拆分进 `engine/tools.rs` 体系与 `plugins/`。文档若仍见此文件名，请以当前目录为准。
 
 ---
 
@@ -142,8 +148,9 @@
 - **技术**：`mcp.rs` 的 `sync_mcp_tools` / `call_mcp_tool`（HTTP/SSE 通路，不引 stdio 子进程）；`mcp-mapper.ts` 持久化。
 
 ### 3.3 Skill 中心（`/skill-hub`）【已落地】
-- **功能**：管理可复用 Skill（含 `skill_markdown` 文档），挂载到智能体。
-- **技术**：`skill_adapter.rs` 适配；列表卡片 + 详情目录树 UI。
+- **功能**：技能（可复用工作流包）的注册管理台——创建 / 编辑 / 删除 / 启停 / 文件树浏览 / 导入导出 ZIP，挂载到智能体后驱动其在特定领域按既定流程工作。
+- **技术**：`skill-mapper.ts` + `skillFs.ts`（落盘先行再入库）；`skill_info` 表（`identifier` 唯一约束）；`skill_adapter.rs` / `skill_tools.rs` 负责引擎侧装配。
+- **完整能力说明见 §四**（双通道能力、包规范、配额与优先级、安全模型、随包工具契约）。
 
 ### 3.4 知识库（`/knowledge`）【已落地】
 - **功能**：知识库条目 + 文件树，多格式内容查看（PDF/图片/Word/EPUB/音视频/表格）。
@@ -194,7 +201,211 @@
 
 ---
 
-## 四、开发与构建（铁律）
+## 四、技能（Skill）能力体系
+
+> 本章是 §3.3 Skill 中心的完整展开。技能是 WorkDuo 里**把「模型临场发挥」收敛为「可复用既定流程」**的机制。
+
+### 4.1 什么是技能
+
+一个技能包 = **一份 `SKILL.md` 契约** + 可选资源目录 + 可选随包工具声明。挂载到智能体后，该领域的任务会按技能写明的工作流（Workflow）与质量门禁执行，而不是每轮让模型凭通用经验现写文件。
+
+它与相邻概念的分工：
+
+| 概念 | 定位 | 载体 | 是否可带本机脚本 |
+|---|---|---|---|
+| **技能 Skill** | 领域**工作流知识**（怎么做一件事） | `<identifier>/SKILL.md` | 可（`tools.json` → 跑 python / bun 脚本） |
+| **MCP** | 外部**服务工具**（调别人的能力） | 远端 / 本地 MCP Server | 否（由 Server 决定） |
+| **插件 Plugin** | 用户自写的**原子工具** | `user_plugin_tool` 表 + 脚本 | 是（原生） |
+| **记忆 Memory** | 长期**事实沉淀** | `agent_memories` 表 | 否 |
+
+一句话区分：**技能管流程，MCP 管接口，插件管单个动作，记忆管结论。**
+
+### 4.2 能力双通道
+
+技能在同一个包内提供两种能力形态，独立可选、互不依赖：
+
+| 通道 | 触发物 | 生效机制 | 引擎侧代码 |
+|---|---|---|---|
+| **① 知识注入**（默认，无门槛） | `SKILL.md` 正文 | 由 `build_skill_guidance` 拼进子任务 user 消息：**列出每个技能的「名称 + 描述」；仅当只挂 1 个技能时附其 SKILL.md 全文**；总预算 2000 字符，超出按字符截断 | `agent/engine/pipeline.rs::build_skill_guidance` |
+| **② 随包工具**（可选） | 包根 `tools.json` | 声明的每个工具动态注册为 `skill__{包目录名}__{工具slug}`，与原生工具同表参与模型决策 | `agent/plugins/skill_tools.rs::register_skill_tools` |
+
+设计取舍记录（为什么不是「注册成工具再调一次拿正文」）：早期实现把技能注册为 `skill__{id}` 工具、靠模型主动调用换取正文（见 `skill_adapter.rs` 中保留的 `SkillToolWrapper` impl）。实测这条路多一次工具往返且依赖模型是否愿意调用，已改为**直接 prompt 注入**，行为更可控。旧实现标记 `#[allow(dead_code)]` 保留备用，不再注册。
+
+> 注入文本明确要求「不要调用任何 `skill__` 前缀的工具」——即通道①与通道②分流：知识走 prompt，动作走工具，不让模型混淆。
+
+下图是两条通道从技能包到模型决策的完整链路：
+
+```mermaid
+flowchart LR
+    subgraph PACK["技能包目录"]
+        MD["SKILL.md<br/>工作流正文"]
+        TJ["tools.json<br/>随包工具声明"]
+    end
+
+    BIND["绑定 agent_skill_ref<br/>单智能体上限 3 个"]
+    CFG["config_loader 装配<br/>受 MAX_SKILLS 兜底"]
+    CH1["通道一 知识注入<br/>1 个技能附全文 / 多个仅摘要"]
+    GATE{"allow_sandbox 开启?"}
+    CH2["通道二 随包工具<br/>skill__ns__slug"]
+    SB["plugin_runner 沙箱<br/>FS 有界 · 网络离线"]
+    MODEL["模型决策"]
+
+    PACK --> BIND
+    BIND --> CFG
+    CFG --> CH1
+    CH1 --> MODEL
+    CFG --> GATE
+    GATE -->|"是"| CH2
+    CH2 --> SB
+    SB --> MODEL
+    GATE -->|"否，随包工具不注册"| CH1
+```
+
+> 「否」分支的含义：未开启沙箱时**随包工具整条通道不注册**，但 SKILL.md 的知识注入**照常生效**——因此技能的最低能力始终可用，不受开关影响。
+
+### 4.3 技能包目录规范
+
+```text
+<skill_path>/<identifier>/          # 根由 app_config.skill_path 决定，默认 $APPDATA/.skills
+├── SKILL.md                        # 【核心】技能契约正文，落库 skill_info.skill_markdown
+├── tools.json                      # 【可选】随包工具声明清单
+├── logo.*                          # 【可选】卡片图标
+├── references/                     # 【可选】规范文档，供 SKILL.md 指引模型去读
+└── scripts/                        # 【可选】脚手架 / 工具脚本，多为 tools.json 的执行目标
+```
+
+**`SKILL.md` vs `instruction` 是两个独立字段，勿混用**：
+
+| 字段 | 写盘 | 引擎是否读取 | 用途 |
+|---|---|---|---|
+| `skill_markdown` | 落盘为 `<identifier>/SKILL.md` | **是**（注入 prompt） | 技能真正的工作流正文 |
+| `instruction` | **不写盘**，仅入库 | 仅作为 `description` 为空时的回退 | 可选的补充说明；导入流程始终置空 |
+
+### 4.4 绑定关系、配额与优先级
+
+技能通过 `agent_skill_ref` 挂到智能体，`load_config` 装配时受以下约束（单一事实源：`agent/engine/config_loader.rs`）：
+
+| 约束 | 取值 | 兜底行为 |
+|---|---|---|
+| 单智能体技能数 | **≤ 3**（`MAX_SKILLS`） | 超出部分不再并入工具集，静态绑定优先 |
+| 单技能包工具数 | **≤ 8**（`MAX_TOOLS_PER_SKILL`） | 剩余项忽略并告警 |
+| 单工具超时 | 声明值 clamp 到 **1~300 秒**，缺省 60 | 超时按执行失败处理并附 traceback |
+| 脚本执行前置 | 智能体须 `allow_sandbox = 1` | 未开启则**整个随包工具通道不注册**（知识注入不受影响） |
+
+**运行时动态调整**（会话级，不写库）：
+
+- 对话中 `@` 提及某个**未绑定**技能 → 走 `enabled_skill_ids` 临时并入本轮；
+- `disabled_skill_ids` 临时剔除某个已绑定技能；
+- 两者同时命中同一技能时 **`enabled` 优先**（显式 @ 覆盖临时移除）；
+- 均为每轮临时生效，静态绑定配置不被篡改。
+
+### 4.5 随包工具契约（`tools.json`）
+
+```json
+{
+  "tools": [
+    {
+      "name": "setup_project",
+      "description": "初始化项目脚手架（规划器与执行模型都依赖它决策，必填）",
+      "runtime": "python",
+      "script": "tools/setup_project.py",
+      "parameters": { "type": "object", "properties": {}, "required": [] },
+      "timeout_sec": 60,
+      "sensitive": false,
+      "dependencies": []
+    }
+  ]
+}
+```
+
+| 字段 | 约束 |
+|---|---|
+| `name` | 必填，`[a-z0-9_-]+`；同包内重名后者跳过 |
+| `description` | 必填非空（模型据此选型） |
+| `runtime` | `python` \| `bun`，其它值整项拒绝 |
+| `script` | 必填；相对包根的正斜杠路径，**禁 `..`、绝对路径、反斜杠** |
+| `parameters` | 必须是 `type: "object"` 的 JSON Schema，缺省空 object |
+| `sensitive` | **缺省即 `true`** → 触发人机审批；显式 `false` 才降级无感 |
+
+**解析容错原则**：`tools.json` 缺失 = 纯知识包（静默，零影响）；文件非法或单项校验失败 = **跳过该项并记 warn，绝不阻断任务启动**。坏包不会拖垮整条流水线。
+
+### 4.6 安全模型
+
+技能包可能来自第三方渠道，随包脚本本质是**在本机执行外来代码**，因此采用「默认收紧 + 声明降级 + 沙箱兜底」三层：
+
+1. **权限默认收紧**：`sensitive` 缺省 `true` → `RequireApproval`，调用前弹人机审批；包作者显式声明低风险才降级 `ReadSafe`。
+2. **路径双保险**：解析期校验脚本为包内相对路径；执行前再 `canonicalize` 根目录与脚本，断言脚本落在包内，防符号链接与拼接逃逸。
+3. **共享插件沙箱**：执行复用 `plugin_runner::run_plugin`（与插件同一套底线），自动注入文件系统有界守卫 + 网络离线守卫；工具行为标注为 `exec` 类，纳入策略层危险信号扫描（入参含命令 / 路径字面量时评估更严）。
+
+> 结论：技能与插件共享同一执行底线，仅分发载体不同——**会审批、会越界拦截、会走沙箱**。
+
+### 4.7 技能的信息来源三个入口
+
+管理入口有两个，**副作用完全一致**（同一个 handler），任选其一：
+
+| 入口 | 路径 | 适用 |
+|---|---|---|
+| **UI** | 设置 → 技能中心（`/skill-hub`）：卡片网格 + 分类过滤 + 搜索 + 分页（12/页）、启停开关、详情抽屉、文件树、导入 / 导出 ZIP | 人工管理 |
+| **MCP 工具** | 10 个 `skill_*` 工具经 `mcp:intent` 派发到前端同一 handler，走完整 Tauri 链路 | 外部编程工具 / Agent 自动化 |
+
+两者共用**同一份导入契约**（UI 弹窗与 `skill_import` 走同一套解析逻辑）：接收 ZIP base64 或文件数组，`SKILL.md` 归入 `skillMarkdown`、`logo.*` 归包根目录——用于迁移与团队分发。
+
+`skill_*` MCP 工具清单：
+
+| 工具 | 作用 |
+|---|---|
+| `skill_list` | 枚举全部技能（本模块唯一枚举入口，无入参），返回 `{count, rows}` |
+| `skill_get` | 按 id 查单个技能（含 `skillMarkdown` 正文与 `path`） |
+| `skill_upsert` | 创建 / 编辑并落盘（支持 `scripts[]` / `resources[]`），落盘先行再入库 |
+| `skill_delete` | 真实删除（删库行 + 删磁盘目录），**不可逆** |
+| `skill_set_status` | 启用 / 禁用（对应卡片右上角开关） |
+| `skill_list_files` | 列技能目录文件树（目录优先、同名排序） |
+| `skill_read_file` / `skill_write_file` | 读写技能目录内文本文件（读返回 base64） |
+| `skill_export` | 打包整个技能目录为 ZIP（base64），用于备份 / 分享 |
+| `skill_import` | 导入技能（ZIP 或文件数组），`SKILL.md` 归入 `skillMarkdown`、`logo.*` 归根目录 |
+
+### 4.8 内置技能包：`workduo-mcp`
+
+仓库自带一份生产级技能样本，位于 `docs/skills/workduo-mcp/`：
+
+| 项 | 内容 |
+|---|---|
+| `SKILL.md` | 约 456 行的完整集成指南：WorkDuo 自身作为标准 MCP Server（`http://127.0.0.1:18755/mcp`，Streamable HTTP），供外部编程工具接入后 **UI 级**驱动全模块 |
+| `scripts/` | 一套 MCP 驱动脚本与专用探针脚本（详见 §4.10） |
+| 覆盖模块 | Agent 对话链路（意图 → 规划 → 工具 → 回复）、本地插件、知识库、记忆宫殿、技能中心、服务器托管、智能体小分队 |
+
+它的核心价值是**「UI 级真实链路」**：MCP 工具经 Tauri 事件派发到前端**与界面按钮同一个** handler，副作用与真人点击完全一致，且全量落 `workduo.db` 可在界面抽查——因此同一份工具面既能人工操作，也能被外部 Agent 用于自动化生态迭代。
+
+> 该文件是此技能的**单一事实源**；分发到客户端目录时请整体覆盖同步，避免文档与工具面错位。
+
+### 4.9 写好一个技能的实践要点
+
+1. **工作流要具体到动作序列**，不要写「你是一个专业的 XX 专家」——模型不会因此改变行为方式。
+2. **写明质量门禁**（依赖版本固定、构建必须通过、测试必须通过），并要求模型在交付前自查，而不是写完即宣称完成。
+3. **`description` 是模型的选型依据**，一句话说清「什么场景下该选我」，比长正文更重要。
+4. **需要本机动作时优先 `tools.json`**，把确定性步骤固化成脚本，而非让模型临时拼命令行。
+5. **资源走 `references/` 分包**，正文只留索引，控制注入 token 消耗（预算 2000 字符起）。
+6. **重度依赖长正文的技能尽量单独挂载**——挂载 1 个技能时才注入 SKILL.md **全文**，挂载 2~3 个时只注入「名称 + 描述」**摘要**（见 §4.2）。若多个技能常同时使用，务必把关键约束压进 `description`。
+
+### 4.10 技能相关的评测与门禁脚本
+
+位于 `docs/skills/workduo-mcp/scripts/`，直连内建 MCP Server，**只做参数编排与断言**；发现能力缺口应回流到 MCP 工具层修补，而非绕过 MCP 自写替代实现。
+
+| 类别 | 脚本 | 用途 |
+|---|---|---|
+| 标准库 | `agent_task_driver.mjs` | MCP 客户端、终态轮询（三类挂起自动应答）、轨迹解包、增量日志、启动组装 |
+| 审计 / 评分 | `agent_e2e_audit.mjs` | 全模块四阶段评分审计（100 分制），报告写 `e2e_audit_report.json` |
+| 定向探针 | `agent_intent_probe.mjs` / `composite_hang_probe.mjs` / `failure_cleanup_probe.mjs` / `failure_suite_runner.mjs` / `tool_contract_probe.mjs` | 意图快路径、复合任务挂起诊断（区分「慢」与「死」）、失败收尾、故障注入套件、工具契约边界防御 |
+| 编排 / 门禁 | `l2_eval_harness.mjs` / `squad_eval_harness.mjs` / `release_gate.mjs` | 能力矩阵测评、智能体分组协作回归、发布门禁 |
+| 脚本范式 | `plugin.python.template.py` / `plugin.bun.template.ts` / `plugin.xlsx_writer.template.py` / `plugin.chart_png.template.py` / `seeds/` | 插件与评测样例的可复用骨架 |
+
+其中三项已接入 npm scripts（见 §五）：`npm run release:gate`、`npm run squad:eval`、`npm run squad:gate`。
+
+> **慢 ≠ 死**：判据应是「无产出静默时长」而非总墙钟耗时。同一复合任务在不同模型上实测可差 6 倍以上，任何过紧的终态等待阈值都会把正常任务误判为挂死。
+
+---
+
+## 五、开发与构建（铁律）
 
 | 命令 | 用途 |
 |---|---|
@@ -212,21 +423,4 @@
 
 ---
 
-## 五、路线图与下一步（供规划参考）
-
-**已完成（前端 + 后端可用）**
-- 模型接入、智能体三层引擎、MCP、Skill、知识库多格式查看、Python 沙箱、产物归档、上下文压缩、审批/恢复。
-- 记忆宫殿（含自动锚定 + `agent-memory-anchored` 实时刷新）、记忆模式开关三档。
-- Phase 3 三视图：轨迹视图（§3.1）、产物画布分支重跑（§3.2）、记忆实时刷新（§3.3）——**均已落地**。
-
-**占位（需从骨架起步）**
-- 仪表盘（`/`）、智能体编队（`/squads-workspace`）。
-
-**建议下一步切入方向**
-1. 仪表盘从占位到可用（运行概览 / 快捷入口 / 记忆热力总览）。
-2. 智能体编队（多智能体协作）从骨架起步。
-3. 记忆质量增强：强制档沉淀的「总结非空才落库」护栏细化、自动锚定去噪。
-
----
-
-> 本文档依据当前代码实际状态梳理（2026-09-06），用于下一步任务规划。具体实现细节以 `src/`、`src-tauri/`、`docs/`、`前端开发规范.md` 为准。
+> 本文档依据当前代码实际状态梳理（2026-10-02 复核）。「技能能力」一章（§四）对应 `docs/skills/workduo-mcp/SKILL.md`、`src-tauri/src/agent/plugins/skill_{adapter,tools}.rs`、`src-tauri/src/agent/engine/config_loader.rs` 的当前实现。具体实现细节以 `src/`、`src-tauri/`、`docs/`、`前端开发规范.md` 为准。
