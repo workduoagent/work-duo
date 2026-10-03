@@ -672,6 +672,9 @@ pub async fn run_node_script(
     if !script.exists() {
         return Err(format!("脚本文件不存在：{script_path}"));
     }
+    // F002 安全边界：渲染层可直达本命令——脚本路径必须落在允许根内（工作空间/应用数据/资源目录）。
+    let roots = crate::fs_helper::allowed_script_roots(&app).await;
+    crate::fs_helper::ensure_script_path_in_roots(&script, &roots)?;
     let original_parent = script.parent().map(|p| p.to_path_buf());
 
     // 关键修复：改为「原地执行」脚本，不再复制到 run_tmp。

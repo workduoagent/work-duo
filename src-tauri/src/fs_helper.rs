@@ -2,6 +2,7 @@
 use std::path::{Path, PathBuf};
 use std::fs;
 use serde::Serialize;
+use sqlx::Row;
 
 /// 将传入路径规范化为全局唯一绝对路径。
 /// - 目录不存在或无法解析时返回 Err（前端据此熔断，禁止为不存在的目录建档）；
@@ -89,4 +90,115 @@ pub fn migrate_storage_dir(old_path: String, new_path: String) -> Result<Migrate
     fs::remove_dir_all(&old_canon)
         .map_err(|e| format!("文件已复制至新目录，但清理原目录失败（请手动删除原目录）：{e}"))?;
     Ok(MigrateReport { moved, skipped: false })
+}
+
+/* ============================ F002：脚本命令路径安全边界 ============================ */
+//
+// 背景：`run_python_script` / `run_node_script` 作为 Tauri 命令被渲染层直达，
+// 修复前 script_path 仅做 exists() 校验——被注入的渲染层可指向全盘任意脚本执行。
+// 本边界把脚本路径收敛到「应用数据目录 + 资源目录 + 全局工作空间」内；
+// 运行时沙箱守卫（网络默认关+文件有界）由 run_script_with_selfheal 统一注入，两条通道均已覆盖。
+
+use tauri::{AppHandle, Manager};
+use tauri_plugin_sql::DbInstances;
+
+/// 读取全局工作空间根（settings `workspace_path`，支持 $APPDATA 占位符；非绝对路径忽略）。
+async fn workspace_root(app: &AppHandle) -> Option<PathBuf> {
+    let instances = app.state::<DbInstances>();
+    let guard = instances.0.read().await;
+    let pool = match guard.get("sqlite:workduo.db")? {
+        tauri_plugin_sql::DbPool::Sqlite(p) => p.clone(),
+    };
+    drop(guard);
+    let row = sqlx::query("SELECT value FROM app_config WHERE key = 'workspace_path'")
+        .fetch_optional(&pool)
+        .await
+        .ok()
+        .flatten()?;
+    let raw = row
+        .try_get::<Option<String>, _>("value")
+        .ok()
+        .flatten()?;
+    let appdata = app.path().app_data_dir().ok()?.to_string_lossy().to_string();
+    let expanded = raw.replace("$APPDATA", &appdata);
+    let p = PathBuf::from(expanded);
+    if p.is_absolute() {
+        Some(p)
+    } else {
+        None
+    }
+}
+
+/// 脚本命令允许的根目录：应用数据目录 + 资源目录（mamba/bun 管理资产）+ 全局工作空间。
+pub async fn allowed_script_roots(app: &AppHandle) -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+    if let Ok(dir) = app.path().app_data_dir() {
+        roots.push(dir);
+    }
+    if let Ok(dir) = app.path().resource_dir() {
+        roots.push(dir);
+    }
+    if let Some(ws) = workspace_root(app).await {
+        roots.push(ws);
+    }
+    roots
+}
+
+/// 校验脚本路径必须落在允许根内（canonicalize 后组件级 `Path::starts_with` 比对——
+/// 字符串前缀比对会被 `base` vs `base_secret` 这类兄弟目录绕过，必须走组件级）。
+pub fn ensure_script_path_in_roots(script: &Path, roots: &[PathBuf]) -> Result<(), String> {
+    let canon = fs::canonicalize(script).map_err(|e| format!("解析脚本真实路径失败：{e}"))?;
+    for root in roots {
+        let root_canon = fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+        if canon.starts_with(&root_canon) {
+            return Ok(());
+        }
+    }
+    Err(format!(
+        "脚本路径越界（安全边界）：仅允许运行「工作空间 / 应用数据目录 / 资源目录」内的脚本，当前：{}",
+        script.display()
+    ))
+}
+
+#[cfg(test)]
+mod f002_tests {
+    use super::*;
+
+    fn tmp_base(tag: &str) -> PathBuf {
+        std::env::temp_dir().join(format!("f002_{tag}_{}", std::process::id()))
+    }
+
+    #[test]
+    fn inside_root_allowed() {
+        let base = tmp_base("in");
+        let dir = base.join("sub");
+        fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("s.py");
+        fs::write(&f, "print(1)").unwrap();
+        assert!(ensure_script_path_in_roots(&f, &[base.clone()]).is_ok());
+        fs::remove_dir_all(&base).ok();
+    }
+
+    #[test]
+    fn outside_root_rejected() {
+        let base = tmp_base("root");
+        let other = tmp_base("other");
+        fs::create_dir_all(&other).unwrap();
+        let f = other.join("s.py");
+        fs::write(&f, "x").unwrap();
+        assert!(ensure_script_path_in_roots(&f, &[base]).is_err());
+        fs::remove_dir_all(&other).ok();
+    }
+
+    #[test]
+    fn prefix_sibling_dir_rejected() {
+        // 组件级比对的回归锚：字符串 starts_with 会被 base vs base__secret 兄弟目录绕过
+        let base = tmp_base("pre");
+        let sib = tmp_base("pre__secret");
+        fs::create_dir_all(&sib).unwrap();
+        let f = sib.join("s.py");
+        fs::write(&f, "x").unwrap();
+        assert!(ensure_script_path_in_roots(&f, &[base]).is_err());
+        fs::remove_dir_all(&sib).ok();
+    }
 }

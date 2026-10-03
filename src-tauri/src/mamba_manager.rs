@@ -1286,6 +1286,9 @@ pub async fn run_python_script(
     if !script.exists() {
         return Err(format!("脚本文件不存在：{script_path}"));
     }
+    // F002 安全边界：渲染层可直达本命令——脚本路径必须落在允许根内（工作空间/应用数据/资源目录）。
+    let roots = crate::fs_helper::allowed_script_roots(&app).await;
+    crate::fs_helper::ensure_script_path_in_roots(&script, &roots)?;
     let original_parent = script.parent().map(|p| p.to_path_buf());
 
     // 目标环境存在性校验，避免 run 落到未知/损坏的环境。
