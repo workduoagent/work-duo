@@ -493,10 +493,26 @@ impl KnowledgeGraph {
         })
     }
 
-    /// 拓扑就绪：status ∈ {pending, retrying} 且全部 depends_on 源节点 status ∈ {completed, skipped}。
+    /// 拓扑就绪：status ∈ {pending, retrying} 且全部依赖源任务 status ∈ {completed, skipped}。
     /// 注意 `retrying` 也视为就绪：恢复/自动接管重试把节点置 `retrying` 后回到主循环，
     /// 必须能被重新拾起执行（其前置依赖必然已闭环）；否则会被死锁分支误判为卡死。
     pub fn topo_ready(&self, session_id: &str) -> Vec<String> {
+        // F004 双层修复（见 .fix/F004.md）：
+        // ① 字段名：写入端 plan_to_graph 写 "dependsOn"（驼峰），读取端此前误读蛇形 "depends_on" → deps 恒空；
+        // ② id 命名空间：deps 存的是 planner 层 task_id（"t1"），此前直接拿它查内部节点 id 表（键为 "n_…"）恒 miss。
+        //    故先建本会话 taskId→节点 映射再查状态（分支重跑的 obsolete 旧节点不参与解析，避免同名旧节点顶替）。
+        let mut by_task: HashMap<String, &GraphNode> = HashMap::new();
+        for id in self.session_task_ids(session_id) {
+            if let Some(n) = self.nodes.get(&id) {
+                let st = n.props.get("status").and_then(|v| v.as_str()).unwrap_or("");
+                if st == "obsolete" {
+                    continue;
+                }
+                if let Some(tid) = n.props.get("taskId").and_then(|v| v.as_str()) {
+                    by_task.insert(tid.to_string(), n);
+                }
+            }
+        }
         let mut ready = Vec::new();
         for id in self.session_task_ids(session_id) {
             let node = &self.nodes[&id];
@@ -506,7 +522,7 @@ impl KnowledgeGraph {
             }
             let deps: Vec<String> = node
                 .props
-                .get("depends_on")
+                .get("dependsOn")
                 .and_then(|v| v.as_array())
                 .map(|a| {
                     a.iter()
@@ -515,13 +531,10 @@ impl KnowledgeGraph {
                 })
                 .unwrap_or_default();
             let ok = deps.iter().all(|d| {
-                self.nodes
-                    .get(d)
-                    .map(|n| {
-                        let s = n.props.get("status").and_then(|v| v.as_str()).unwrap_or("");
-                        s == "completed" || s == "skipped"
-                    })
-                    .unwrap_or(false)
+                by_task.get(d).map_or(false, |n| {
+                    let s = n.props.get("status").and_then(|v| v.as_str()).unwrap_or("");
+                    s == "completed" || s == "skipped"
+                })
             });
             if ok {
                 ready.push(id);
@@ -995,4 +1008,100 @@ fn now_ms() -> i64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod topo_tests {
+    //! F004 回归：依赖门控 / 环检测 / 前向引用 / skip 兼容（graph.rs 此前零测试覆盖）。
+    use super::*;
+    use crate::agent::types::{PlanDAG, PlanSubTask};
+
+    /// 构造 PlanDAG：(step, task_id, deps) 三元组列表。
+    fn dag(tasks: Vec<(usize, &str, Vec<&str>)>) -> PlanDAG {
+        PlanDAG {
+            goal_summary: "test".into(),
+            tasks: tasks
+                .into_iter()
+                .map(|(step, task_id, deps)| PlanSubTask {
+                    step,
+                    task_id: task_id.into(),
+                    title: format!("step {step}"),
+                    description: String::new(),
+                    success_criteria: vec![],
+                    depends_on: deps.into_iter().map(String::from).collect(),
+                })
+                .collect(),
+        }
+    }
+
+    /// topo_ready 返回的是内部节点 id；按 taskId 反查以便置状态。
+    fn task_node_id(g: &KnowledgeGraph, sid: &str, task_id: &str) -> String {
+        g.session_tasks(sid)
+            .iter()
+            .find(|n| n.props.get("taskId").and_then(|v| v.as_str()) == Some(task_id))
+            .map(|n| n.id.clone())
+            .unwrap_or_else(|| panic!("task node {task_id} not found"))
+    }
+
+    #[test]
+    fn dependency_gating_releases_in_order() {
+        let mut g = KnowledgeGraph::open(None).unwrap();
+        let sid = "s-gating";
+        g.plan_to_graph(
+            &dag(vec![(1, "t1", vec![]), (2, "t2", vec!["t1"]), (3, "t3", vec!["t1", "t2"])]),
+            sid,
+        );
+
+        assert_eq!(g.topo_ready(sid).len(), 1, "首轮只有无依赖的 t1 就绪（依赖门控生效）");
+
+        g.set_task_status(&task_node_id(&g, sid, "t1"), "completed");
+        let ready = g.topo_ready(sid);
+        assert_eq!(ready.len(), 1, "t1 完成后仅 t2 就绪（t3 仍被 t2 挡住）");
+        let t2 = task_node_id(&g, sid, "t2");
+        assert!(ready.contains(&t2), "就绪的应是 t2");
+
+        g.set_task_status(&t2, "completed");
+        assert_eq!(g.topo_ready(sid).len(), 1, "t3 此时才就绪");
+
+        g.set_task_status(&task_node_id(&g, sid, "t3"), "completed");
+        assert!(g.topo_ready(sid).is_empty());
+        assert!(g.session_all_completed(sid), "全部完成后拓扑排空");
+    }
+
+    #[test]
+    fn cycle_deadlock_detectable() {
+        let mut g = KnowledgeGraph::open(None).unwrap();
+        let sid = "s-cycle";
+        g.plan_to_graph(
+            &dag(vec![(1, "t1", vec!["t2"]), (2, "t2", vec!["t1"])]),
+            sid,
+        );
+        // 修复前：deps 恒空 → 两个任务都「就绪」，环静默按序跑完假报成功；
+        // 修复后：ready 为空且未全完成 → pipeline 死锁分支可触发（诚实报错）。
+        assert!(g.topo_ready(sid).is_empty(), "环内节点均不得就绪");
+        assert!(!g.session_all_completed(sid));
+    }
+
+    #[test]
+    fn forward_reference_resolves_causally() {
+        let mut g = KnowledgeGraph::open(None).unwrap();
+        let sid = "s-forward";
+        // 模型违反「只引用前文步骤」软约束：t1 依赖后文的 t2
+        g.plan_to_graph(&dag(vec![(1, "t1", vec!["t2"]), (2, "t2", vec![])]), sid);
+        let t2 = task_node_id(&g, sid, "t2");
+        let ready = g.topo_ready(sid);
+        assert_eq!(ready.len(), 1, "只有 t2 就绪");
+        assert!(ready.contains(&t2), "被前向引用的 t2 先行（因果序正确）");
+        g.set_task_status(&t2, "completed");
+        assert_eq!(g.topo_ready(sid).len(), 1, "t2 完成后 t1 释放");
+    }
+
+    #[test]
+    fn skipped_dependency_satisfies() {
+        let mut g = KnowledgeGraph::open(None).unwrap();
+        let sid = "s-skip";
+        g.plan_to_graph(&dag(vec![(1, "t0", vec![]), (2, "t1", vec!["t0"])]), sid);
+        g.set_task_status(&task_node_id(&g, sid, "t0"), "skipped");
+        assert_eq!(g.topo_ready(sid).len(), 1, "依赖被 skip 视为满足，t1 可就绪");
+    }
 }
