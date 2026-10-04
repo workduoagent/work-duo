@@ -75,6 +75,20 @@ pub struct EnvInfo {
 /// 绿色便携运行时管理器（与 `MambaManager` 同构：不持有路径字段，根目录每次动态推导）。
 pub struct BunManager {}
 
+
+/// F053：去除 Windows verbatim 前缀——`\\?\D:\x` → `D:\x`，`\\?\UNC\srv\share` → `\\srv\share`。
+/// Bun 1.4 无法加载带该前缀的 --preload / 脚本路径。
+fn strip_verbatim(p: PathBuf) -> PathBuf {
+    let s = p.to_string_lossy().to_string();
+    if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
+        return PathBuf::from(format!(r"\\{rest}"));
+    }
+    if let Some(rest) = s.strip_prefix(r"\\?\") {
+        return PathBuf::from(rest);
+    }
+    p
+}
+
 impl BunManager {
     pub fn new() -> Self {
         Self {}
@@ -83,7 +97,9 @@ impl BunManager {
     /// 解析根目录：优先 Tauri 资源目录（`$RESOURCES`），失败回退到 exe 父目录。
     fn base_dir(app: &AppHandle) -> PathBuf {
         if let Ok(res) = app.path().resource_dir() {
-            return res;
+            // F053：resource_dir 在 Windows 带 verbatim 前缀（\\?\D:\...），
+            // Bun 无法加载该前缀的 --preload 路径（报 JSError）——统一剥掉。
+            return strip_verbatim(res);
         }
         std::env::current_exe()
             .ok()
@@ -751,3 +767,28 @@ pub async fn ensure_default_bun(app: &AppHandle) -> Result<(), String> {
         .map_err(|e| format!("创建 node_modules 失败：{e}"))?;
     Ok(())
 }
+
+#[cfg(test)]
+mod f053_tests {
+    use super::strip_verbatim;
+    use std::path::PathBuf;
+
+    #[test]
+    fn strips_windows_drive_verbatim_prefix() {
+        let got = strip_verbatim(PathBuf::from(r"\\?\D:\WorkDuo\bun_root"));
+        assert_eq!(got, PathBuf::from(r"D:\WorkDuo\bun_root"));
+    }
+
+    #[test]
+    fn strips_windows_unc_verbatim_prefix() {
+        let got = strip_verbatim(PathBuf::from(r"\\?\UNC\server\share\bun_root"));
+        assert_eq!(got, PathBuf::from(r"\\server\share\bun_root"));
+    }
+
+    #[test]
+    fn preserves_plain_path() {
+        let plain = PathBuf::from(r"D:\WorkDuo\bun_root");
+        assert_eq!(strip_verbatim(plain.clone()), plain);
+    }
+}
+

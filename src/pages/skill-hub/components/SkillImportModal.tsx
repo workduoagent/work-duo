@@ -23,6 +23,7 @@ import {
 import { uint8ToBase64 } from '@/core/file/skillFs'
 import { ScenarioSelect } from '@/components/scenario'
 import { isTauri } from '@/core/config'
+import { invoke } from '@tauri-apps/api/core'
 import { open as openDialog } from '@tauri-apps/plugin-dialog'
 import { readDir, readFile } from '@tauri-apps/plugin-fs'
 import { join } from '@tauri-apps/api/path'
