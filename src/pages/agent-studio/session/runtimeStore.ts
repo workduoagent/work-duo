@@ -570,19 +570,21 @@ export function ensureRuntimeBridge() {
   if (!isTauri || S.bridgeStarted) return
   S.bridgeStarted = true
 
-  /** 事件统一路由到「正在运行的会话」；没有运行中的任务则忽略（避免污染其它会话）。 */
-  const route = (fn: (rt: RuntimeState, refs: RuntimeRefs) => RuntimeState) => {
-    const id = S.runningSessionId
-    if (!id) return
+  /** F007 事件归属路由：事件带 sessionId 戳 → 路由到归属会话条目（并发 run 不串台）；
+   *  无戳事件回退「正在运行的会话」既有行为；两者皆无则忽略。返回实际路由到的会话 id。 */
+  const route = (fn: (rt: RuntimeState, refs: RuntimeRefs) => RuntimeState, sid?: string) => {
+    const id = sid ?? S.runningSessionId
+    if (!id) return null
     mutateRuntime(id, fn)
+    return id
   }
 
   void listen<AgentEvent>('agent-event', (ev) => {
-    route((rt, refs) => applyAgentEvent(rt, refs, ev.payload))
+    route((rt, refs) => applyAgentEvent(rt, refs, ev.payload), ev.payload.sessionId)
   })
 
   void listen<ApprovalRequest>('agent-awaiting-approval', (ev) => {
-    const id = S.runningSessionId
+    const id = ev.payload.sessionId ?? S.runningSessionId
     if (!id) return
     mutateRuntime(id, (rt, refs) => {
       refs.pendingHold = true
@@ -596,8 +598,8 @@ export function ensureRuntimeBridge() {
     firePendingNotify(id, 'agent-awaiting-approval')
   })
 
-  void listen<{ promptTokens: number; completionTokens: number }>('agent-task-done', (ev) => {
-    const id = S.runningSessionId
+  void listen<{ sessionId?: string; promptTokens: number; completionTokens: number }>('agent-task-done', (ev) => {
+    const id = ev.payload.sessionId ?? S.runningSessionId
     if (!id) return
     mutateRuntime(id, (rt, refs) => {
       refs.lastTaskUsage = ev.payload ?? null
@@ -626,14 +628,15 @@ export function ensureRuntimeBridge() {
         ok: true,
         usage: ev.payload ?? null,
       })
-      endRun()
+      // F007：仅当结束的会话就是当前追踪的运行会话时才清空运行态（并发下外来终态不得误清）
+      if (id === S.runningSessionId) endRun()
       lastPendingKind.delete(id) // 新一轮任务在同一会话挂起时仍可再次提醒
       return next
     })
   })
 
-  void listen<string>('agent-task-error', (ev) => {
-    const id = S.runningSessionId
+  void listen<{ sessionId?: string; message: string }>('agent-task-error', (ev) => {
+    const id = ev.payload.sessionId ?? S.runningSessionId
     if (!id) return
     mutateRuntime(id, (rt, refs) => {
       refs.pendingHold = false
@@ -641,11 +644,11 @@ export function ensureRuntimeBridge() {
         ...rt,
         isRunning: false,
         isStreaming: false,
-        statusText: `任务异常：${ev.payload}`,
+        statusText: `任务异常：${ev.payload.message}`,
         recovery: null,
         planApproval: null,
         planning: false,
-        taskError: { message: ev.payload, at: Date.now() },
+        taskError: { message: ev.payload.message, at: Date.now() },
       }
       next = finalizeStuckSteps(next, refs)
       fireTerminal({
@@ -657,21 +660,21 @@ export function ensureRuntimeBridge() {
         ok: false,
         usage: null,
       })
-      endRun()
+      if (id === S.runningSessionId) endRun()
       lastPendingKind.delete(id)
       return next
     })
   })
 
   void listen<RecoveryRequest>('agent-recovery-needed', (ev) => {
-    const id = S.runningSessionId
+    const id = ev.payload.sessionId ?? S.runningSessionId
     if (!id) return
     mutateRuntime(id, (rt) => ({ ...rt, recovery: ev.payload }))
     firePendingNotify(id, 'agent-recovery-needed')
   })
 
   void listen<ChoiceRequest>('agent-choice-needed', (ev) => {
-    const id = S.runningSessionId
+    const id = ev.payload.sessionId ?? S.runningSessionId
     if (!id) return
     mutateRuntime(id, (rt, refs) => {
       refs.pendingHold = true
@@ -681,7 +684,7 @@ export function ensureRuntimeBridge() {
   })
 
   void listen<PlanApprovalRequest>('agent-plan-approval-needed', (ev) => {
-    const id = S.runningSessionId
+    const id = ev.payload.sessionId ?? S.runningSessionId
     if (!id) return
     mutateRuntime(id, (rt, refs) => {
       refs.pendingHold = true
@@ -694,15 +697,15 @@ export function ensureRuntimeBridge() {
     firePendingNotify(id, 'agent-plan-approval-needed')
   })
 
-  void listen<{ promptTokens: number; completionTokens: number }>('agent-token-update', (ev) => {
-    if (ev.payload) route((rt) => ({ ...rt, liveTokenUsage: ev.payload }))
+  void listen<{ sessionId?: string; promptTokens: number; completionTokens: number }>('agent-token-update', (ev) => {
+    if (ev.payload) route((rt) => ({ ...rt, liveTokenUsage: ev.payload }), ev.payload.sessionId)
   })
 
-  void listen<{ promptTokens: number; completionTokens: number }>('agent-llm-usage', (ev) => {
-    if (ev.payload) route((rt) => ({ ...rt, lastLlmUsage: ev.payload }))
+  void listen<{ sessionId?: string; promptTokens: number; completionTokens: number }>('agent-llm-usage', (ev) => {
+    if (ev.payload) route((rt) => ({ ...rt, lastLlmUsage: ev.payload }), ev.payload.sessionId)
   })
 
-  void listen<{ step: number; artifacts: ArtifactRef[] }>('agent-artifact-created', (ev) => {
+  void listen<{ sessionId?: string; step: number; artifacts: ArtifactRef[] }>('agent-artifact-created', (ev) => {
     if (ev.payload?.artifacts?.length) {
       route((rt) => {
         const seen = new Set(rt.artifacts.map((a) => a.artifactId))
@@ -712,6 +715,6 @@ export function ensureRuntimeBridge() {
   })
 
   void listen<PlanBranchGenerated>('agent-plan-branch', (ev) => {
-    if (ev.payload) route((rt) => ({ ...rt, planBranch: ev.payload }))
+    if (ev.payload) route((rt) => ({ ...rt, planBranch: ev.payload }), (ev.payload as { sessionId?: string }).sessionId)
   })
 }

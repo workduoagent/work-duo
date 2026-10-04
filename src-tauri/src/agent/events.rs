@@ -39,6 +39,18 @@ pub fn current_run_id() -> String {
 
 /// #8 per-run：在给定 run_id 的作用域内执行 `f`，使 `current_run_id()` 在该 future 内返回 `rid`。
 /// 封装 task_local 的 scope，避免跨模块直接引用宏生成类型。
+/// F007 事件归属：读取当前任务归属会话（commands.rs spawn 顶层经 set_trace_context 注入，
+/// 随 with_run_id_scope 作用域对全部 emit 点生效）。未注入（squad/非会话通道）返回 None——
+/// 事件不带 sessionId 戳，前端回退既有「正在运行会话」路由。
+pub fn current_session_id() -> Option<String> {
+    let rid = current_run_id();
+    if rid.is_empty() {
+        return None;
+    }
+    let map = run_traces().lock().unwrap_or_else(|e| e.into_inner());
+    map.get(&rid).and_then(|b| b.session_id.clone())
+}
+
 pub fn with_run_id_scope<F>(rid: String, f: F) -> impl std::future::Future<Output = F::Output>
 where
     F: std::future::Future,
@@ -496,7 +508,15 @@ pub struct StreamChunk {
 fn emit(app: &AppHandle, event: &str, payload: &impl Serialize) {
     // 自测闭环：把事件落轨迹缓冲（text/thinking_chunk 已在各自专用函数累加，此处跳过）。
     push_event(event, payload);
-    if let Err(e) = app.emit(event, payload) {
+    // F007 事件归属：run 作用域内的事件统一盖 session 戳（归属会话经 set_trace_context 注入），
+    // 前端据此路由到归属会话——并发 run 的事件不再互相污染；非会话通道无戳、走既有路由。
+    let mut value = serde_json::to_value(payload).unwrap_or(serde_json::Value::Null);
+    if let Some(obj) = value.as_object_mut() {
+        if let Some(sid) = current_session_id() {
+            obj.insert("sessionId".to_string(), serde_json::Value::String(sid));
+        }
+    }
+    if let Err(e) = app.emit(event, &value) {
         tracing::warn!("[agent] emit `{event}` failed: {e}");
     } else {
         tracing::info!("[agent] emit `{event}` ok");
@@ -713,7 +733,8 @@ pub fn emit_task_done(app: &AppHandle, prompt_tokens: u64, completion_tokens: u6
 
 /// 整轮任务异常终止。
 pub fn emit_task_error(app: &AppHandle, message: &str) {
-    emit(app, EVT_TASK_ERROR, &message);
+    // F007：载荷从裸字符串升级为对象（sessionId 归属戳由 emit 统一盖上）。
+    emit(app, EVT_TASK_ERROR, &serde_json::json!({ "message": message }));
 }
 
 /// 实时 token 用量增量载荷（camelCase）。
@@ -1335,5 +1356,26 @@ mod tests {
             let tk = get_trace("keep");
             assert_eq!(tk["reply"].as_str().unwrap(), "keep-content");
         });
+    }
+
+
+    #[test]
+    fn f007_session_stamp_resolves_via_trace_context() {
+        // F007：事件归属戳——set_trace_context 注入会话后，run 作用域内 current_session_id
+        // 应解析出归属会话；未注入（squad/非会话通道）为 None。
+        let rid = "f007-stamp-run".to_string();
+        let sid = "f007-stamp-session".to_string();
+        reset_trace(&rid);
+        set_trace_context(&rid, Some("agent-x".into()), Some(sid.clone()));
+        let got = with_run_id_scope(rid.clone(), async {
+            let a = current_session_id();
+            assert_eq!(a.as_deref(), Some("f007-stamp-session"), "作用域内应解析出归属会话");
+            let r = current_run_id();
+            assert_eq!(r, rid, "run_id 同源");
+        });
+        tauri::async_runtime::block_on(got);
+        // 作用域外：无 run_id → None
+        let outside = CURRENT_RUN_ID.try_with(|_| ()).is_err();
+        assert!(outside || current_session_id().is_none(), "作用域外不应有归属会话");
     }
 }

@@ -60,6 +60,8 @@ export interface StreamChunk {
 
 /** 审批请求（高危操作挂起）。 */
 export interface ApprovalRequest {
+  /** F007 事件归属：事件所属会话 id（Rust emit 统一盖章；squad/非会话通道无此字段） */
+  sessionId?: string
   /** 本次审批唯一标识（Rust 侧 oneshot 通道 key）。 */
   approvalId: string
   /** 触发审批的工具名。 */
@@ -117,6 +119,8 @@ export interface ChoiceOption {
 
 /** 方案推荐请求（对应 Rust `agent-choice-needed` 事件，渲染选项列表弹窗）。 */
 export interface ChoiceRequest {
+  /** F007 事件归属：事件所属会话 id（Rust emit 统一盖章；squad/非会话通道无此字段） */
+  sessionId?: string
   /** 本次询问唯一标识（oneshot 通道 key）。 */
   choiceId: string
   /** 向用户提出的问题。 */
@@ -190,6 +194,8 @@ export interface ArtifactRef {
 
 /** 步骤级恢复请求（对应 Rust `agent-recovery-needed` 事件，渲染恢复面板）。 */
 export interface RecoveryRequest {
+  /** F007 事件归属：事件所属会话 id（Rust emit 统一盖章；squad/非会话通道无此字段） */
+  sessionId?: string
   /** 受阻子任务序号（1-based）。 */
   step: number
   /** 子任务 id（PlanSubTask.task_id）。 */
@@ -239,6 +245,8 @@ export interface PlanSensitiveOp {
 
 /** 计划审批请求（对应 Rust `agent-plan-approval-needed` 事件，渲染「计划确认」弹窗）。 */
 export interface PlanApprovalRequest {
+  /** F007 事件归属：事件所属会话 id（Rust emit 统一盖章；squad/非会话通道无此字段） */
+  sessionId?: string
   /** 任务一句话目标。 */
   goalSummary: string
   /** DAG 步骤清单。 */
@@ -270,6 +278,8 @@ export interface ThinkingChunk {
 
 /** `agent-event` 的负载（按 `type` 区分具体事件）。 */
 export interface AgentEvent {
+  /** F007 事件归属：事件所属会话 id（Rust emit 统一盖章；squad/非会话通道无此字段） */
+  sessionId?: string
   type:
     | 'tool_started' // 工具开始调用（前端新增折叠卡片 running）
     | 'tool_finished' // 工具结束（running→success/failed，回填 result）
