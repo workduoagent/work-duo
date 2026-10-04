@@ -7,74 +7,11 @@ mod bun_manager;
 mod sandbox_audit;
 mod ws_snapshot;
 mod fs_helper;
+mod fs_scope_grant;
 mod host;
 mod logging;
 mod mcp_server;
 mod net;
-
-/// 数据迁移后动态授予 fs 权限：把用户迁移到的任意绝对数据目录加入 fs scope。
-///
-/// 背景：设置里的「数据迁移」会把 skill_path / knowledge_base_path / vector_path 等
-/// 改写到默认 Tauri 路径（$APPDATA/$RESOURCE）之外的绝对目录（如 E:\WorkDuo\.skills）。
-/// 静态 capability 的 $APPDATA/$RESOURCE 变量无法覆盖这些自定义目录，
-/// 导致前端经 @tauri-apps/plugin-fs 写盘（mkdir/write）被 ACL 拒绝。
-///
-/// 修复：权限授予（fs:allow-mkdir 等）已由静态 default.json 给出，scope 只决定「哪些路径允许」。
-/// 本命令在启动时由前端收集实际目录后，调用 tauri-plugin-fs 公开 API
-/// `FsExt::fs_scope().allow_directory()` 把目录（含递归子目录）直接加进运行时 scope。
-/// 该方法走插件内部 RwLock，运行期调用即可生效，无需 dynamic-acl / 重编 capability。
-///
-/// 仅接受绝对路径（Windows 盘符或 unix 根），避免把相对/占位路径误注入 scope。
-#[tauri::command]
-fn grant_fs_scope(app: tauri::AppHandle, paths: Vec<String>) -> Result<(), String> {
-    use std::{fs, path::Path};
-    use tauri_plugin_fs::FsExt;
-    let scope = app.fs_scope();
-    let mut granted = Vec::new();
-    for p in paths {
-        let norm = p.replace('\\', "/").trim().trim_end_matches('/').to_string();
-        if norm.is_empty() {
-            continue;
-        }
-        let is_abs = norm.starts_with('/')
-            || (norm.len() >= 3
-                && norm.as_bytes()[1] == b':'
-                && (norm.as_bytes()[2] == b'/' || norm.as_bytes()[2] == b'\\'));
-        if !is_abs {
-            continue;
-        }
-        // F003：路径可能是文件（如手选 ZIP）——文件授予其父目录（会话级，重启失效）；
-        // 目录维持原语义（递归整树）。
-        let grant_target = match fs::metadata(&norm) {
-            Ok(m) if m.is_file() => {
-                let parent = Path::new(&norm)
-                    .parent()
-                    .map(|p| p.to_string_lossy().to_string())
-                    .unwrap_or_else(|| norm.clone());
-                tracing::info!("grant_fs_scope: 文件路径按父目录授权 file={} dir={}", norm, parent);
-                parent
-            }
-            _ => norm.clone(),
-        };
-        if let Err(e) = scope.allow_directory(&grant_target, true) {
-            tracing::warn!(
-                "grant_fs_scope: 开放目录 scope 失败 path={} err={}",
-                grant_target,
-                e
-            );
-            continue;
-        }
-        granted.push(norm);
-    }
-    if granted.is_empty() {
-        return Ok(());
-    }
-    tracing::info!(
-        "grant_fs_scope: 已为 {} 个迁移目录开放 fs scope",
-        granted.len()
-    );
-    Ok(())
-}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -269,7 +206,8 @@ pub fn run() {
             agent::commands::kb_remove_asset,
             agent::commands::kb_remove_kb_index,
             agent::commands::kb_rebuild_index,
-            grant_fs_scope,
+            fs_scope_grant::record_fs_scope_grant,
+            fs_scope_grant::restore_fs_scope,
             sandbox_audit::read_sandbox_audit_logs,
             agent::commands::sandbox_guard_status,
             host::commands::server_host_list,

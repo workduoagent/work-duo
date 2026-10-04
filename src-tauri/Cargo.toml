@@ -64,4 +64,6 @@ hex = "0.4"
 md-5 = "0.10"
 # MCP OAuth2：PKCE(S256) 与随机会话状态
 sha2 = "0.10"
+# F003 follow-up：持久目录 fs scope 授权凭据的 HMAC-SHA256 签名（密钥在 OS 凭据管理器）
+hmac = "0.12"
 rand = "0.8"

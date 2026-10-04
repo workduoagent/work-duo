@@ -676,3 +676,17 @@ CREATE TABLE IF NOT EXISTS mcp_paired_device
     created_at   INTEGER NOT NULL,
     last_seen    INTEGER NOT NULL
 );
+
+-- ---------- v40：持久目录 fs scope 授权凭据（F003 follow-up） ----------
+-- path 本身不可信（渲染层可经 plugin-sql 改写业务表路径字段），跨重启恢复 scope 以
+-- HMAC-SHA256(scope_key || path) 签名为准，密钥存 OS 凭据管理器、不经 IPC 暴露。
+-- scope_key：config:<数据目录键> | project:<工程 id> | squad:<小分队 id>；
+-- 签发仅经 Rust record_fs_scope_grant（先校验 fs_scope 来源），本表对渲染层只读无效。
+CREATE TABLE IF NOT EXISTS fs_scope_grant
+(
+    scope_key  TEXT    PRIMARY KEY,
+    path       TEXT    NOT NULL,
+    mac        TEXT    NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);

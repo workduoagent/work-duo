@@ -147,7 +147,7 @@ export function TracePanel({ intent, thinking, planSteps, toolSteps, planning = 
   const handleExport = async () => {
     if (!replay || exporting) return
     try {
-      const dir = await open({ directory: true, multiple: false, title: '选择交付包保存目录' })
+      const dir = await open({ directory: true, multiple: false, recursive: true, title: '选择交付包保存目录' })
       if (!dir || typeof dir !== 'string') return
       setExporting(true)
       setExported(null)

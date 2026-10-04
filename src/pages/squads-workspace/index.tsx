@@ -674,8 +674,10 @@ function SquadEditorModal({
 
     const onPickWorkspace = async () => {
         try {
-            const picked = await openDialog({directory: true, multiple: false})
-            if (typeof picked === 'string') setState((s) => ({...s, workspaceDir: picked}))
+            const picked = await openDialog({directory: true, multiple: false, recursive: true})
+            if (typeof picked === 'string') {
+                setState((s) => ({...s, workspaceDir: picked}))
+            }
         } catch {
             /* 非 Tauri 环境忽略 */
         }
@@ -786,6 +788,9 @@ function SquadEditorModal({
         try {
             const leaderAgentId = state.mode === 'orchestrator' ? (state.leaderAgentId || null) : null
             const summarizerAgentId = state.mode === 'chat' ? (state.summarizerAgentId || null) : null
+            const workspaceDir = state.workspaceDir.trim()
+            // 新建时在编辑器侧先生成 id：保存后可直接为工作区签发 fs scope 授权凭据。
+            const squadId = state.id || crypto.randomUUID()
             const members = state.members.map((m) => ({
                 ...m,
                 // S3 批次2：编排式保留模板/编辑器的主管标记（leaderAgentId 未选时自动推导）。
@@ -795,7 +800,7 @@ function SquadEditorModal({
                 pipelineOrder: m.pipelineOrder ?? null,
             }))
             const list = await upsertSquad({
-                id: state.id,
+                id: squadId,
                 name: state.name.trim(),
                 description: state.description.trim() || null,
                 logo: state.logo.trim() || null,
@@ -804,7 +809,7 @@ function SquadEditorModal({
                 globalMcpIds: state.globalMcpIds,
                 globalMcpTools: state.globalMcpTools,
                 supportsFileInput: state.supportsFileInput,
-                workspaceDir: state.workspaceDir.trim() || null,
+                workspaceDir: workspaceDir || null,
                 runStrategy: {
                     executionMode: state.executionMode,
                     retryCount: state.retryCount,
@@ -821,6 +826,16 @@ function SquadEditorModal({
                     executeActions: state.mode === 'chat' && state.executeActions,
                 },
             })
+            if (workspaceDir) {
+                try {
+                    // F003 follow-up：为工作区签发跨重启授权凭据（Rust 校验 fs scope 来源 + HMAC 落库）。
+                    // 手输路径若未经原生目录选择授权，Rust 会拒绝签发（防渲染层任意路径提权）；
+                    // Rust 侧使用该工作区不依赖 fs scope，仅前端 plugin-fs 读取受限。
+                    await invoke('record_fs_scope_grant', { scopeKey: `squad:${squadId}`, path: workspaceDir })
+                } catch (scopeError) {
+                    message.warning(`编队已保存；工作区持久授权未签发（如需跨重启前端访问请用「选择本地目录」）：${String(scopeError)}`)
+                }
+            }
             onSaved(list)
             message.success(state.id ? '已更新小分队' : '已创建小分队')
             onClose()

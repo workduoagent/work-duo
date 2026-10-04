@@ -39,6 +39,14 @@ function Title({ icon, children }: { icon: ReactNode; children: ReactNode }) {
 
 type StorageKey = 'workspacePath' | 'skillPath' | 'knowledgeBasePath' | 'vectorPath'
 
+/** StorageKey → app_config 落库键（fs_scope_grant 的 scope_key 前缀用）。 */
+const STORAGE_DB_KEYS = {
+  workspacePath: 'workspace_path',
+  skillPath: 'skill_path',
+  knowledgeBasePath: 'knowledge_base_path',
+  vectorPath: 'vector_path',
+} as const
+
 /** 存储目录选择行：展示当前真实路径 + 「选择目录」按钮（迁移中显示转圈并禁用）。 */
 function StorageDirRow({
   icon,
@@ -95,19 +103,41 @@ export function SystemSettingsPanel({ settings, onChange }: Props) {
 
   const proxyManual = settings.networkProxy.mode === 'manual'
 
+  /** 为迁移目标目录签发跨重启授权凭据（Rust 校验 dialog 来源 + HMAC 落 fs_scope_grant）。
+   *  失败不阻断迁移结果：本次会话 scope 已由 dialog 自动授予，重启后重新选择目录即可补签。 */
+  const recordScopeGrant = useCallback(
+    async (key: StorageKey, dir: string) => {
+      try {
+        await invoke('record_fs_scope_grant', {
+          scopeKey: `config:${STORAGE_DB_KEYS[key]}`,
+          path: dir,
+        })
+      } catch (scopeError) {
+        message.warning(`目录已生效，但持久授权签发失败（重启后需重新选择目录）：${String(scopeError)}`)
+      }
+    },
+    [message],
+  )
+
   const pickDir = useCallback(
     async (key: StorageKey, expectedSeg: string) => {
       if (migrating) return
-      const selected = await open({ directory: true, multiple: false })
+      const selected = await open({ directory: true, multiple: false, recursive: true })
       if (!selected || typeof selected !== 'string') return
       const trimmed = selected.replace(/[\\/]+$/, '')
       const base =
         (await basename(trimmed)) === expectedSeg ? trimmed : await join(trimmed, expectedSeg)
 
       const oldReal = await resolveStorageBasePath(settings[key])
-      if (base === oldReal) return // 未变化，无需迁移
+      if (base === oldReal) {
+        // 未变化、无需迁移；但升级后可能缺少授权凭据，补签发一次（幂等）。
+        await recordScopeGrant(key, base)
+        return
+      }
 
       const oldRaw = settings[key]
+      // dialog.open({ recursive: true }) 已为 selected（及其子目录 base）自动授予本次运行 scope；
+      // 迁移成功后经 record_fs_scope_grant 签发凭据，重启由 restore_fs_scope 验签恢复。
       setMigrating(key)
       try {
         // 向量库目录迁移有专属语义：close → move → 更新配置 → reopen（LanceDB 连接常驻，
@@ -131,6 +161,8 @@ export function SystemSettingsPanel({ settings, onChange }: Props) {
         if (key === 'skillPath') {
           await rewriteSkillPaths(oldRaw, base)
         }
+        // 迁移成功后目录已建好：签发跨重启授权凭据（见 restore_fs_scope / fs_scope_grant.rs）。
+        await recordScopeGrant(key, base)
       } catch (e) {
         message.error(`迁移失败：${typeof e === 'string' ? e : String(e)}`)
         return
@@ -139,7 +171,7 @@ export function SystemSettingsPanel({ settings, onChange }: Props) {
       }
       onChange({ [key]: base })
     },
-    [migrating, settings, onChange, message],
+    [migrating, settings, onChange, message, recordScopeGrant],
   )
 
   return (

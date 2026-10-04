@@ -6,7 +6,8 @@
 
 - **走查摘要 P0 已全部完成 ✅**：F001（MCP 信任协议）/ F002（脚本路径边界）/ F003（CSP + fs 收敛）/ F004（DAG 双层断裂）/ F005（kbFs 越界）/ F006（MCP 桥载荷校验）/ F007（事件归属）。完成状态与 commit 固化在 `.workspace/.fix/20261002-走查报告原文.md` 的各节 ✅ 横幅；完成 F 单按约定已从 `.fix/` 删除。
 - **F053 已完成 ✅**（`376fd15`）：Node 沙箱页运行工作空间 `.js` 报 `Error occurred loading entry point: JSError`，根因是 Windows `resource_dir()` 返回 `\\?\` verbatim 路径，Bun 1.4 无法加载带此前缀的 `--preload guard.js`。`bun_manager::base_dir` 已统一归一化盘符/UNC 前缀；真实 UIA 测试输出 `hello node from workspace`，桌面脚本仍被 F002 越界边界拒绝。
-- F003 的 CSP 严格策略与 fs 读权限收敛已在运行实例回归：MCP KB/Skill/插件全过，知识库/智能体/编辑向导 UIA 截图正常；迁移目录由 `fsScopeBootstrap` + `grant_fs_scope` 动态授权兼容。
+- **F003 fs 手选路径闭环已凭据化收口 ✅**（2026-10-04）：审查指出渲染层可经 plugin-sql 直改 app_config/agent_project/agent_squad，「直信 SQLite 路径恢复 scope」构成提权链。现架构：dialog 手选自动 allow（目录选择加 `recursive: true`）；跨重启目录由 `record_fs_scope_grant` 签发 HMAC-SHA256 凭据（密钥在 keyring）落 `fs_scope_grant` 表（schema v40），启动 `restore_fs_scope` 验签 + 来源字段二次比对后恢复；签发门禁 = 运行时 fs scope（dialog 授予）或 $HOME 静态可信根，越权路径一律拒。CDP 真实渲染层 E2E 三用例全过（越权拒/非法 key 拒/签发→重启恢复），217 Rust 测试 + tsc 通过。
+- F003 的 CSP 严格策略与 fs 读权限收敛已在运行实例回归：MCP KB/Skill/插件全过，知识库/智能体/编辑向导 UIA 截图正常。
 
 ## 下一步候选
 

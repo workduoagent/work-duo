@@ -23,7 +23,6 @@ import {
 import { uint8ToBase64 } from '@/core/file/skillFs'
 import { ScenarioSelect } from '@/components/scenario'
 import { isTauri } from '@/core/config'
-import { invoke } from '@tauri-apps/api/core'
 import { open as openDialog } from '@tauri-apps/plugin-dialog'
 import { readDir, readFile } from '@tauri-apps/plugin-fs'
 import { join } from '@tauri-apps/api/path'
@@ -192,10 +191,8 @@ export function SkillImportModal({
   async function handleFolderDialog() {
     if (!isTauri) return
     try {
-      const selected = await openDialog({ directory: true, multiple: false })
+      const selected = await openDialog({ directory: true, multiple: false, recursive: true })
       if (!selected) return
-      // F003：fs 读权限收敛后，手选目录需运行时补授权才能 readDir/readFile
-      await invoke('grant_fs_scope', { paths: [selected as string] })
       const tree = await readFolderTree(selected as string)
       setKind('folder')
       appendCaptured(tree)
@@ -214,8 +211,6 @@ export function SkillImportModal({
         filters: [{ name: 'ZIP 压缩包', extensions: ['zip'] }],
       })
       if (!selected) return
-      // F003：fs 读权限收敛后，手选 ZIP 需运行时补授权才能 readFile
-      await invoke('grant_fs_scope', { paths: [selected as string] })
       const bytes = (await readFile(selected as string)) as Uint8Array
       const files = await unzipCaptured(bytes)
       setKind('zip')

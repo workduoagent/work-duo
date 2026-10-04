@@ -11,6 +11,7 @@
  * 运行链路在 useChatRun，终态落库在 terminal-bridge。
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react'
+import { invoke } from '@tauri-apps/api/core'
 import { open } from '@tauri-apps/plugin-dialog'
 import { isTauri } from '@/core/config'
 import { getNotifyApi } from '@/components/ui/notifyBridge'
@@ -371,9 +372,16 @@ export function useSessionWorkspace(opts: {
   const changeWorkspaceDir = useCallback(async () => {
     if (!isTauri) return
     try {
-      const selected = await open({ directory: true, multiple: false, title: '选择工作空间目录' })
+      const selected = await open({ directory: true, multiple: false, recursive: true, title: '选择工作空间目录' })
       if (!selected || typeof selected !== 'string') return
       const proj = await ensureProjectByPath(selected)
+      // F003 follow-up：为工程根签发跨重启授权凭据（手选目录已由 dialog 自动授权本次会话）。
+      // 失败不阻断绑定：重启后重新选择目录即可补签。
+      try {
+        await invoke('record_fs_scope_grant', { scopeKey: `project:${proj.id}`, path: proj.rootPath })
+      } catch (scopeError) {
+        message.warning(`工作空间已绑定，但持久授权签发失败（重启后需重新选择目录）：${String(scopeError)}`)
+      }
       await refreshProjects()
       setPendingProjectId(proj.id)
       if (activeSessionId) await updateSession(activeSessionId, { projectId: proj.id })

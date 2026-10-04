@@ -136,7 +136,7 @@ async fn config_root(app: &AppHandle, key: &str) -> Option<PathBuf> {
 }
 
 /// 脚本命令允许的根目录：应用数据目录 + 资源目录（mamba/bun 管理资产）
-/// + 用户可配置的四个数据目录（工作空间 / Skill / 知识库 / 向量库）——
+/// + 用户可配置的五个数据目录（工作空间 / Skill / 知识库 / 向量库 / 插件）——
 /// 含「数据迁移」后指向的自定义绝对目录（如 E:\MySkills），迁移脚本仍可运行。
 pub async fn allowed_script_roots(app: &AppHandle) -> Vec<PathBuf> {
     let mut roots = Vec::new();
@@ -146,7 +146,13 @@ pub async fn allowed_script_roots(app: &AppHandle) -> Vec<PathBuf> {
     if let Ok(dir) = app.path().resource_dir() {
         roots.push(dir);
     }
-    for key in ["workspace_path", "skill_path", "knowledge_base_path", "vector_path"] {
+    for key in [
+        "workspace_path",
+        "skill_path",
+        "knowledge_base_path",
+        "vector_path",
+        "plugin_path",
+    ] {
         if let Some(dir) = config_root(app, key).await {
             roots.push(dir);
         }

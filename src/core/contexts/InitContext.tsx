@@ -4,6 +4,7 @@ import { getDb, initTables, updateTables } from '@/core/db/SqlService'
 import { getRawConfig, setRawConfig } from '@/core/mapper/config-mapper'
 import { isTauri } from '@/core/config'
 import { normalizeSkillPaths } from '@/core/mapper/skill-mapper'
+import { ensureDataDirFsScope } from '@/core/fsScopeBootstrap'
 
 /**
  * 数据库初始化上下文。
@@ -73,6 +74,10 @@ export const InitProvider: React.FC<{ children: React.ReactNode }> = ({ children
         } catch (e) {
           console.error('[InitContext] skill_info.path 归一失败', e)
         }
+
+        // 4.6 F003 follow-up：恢复持久目录 fs scope（验签 fs_scope_grant，见 fs_scope_grant.rs）。
+        //     放在 initTables/updateTables 之后执行，规避启动早期表不存在的竞态；失败仅告警不阻断。
+        void ensureDataDirFsScope()
 
         // 5. 首启完成后置标记，供应用层判断「是否首次运行」
         if (isFirstLoad) {

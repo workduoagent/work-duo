@@ -2,7 +2,7 @@
 -- Work Duo 本地数据库初始化脚本（DDL 单一事实源）
 -- 当前 schema 版本（台账 S11）：每次 DDL 变更时同步递增（与 updater.sql 末段版本号一致），
 -- SqlService.updateTables 读取此标记作为 user_version 封存目标。
--- SCHEMA_VERSION: 38
+-- SCHEMA_VERSION: 40
 -- 由 InitContext 在「每次启动」时幂等执行：
 --   - CREATE TABLE IF NOT EXISTS：表已存在则跳过，不会重建/丢数据；
 --   - INSERT OR IGNORE：种子已存在则跳过，不会重复插入。
@@ -146,6 +146,20 @@ CREATE TABLE IF NOT EXISTS mcp_paired_device
     fingerprint  TEXT    NOT NULL,
     created_at   INTEGER NOT NULL,
     last_seen    INTEGER NOT NULL
+);
+
+-- 持久目录 fs scope 授权凭据（F003 follow-up）：
+-- path 本身不可信（渲染层可经 plugin-sql 改写业务表），跨重启恢复 scope 以
+-- HMAC-SHA256(scope_key || path) 签名为准，密钥存 OS 凭据管理器、不经 IPC 暴露。
+-- scope_key：config:<数据目录键> | project:<工程 id> | squad:<小分队 id>；
+-- 签发仅经 Rust record_fs_scope_grant（校验 fs_scope 来源），本表对渲染层只读无效。
+CREATE TABLE IF NOT EXISTS fs_scope_grant
+(
+    scope_key  TEXT    PRIMARY KEY,
+    path       TEXT    NOT NULL,
+    mac        TEXT    NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
 );
 
 -- ============ MCP 工具定义表（mcp_tool_definition） ============

@@ -10473,6 +10473,7 @@ dependencies = [
  "chrono",
  "futures-util",
  "hex",
+ "hmac",
  "keyring",
  "lancedb",
  "md-5 0.10.6",

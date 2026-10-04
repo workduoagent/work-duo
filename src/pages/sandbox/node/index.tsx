@@ -221,6 +221,7 @@ export default function SandboxNodePage() {
         multiple: false,
         filters: [{ name: 'Node 脚本', extensions: ['mjs', 'cjs', 'js', 'ts'] }],
       })
+      // tauri-plugin-dialog 对手选文件自动 allow_file；F002 Rust 边界仍独立校验能否执行。
       if (typeof selected === 'string') setRunPath(selected)
     } catch (e) {
       message.error(`选择文件失败：${String(e)}`)
