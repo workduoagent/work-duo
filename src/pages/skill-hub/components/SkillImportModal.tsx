@@ -193,6 +193,8 @@ export function SkillImportModal({
     try {
       const selected = await openDialog({ directory: true, multiple: false })
       if (!selected) return
+      // F003：fs 读权限收敛后，手选目录需运行时补授权才能 readDir/readFile
+      await invoke('grant_fs_scope', { paths: [selected as string] })
       const tree = await readFolderTree(selected as string)
       setKind('folder')
       appendCaptured(tree)
@@ -211,6 +213,8 @@ export function SkillImportModal({
         filters: [{ name: 'ZIP 压缩包', extensions: ['zip'] }],
       })
       if (!selected) return
+      // F003：fs 读权限收敛后，手选 ZIP 需运行时补授权才能 readFile
+      await invoke('grant_fs_scope', { paths: [selected as string] })
       const bytes = (await readFile(selected as string)) as Uint8Array
       const files = await unzipCaptured(bytes)
       setKind('zip')

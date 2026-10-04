@@ -27,6 +27,7 @@ mod net;
 /// 仅接受绝对路径（Windows 盘符或 unix 根），避免把相对/占位路径误注入 scope。
 #[tauri::command]
 fn grant_fs_scope(app: tauri::AppHandle, paths: Vec<String>) -> Result<(), String> {
+    use std::{fs, path::Path};
     use tauri_plugin_fs::FsExt;
     let scope = app.fs_scope();
     let mut granted = Vec::new();
@@ -42,10 +43,23 @@ fn grant_fs_scope(app: tauri::AppHandle, paths: Vec<String>) -> Result<(), Strin
         if !is_abs {
             continue;
         }
-        if let Err(e) = scope.allow_directory(&norm, true) {
+        // F003：路径可能是文件（如手选 ZIP）——文件授予其父目录（会话级，重启失效）；
+        // 目录维持原语义（递归整树）。
+        let grant_target = match fs::metadata(&norm) {
+            Ok(m) if m.is_file() => {
+                let parent = Path::new(&norm)
+                    .parent()
+                    .map(|p| p.to_string_lossy().to_string())
+                    .unwrap_or_else(|| norm.clone());
+                tracing::info!("grant_fs_scope: 文件路径按父目录授权 file={} dir={}", norm, parent);
+                parent
+            }
+            _ => norm.clone(),
+        };
+        if let Err(e) = scope.allow_directory(&grant_target, true) {
             tracing::warn!(
                 "grant_fs_scope: 开放目录 scope 失败 path={} err={}",
-                norm,
+                grant_target,
                 e
             );
             continue;

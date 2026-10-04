@@ -18,7 +18,7 @@ import { appDataDir, resourceDir } from '@tauri-apps/api/path'
 import { fe } from '@/core/logBridge'
 
 /** app_config 中凡是「物理数据目录」的键，迁移后都需纳入 fs scope。 */
-const DATA_DIR_KEYS = ['skill_path', 'knowledge_base_path', 'vector_path', 'plugin_path']
+const DATA_DIR_KEYS = ['workspace_path', 'skill_path', 'knowledge_base_path', 'vector_path', 'plugin_path']
 
 async function resolveRaw(raw: string): Promise<string> {
   let s = raw.trim()

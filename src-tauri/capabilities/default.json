@@ -2,7 +2,9 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Capability for the main window",
-  "windows": ["main"],
+  "windows": [
+    "main"
+  ],
   "permissions": [
     "core:default",
     "core:window:allow-show",
@@ -69,9 +71,6 @@
     {
       "identifier": "fs:allow-read-file",
       "allow": [
-        {
-          "path": "**"
-        },
         {
           "path": "$APPCONFIG/**"
         },
@@ -197,9 +196,6 @@
       "identifier": "fs:allow-read-text-file",
       "allow": [
         {
-          "path": "**"
-        },
-        {
           "path": "$APPCONFIG/**"
         },
         {
@@ -324,9 +320,6 @@
       "identifier": "fs:allow-read-dir",
       "allow": [
         {
-          "path": "**"
-        },
-        {
           "path": "$APPCONFIG/**"
         },
         {
@@ -388,9 +381,6 @@
     {
       "identifier": "fs:allow-exists",
       "allow": [
-        {
-          "path": "**"
-        },
         {
           "path": "$APPCONFIG/**"
         },
