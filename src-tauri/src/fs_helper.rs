@@ -103,14 +103,15 @@ use tauri::{AppHandle, Manager};
 use tauri_plugin_sql::DbInstances;
 
 /// 读取全局工作空间根（settings `workspace_path`，支持 $APPDATA 占位符；非绝对路径忽略）。
-async fn workspace_root(app: &AppHandle) -> Option<PathBuf> {
+async fn config_root(app: &AppHandle, key: &str) -> Option<PathBuf> {
     let instances = app.state::<DbInstances>();
     let guard = instances.0.read().await;
     let pool = match guard.get("sqlite:workduo.db")? {
         tauri_plugin_sql::DbPool::Sqlite(p) => p.clone(),
     };
     drop(guard);
-    let row = sqlx::query("SELECT value FROM app_config WHERE key = 'workspace_path'")
+    let row = sqlx::query("SELECT value FROM app_config WHERE key = ?")
+        .bind(key)
         .fetch_optional(&pool)
         .await
         .ok()
@@ -119,8 +120,13 @@ async fn workspace_root(app: &AppHandle) -> Option<PathBuf> {
         .try_get::<Option<String>, _>("value")
         .ok()
         .flatten()?;
+    // 占位符解析：$APPDATA/$RESOURCE（与前端 settings-file 的默认值写法一致）；
+    // 数据迁移后这些键多为绝对自定义路径（如 E:\MySkills），原样即是绝对路径。
     let appdata = app.path().app_data_dir().ok()?.to_string_lossy().to_string();
-    let expanded = raw.replace("$APPDATA", &appdata);
+    let resource = app.path().resource_dir().ok()?.to_string_lossy().to_string();
+    let expanded = raw
+        .replace("$APPDATA", &appdata)
+        .replace("$RESOURCE", &resource);
     let p = PathBuf::from(expanded);
     if p.is_absolute() {
         Some(p)
@@ -129,7 +135,9 @@ async fn workspace_root(app: &AppHandle) -> Option<PathBuf> {
     }
 }
 
-/// 脚本命令允许的根目录：应用数据目录 + 资源目录（mamba/bun 管理资产）+ 全局工作空间。
+/// 脚本命令允许的根目录：应用数据目录 + 资源目录（mamba/bun 管理资产）
+/// + 用户可配置的四个数据目录（工作空间 / Skill / 知识库 / 向量库）——
+/// 含「数据迁移」后指向的自定义绝对目录（如 E:\MySkills），迁移脚本仍可运行。
 pub async fn allowed_script_roots(app: &AppHandle) -> Vec<PathBuf> {
     let mut roots = Vec::new();
     if let Ok(dir) = app.path().app_data_dir() {
@@ -138,8 +146,10 @@ pub async fn allowed_script_roots(app: &AppHandle) -> Vec<PathBuf> {
     if let Ok(dir) = app.path().resource_dir() {
         roots.push(dir);
     }
-    if let Some(ws) = workspace_root(app).await {
-        roots.push(ws);
+    for key in ["workspace_path", "skill_path", "knowledge_base_path", "vector_path"] {
+        if let Some(dir) = config_root(app, key).await {
+            roots.push(dir);
+        }
     }
     roots
 }
