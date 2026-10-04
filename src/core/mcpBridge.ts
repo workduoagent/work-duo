@@ -48,6 +48,7 @@ import {
   listPluginRunLogs,
 } from '@/core/mapper/plugin-mapper'
 import { extractPluginMeta, testPlugin } from '@/core/mapper/plugin-connection'
+import { validateIntentPayload } from '@/core/mcpBridge-validate'
 import type { UpsertUserPluginInput } from '@/core/file/plugin-file'
 
 // —— 知识库模块：与 KnowledgeFormModal / detail 同款真实 handler（落盘走 kbFs，索引联动走 mapper）——
@@ -177,6 +178,9 @@ async function resolveSkill(key?: string): Promise<SkillInfo | undefined> {
  * 严禁另写一份「测试专用」逻辑。
  */
 async function dispatch(intent: string, payload: unknown): Promise<unknown> {
+  // F006：载荷形状运行时校验——外部客户端的畸形注入在此拒绝（throw → 信封 ok:false）
+  const specErr = validateIntentPayload(intent, payload)
+  if (specErr) throw new Error(specErr)
   switch (intent) {
     case 'agent:ui_create':
     case 'agent:ui_update': {
