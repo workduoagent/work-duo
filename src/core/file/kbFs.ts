@@ -15,6 +15,7 @@
  *    供 knowledge-mapper 写入 knowledge_asset。
  */
 import { isTauri } from '@/core/config'
+import { assertSafeRelPath } from '@/core/file/rel-path-guard'
 import { fe } from '@/core/logBridge'
 import { appDataDir, resourceDir, join } from '@tauri-apps/api/path'
 import {
@@ -176,6 +177,7 @@ export async function readKbFileContent(
   if (!isTauri) return null
   try {
     const base = await resolveRealKnowledgeBasePath(folder)
+    assertSafeRelPath(relPath, 'kb')
     const target = await join(base, relPath)
     const data = (await readFile(target)) as Uint8Array
     return { relPath, name: relPath.split('/').pop() || relPath, data }
@@ -202,6 +204,7 @@ export async function writeKbFileContent(
   if (!isTauri) return { ok: false, error: '当前环境不支持写盘' }
   try {
     const base = await resolveRealKnowledgeBasePath(folder)
+    assertSafeRelPath(relPath, 'kb')
     const target = await join(base, relPath)
     await mkdir(await dirname(target), { recursive: true })
     await writeTextFile(target, content)
@@ -226,6 +229,7 @@ export async function writeKbFileBinary(
   if (!isTauri) return { ok: false, error: '当前环境不支持写盘' }
   try {
     const base = await resolveRealKnowledgeBasePath(folder)
+    assertSafeRelPath(relPath, 'kb')
     const target = await join(base, relPath)
     await mkdir(await dirname(target), { recursive: true })
     await writeFile(target, bytes)
@@ -246,6 +250,7 @@ export async function createKbFolder(folder: string, relPath: string): Promise<K
   if (!isTauri) return { ok: false, error: '当前环境不支持写盘' }
   try {
     const base = await resolveRealKnowledgeBasePath(folder)
+    assertSafeRelPath(relPath, 'kb')
     const target = await join(base, relPath)
     await mkdir(target, { recursive: true })
     fe.info('kbFs', `createKbFolder ok relPath=${relPath}`)
@@ -273,6 +278,7 @@ export async function deleteKbEntry(folder: string, relPath: string): Promise<Kb
   if (!isTauri) return { ok: false, error: '当前环境不支持写盘' }
   try {
     const base = await resolveRealKnowledgeBasePath(folder)
+    assertSafeRelPath(relPath, 'kb')
     const target = await join(base, relPath)
     await remove(target, { recursive: true })
     fe.info('kbFs', `deleteKbEntry ok relPath=${relPath}`)
@@ -297,8 +303,10 @@ export async function moveKbEntry(
   if (!isTauri) return { ok: false, error: '当前环境不支持写盘' }
   try {
     const base = await resolveRealKnowledgeBasePath(folder)
+    assertSafeRelPath(fromRel, 'kb')
     const name = fromRel.split('/').pop() || fromRel
     const destRel = toDirRel ? `${toDirRel}/${name}` : name
+    assertSafeRelPath(destRel, 'kb')
     const from = await join(base, fromRel)
     const to = await join(base, destRel)
     await rename(from, to)
