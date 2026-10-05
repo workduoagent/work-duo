@@ -13,11 +13,13 @@
 
 - **F010 已完成 ✅**（2026-10-05）：Bun/Node 沙箱网络隔离——`SANDBOX_GUARD_JS` 增加 net 段（fetch/WebSocket/http(s)/net/tls/dgram/dns/Bun 原生 connect·listen·udpSocket·serve 全拦），注入条件改 fs/net 两段独立启用；真实 bun CLI E2E 封网 16 通道全拒 + 放行场景无误伤；226 Rust 测试通过。
 
+- **F009 已完成 ✅**（2026-10-05）：`native__execute_command` 的 `cmd /C` 整串透传——`ensure_command_in_boundary` 前置护栏拦 `..` 路径段（git 区间语法不误伤）、盘符/UNC 绝对路径、段首嵌套 shell（python/node 项目运行时保留），审批卡原文兜底残留；230 Rust 测试通过。
+
 ## 下一步候选
 
-1. **F009**：`native__execute_command` 走 `cmd /C` 整串透传（P1；宿主模式一次诱导即可执行任意命令，改受限执行器或前置过滤，参照 `host/exec.rs` 的 `sq()` 转义）。
-2. **F011-F017**：squad 可靠性批次（启动清扫误杀 / pause_checkpoint 状态守卫 / run 级墙钟超时 / expect panic 等）。
-3. **F018 / F038 / F039**：前端测试基建、Squad 巨型组件拆分、运行控制台重复逻辑（结构性工程债）。
+1. **F011-F017**：squad 可靠性批次（启动清扫误杀 / pause_checkpoint 状态守卫 / run 级墙钟超时 / expect panic 等），可按序逐个复核+修复。
+2. **F018**：前端测试基建（零测试 + 无 Lint，结构性债）。
+3. **F038 / F039**：Squad 巨型组件拆分、运行控制台重复逻辑（结构性工程债）。
 
 ## 环境事实（跨设备必读）
 

