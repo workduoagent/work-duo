@@ -15,11 +15,13 @@
 
 - **F009 已完成 ✅**（2026-10-05）：`native__execute_command` 的 `cmd /C` 整串透传——`ensure_command_in_boundary` 前置护栏拦 `..` 路径段（git 区间语法不误伤）、盘符/UNC 绝对路径、段首嵌套 shell（python/node 项目运行时保留），审批卡原文兜底残留；230 Rust 测试通过。
 
+- **F011 已完成 ✅**（2026-10-05）：squad 启动清扫误杀——schema v41 加 `agent_squad_session.owner_pid`（INSERT/Resume 接管写入），清扫按「无主（NULL/异 PID/本进程无协程登记）才收敛 + CAS 单条 UPDATE」重构，活跃会话绝不触碰；内存库单测 4 项，234 Rust 测试通过，运行时冒烟 v41 落库正常。
+
 ## 下一步候选
 
-1. **F011-F017**：squad 可靠性批次（启动清扫误杀 / pause_checkpoint 状态守卫 / run 级墙钟超时 / expect panic 等），可按序逐个复核+修复。
-2. **F018**：前端测试基建（零测试 + 无 Lint，结构性债）。
-3. **F038 / F039**：Squad 巨型组件拆分、运行控制台重复逻辑（结构性工程债）。
+1. **F012**：pause_checkpoint 的 UPDATE 缺状态守卫（终态可回退成 running；报告已给 CAS 处方，与 F011 同域顺手收）。
+2. **F013-F017**：squad 可靠性批次剩余（run 级墙钟超时 / pipeline expect panic / 成员超时半行 JSON / board_json 读改写丢更新 / events.rs 锁）。
+3. **F018**：前端测试基建（零测试 + 无 Lint，结构性债）。
 
 ## 环境事实（跨设备必读）
 

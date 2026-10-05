@@ -690,3 +690,8 @@ CREATE TABLE IF NOT EXISTS fs_scope_grant
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
 );
+
+-- ---------- v41：小分会话归属进程 PID（F011） ----------
+-- 启动清扫只收敛「无主」半终态会话（owner_pid 为空 / 异 PID / 本进程但无存活协程登记），
+-- 本进程活跃会话绝不清扫（SQUAD_CANCELS 为真相源），防清扫误杀在跑协作。
+ALTER TABLE agent_squad_session ADD COLUMN owner_pid INTEGER;

@@ -1970,14 +1970,16 @@ pub async fn run_squad_task(
     let _pause_guard = SquadPauseGuard(session_id.clone());
     let title = prompt.chars().take(120).collect::<String>();
     let mode = squad.mode.clone();
+    // F011：登记归属 PID——启动清扫据此区分「本进程活跃」与「无主遗留」。
     let _ = sqlx::query(
-        "INSERT INTO agent_squad_session (id, squad_id, title, mode, status, snapshot, created_at, updated_at) \
-         VALUES (?, ?, ?, ?, 'running', NULL, ?, ?)",
+        "INSERT INTO agent_squad_session (id, squad_id, title, mode, status, snapshot, owner_pid, created_at, updated_at) \
+         VALUES (?, ?, ?, ?, 'running', NULL, ?, ?, ?)",
     )
     .bind(&session_id)
     .bind(&squad.squad_id)
     .bind(&title)
     .bind(&mode)
+    .bind(std::process::id() as i64)
     .bind(now_ms())
     .bind(now_ms())
     .execute(&pool)
@@ -2360,7 +2362,9 @@ pub async fn resume_squad_session(app: &AppHandle, squad_key: &str, session_id: 
     let _inject_guard = SquadInjectGuard(session_id.to_string());
     squad_metrics_register_budget(session_id, squad.run_strategy.budget_tokens);
 
-    let _ = sqlx::query("UPDATE agent_squad_session SET status='running', updated_at=? WHERE id=?")
+    // F011：跨进程 Resume 接管后归属改写为本进程——后续清扫不会把在跑会话误判为无主遗留。
+    let _ = sqlx::query("UPDATE agent_squad_session SET status='running', owner_pid=?, updated_at=? WHERE id=?")
+        .bind(std::process::id() as i64)
         .bind(now_ms())
         .bind(session_id)
         .execute(&pool)
@@ -2414,31 +2418,100 @@ pub async fn resume_squad_session(app: &AppHandle, squad_key: &str, session_id: 
 }
 
 /// S3 批次3（§4.10-3）：启动清扫——上一进程遗留的半终态会话（running/awaiting_delivery/paused）
-/// 已无存活协程，收敛为 failed，才允许 Resume 重入。在 MCP / API / 调度器启动时各调一次（幂等）。
+/// 已无存活协程，收敛为 failed，才允许 Resume 重入。在启动序列调用（幂等）。
+///
+/// F011：清扫不再无条件全表 UPDATE——按「归属 + 存活性」筛选（SQUAD_CANCELS 是
+/// 本进程活跃会话的真相源）：
+///  - owner_pid 为空（旧版本遗留）或非本进程 → 无主遗留，清扫；
+///  - owner_pid 为本进程但注册表无存活协程 → 同样无主（进程内启动竞态 / 守卫
+///    已 Drop 而终态未及写入的残留），清扫；
+///  - owner_pid 为本进程且有协程登记 → 活跃会话，绝不触碰。
+/// 单条终态 UPDATE 带半终态条件做 CAS——SELECT 与 UPDATE 之间协程若已正常写
+/// 终态（done/cancelled），不会被清扫覆盖。
 pub async fn sweep_stale_squad_sessions(app: &AppHandle) -> usize {
-    let pool = match get_pool(app).await {
-        Ok(p) => p,
-        Err(_) => return 0,
-    };
-    match sqlx::query(
-        "UPDATE agent_squad_session SET status='failed', updated_at=? WHERE status IN ('running','awaiting_plan','awaiting_checkpoint','awaiting_delivery','paused')",
-    )
-    .bind(now_ms())
-    .execute(&pool)
-    .await
-    {
-        Ok(res) => {
-            let n = res.rows_affected() as usize;
-            if n > 0 {
-                tracing::info!("[squad] 启动清扫：{n} 个半终态会话收敛为 failed（§4.10-3），可 Resume 重入");
+    let Ok(pool) = get_pool(app).await else { return 0 };
+    sweep_stale_squad_sessions_in(&pool, &live_session_ids()).await
+}
+
+/// 本进程当前有存活协程的 session 集合（SQUAD_CANCELS 的键视图）。
+fn live_session_ids() -> std::collections::HashSet<String> {
+    let g = SQUAD_CANCELS.lock().unwrap_or_else(|e| e.into_inner());
+    g.as_ref()
+        .map(|m| m.keys().cloned().collect())
+        .unwrap_or_default()
+}
+
+/// 半终态清单：running + 三类门禁挂起 + paused（清扫对象；done/failed/cancelled 不碰）。
+const SEMI_TERMINAL_STATUSES: &str =
+    "('running','awaiting_plan','awaiting_checkpoint','awaiting_delivery','paused')";
+
+/// 清扫可测核心：pool + 本进程活跃集合，返回实际收敛条数。
+async fn sweep_stale_squad_sessions_in(
+    pool: &sqlx::SqlitePool,
+    live: &std::collections::HashSet<String>,
+) -> usize {
+    use sqlx::Row;
+    let my_pid = std::process::id() as i64;
+    // owner_pid 列是 v41 新增；升级后首个启动序列里本清扫可能先于前端建列执行，
+    // 此时退回旧语义（全部按无主处理）——该窗口内本进程尚无协程启动，无条件清扫安全。
+    let primary = sqlx::query(&format!(
+        "SELECT id, owner_pid FROM agent_squad_session WHERE status IN {SEMI_TERMINAL_STATUSES}"
+    ))
+    .fetch_all(pool)
+    .await;
+    let rows: Vec<(String, Option<i64>)> = match primary {
+        Ok(rs) => rs
+            .into_iter()
+            .map(|r| {
+                (
+                    r.try_get("id").unwrap_or_default(),
+                    r.try_get("owner_pid").ok().flatten(),
+                )
+            })
+            .collect(),
+        Err(_) => match sqlx::query(&format!(
+            "SELECT id FROM agent_squad_session WHERE status IN {SEMI_TERMINAL_STATUSES}"
+        ))
+        .fetch_all(pool)
+        .await
+        {
+            Ok(rs) => rs
+                .into_iter()
+                .map(|r| (r.try_get("id").unwrap_or_default(), None))
+                .collect(),
+            Err(e) => {
+                tracing::warn!("[squad] 启动清扫查询失败：{e}");
+                return 0;
             }
-            n
+        },
+    };
+    let mut stale: Vec<String> = Vec::new();
+    for (id, pid) in rows {
+        let owned_by_me = pid == Some(my_pid);
+        if owned_by_me && live.contains(&id) {
+            continue; // F011：本进程活跃会话不清扫
         }
-        Err(e) => {
-            tracing::warn!("[squad] 启动清扫失败：{e}");
-            0
+        stale.push(id);
+    }
+    let mut swept = 0usize;
+    for id in stale {
+        match sqlx::query(&format!(
+            "UPDATE agent_squad_session SET status='failed', updated_at=? WHERE id=? AND status IN {SEMI_TERMINAL_STATUSES}"
+        ))
+        .bind(now_ms())
+        .bind(&id)
+        .execute(pool)
+        .await
+        {
+            Ok(res) if res.rows_affected() > 0 => swept += 1,
+            Ok(_) => {}
+            Err(e) => tracing::warn!("[squad] 启动清扫单条失败：{id} {e}"),
         }
     }
+    if swept > 0 {
+        tracing::info!("[squad] 启动清扫：{swept} 个半终态会话收敛为 failed（§4.10-3），可 Resume 重入");
+    }
+    swept
 }
 
 /// S3 批次3（§4.11.4）：广播——「告诉团队」。写 board.decisions（scope 决策卡）+ system round + 事件；
@@ -4861,5 +4934,123 @@ mod s1_tests {
         assert_eq!(delegated[0].expected_artifacts, vec!["main.py"]);
         assert_eq!(delegated[1].instruction, "评审", "instruction 缺省回落 title");
         assert_eq!(delegated[1].depends_on, vec!["写脚手架"]);
+    }
+}
+
+#[cfg(test)]
+mod f011_tests {
+    use super::*;
+    use sqlx::Row;
+
+    async fn test_pool() -> sqlx::SqlitePool {
+        let pool = sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap();
+        sqlx::query(
+            "CREATE TABLE agent_squad_session (\
+                id TEXT PRIMARY KEY, status TEXT NOT NULL, \
+                owner_pid INTEGER, updated_at INTEGER NOT NULL)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        pool
+    }
+
+    async fn insert_session(pool: &sqlx::SqlitePool, id: &str, status: &str, owner_pid: Option<i64>) {
+        sqlx::query("INSERT INTO agent_squad_session (id, status, owner_pid, updated_at) VALUES (?, ?, ?, 1)")
+            .bind(id)
+            .bind(status)
+            .bind(owner_pid)
+            .execute(pool)
+            .await
+            .unwrap();
+    }
+
+    async fn status_of(pool: &sqlx::SqlitePool, id: &str) -> String {
+        sqlx::query("SELECT status FROM agent_squad_session WHERE id = ?")
+            .bind(id)
+            .fetch_one(pool)
+            .await
+            .unwrap()
+            .try_get::<String, _>("status")
+            .unwrap()
+    }
+
+    fn live_of(ids: &[&str]) -> std::collections::HashSet<String> {
+        ids.iter().map(|s| s.to_string()).collect()
+    }
+
+    /// 无主半终态（NULL / 异 PID）清扫；本进程活跃会话（登记在册）绝不触碰。
+    #[tokio::test]
+    async fn sweeps_unowned_only() {
+        let pool = test_pool().await;
+        let my = std::process::id() as i64;
+        insert_session(&pool, "legacy", "running", None).await;
+        insert_session(&pool, "foreign", "awaiting_checkpoint", Some(my + 1)).await;
+        insert_session(&pool, "live-running", "running", Some(my)).await;
+        insert_session(&pool, "live-paused", "paused", Some(my)).await;
+
+        let swept = sweep_stale_squad_sessions_in(&pool, &live_of(&["live-running", "live-paused"])).await;
+        assert_eq!(swept, 2);
+        assert_eq!(status_of(&pool, "legacy").await, "failed");
+        assert_eq!(status_of(&pool, "foreign").await, "failed");
+        assert_eq!(status_of(&pool, "live-running").await, "running");
+        assert_eq!(status_of(&pool, "live-paused").await, "paused");
+    }
+
+    /// 本进程半终态但注册表无登记（守卫已 Drop / 启动竞态）→ 判无主清扫。
+    #[tokio::test]
+    async fn sweeps_own_pid_without_live_registry() {
+        let pool = test_pool().await;
+        let my = std::process::id() as i64;
+        insert_session(&pool, "orphan-own", "awaiting_delivery", Some(my)).await;
+        let swept = sweep_stale_squad_sessions_in(&pool, &live_of(&[])).await;
+        assert_eq!(swept, 1);
+        assert_eq!(status_of(&pool, "orphan-own").await, "failed");
+    }
+
+    /// 终态（done/cancelled/failed）与全部半终态状态的清扫口径。
+    #[tokio::test]
+    async fn touches_only_semi_terminal() {
+        let pool = test_pool().await;
+        for (id, status) in [
+            ("a", "done"),
+            ("b", "cancelled"),
+            ("c", "failed"),
+            ("d", "running"),
+            ("e", "awaiting_plan"),
+            ("f", "awaiting_checkpoint"),
+            ("g", "awaiting_delivery"),
+            ("h", "paused"),
+        ] {
+            insert_session(&pool, id, status, None).await;
+        }
+        let swept = sweep_stale_squad_sessions_in(&pool, &live_of(&[])).await;
+        assert_eq!(swept, 5, "仅半终态 5 条被收敛");
+        assert_eq!(status_of(&pool, "a").await, "done");
+        assert_eq!(status_of(&pool, "b").await, "cancelled");
+        assert_eq!(status_of(&pool, "c").await, "failed");
+    }
+
+    /// CAS：SELECT 与 UPDATE 之间协程已写终态的行不被覆盖（UPDATE 带半终态条件）。
+    #[tokio::test]
+    async fn cas_skips_row_promoted_to_terminal() {
+        let pool = test_pool().await;
+        insert_session(&pool, "race", "running", None).await;
+        // 模拟：清扫已把该行纳入 stale 列表后，协程先写了终态 cancelled。
+        sqlx::query("UPDATE agent_squad_session SET status='cancelled' WHERE id='race'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        // 清扫式 UPDATE 带半终态条件 → 对 cancelled 行 0 行受影响，不覆盖终态。
+        let res = sqlx::query(&format!(
+            "UPDATE agent_squad_session SET status='failed', updated_at=? WHERE id=? AND status IN {SEMI_TERMINAL_STATUSES}"
+        ))
+        .bind(now_ms())
+        .bind("race")
+        .execute(&pool)
+        .await
+        .unwrap();
+        assert_eq!(res.rows_affected(), 0);
+        assert_eq!(status_of(&pool, "race").await, "cancelled");
     }
 }
