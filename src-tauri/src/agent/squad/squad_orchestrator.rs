@@ -282,11 +282,14 @@ async fn pause_checkpoint(
         return true;
     }
     let note = format!("⏸️ 会话已暂停（{at}边界，完成当前节点后挂起）；外部 Resume 后继续。");
-    let _ = sqlx::query("UPDATE agent_squad_session SET status='paused', updated_at=? WHERE id=?")
-        .bind(now_ms())
-        .bind(session_id)
-        .execute(pool)
-        .await;
+    // F012：半终态守卫——cancel 并发写入 cancelled 后不得再回写成 paused（防复活僵尸）。
+    let _ = sqlx::query(&format!(
+        "UPDATE agent_squad_session SET status='paused', updated_at=? WHERE id=? AND status IN {SEMI_TERMINAL_STATUSES}"
+    ))
+    .bind(now_ms())
+    .bind(session_id)
+    .execute(pool)
+    .await;
     let _ = sqlx::query(
         "INSERT INTO agent_squad_round (id, squad_id, session_id, speaker_agent_id, role, content, kind, created_at) VALUES (?, ?, ?, NULL, '系统', ?, 'system', ?)",
     )
@@ -311,11 +314,15 @@ async fn pause_checkpoint(
     let resumed = wait_resume(session_id, cancel).await;
     if resumed {
         let note = "▶️ 会话已恢复，继续执行。".to_string();
-        let _ = sqlx::query("UPDATE agent_squad_session SET status='running', updated_at=? WHERE id=?")
-            .bind(now_ms())
-            .bind(session_id)
-            .execute(pool)
-            .await;
+        // F012（报告处方）：仅 paused → running——cancel 并发写终态后不得回退，
+        // 否则无任何协程再写终态，session 永久 running 僵尸。
+        let _ = sqlx::query(
+            "UPDATE agent_squad_session SET status='running', updated_at=? WHERE id=? AND status='paused'",
+        )
+        .bind(now_ms())
+        .bind(session_id)
+        .execute(pool)
+        .await;
         let _ = sqlx::query(
             "INSERT INTO agent_squad_round (id, squad_id, session_id, speaker_agent_id, role, content, kind, created_at) VALUES (?, ?, ?, NULL, '系统', ?, 'system', ?)",
         )
@@ -542,9 +549,11 @@ async fn finish_squad_session(
 ) {
     // S2（§4.11）：终态即止——仍未消费的插话标记 dropped（§4.11.6「节点已结束」）。
     squad_inject_flush_session(app, pool, squad_id, session_id).await;
-    let _ = sqlx::query(
-        "UPDATE agent_squad_session SET status=?, snapshot=?, updated_at=? WHERE id=?",
-    )
+    // F012（报告处方）：finish 带 CAS 守卫——终态（done/failed/cancelled）一经落定，
+    // 任何迟到的 finish 不得改写（防双协程竞态把终态互相覆盖）。
+    let _ = sqlx::query(&format!(
+        "UPDATE agent_squad_session SET status=?, snapshot=?, updated_at=? WHERE id=? AND status NOT IN {TERMINAL_STATUSES}"
+    ))
     .bind(status)
     .bind(summary)
     .bind(now_ms())
@@ -1409,11 +1418,14 @@ async fn squad_checkpoint_hang(
         },
     );
     // 复查修复 #1（09-29）：L2 检查点挂起写独立状态（对齐 L4 awaiting_delivery，前端已预留识别）。
-    let _ = sqlx::query("UPDATE agent_squad_session SET status='awaiting_checkpoint', updated_at=? WHERE id=?")
-        .bind(now_ms())
-        .bind(session_id)
-        .execute(pool)
-        .await;
+    // F012：半终态守卫——cancel 并发写终态后不得再回写成挂起态。
+    let _ = sqlx::query(&format!(
+        "UPDATE agent_squad_session SET status='awaiting_checkpoint', updated_at=? WHERE id=? AND status IN {SEMI_TERMINAL_STATUSES}"
+    ))
+    .bind(now_ms())
+    .bind(session_id)
+    .execute(pool)
+    .await;
     let decision = match wait_checkpoint_gate(session_id, squad_cancel).await {
         Some(d) => d,
         // 取消路径也要摘除 gate，防注册表残留（session_id 每次 run 都新建，残留即永久泄漏）。
@@ -1424,7 +1436,8 @@ async fn squad_checkpoint_hang(
     };
     remove_checkpoint_gate(session_id);
     // 决议后回写运行态（继续 → 下一波；返工 → 本波重跑，均处于运行中）。
-    let _ = sqlx::query("UPDATE agent_squad_session SET status='running', updated_at=? WHERE id=?")
+    // F012：仅 awaiting_checkpoint → running——等待期间被 cancel 收尾则不得复活。
+    let _ = sqlx::query("UPDATE agent_squad_session SET status='running', updated_at=? WHERE id=? AND status='awaiting_checkpoint'")
         .bind(now_ms())
         .bind(session_id)
         .execute(pool)
@@ -1518,11 +1531,14 @@ async fn gate_delivery_confirm(
     session_id: &str,
     squad_cancel: &Arc<AtomicBool>,
 ) -> bool {
-    let _ = sqlx::query("UPDATE agent_squad_session SET status='awaiting_delivery', updated_at=? WHERE id=?")
-        .bind(now_ms())
-        .bind(session_id)
-        .execute(pool)
-        .await;
+    // F012：半终态守卫——cancel 并发写终态后不得再回写成挂起态。
+    let _ = sqlx::query(&format!(
+        "UPDATE agent_squad_session SET status='awaiting_delivery', updated_at=? WHERE id=? AND status IN {SEMI_TERMINAL_STATUSES}"
+    ))
+    .bind(now_ms())
+    .bind(session_id)
+    .execute(pool)
+    .await;
     SQUAD_DELIVERY_GATES
         .lock()
         .unwrap_or_else(|e| e.into_inner())
@@ -2103,11 +2119,14 @@ pub async fn run_squad_task(
             plan_text
         );
         // 复查修复 #1（09-29）：L1 门禁挂起写独立状态（此前停 'running'，外部观测不出「卡在门禁」）。
-        let _ = sqlx::query("UPDATE agent_squad_session SET status='awaiting_plan', updated_at=? WHERE id=?")
-            .bind(now_ms())
-            .bind(&session_id)
-            .execute(&pool)
-            .await;
+        // F012：半终态守卫——cancel 并发写终态后不得再回写成挂起态。
+        let _ = sqlx::query(&format!(
+            "UPDATE agent_squad_session SET status='awaiting_plan', updated_at=? WHERE id=? AND status IN {SEMI_TERMINAL_STATUSES}"
+        ))
+        .bind(now_ms())
+        .bind(&session_id)
+        .execute(&pool)
+        .await;
         let _ = sqlx::query(
             "INSERT INTO agent_squad_round (id, squad_id, session_id, speaker_agent_id, role, content, kind, created_at) VALUES (?, ?, ?, ?, ?, ?, 'plan', ?)",
         )
@@ -2139,7 +2158,8 @@ pub async fn run_squad_task(
             return session_id;
         }
         // 复查修复 #1：批准后回写运行态（拒绝路径由 finish_squad_session 写 cancelled）。
-        let _ = sqlx::query("UPDATE agent_squad_session SET status='running', updated_at=? WHERE id=?")
+        // F012：仅 awaiting_plan → running——等待期间被 cancel 收尾则不得复活。
+        let _ = sqlx::query("UPDATE agent_squad_session SET status='running', updated_at=? WHERE id=? AND status='awaiting_plan'")
             .bind(now_ms())
             .bind(&session_id)
             .execute(&pool)
@@ -2239,9 +2259,10 @@ async fn finish_orchestrator_tail(
     }
     squad_inject_flush_session(app, pool, &squad.squad_id, session_id).await; // S2 插话兜底清账
 
-    let _ = sqlx::query(
-        "UPDATE agent_squad_session SET status='done', snapshot=?, updated_at=? WHERE id=?",
-    )
+    // F012：终态否定守卫——cancel 竞态已写终态时，迟到的 done 不得覆盖。
+    let _ = sqlx::query(&format!(
+        "UPDATE agent_squad_session SET status='done', snapshot=?, updated_at=? WHERE id=? AND status NOT IN {TERMINAL_STATUSES}"
+    ))
     .bind(&summary)
     .bind(now_ms())
     .bind(session_id)
@@ -2363,12 +2384,15 @@ pub async fn resume_squad_session(app: &AppHandle, squad_key: &str, session_id: 
     squad_metrics_register_budget(session_id, squad.run_strategy.budget_tokens);
 
     // F011：跨进程 Resume 接管后归属改写为本进程——后续清扫不会把在跑会话误判为无主遗留。
-    let _ = sqlx::query("UPDATE agent_squad_session SET status='running', owner_pid=?, updated_at=? WHERE id=?")
-        .bind(std::process::id() as i64)
-        .bind(now_ms())
-        .bind(session_id)
-        .execute(&pool)
-        .await;
+    // F012：半终态守卫——接管不得复活已到终态（done/cancelled）的会话。
+    let _ = sqlx::query(&format!(
+        "UPDATE agent_squad_session SET status='running', owner_pid=?, updated_at=? WHERE id=? AND status IN {SEMI_TERMINAL_STATUSES}"
+    ))
+    .bind(std::process::id() as i64)
+    .bind(now_ms())
+    .bind(session_id)
+    .execute(&pool)
+    .await;
     let note = format!(
         "▶️ Resume 重入：已完成 {done_count}/{} 个任务跳过，其余从头重跑（幂等覆盖写）。",
         delegated.len()
@@ -2444,6 +2468,9 @@ fn live_session_ids() -> std::collections::HashSet<String> {
 /// 半终态清单：running + 三类门禁挂起 + paused（清扫对象；done/failed/cancelled 不碰）。
 const SEMI_TERMINAL_STATUSES: &str =
     "('running','awaiting_plan','awaiting_checkpoint','awaiting_delivery','paused')";
+
+/// 终态清单（F012）：finish 类写入的否定守卫——终态一经落定不可被任何迟到写改写。
+const TERMINAL_STATUSES: &str = "('done','failed','cancelled')";
 
 /// 清扫可测核心：pool + 本进程活跃集合，返回实际收敛条数。
 async fn sweep_stale_squad_sessions_in(
@@ -3642,7 +3669,10 @@ async fn run_squad_pipeline(
                 .await;
                 let _ = sqlx::query(
                     // 复查修复 #2（09-29）：DAG 环失败是 failed 终态（此前误写 'done'，与 pack status='failed' 矛盾）。
-                    "UPDATE agent_squad_session SET status='failed', snapshot=?, updated_at=? WHERE id=?",
+                    // F012：终态否定守卫——cancel 竞态已写终态时不得覆盖。
+                    &format!(
+                        "UPDATE agent_squad_session SET status='failed', snapshot=?, updated_at=? WHERE id=? AND status NOT IN {TERMINAL_STATUSES}"
+                    ),
                 )
                 .bind(&e)
                 .bind(now_ms())
@@ -4013,9 +4043,10 @@ async fn run_squad_pipeline(
     }
     squad_inject_flush_session(app, pool, &squad.squad_id, session_id).await; // S2 插话兜底清账
 
-    let _ = sqlx::query(
-        "UPDATE agent_squad_session SET status='done', snapshot=?, updated_at=? WHERE id=?",
-    )
+    // F012：终态否定守卫——cancel 竞态已写终态时，迟到的 done 不得覆盖。
+    let _ = sqlx::query(&format!(
+        "UPDATE agent_squad_session SET status='done', snapshot=?, updated_at=? WHERE id=? AND status NOT IN {TERMINAL_STATUSES}"
+    ))
     .bind(&summary)
     .bind(now_ms())
     .bind(session_id)
@@ -4440,9 +4471,10 @@ async fn run_squad_chat(
     }
     squad_inject_flush_session(app, pool, &squad.squad_id, session_id).await; // S2 插话兜底清账
 
-    let _ = sqlx::query(
-        "UPDATE agent_squad_session SET status='done', snapshot=?, updated_at=? WHERE id=?",
-    )
+    // F012：终态否定守卫——cancel 竞态已写终态时，迟到的 done 不得覆盖。
+    let _ = sqlx::query(&format!(
+        "UPDATE agent_squad_session SET status='done', snapshot=?, updated_at=? WHERE id=? AND status NOT IN {TERMINAL_STATUSES}"
+    ))
     .bind(&summary)
     .bind(now_ms())
     .bind(session_id)
@@ -5052,5 +5084,104 @@ mod f011_tests {
         .unwrap();
         assert_eq!(res.rows_affected(), 0);
         assert_eq!(status_of(&pool, "race").await, "cancelled");
+    }
+}
+
+#[cfg(test)]
+mod f012_tests {
+    use super::*;
+    use sqlx::Row;
+
+    async fn test_pool() -> sqlx::SqlitePool {
+        let pool = sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap();
+        sqlx::query(
+            "CREATE TABLE agent_squad_session (\
+                id TEXT PRIMARY KEY, status TEXT NOT NULL, \
+                owner_pid INTEGER, updated_at INTEGER NOT NULL)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        pool
+    }
+
+    async fn insert_session(pool: &sqlx::SqlitePool, id: &str, status: &str) {
+        sqlx::query("INSERT INTO agent_squad_session (id, status, updated_at) VALUES (?, ?, 1)")
+            .bind(id)
+            .bind(status)
+            .execute(pool)
+            .await
+            .unwrap();
+    }
+
+    async fn status_of(pool: &sqlx::SqlitePool, id: &str) -> String {
+        sqlx::query("SELECT status FROM agent_squad_session WHERE id = ?")
+            .bind(id)
+            .fetch_one(pool)
+            .await
+            .unwrap()
+            .try_get::<String, _>("status")
+            .unwrap()
+    }
+
+    async fn affected(pool: &sqlx::SqlitePool, sql: &str, id: &str) -> u64 {
+        sqlx::query(sql)
+            .bind(now_ms())
+            .bind(id)
+            .execute(pool)
+            .await
+            .unwrap()
+            .rows_affected()
+    }
+
+    /// F012 报告处方 1：resume 仅 paused → running；cancelled 行 0 行受影响（不复活）。
+    #[tokio::test]
+    async fn resume_only_from_paused() {
+        let pool = test_pool().await;
+        insert_session(&pool, "paused-row", "paused").await;
+        insert_session(&pool, "cancelled-row", "cancelled").await;
+        let sql = "UPDATE agent_squad_session SET status='running', updated_at=? WHERE id=? AND status='paused'";
+        assert_eq!(affected(&pool, sql, "paused-row").await, 1);
+        assert_eq!(affected(&pool, sql, "cancelled-row").await, 0);
+        assert_eq!(status_of(&pool, "paused-row").await, "running");
+        assert_eq!(status_of(&pool, "cancelled-row").await, "cancelled");
+    }
+
+    /// F012 报告处方 2：finish 带终态否定守卫——迟到的 finish 不得改写已落定终态。
+    #[tokio::test]
+    async fn finish_never_overwrites_terminal() {
+        let pool = test_pool().await;
+        insert_session(&pool, "running-row", "running").await;
+        insert_session(&pool, "done-row", "done").await;
+        insert_session(&pool, "cancelled-row", "cancelled").await;
+        let sql = &format!(
+            "UPDATE agent_squad_session SET status='failed', updated_at=? WHERE id=? AND status NOT IN {TERMINAL_STATUSES}"
+        );
+        assert_eq!(affected(&pool, sql, "running-row").await, 1);
+        assert_eq!(affected(&pool, sql, "done-row").await, 0);
+        assert_eq!(affected(&pool, sql, "cancelled-row").await, 0);
+        assert_eq!(status_of(&pool, "running-row").await, "failed");
+        assert_eq!(status_of(&pool, "done-row").await, "done");
+        assert_eq!(status_of(&pool, "cancelled-row").await, "cancelled");
+    }
+
+    /// 门禁挂起写（awaiting_*）与 done 收尾在终态行上一律 0 行受影响。
+    #[tokio::test]
+    async fn terminal_rows_reject_all_resurrection() {
+        let pool = test_pool().await;
+        insert_session(&pool, "t1", "cancelled").await;
+        insert_session(&pool, "t2", "failed").await;
+        for sql in [
+            format!("UPDATE agent_squad_session SET status='awaiting_plan', updated_at=? WHERE id=? AND status IN {SEMI_TERMINAL_STATUSES}"),
+            format!("UPDATE agent_squad_session SET status='awaiting_checkpoint', updated_at=? WHERE id=? AND status IN {SEMI_TERMINAL_STATUSES}"),
+            format!("UPDATE agent_squad_session SET status='awaiting_delivery', updated_at=? WHERE id=? AND status IN {SEMI_TERMINAL_STATUSES}"),
+            format!("UPDATE agent_squad_session SET status='paused', updated_at=? WHERE id=? AND status IN {SEMI_TERMINAL_STATUSES}"),
+            format!("UPDATE agent_squad_session SET status='done', updated_at=? WHERE id=? AND status NOT IN {TERMINAL_STATUSES}"),
+        ] {
+            assert_eq!(affected(&pool, &sql, "t1").await, 0, "cancelled 行被复活：{sql}");
+            assert_eq!(affected(&pool, &sql, "t2").await, 0, "failed 行被改写：{sql}");
+        }
+        assert_eq!(status_of(&pool, "t1").await, "cancelled");
+        assert_eq!(status_of(&pool, "t2").await, "failed");
     }
 }
