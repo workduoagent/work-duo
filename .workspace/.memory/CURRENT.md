@@ -11,10 +11,12 @@
 
 - **F008 已完成 ✅**（2026-10-05）：host 本地路径闸门 `local_guard` 前缀绕过 + `..` 穿越——重构为 `fs_helper::ensure_path_in_roots` 共享边界原语（折叠 + 最深已存在祖先 canonicalize + 组件级比对 + Windows 大小写折叠），sftp 拿规范化路径双保险；无边界场景从放行收紧为拒绝；F002 迁移共用原语；224 Rust 测试通过。远端闸门 `policy::check_path` 复核正确未动。
 
+- **F010 已完成 ✅**（2026-10-05）：Bun/Node 沙箱网络隔离——`SANDBOX_GUARD_JS` 增加 net 段（fetch/WebSocket/http(s)/net/tls/dgram/dns/Bun 原生 connect·listen·udpSocket·serve 全拦），注入条件改 fs/net 两段独立启用；真实 bun CLI E2E 封网 16 通道全拒 + 放行场景无误伤；226 Rust 测试通过。
+
 ## 下一步候选
 
-1. **F010**：Bun/Node 沙箱网络隔离（P1 安全项；F053 已修复 preload 路径基础问题后，适合继续补 fetch/WebSocket/net/tls/dgram 拦截，对齐 Python 侧 socket monkey-patch）。
-2. **F009**：`native__execute_command` 走 `cmd /C` 整串透传（P1；宿主模式一次诱导即可执行任意命令，改受限执行器或前置过滤）。
+1. **F009**：`native__execute_command` 走 `cmd /C` 整串透传（P1；宿主模式一次诱导即可执行任意命令，改受限执行器或前置过滤，参照 `host/exec.rs` 的 `sq()` 转义）。
+2. **F011-F017**：squad 可靠性批次（启动清扫误杀 / pause_checkpoint 状态守卫 / run 级墙钟超时 / expect panic 等）。
 3. **F018 / F038 / F039**：前端测试基建、Squad 巨型组件拆分、运行控制台重复逻辑（结构性工程债）。
 
 ## 环境事实（跨设备必读）

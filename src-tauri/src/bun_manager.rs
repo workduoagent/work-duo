@@ -140,13 +140,15 @@ impl BunManager {
     }
 }
 
-/// Bun 沙箱文件系统守卫（`bun --preload` 注入，`WD_SANDBOX_FS_GUARD=1` 启用）：
-/// patch node:fs 的写/删/移入口（同步 + 回调 + promises 三形态），白名单 =
-/// `WD_SANDBOX_WS`（工作空间）+ 系统临时目录，越界 throw。fd（数字）跳过。
-const SANDBOX_GUARD_JS: &str = r#"// WorkDuo 沙箱文件系统守卫（bun --preload）
-// ⚠️ 覆盖口径（2026-09-25 P0-3 明示）：本守卫仅 patch node:fs 的写/删/移入口；
-// **网络隔离不承诺**——Bun 侧无同款 socket patch，不遵守代理 env 的 fetch/连接可穿透，
-// 由观测层（sandbox_audit observe-only）兜底。完整网络守卫待后续版本提供。
+/// Bun 沙箱守卫（`bun --preload` 注入）：
+/// - 文件系统有界（`WD_SANDBOX_FS_GUARD=1`）：patch node:fs 的写/删/移入口
+///   （同步 + 回调 + promises 三形态），白名单 = `WD_SANDBOX_WS`（工作空间）+ 系统临时目录，
+///   越界 throw。fd（数字）跳过。
+/// - 网络默认关（`WD_SANDBOX_NET_GUARD=1`，F010）：patch 全局 fetch / WebSocket、
+///   node:http(s)/net/tls/dgram/dns 与 Bun 原生 connect/listen/udpSocket/serve——
+///   与 Python 侧 sitecustomize 的 socket 补丁同口径（不遵守代理 env 的通道同样拦截），
+///   逃生阀同为 `WD_SANDBOX_NET=on`（平台侧不注入 NET_GUARD 即放行）。
+const SANDBOX_GUARD_JS: &str = r#"// WorkDuo 沙箱守卫（bun --preload）
 if (process.env.WD_SANDBOX_FS_GUARD === "1") {
   const _path = require("path")
   const _os = require("os")
@@ -205,6 +207,67 @@ if (process.env.WD_SANDBOX_FS_GUARD === "1") {
     }
   }
 }
+
+// ---- 网络默认关（F010，与 Python 侧 sitecustomize socket 补丁同口径）----
+// 拦截面：全局 fetch / WebSocket、node:http(s) request·get（客户端库入口）、
+// node:net/tls/dgram（raw 连接）、node:dns（DNS 外带通道）、Bun 原生
+// connect/listen/udpSocket/serve。preload 先于用户代码执行，改写导出对象
+// 后续 require/import 均命中同一实例。
+if (process.env.WD_SANDBOX_NET_GUARD === "1") {
+  const NET_MSG = "沙箱默认离线：脚本网络访问已被禁用（平台侧 WD_SANDBOX_NET=on 可放行）。需要外部数据请改用 http_request 工具（带 SSRF 防护）。"
+  const netBlocked = function () { throw new Error(NET_MSG) }
+  const block = (obj, name) => {
+    if (obj && typeof obj[name] === "function") { try { obj[name] = netBlocked } catch {} }
+  }
+
+  try { globalThis.fetch = netBlocked } catch {}
+  try { globalThis.WebSocket = netBlocked } catch {}
+  if (typeof Bun !== "undefined") {
+    try { Bun.fetch = netBlocked } catch {}
+    try { Bun.WebSocket = netBlocked } catch {}
+    block(Bun, "connect")
+    block(Bun, "listen")
+    block(Bun, "udpSocket")
+    block(Bun, "serve")
+  }
+
+  for (const spec of ["node:http", "node:https"]) {
+    try {
+      const mod = require(spec)
+      block(mod, "request")
+      block(mod, "get")
+    } catch {}
+  }
+
+  const patchNet = (net) => {
+    if (!net) return
+    block(net, "connect")
+    block(net, "createConnection")
+    if (net.Socket && net.Socket.prototype) {
+      try { net.Socket.prototype.connect = netBlocked } catch {}
+    }
+  }
+  for (const spec of ["net", "node:net"]) {
+    try { patchNet(require(spec)) } catch {}
+  }
+  for (const spec of ["tls", "node:tls"]) {
+    try { block(require(spec), "connect") } catch {}
+  }
+  for (const spec of ["dgram", "node:dgram"]) {
+    try { block(require(spec), "createSocket") } catch {}
+  }
+  for (const spec of ["dns", "node:dns"]) {
+    try {
+      const dns = require(spec)
+      block(dns, "lookup")
+      for (const n of ["resolve", "resolve4", "resolve6", "resolveSrv", "resolveTxt", "resolveMx", "resolveNs", "resolveCname", "reverse"]) block(dns, n)
+      if (dns.promises) {
+        try { dns.promises.lookup = netBlocked } catch {}
+        for (const n of ["resolve", "resolve4", "resolve6", "reverse"]) block(dns.promises, n)
+      }
+    } catch {}
+  }
+}
 "#;
 
 /// 确保 Bun 守卫脚本在位（幂等，内容漂移时重写），返回 guard.js 路径字符串。
@@ -230,7 +293,8 @@ fn ensure_bun_sandbox_guard(bun_root: &Path) -> Result<String, String> {
 /// （npmmirror 镜像），保证绿便携 + 国内可达，不依赖用户本机 ~/.bun / npm 配置。
 ///
 /// 网络策略默认 `Allow`（平台自身操作保持联网）；运行用户脚本请用
-/// `run_bun_sidecar_policy(..., NetPolicy::Blocked)`（Bun fetch/axios 遵守代理 env）。
+/// `run_bun_sidecar_policy(..., NetPolicy::Blocked)`（preload 断网守卫 + 尸端口代理，
+/// F010 起与 Python 侧 sitecustomize 同口径）。
 async fn run_bun_sidecar(
     app: &AppHandle,
     bun_root: &Path,
@@ -247,10 +311,14 @@ async fn run_bun_sidecar_policy(
     cwd: Option<&Path>,
     net: crate::mamba_manager::NetPolicy,
 ) -> Result<(String, String, Option<i32>), String> {
-    // 沙箱守卫（文件系统有界）：运行用户脚本时 --preload guard.js（依赖安装通道不注入）。
+    // 沙箱守卫（文件系统有界 + 网络默认关）：运行用户脚本时 --preload guard.js（依赖安装通道不注入）。
+    // fs / net 两段独立启用（逃生阀 WD_SANDBOX_FS=off / WD_SANDBOX_NET=on 分别放行）；
+    // 仅 net 段生效（WD_SANDBOX_FS=off）时同样需要 preload 注入 NET_GUARD。
     let mut args = args;
     let mut preload_guard: Option<String> = None;
-    if net == crate::mamba_manager::NetPolicy::Blocked && crate::mamba_manager::fs_block_enabled() {
+    if net == crate::mamba_manager::NetPolicy::Blocked
+        && (crate::mamba_manager::fs_block_enabled() || crate::mamba_manager::net_block_enabled())
+    {
         preload_guard = Some(ensure_bun_sandbox_guard(bun_root)?);
         args.insert(0, preload_guard.clone().unwrap());
         args.insert(0, "--preload".to_string());
@@ -275,9 +343,14 @@ async fn run_bun_sidecar_policy(
         }
     }
     if preload_guard.is_some() {
-        cmd = cmd.env("WD_SANDBOX_FS_GUARD", "1");
-        if let Some(ws) = cwd {
-            cmd = cmd.env("WD_SANDBOX_WS", ws.to_string_lossy().to_string());
+        if crate::mamba_manager::fs_block_enabled() {
+            cmd = cmd.env("WD_SANDBOX_FS_GUARD", "1");
+            if let Some(ws) = cwd {
+                cmd = cmd.env("WD_SANDBOX_WS", ws.to_string_lossy().to_string());
+            }
+        }
+        if net == crate::mamba_manager::NetPolicy::Blocked && crate::mamba_manager::net_block_enabled() {
+            cmd = cmd.env("WD_SANDBOX_NET_GUARD", "1");
         }
     }
     let (mut rx, child) = cmd
@@ -639,8 +712,9 @@ async fn run_script_with_selfheal(
     cwd: Option<&Path>,
 ) -> Result<ScriptRunResult, String> {
     let args = vec![tmp_path.to_string_lossy().to_string()];
-    // 网络默认关（2026-09-24）：运行用户 JS 一律注入断网 env（Bun fetch/axios 遵守代理 env；
-    // 依赖安装走 install_packages_silent 的 Allow 通道不受影响）。
+    // 网络默认关（2026-09-24）：运行用户 JS 一律注入断网 env；F010 起 preload 守卫
+    // 同时 patch fetch/WebSocket/node 网络模块/Bun 原生连接（与 Python 侧同口径），
+    // 不遵守代理 env 的通道不再穿透。依赖安装走 install_packages_silent 的 Allow 通道不受影响。
     let net = crate::mamba_manager::NetPolicy::Blocked;
     let (stdout, stderr, code) =
         run_bun_sidecar_policy(app, bun_root, args, cwd, net).await?;
@@ -789,6 +863,48 @@ mod f053_tests {
     fn preserves_plain_path() {
         let plain = PathBuf::from(r"D:\WorkDuo\bun_root");
         assert_eq!(strip_verbatim(plain.clone()), plain);
+    }
+}
+
+#[cfg(test)]
+mod f010_tests {
+    use super::SANDBOX_GUARD_JS;
+
+    /// 防回归锚：守卫 JS 必须包含网络默认关段（F010）——
+    /// 覆盖全局 fetch/WebSocket、node 客户端库入口、raw 连接、DNS 通道与 Bun 原生面。
+    #[test]
+    fn guard_contains_net_section() {
+        for marker in [
+            "WD_SANDBOX_NET_GUARD",
+            "globalThis.fetch",
+            "globalThis.WebSocket",
+            "\"node:http\"",
+            "\"node:https\"",
+            "\"node:net\"",
+            "Socket.prototype.connect",
+            "\"node:tls\"",
+            "\"node:dgram\"",
+            "\"node:dns\"",
+            "Bun.fetch",
+            "\"connect\"",
+            "\"listen\"",
+            "\"udpSocket\"",
+            "\"serve\"",
+            "WD_SANDBOX_NET=on",
+        ] {
+            assert!(SANDBOX_GUARD_JS.contains(marker), "守卫缺少标记：{marker}");
+        }
+    }
+
+    /// fs 段与 net 段各自独立启用（互不绑定），逃生阀文案与 Python 侧一致。
+    #[test]
+    fn guard_sections_are_independent() {
+        assert!(SANDBOX_GUARD_JS.contains("WD_SANDBOX_FS_GUARD === \"1\""));
+        assert!(SANDBOX_GUARD_JS.contains("WD_SANDBOX_NET_GUARD === \"1\""));
+        // fs 段先闭合，net 段独立 if，不嵌套
+        let fs_pos = SANDBOX_GUARD_JS.find("WD_SANDBOX_FS_GUARD === \"1\"").unwrap();
+        let net_pos = SANDBOX_GUARD_JS.find("WD_SANDBOX_NET_GUARD === \"1\"").unwrap();
+        assert!(fs_pos < net_pos);
     }
 }
 
