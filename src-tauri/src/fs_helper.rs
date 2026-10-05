@@ -1,5 +1,5 @@
 // 文件系统辅助命令：路径规范化（智能工作空间绑定用）+ 存储目录迁移。
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::fs;
 use serde::Serialize;
 use sqlx::Row;
@@ -164,16 +164,118 @@ pub async fn allowed_script_roots(app: &AppHandle) -> Vec<PathBuf> {
 /// 字符串前缀比对会被 `base` vs `base_secret` 这类兄弟目录绕过，必须走组件级）。
 pub fn ensure_script_path_in_roots(script: &Path, roots: &[PathBuf]) -> Result<(), String> {
     let canon = fs::canonicalize(script).map_err(|e| format!("解析脚本真实路径失败：{e}"))?;
-    for root in roots {
-        let root_canon = fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
-        if canon.starts_with(&root_canon) {
-            return Ok(());
+    ensure_path_in_roots(&canon, roots)
+        .map(|_| ())
+        .map_err(|_| {
+            format!(
+                "脚本路径越界（安全边界）：仅允许运行「工作空间 / 应用数据目录 / 资源目录」内的脚本，当前：{}",
+                script.display()
+            )
+        })
+}
+
+/* ============================ F008：本地路径边界原语（host__* 与 F002 共用） ============================ */
+//
+// 背景：host__upload/download/sync 的 local_guard 用「斜杠替换后的字符串 starts_with」
+// 做白名单比对且从不 canonicalize——(a) 白名单 D:/proj 会放行兄弟目录 D:/proj_secret/x；
+// (b) `..` 不折叠，sftp 按原始路径读/写真实文件，穿越成立。本节提供组件级边界原语：
+// 折叠 + 规范化 + 组件级比对，F002 的脚本边界同样迁移到该原语上。
+
+/// 剥离 Windows verbatim 前缀（`\\?\` 与 `\\?\UNC\`），便于跨形态组件比对
+/// （canonicalize 产出 verbatim 形态，而用户输入/配置多为普通形态）。
+fn simplify_verbatim_string(s: &str) -> String {
+    if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
+        return format!(r"\\{rest}");
+    }
+    if let Some(rest) = s.strip_prefix(r"\\?\") {
+        return rest.to_string();
+    }
+    s.to_string()
+}
+
+/// 逻辑折叠 `..` / `.` 为真实路径形态，再对**最深已存在祖先** canonicalize
+/// （解析符号链接 / 大小写 / verbatim）并接回不存在的尾部。
+///
+/// 折叠语义：根处（Prefix/RootDir 之上）的 `..` 按 OS 语义 clamp（盘符根的父目录是它自己）；
+/// 逃逸与否交给后续的边界比对裁决——调用方必须传入**绝对路径**（local_guard 已先 join 工作区），
+/// 裸相对路径折叠结果无法命中任何绝对根，天然被拒。
+pub fn canonicalize_boundary(p: &Path) -> Result<PathBuf, String> {
+    let mut stack: Vec<std::path::Component> = Vec::new();
+    for comp in p.components() {
+        match comp {
+            Component::ParentDir => match stack.last() {
+                // 仅弹出普通组件；根/前缀之上 clamp（等同 OS 对盘符根 `..` 的处理），
+                // 逃逸与否交给后续的组件级边界比对裁决。
+                Some(std::path::Component::Normal(_)) => {
+                    stack.pop();
+                }
+                _ => {}
+            },
+            Component::CurDir => {}
+            other => stack.push(other),
         }
     }
-    Err(format!(
-        "脚本路径越界（安全边界）：仅允许运行「工作空间 / 应用数据目录 / 资源目录」内的脚本，当前：{}",
-        script.display()
-    ))
+    let folded: PathBuf = stack.iter().collect();
+
+    // 最深已存在祖先 canonicalize + 接回尾部（下载落盘新文件等目标尚不存在场景）。
+    let mut tail: Vec<std::ffi::OsString> = Vec::new();
+    let mut cur = folded.clone();
+    let canon = loop {
+        match fs::canonicalize(&cur) {
+            Ok(c) => break c,
+            Err(_) => match (cur.parent(), cur.file_name()) {
+                (Some(parent), Some(name)) => {
+                    tail.push(name.to_os_string());
+                    cur = parent.to_path_buf();
+                }
+                // 整条链都无法 canonicalize（如盘符不存在）：退回折叠结果。
+                _ => return Ok(folded),
+            },
+        }
+    };
+    let mut out = canon;
+    for seg in tail.into_iter().rev() {
+        out.push(seg);
+    }
+    Ok(out)
+}
+
+/// 组件序列（比对用）：剥 verbatim 前缀后按组件拆分；Windows 侧大小写折叠
+/// （NTFS 不区分大小写；POSIX 保持大小写敏感，避免 `D:/Proj` 误放行）。
+fn boundary_components(p: &Path) -> Vec<String> {
+    let s = simplify_verbatim_string(&p.to_string_lossy());
+    Path::new(&s)
+        .components()
+        .map(|c| {
+            let part = c.as_os_str().to_string_lossy().to_string();
+            #[cfg(windows)]
+            {
+                part.to_lowercase()
+            }
+            #[cfg(not(windows))]
+            {
+                part
+            }
+        })
+        .collect()
+}
+
+/// 组件级边界比对：`path` 折叠规范化后必须命中 `roots` 中任一根（含其子树）。
+/// 命中返回规范化路径（供调用方以真实路径执行 IO，即使比对层有漏也不再把
+/// 带 `..` 的原始串交给下游）；未命中报错。
+///
+/// 要求 `path` 为绝对路径（local_guard / F002 两侧调用前均已保证）。
+pub fn ensure_path_in_roots(path: &Path, roots: &[PathBuf]) -> Result<PathBuf, String> {
+    let canon = canonicalize_boundary(path)?;
+    let path_comps = boundary_components(&canon);
+    for root in roots {
+        let root_canon = canonicalize_boundary(root).unwrap_or_else(|_| root.to_path_buf());
+        let root_comps = boundary_components(&root_canon);
+        if !root_comps.is_empty() && path_comps.starts_with(&root_comps) {
+            return Ok(canon);
+        }
+    }
+    Err(format!("本地路径越出允许根：{}", canon.display()))
 }
 
 #[cfg(test)]
@@ -216,5 +318,97 @@ mod f002_tests {
         fs::write(&f, "x").unwrap();
         assert!(ensure_script_path_in_roots(&f, &[base]).is_err());
         fs::remove_dir_all(&sib).ok();
+    }
+}
+
+#[cfg(test)]
+mod f008_tests {
+    use super::*;
+
+    fn tmp_base(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("f008_{tag}_{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn sibling_prefix_rejected() {
+        // 白名单 D:/proj 不应放行兄弟目录 D:/proj_secret/x（字符串前缀绕过）
+        let base = tmp_base("sib");
+        let sib = base.with_file_name(format!(
+            "{}_secret",
+            base.file_name().unwrap().to_string_lossy()
+        ));
+        fs::create_dir_all(&sib).unwrap();
+        let f = sib.join("x.txt");
+        fs::write(&f, "x").unwrap();
+        assert!(ensure_path_in_roots(&f, &[base.clone()]).is_err());
+        fs::remove_dir_all(&sib).ok();
+        fs::remove_dir_all(&base).ok();
+    }
+
+    #[test]
+    fn dotdot_relative_escape_rejected() {
+        // 相对路径 .. join 到工作区后折叠 = 逃出工作区
+        let ws = tmp_base("ws");
+        let p = ws.join("..").join("..").join("elsewhere.txt");
+        assert!(ensure_path_in_roots(&p, &[ws.clone()]).is_err());
+        fs::remove_dir_all(&ws).ok();
+    }
+
+    #[test]
+    fn dotdot_absolute_traversal_rejected() {
+        // 绝对路径夹带 .. 折叠后落到边界外（报告场景：D:/proj/../../Windows/...）
+        let base = tmp_base("trav");
+        let p = base.join("sub").join("..").join("..").join("escape.txt");
+        assert!(ensure_path_in_roots(&p, &[base.clone()]).is_err());
+        fs::remove_dir_all(&base).ok();
+    }
+
+    #[test]
+    fn legit_subpath_and_exact_root_allowed() {
+        let base = tmp_base("legit");
+        let sub = base.join("sub");
+        fs::create_dir_all(&sub).unwrap();
+        let f = sub.join("a.txt");
+        fs::write(&f, "x").unwrap();
+        assert!(ensure_path_in_roots(&f, &[base.clone()]).is_ok());
+        // 根本身精确命中（sync 整目录场景）
+        assert!(ensure_path_in_roots(&base, &[base.clone()]).is_ok());
+        fs::remove_dir_all(&base).ok();
+    }
+
+    #[test]
+    fn nonexistent_download_target_allowed() {
+        let base = tmp_base("dl");
+        // 下载落盘目标尚不存在：最深已存在祖先 canonicalize + 接回尾部 → 根内放行
+        let target = base.join("newdir").join("file.txt");
+        assert!(ensure_path_in_roots(&target, &[base.clone()]).is_ok());
+        // 逃逸到边界外的不存在路径同样拒绝
+        let evil = base.join("..").join("outside").join("file.txt");
+        assert!(ensure_path_in_roots(&evil, &[base.clone()]).is_err());
+        fs::remove_dir_all(&base).ok();
+    }
+
+    #[test]
+    fn boundary_folds_dotdot_to_real_path() {
+        let base = tmp_base("fold");
+        let sub = base.join("sub");
+        fs::create_dir_all(&sub).unwrap();
+        let p = sub.join("..").join("real.txt");
+        let out = canonicalize_boundary(&p).unwrap();
+        let base_canon = fs::canonicalize(&base).unwrap();
+        assert!(out.starts_with(&base_canon) && out.ends_with("real.txt"));
+        fs::remove_dir_all(&base).ok();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn case_insensitive_on_windows() {
+        // NTFS 不区分大小写：根用大写书写也应命中（canonicalize 折回磁盘真实大小写）
+        let base = tmp_base("case");
+        let upper = PathBuf::from(base.to_string_lossy().to_uppercase());
+        assert!(ensure_path_in_roots(&base, &[upper]).is_ok());
+        fs::remove_dir_all(&base).ok();
     }
 }

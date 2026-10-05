@@ -48,6 +48,11 @@ fn path_guard(binding: &ServerBinding, path: &str) -> Result<(), ToolError> {
 }
 
 /// 本地路径守卫：优先 binding.local_path_allow，否则约束在工作空间内。
+///
+/// F008：先折叠 `..`/`.` 并对最深已存在祖先 canonicalize（解析符号链接/大小写/verbatim），
+/// 再做组件级比对——原「斜杠替换后字符串 starts_with」会被兄弟目录（D:/proj vs D:/proj_secret）
+/// 与未折叠 `..` 穿越（D:/proj/../..，sftp 按原始路径读真实文件）绕过。
+/// 无工作空间且无 allowlist 时按工具契约拒绝（原实现此处放行任意绝对路径，与文档相悖）。
 fn local_guard(ctx: &ToolContext, binding: &ServerBinding, path: &str) -> Result<PathBuf, ToolError> {
     let p = Path::new(path);
     let normalized = if p.is_absolute() {
@@ -58,27 +63,19 @@ fn local_guard(ctx: &ToolContext, binding: &ServerBinding, path: &str) -> Result
             None => return Err(ToolError::InvalidArgs("本地路径必须为绝对路径".into())),
         }
     };
-    if !binding.local_path_allow.is_empty() {
-        let norm = normalized.to_string_lossy().replace('\\', "/");
-        let hit = binding.local_path_allow.iter().any(|a| {
-            let a = a.trim_end_matches('/');
-            norm.starts_with(a)
-        });
-        if !hit {
-            return Err(ToolError::PermissionDenied(format!(
-                "本地路径不在 local_path_allow 内：{norm}"
-            )));
-        }
+    let guarded = if !binding.local_path_allow.is_empty() {
+        let roots: Vec<PathBuf> = binding
+            .local_path_allow
+            .iter()
+            .map(PathBuf::from)
+            .collect();
+        crate::fs_helper::ensure_path_in_roots(&normalized, &roots)
     } else if let Some(ws) = &ctx.workspace {
-        let ws = ws.to_string_lossy().replace('\\', "/");
-        let norm = normalized.to_string_lossy().replace('\\', "/");
-        if !norm.starts_with(ws.trim_end_matches('/')) {
-            return Err(ToolError::PermissionDenied(format!(
-                "本地路径越出工作空间：{norm}"
-            )));
-        }
-    }
-    Ok(normalized)
+        crate::fs_helper::ensure_path_in_roots(&normalized, std::slice::from_ref(ws))
+    } else {
+        Err("本地路径无可用边界：未绑定工作空间且未配置 local_path_allow".into())
+    };
+    guarded.map_err(ToolError::PermissionDenied)
 }
 
 async fn binding_and_session(
