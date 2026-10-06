@@ -176,7 +176,7 @@
   transition: border-color 0.15s ease, background-color 0.15s ease;
 
   .dark & {
-    background: #262626;
+    background: var(--color-background-muted);
   }
 
   &:hover:not(:disabled) {

@@ -6,8 +6,8 @@
   overflow: hidden;
 
   .dark & {
-    border-color: #2f2f2f;
-    background: #1a1a1a;
+    border-color: var(--color-border);
+    background: var(--color-background-subtle);
   }
 
   &--failed {
@@ -31,7 +31,7 @@
       background: var(--color-background-subtle, #f7f7f8);
     }
     .dark & {
-      color: #e6e6e6;
+      color: var(--color-foreground);
       &:hover {
         background: #242424;
       }
@@ -150,7 +150,7 @@
 
   .dark & {
     background: #161616;
-    border-color: #2f2f2f;
-    color: #aaa;
+    border-color: var(--color-border);
+    color: var(--color-foreground-muted);
   }
 }

@@ -8,7 +8,7 @@
   font-size: 0.82rem;
 
   .dark & {
-    border-color: #2a2a2a;
+    border-color: var(--color-border);
     background: #161616;
   }
 
@@ -21,7 +21,7 @@
     font-weight: 600;
 
     .dark & {
-      color: #e5e5e5;
+      color: var(--color-foreground);
     }
   }
 
@@ -32,7 +32,7 @@
     margin-left: 4px;
 
     .dark & {
-      color: #888;
+      color: var(--color-foreground-muted);
     }
   }
 
@@ -59,8 +59,8 @@
     }
 
     .dark & {
-      border-color: #2a2a2a;
-      color: #888;
+      border-color: var(--color-border);
+      color: var(--color-foreground-muted);
 
       &:hover {
         color: #4ea1ff;
@@ -93,7 +93,7 @@
     }
 
     .dark & {
-      border-left-color: #2a2a2a;
+      border-left-color: var(--color-border);
     }
   }
 
@@ -140,7 +140,7 @@
     white-space: nowrap;
 
     .dark & {
-      color: #e5e5e5;
+      color: var(--color-foreground);
     }
   }
 
@@ -150,7 +150,7 @@
     color: var(--color-muted, #888);
 
     .dark & {
-      color: #888;
+      color: var(--color-foreground-muted);
     }
   }
 
@@ -185,7 +185,7 @@
     padding: 2px 4px;
 
     .dark & {
-      color: #888;
+      color: var(--color-foreground-muted);
     }
   }
 
@@ -200,7 +200,7 @@
     padding: 6px 8px;
 
     .dark & {
-      background: #1f1f1f;
+      background: var(--color-background-subtle);
     }
   }
 }
@@ -223,8 +223,8 @@
   font-size: 12px;
 
   .dark & {
-    background: #1a1a1a;
-    border-color: #2f2f2f;
+    background: var(--color-background-subtle);
+    border-color: var(--color-border);
     color: #ddd;
   }
 }
