@@ -9,23 +9,22 @@
 import { invoke } from '@tauri-apps/api/core'
 import { isTauri } from '@/core/config'
 import type { ServerHost, ServerHostInput, ServerTestReport } from '@/types/core'
+// F024：localStorage 降级读写收敛到共享实现
+import { lsList, lsSave } from './localFallback'
 
 /* ------------------------------------------------------------------ *
  * 非 Tauri（浏览器 dev）回退：localStorage（无凭证加密与 SSH 能力）
  * ---------------------------------------------------------------- */
 const LS_SERVERS = 'work-duo:server-hosts'
 
+// F024：委托共享实现（保留同名薄封装，5 处调用点零改动）。行为与原实现一致：
+// 读取失败/无数据返回空数组，写入失败向上抛（不静默吞）。
 function lsRead(): ServerHost[] {
-  try {
-    const raw = localStorage.getItem(LS_SERVERS)
-    return raw ? (JSON.parse(raw) as ServerHost[]) : []
-  } catch {
-    return []
-  }
+  return lsList<ServerHost>(LS_SERVERS)
 }
 
 function lsWrite(list: ServerHost[]): void {
-  localStorage.setItem(LS_SERVERS, JSON.stringify(list))
+  lsSave(LS_SERVERS, list)
 }
 
 /* ------------------------------------------------------------------ *

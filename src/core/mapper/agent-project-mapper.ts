@@ -14,6 +14,8 @@ import { getDb } from '@/core/db/SqlService'
 import { invoke } from '@tauri-apps/api/core'
 import type { AgentProject } from '@/types/core'
 import type { AgentProjectRow } from '@/types/database'
+// F024：localStorage 降级读写收敛到共享实现
+import { lsList, lsSave } from './localFallback'
 
 /* ------------------------------------------------------------------ *
  * 行 <-> 领域模型 转换
@@ -39,16 +41,13 @@ function rowToProject(r: AgentProjectRow): AgentProject {
  * ---------------------------------------------------------------- */
 const LS_PROJECT = 'work-duo:agent-projects'
 
+// F024：本文件 6 个 localStorage 读写函数全部委托共享实现，
+// 保留同名薄封装使 9 处调用点零改动。
 function lsRead(): AgentProject[] {
-  try {
-    const raw = localStorage.getItem(LS_PROJECT)
-    return raw ? (JSON.parse(raw) as AgentProject[]) : []
-  } catch {
-    return []
-  }
+  return lsList<AgentProject>(LS_PROJECT)
 }
 function lsWrite(list: AgentProject[]): void {
-  localStorage.setItem(LS_PROJECT, JSON.stringify(list))
+  lsSave(LS_PROJECT, list)
 }
 
 /* ------------------------------------------------------------------ *
@@ -284,24 +283,14 @@ const LS_SESSION = 'work-duo:agent-sessions'
 const LS_ROUND = 'work-duo:agent-rounds'
 
 function lsReadSessions(): Array<{ id: string; projectId?: string }> {
-  try {
-    const raw = localStorage.getItem(LS_SESSION)
-    return raw ? (JSON.parse(raw) as Array<{ id: string; projectId?: string }>) : []
-  } catch {
-    return []
-  }
+  return lsList<{ id: string; projectId?: string }>(LS_SESSION)
 }
 function lsWriteSessions(list: Array<{ id: string; projectId?: string }>): void {
-  localStorage.setItem(LS_SESSION, JSON.stringify(list))
+  lsSave(LS_SESSION, list)
 }
 function lsReadRounds(): Array<{ sessionId: string }> {
-  try {
-    const raw = localStorage.getItem(LS_ROUND)
-    return raw ? (JSON.parse(raw) as Array<{ sessionId: string }>) : []
-  } catch {
-    return []
-  }
+  return lsList<{ sessionId: string }>(LS_ROUND)
 }
 function lsWriteRounds(list: Array<{ sessionId: string }>): void {
-  localStorage.setItem(LS_ROUND, JSON.stringify(list))
+  lsSave(LS_ROUND, list)
 }

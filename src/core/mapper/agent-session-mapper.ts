@@ -13,7 +13,8 @@
 import { isTauri } from '@/core/config'
 import { safeIso } from './safeTime'
 import { getDb } from '@/core/db/SqlService'
-import { safeParse } from './localFallback'
+// F024：localStorage 降级读写收敛到共享实现
+import { safeParse, lsList as lsRead, lsSave as lsWrite } from './localFallback'
 import type {
   AgentConversationRound,
   AgentConversationSession,
@@ -86,18 +87,9 @@ function rowToRound(r: AgentConversationRoundRow): AgentConversationRound {
 const LS_SESSION = 'work-duo:agent-sessions'
 const LS_ROUND = 'work-duo:agent-rounds'
 
-function lsRead<T>(key: string): T[] {
-  try {
-    const raw = localStorage.getItem(key)
-    return raw ? (JSON.parse(raw) as T[]) : []
-  } catch {
-    return []
-  }
-}
-
-function lsWrite<T>(key: string, list: T[]): void {
-  localStorage.setItem(key, JSON.stringify(list))
-}
+// F024：localStorage 降级分支的读写收敛到共享实现（此前本文件与 agent-mapper
+// 各写一份逐字相同的实现）。行为完全一致，仅消除重复。
+// 命名保持 lsRead/lsWrite 以免改动 24 处调用点。
 
 /* ------------------------------------------------------------------ *
  * 会话 CRUD

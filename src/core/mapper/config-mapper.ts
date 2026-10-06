@@ -14,6 +14,9 @@
  */
 import { isTauri } from '@/core/config'
 import { getDb } from '@/core/db/SqlService'
+// F024：localStorage 降级读写收敛到共享实现
+import { safeParse } from './localFallback'
+
 
 /* ------------------------------------------------------------------ *
  * SQLite 路径：app_config（key-value）
@@ -66,12 +69,8 @@ export async function setRawConfig(key: string, value: string): Promise<void> {
 const LS_KEY = 'work-duo:app-config'
 
 function lsAll(): Record<string, string> {
-  try {
-    const raw = localStorage.getItem(LS_KEY)
-    return raw ? (JSON.parse(raw) as Record<string, string>) : {}
-  } catch {
-    return {}
-  }
+  // F024：委托共享实现（配置是 Record 非数组，用 safeParse + 空对象回落）
+  return safeParse<Record<string, string>>(localStorage.getItem(LS_KEY), {})
 }
 
 function lsSave(all: Record<string, string>): void {

@@ -25,7 +25,11 @@ import type {
 import type { McpInfo, McpToolDefinition } from '@/core/file/mcp-file'
 import type { McpInfoRow, McpToolDefinitionRow } from '@/types/database'
 import { getDb } from '@/core/db/SqlService'
-import { safeParse } from './localFallback'
+import {
+  safeParse,
+  lsList as lsListShared,
+  lsSave as lsSaveShared,
+} from './localFallback'
 
 /* ------------------------------------------------------------------ *
  * 行 <-> 领域模型 转换
@@ -129,26 +133,17 @@ const LS_MCP_KEY = 'work-duo:mcps'
 const LS_TOOL_KEY = 'work-duo:mcp-tools'
 
 function lsListMcp(): McpInfo[] {
-  try {
-    const raw = localStorage.getItem(LS_MCP_KEY)
-    return raw ? (JSON.parse(raw) as McpInfo[]) : []
-  } catch {
-    return []
-  }
+  // F024：委托共享实现（MCP 与工具目录两组，保留同名薄封装）
+  return lsListShared<McpInfo>(LS_MCP_KEY)
 }
 function lsSaveMcp(list: McpInfo[]): void {
-  localStorage.setItem(LS_MCP_KEY, JSON.stringify(list))
+  lsSaveShared(LS_MCP_KEY, list)
 }
 function lsListTools(): McpToolDefinition[] {
-  try {
-    const raw = localStorage.getItem(LS_TOOL_KEY)
-    return raw ? (JSON.parse(raw) as McpToolDefinition[]) : []
-  } catch {
-    return []
-  }
+  return lsListShared<McpToolDefinition>(LS_TOOL_KEY)
 }
 function lsSaveTools(list: McpToolDefinition[]): void {
-  localStorage.setItem(LS_TOOL_KEY, JSON.stringify(list))
+  lsSaveShared(LS_TOOL_KEY, list)
 }
 
 /* ------------------------------------------------------------------ *

@@ -18,7 +18,11 @@ import type { ModelProvider } from '@/types/core'
 import type { ModelConfig } from '@/core/file/model-file'
 import type { ModelConfigRow } from '@/types/database'
 import { getDb } from '@/core/db/SqlService'
-import { safeParse } from './localFallback'
+import {
+  safeParse,
+  lsList as lsListShared,
+  lsSave as lsSaveShared,
+} from './localFallback'
 import { safeIso } from './safeTime'
 
 /* ------------------------------------------------------------------ *
@@ -81,16 +85,12 @@ function rowToModel(r: ModelConfigRow): ModelConfig {
 const LS_KEY = 'work-duo:models'
 
 function lsList(): ModelConfig[] {
-  try {
-    const raw = localStorage.getItem(LS_KEY)
-    return raw ? (JSON.parse(raw) as ModelConfig[]) : []
-  } catch {
-    return []
-  }
+  // F024：委托共享实现，保留同名以免改动调用点
+  return lsListShared<ModelConfig>(LS_KEY)
 }
 
 function lsSave(list: ModelConfig[]): void {
-  localStorage.setItem(LS_KEY, JSON.stringify(list))
+  lsSaveShared(LS_KEY, list)
 }
 
 /* ------------------------------------------------------------------ *

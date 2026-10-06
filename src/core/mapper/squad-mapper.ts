@@ -31,7 +31,8 @@ import type {
   AgentSquadSessionRow,
 } from '@/types/database'
 import { getDb } from '@/core/db/SqlService'
-import { safeParse } from './localFallback'
+// F024：localStorage 降级读写收敛到共享实现
+import { safeParse, lsList, lsSave } from './localFallback'
 
 /* ------------------------------------------------------------------ *
  * 行 <-> 领域模型 转换
@@ -136,17 +137,13 @@ function rowToSquad(
 
 const LS_SQUAD = 'work-duo:squads'
 
+// F024：委托共享实现（保留同名薄封装，6 处调用点零改动）。行为与原实现一致。
 function lsRead(): SquadInfo[] {
-  try {
-    const raw = localStorage.getItem(LS_SQUAD)
-    return raw ? (JSON.parse(raw) as SquadInfo[]) : []
-  } catch {
-    return []
-  }
+  return lsList<SquadInfo>(LS_SQUAD)
 }
 
 function lsWrite(list: SquadInfo[]): void {
-  localStorage.setItem(LS_SQUAD, JSON.stringify(list))
+  lsSave(LS_SQUAD, list)
 }
 
 /* ------------------------------------------------------------------ *
@@ -448,17 +445,13 @@ export type { SquadMemberInput }
 
 const LS_SQUAD_MEM = 'work-duo:squad-memories'
 
+/** F024：委托共享实现（团队记忆的 localStorage 降级读写，保留同名薄封装）。 */
 function lsMemRead(): SquadMemory[] {
-  try {
-    const raw = localStorage.getItem(LS_SQUAD_MEM)
-    return raw ? (JSON.parse(raw) as SquadMemory[]) : []
-  } catch {
-    return []
-  }
+  return lsList<SquadMemory>(LS_SQUAD_MEM)
 }
 
 function lsMemWrite(list: SquadMemory[]): void {
-  localStorage.setItem(LS_SQUAD_MEM, JSON.stringify(list))
+  lsSave(LS_SQUAD_MEM, list)
 }
 
 export interface AnchorSquadMemoryInput {

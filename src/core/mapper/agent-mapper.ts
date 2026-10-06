@@ -36,6 +36,8 @@ import type {
 import { getDb } from '@/core/db/SqlService'
 import { safeParse } from './localFallback'
 import { safeIso } from './safeTime'
+// F024：localStorage 降级读写收敛到共享实现
+import { lsList as lsRead, lsSave as lsWrite } from './localFallback'
 
 /* ------------------------------------------------------------------ *
  * 行 <-> 领域模型 转换
@@ -123,18 +125,10 @@ const LS_AGENT = 'work-duo:agents'
 const LS_MCP = 'work-duo:agent-mcp-refs'
 const LS_SKILL = 'work-duo:agent-skill-refs'
 
-function lsRead<T>(key: string): T[] {
-  try {
-    const raw = localStorage.getItem(key)
-    return raw ? (JSON.parse(raw) as T[]) : []
-  } catch {
-    return []
-  }
-}
-
-function lsWrite<T>(key: string, list: T[]): void {
-  localStorage.setItem(key, JSON.stringify(list))
-}
+// F024：localStorage 降级分支的读写收敛到共享实现（此前本文件与
+// agent-session-mapper 各写一份逐字相同���实现）。行为完全一致，
+// 仅消除重复——改一处漏一处的风险。
+// 命名保持 lsRead/lsWrite 以免改动 25 处调用点。
 
 /* ------------------------------------------------------------------ *
  * 对外 CRUD（页面/组件只调这些）

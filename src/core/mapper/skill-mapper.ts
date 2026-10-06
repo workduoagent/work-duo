@@ -16,7 +16,11 @@ import { safeIso } from './safeTime'
 import type { SkillInfo } from '@/core/file/skill-file'
 import type { SkillInfoRow } from '@/types/database'
 import { getDb } from '@/core/db/SqlService'
-import { safeParse } from './localFallback'
+import {
+  safeParse,
+  lsList as lsListShared,
+  lsSave as lsSaveShared,
+} from './localFallback'
 
 /* ------------------------------------------------------------------ *
  * 行 <-> 领域模型 转换
@@ -90,16 +94,12 @@ export async function resolveSkillBasePath(): Promise<string> {
 const LS_KEY = 'work-duo:skills'
 
 function lsList(): SkillInfo[] {
-  try {
-    const raw = localStorage.getItem(LS_KEY)
-    return raw ? (JSON.parse(raw) as SkillInfo[]) : []
-  } catch {
-    return []
-  }
+  // F024：委托共享实现，保留同名以免改动调用点
+  return lsListShared<SkillInfo>(LS_KEY)
 }
 
 function lsSave(list: SkillInfo[]): void {
-  localStorage.setItem(LS_KEY, JSON.stringify(list))
+  lsSaveShared(LS_KEY, list)
 }
 
 /* ------------------------------------------------------------------ *

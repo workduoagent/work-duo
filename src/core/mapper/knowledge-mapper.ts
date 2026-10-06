@@ -26,6 +26,12 @@ import {
   walkKbAssets,
 } from '@/core/file/kbFs'
 import { fireKbRemoveAsset, fireKbSyncAsset } from './kb-index-hooks'
+// F024：localStorage 降级读写收敛到共享实现
+import {
+  lsList as lsListShared,
+  lsSave as lsSaveShared,
+} from './localFallback'
+
 
 const DEFAULT_KB_PATH = '$APPDATA/.knowledge_base'
 
@@ -87,16 +93,13 @@ function rowToAsset(r: KnowledgeAssetRow): KnowledgeAsset {
 const LS_KEY = 'work-duo:knowledge-bases'
 
 function lsList(): KnowledgeBase[] {
-  try {
-    const raw = localStorage.getItem(LS_KEY)
-    return raw ? (JSON.parse(raw) as KnowledgeBase[]) : []
-  } catch {
-    return []
-  }
+  // F024：委托共享实现，保留同名以免改动调用点
+  return lsListShared<KnowledgeBase>(LS_KEY)
 }
 
 function lsSave(list: KnowledgeBase[]): void {
-  localStorage.setItem(LS_KEY, JSON.stringify(list))
+  // F024：委托共享实现
+  lsSaveShared(LS_KEY, list)
 }
 
 /* ------------------------------------------------------------------ *

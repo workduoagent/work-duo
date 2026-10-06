@@ -13,6 +13,12 @@
 import { isTauri } from '@/core/config'
 import { getDb } from '@/core/db/SqlService'
 import type { ScenarioCategory, ScenarioScope } from '@/types/core'
+// F024：localStorage 降级读写收敛到共享实现
+import {
+  lsList as lsListShared,
+  lsSave as lsSaveShared,
+} from './localFallback'
+
 
 /** 每个 scope 对应的「业务引用表 + 列」。 */
 const SCOPE_REF: Partial<
@@ -63,16 +69,12 @@ function slugify(s: string): string {
 const LS_KEY = 'work-duo:scenario-categories'
 
 function lsAll(): ScenarioCategory[] {
-  try {
-    const raw = localStorage.getItem(LS_KEY)
-    return raw ? (JSON.parse(raw) as ScenarioCategory[]) : []
-  } catch {
-    return []
-  }
+  // F024：委托共享实现（场景分类为数组，保留同名 lsAll）
+  return lsListShared<ScenarioCategory>(LS_KEY)
 }
 
 function lsSave(list: ScenarioCategory[]): void {
-  localStorage.setItem(LS_KEY, JSON.stringify(list))
+  lsSaveShared(LS_KEY, list)
 }
 
 /* ------------------------------------------------------------------ *

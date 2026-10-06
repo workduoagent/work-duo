@@ -20,7 +20,8 @@ import { safeIso } from './safeTime'
 import type { UserPluginTool, PluginRunLog, UpsertUserPluginInput } from '@/core/file/plugin-file'
 import type { UserPluginToolRow, PluginRunLogRow } from '@/types/database'
 import { getDb } from '@/core/db/SqlService'
-import { safeParse } from './localFallback'
+// F024：localStorage 降级读写收敛到共享实现
+import { safeParse, lsList, lsSave } from './localFallback'
 
 /* ------------------------------------------------------------------ *
  * 行 <-> 领域模型 转换
@@ -112,31 +113,22 @@ function rowToRunLog(r: PluginRunLogRow): PluginRunLog {
 const LS_PLUGIN_KEY = 'work-duo:plugins'
 const LS_REF_KEY = 'work-duo:agent-plugins'
 
+/** F024：委托共享实现（插件工具与智能体引用两组，保留同名薄封装）。 */
 function lsListPlugins(): UserPluginTool[] {
-  try {
-    const raw = localStorage.getItem(LS_PLUGIN_KEY)
-    return raw ? (JSON.parse(raw) as UserPluginTool[]) : []
-  } catch {
-    return []
-  }
+  return lsList<UserPluginTool>(LS_PLUGIN_KEY)
 }
 function lsSavePlugins(list: UserPluginTool[]): void {
-  localStorage.setItem(LS_PLUGIN_KEY, JSON.stringify(list))
+  lsSave(LS_PLUGIN_KEY, list)
 }
 function lsListRefs(): { id: string; agentId: string; pluginId: string; isActive: boolean; createdAt: string; updatedAt: string }[] {
-  try {
-    const raw = localStorage.getItem(LS_REF_KEY)
-    return raw
-      ? (JSON.parse(raw) as { id: string; agentId: string; pluginId: string; isActive: boolean; createdAt: string; updatedAt: string }[])
-      : []
-  } catch {
-    return []
-  }
+  // F024：lsList<T> 已返回 T[]，泛型参数传元素类型本身
+  type PluginRef = { id: string; agentId: string; pluginId: string; isActive: boolean; createdAt: string; updatedAt: string }
+  return lsList<PluginRef>(LS_REF_KEY)
 }
 function lsSaveRefs(
   list: { id: string; agentId: string; pluginId: string; isActive: boolean; createdAt: string; updatedAt: string }[],
 ): void {
-  localStorage.setItem(LS_REF_KEY, JSON.stringify(list))
+  lsSave(LS_REF_KEY, list)
 }
 
 /* ------------------------------------------------------------------ *
