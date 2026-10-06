@@ -4,7 +4,7 @@ import {ArrowLeft, Brain, Plus, Send, Trash2} from 'lucide-react'
 import {listen} from '@tauri-apps/api/event'
 import {invoke} from '@tauri-apps/api/core'
 import {notifyOSWhenHidden} from '@/utils/osNotify'
-import {Button, Empty, Input, Select, Spin} from '@/components/ui'
+import {Button, Empty, Input, Popconfirm, Select, Spin} from '@/components/ui'
 import {useNotify} from '@/components/ui/notify'
 import {PixelAgent, type AgentMotionState} from '@/components/ui/pixel-agent'
 import {MarkdownRenderer} from '@/components/markdown/MarkdownRenderer'
@@ -693,7 +693,18 @@ export default function SquadDetailPage() {
                                         {(s.status === 'paused' || s.status.startsWith('awaiting')) && <Button variant="ghost" size="sm" aria-label="继续" title="继续" onClick={() => void invoke('squad_resume', {squadId: squad.id}).then(() => reloadSessions())}>▶</Button>}
                                         {active && <Button variant="ghost" size="sm" aria-label="停止" title="停止协作" onClick={() => void invoke('cancel_squad_task', {squadId: squad.id}).then(() => reloadSessions())}>⏹</Button>}
                                         {!active && <Button variant="ghost" size="sm" aria-label="重跑" title="按原指令重跑" onClick={() => void handleRerun(s)}>↻</Button>}
-                                        {!active && <Button variant="ghost" size="sm" aria-label="删除" title="删除记录" onClick={() => void deleteSquadSession(s.id).then(() => { if (selected === s.id) selectSessionLocal(null); void reloadSessions() })}>🗑</Button>}
+                                        {!active && (
+                                            <Popconfirm
+                                                title="删除该协作记录"
+                                                description="将一并清除该会话的轮次与交接数据，不可恢复。"
+                                                okText="删除"
+                                                cancelText="取消"
+                                                okButtonProps={{danger: true}}
+                                                onConfirm={() => void deleteSquadSession(s.id).then(() => { if (selected === s.id) selectSessionLocal(null); void reloadSessions() })}
+                                            >
+                                                <Button variant="ghost" size="sm" aria-label="删除" title="删除记录">🗑</Button>
+                                            </Popconfirm>
+                                        )}
                                     </div>
                                 </div>
                             )
@@ -1332,7 +1343,16 @@ const AsideFloat = memo(function AsideFloat({squadId, members, agents, appearanc
                                     <div className="sw-mem__head">
                                         <span className="sw-mem__key">{m.key}</span>
                                         <span className="sw-mem__cat">{m.category}</span>
-                                        <Button variant="ghost" size="sm" aria-label="删除记忆" onClick={() => void deleteSquadMemory(m.id, squadId).then(() => reload())}><Trash2 size={12}/></Button>
+                                        <Popconfirm
+                                            title="删除该条记忆"
+                                            description="删除后不再参与召回锚定，不可恢复。"
+                                            okText="删除"
+                                            cancelText="取消"
+                                            okButtonProps={{danger: true}}
+                                            onConfirm={() => void deleteSquadMemory(m.id, squadId).then(() => reload())}
+                                        >
+                                            <Button variant="ghost" size="sm" aria-label="删除记忆"><Trash2 size={12}/></Button>
+                                        </Popconfirm>
                                     </div>
                                     <div className="sw-mem__body">{m.content}</div>
                                 </div>

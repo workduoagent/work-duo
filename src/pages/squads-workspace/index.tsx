@@ -1339,14 +1339,21 @@ function SquadEditorModal({
                                                                 </Tag>
                                                             </Tooltip>
                                                         )}
-                                                        <Button
-                                                            variant="ghost"
-                                                            size="icon-sm"
-                                                            aria-label="移除出列"
-                                                            onClick={() => removeMember(idx)}
+                                                        <Popconfirm
+                                                            title="将该成员移出编队"
+                                                            description="成员配置会被移除；已产生的轮次与交接记录不受影响。"
+                                                            okText="移出"
+                                                            cancelText="取消"
+                                                            onConfirm={() => removeMember(idx)}
                                                         >
-                                                            <Trash2 size={16} color="var(--color-danger)"/>
-                                                        </Button>
+                                                            <Button
+                                                                variant="ghost"
+                                                                size="icon-sm"
+                                                                aria-label="移除出列"
+                                                            >
+                                                                <Trash2 size={16} color="var(--color-danger)"/>
+                                                            </Button>
+                                                        </Popconfirm>
                                                     </div>
                                                     <Input.TextArea
                                                         autoComplete="off"
@@ -2304,15 +2311,23 @@ export function SquadMemoryPanel({
                                 <span className="squad-mem__key">{m.key}</span>
                                 <Tag>{m.category}</Tag>
                                 <span className="squad-mem__ref">引用 {m.refCount}</span>
-                                <Button
-                                    variant="ghost"
-                                    size="icon-sm"
-                                    className="squad-mem__del"
-                                    aria-label="删除"
-                                    onClick={() => handleDelete(m)}
+                                <Popconfirm
+                                    title="删除该条记忆"
+                                    description="删除后该记忆不再参与召回锚定，不可恢复。"
+                                    okText="删除"
+                                    cancelText="取消"
+                                    okButtonProps={{danger: true}}
+                                    onConfirm={() => handleDelete(m)}
                                 >
-                                    <Trash2 size={14}/>
-                                </Button>
+                                    <Button
+                                        variant="ghost"
+                                        size="icon-sm"
+                                        className="squad-mem__del"
+                                        aria-label="删除"
+                                    >
+                                        <Trash2 size={14}/>
+                                    </Button>
+                                </Popconfirm>
                             </div>
                             <div className="squad-mem__content">{m.content}</div>
                         </div>

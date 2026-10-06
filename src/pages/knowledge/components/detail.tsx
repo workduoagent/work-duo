@@ -661,6 +661,9 @@ export default function KnowledgeDetailPage() {
                   >
                     {t}
                   </button>
+                  {/* F040：标签移除为轻量操作（单个标签 ×，误点代价极低且可重新添加），
+                      故刻意不加二次确认——与「删除技能 / 小分队 / 记忆」等不可恢复
+                      操作区别对待。 */}
                   <button
                     type="button"
                     className="kb-detail__tagchip-x"

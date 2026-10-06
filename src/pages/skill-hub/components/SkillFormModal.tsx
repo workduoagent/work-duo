@@ -520,6 +520,9 @@ export function SkillFormModal({
                         >
                           {expandedScriptId === s.id ? '收起' : '编辑内容'}
                         </Button>
+                        {/* F040：脚本移除属表单草稿编辑，整体「保存 / 取消」已有明确
+                            语义与提示，单项删除无需二次确认——与「删除技能本体」
+                            （连带删磁盘目录、不可恢复）区别对待。 */}
                         <Button
                           variant="ghost"
                           size="icon-sm"
