@@ -7,7 +7,7 @@
  */
 import { useEffect, useMemo, useState } from 'react'
 import { FileJson, Globe, KeyRound, Plug } from 'lucide-react'
-import { Button, Modal, Input, Alert, Checkbox, Tag, Upload as AntUpload } from '@/components/ui'
+import { Button, Modal, Input, Alert, Checkbox, Tag, Upload as AntUpload, LongTaskProgress, useLongTask } from '@/components/ui'
 import { useNotify } from '@/components/ui/notify'
 import {
   getMcpProtocolLabel,
@@ -35,6 +35,8 @@ export function McpImportModal({
   const [error, setError] = useState<string | null>(null)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [importing, setImporting] = useState(false)
+  // F048：批量导入 MCP 配置时给出阶段与进度
+  const task = useLongTask()
 
   useEffect(() => {
     if (open) {
@@ -105,9 +107,14 @@ export function McpImportModal({
   async function handleConfirm() {
     if (selectedItems.length === 0) return
     setImporting(true)
+    task.start(`正在准备 ${selectedItems.length} 个 MCP 配置…`)
     try {
+      task.step(40, '正在写入配置…')
       await onConfirm(selectedItems)
+      task.finish(`已导入 ${selectedItems.length} 个 MCP 配置`)
       onOpenChange(false)
+    } catch (e) {
+      task.fail(`导入失败：${e instanceof Error ? e.message : String(e)}`)
     } finally {
       setImporting(false)
     }
@@ -137,6 +144,10 @@ export function McpImportModal({
       }
     >
       <div className="mcp-import">
+        {/* F048：长耗时导入进度 */}
+        {task.running || task.error ? (
+          <LongTaskProgress pct={task.pct} msg={task.msg} error={task.error} />
+        ) : null}
         {/* 配置输入区 */}
         <div className="mcp-import__editor">
           <div className="mcp-import__toolbar">

@@ -5,7 +5,7 @@
  */
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react'
 import { Copy, Check } from 'lucide-react'
-import { Button, Modal } from '@/components/ui'
+import { Button, Modal , LongTaskProgress, useLongTask } from '@/components/ui'
 import { MonacoJsonEditor } from '@/components/code-editor'
 import { parseModelImport, type ModelConfig } from '@/core/file/model-file'
 import './ImportModal.scss'
@@ -50,6 +50,8 @@ export interface ImportModalProps {
 export function ImportModal({ open, onOpenChange, onImported }: ImportModalProps) {
   const [text, setText] = useState('')
   const [importing, setImporting] = useState(false)
+  // F048：批量导入 N 个模型时界面此前完全静止，给出阶段与进度
+  const task = useLongTask()
   const [copied, setCopied] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
 
@@ -91,9 +93,14 @@ export function ImportModal({ open, onOpenChange, onImported }: ImportModalProps
   async function handleImport() {
     if (!canImport) return
     setImporting(true)
+    task.start(`正在准备 ${parsed.models.length} 个模型配置…`)
     try {
+      task.step(40, '正在写入配置…')
       await onImported(parsed.models)
+      task.finish(`已导入 ${parsed.models.length} 个模型配置`)
       onOpenChange(false)
+    } catch (e) {
+      task.fail(`导入失败：${e instanceof Error ? e.message : String(e)}`)
     } finally {
       setImporting(false)
     }
@@ -118,6 +125,10 @@ export function ImportModal({ open, onOpenChange, onImported }: ImportModalProps
       }
     >
       <div className="import-modal">
+      {/* F048：长耗时导入进度 */}
+      {task.running || task.error ? (
+        <LongTaskProgress pct={task.pct} msg={task.msg} error={task.error} />
+      ) : null}
         <div className="import-modal__toolbar">
           <input
             ref={fileRef}

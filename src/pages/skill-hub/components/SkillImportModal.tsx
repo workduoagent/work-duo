@@ -12,7 +12,7 @@
  */
 import { useEffect, useState } from 'react'
 import { Inbox, FolderUp, Upload as UploadIcon, X } from 'lucide-react'
-import { Button, Modal, Input, Field, FieldLabel, Select, Upload, Tag, Divider, Alert } from '@/components/ui'
+import { Button, Modal, Input, Field, FieldLabel, Select, Upload, Tag, Divider, Alert, LongTaskProgress, useLongTask } from '@/components/ui'
 import { useNotify } from '@/components/ui/notify'
 import {
   createEmptySkill,
@@ -115,6 +115,9 @@ export function SkillImportModal({
 }: SkillImportModalProps) {
   const { message } = useNotify()
   const [captured, setCaptured] = useState<CapturedFile[]>([])
+  // F048：ZIP 解包 / 文件夹遍历动辄数百毫秒到数秒，此前界面完全静止。
+  // 与沙箱页 createWithProgress 同形态：阶段文案 + 百分比 + 平滑推进。
+  const task = useLongTask()
   const [kind, setKind] = useState<'folder' | 'zip' | null>(null)
   const [submitting, setSubmitting] = useState(false)
 
@@ -158,9 +161,12 @@ export function SkillImportModal({
     const isZip = file.name.toLowerCase().endsWith('.zip')
     void (async () => {
       try {
+        task.start(`正在读取 ${file.name}…`)
         const data = new Uint8Array(await file.arrayBuffer())
         if (isZip) {
+          task.step(30, '正在解包 ZIP…')
           const files = await unzipCaptured(data)
+          task.finish(`已解析 ${files.length} 个文件`)
           setKind('zip')
           appendCaptured(files)
           if (!files.length) message.warning('ZIP 压缩包为空或无法解析')
@@ -179,8 +185,10 @@ export function SkillImportModal({
               size: file.size,
             },
           ])
+          task.finish('已读取 1 个文件')
         }
       } catch (e) {
+        task.fail(`解析失败：${e instanceof Error ? e.message : String(e)}`)
         message.error(`解析失败：${e instanceof Error ? e.message : String(e)}`)
       }
     })()
@@ -191,13 +199,20 @@ export function SkillImportModal({
   async function handleFolderDialog() {
     if (!isTauri) return
     try {
+      task.start('正在选择文件夹…')
       const selected = await openDialog({ directory: true, multiple: false, recursive: true })
-      if (!selected) return
+      if (!selected) {
+        task.reset()
+        return
+      }
+      task.step(25, '正在遍历文件…')
       const tree = await readFolderTree(selected as string)
+      task.finish(`已读取 ${tree.length} 个文件`)
       setKind('folder')
       appendCaptured(tree)
       message.success(`已读取文件夹：${tree.length} 个文件`)
     } catch (e) {
+      task.fail(`读取文件夹失败：${e instanceof Error ? e.message : String(e)}`)
       message.error(`读取文件夹失败：${e instanceof Error ? e.message : String(e)}`)
     }
   }
@@ -206,17 +221,25 @@ export function SkillImportModal({
   async function handleZipDialog() {
     if (!isTauri) return
     try {
+      task.start('正在选择压缩包…')
       const selected = await openDialog({
         multiple: false,
         filters: [{ name: 'ZIP 压缩包', extensions: ['zip'] }],
       })
-      if (!selected) return
+      if (!selected) {
+        task.reset()
+        return
+      }
+      task.step(20, '正在读取压缩包…')
       const bytes = (await readFile(selected as string)) as Uint8Array
+      task.step(45, '正在解包 ZIP…')
       const files = await unzipCaptured(bytes)
+      task.finish(`已解析 ${files.length} 个文件`)
       setKind('zip')
       appendCaptured(files)
       message.success(`已读取 ZIP 压缩包：${files.length} 个文件`)
     } catch (e) {
+      task.fail(`读取 ZIP 失败：${e instanceof Error ? e.message : String(e)}`)
       message.error(`读取 ZIP 失败：${e instanceof Error ? e.message : String(e)}`)
     }
   }
@@ -341,6 +364,11 @@ export function SkillImportModal({
         style={{ marginBottom: 16 }}
         message="导入的文件夹 / ZIP 压缩包结构会原样落盘到 skill_path/<标识符>/ 下（scripts / references / assets / templates / SKILL.md）。"
       />
+
+      {/* F048：长耗时导入进度（阶段文案 + 百分比 + 平滑推进） */}
+      {task.running || task.error ? (
+        <LongTaskProgress pct={task.pct} msg={task.msg} error={task.error} />
+      ) : null}
 
       {/* 1) 导入包拖拽 / 选择区 */}
       <div className="sk-import__dropzone">

@@ -1,0 +1,38 @@
+/* 长耗时任务进度（F048） */
+
+.app-long-task {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.app-long-task__bar {
+  height: 4px;
+  border-radius: 999px;
+  background: var(--color-background-muted);
+  overflow: hidden;
+}
+
+.app-long-task__fill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--color-brand-600);
+  /* 宽度变化平滑，配合缓动进度避免生硬跳动 */
+  transition: width 0.18s ease-out;
+}
+
+.app-long-task__msg {
+  font-size: 0.75rem;
+  line-height: 1.4;
+  color: var(--color-foreground-muted);
+  word-break: break-all;
+}
+
+/* 错误态：进度条与文案转危险色（与沙箱页 progress.error 行为一致） */
+.app-long-task.is-error .app-long-task__fill {
+  background: var(--color-danger);
+}
+
+.app-long-task.is-error .app-long-task__msg {
+  color: var(--color-danger);
+}
