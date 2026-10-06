@@ -22,3 +22,23 @@
   margin-left: 2px;
   font-weight: 600;
 }
+
+/* F041：字段级校验反馈 —— 错误就地显示在控件下方，替代「只有顶部 toast」的盲改。
+   颜色一律走令牌（暗色下自动跟随），对比度按 WCAG AA 达标档选取。 */
+.app-field__error {
+  font-size: 0.75rem;
+  line-height: 1.4;
+  color: var(--color-danger);
+  /* 不用纯红 #f87171（在浅底上仅约 3.3:1），令牌化的 danger 已按主题调校 */
+}
+
+.app-field__hint {
+  font-size: 0.75rem;
+  line-height: 1.4;
+  color: var(--color-foreground-muted);
+}
+
+/* 错误态下控件轻微内缩，让红框与错误文案视觉成组 */
+.app-field[data-invalid='true'] {
+  gap: 4px;
+}

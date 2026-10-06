@@ -562,6 +562,13 @@ function SquadEditorModal({
     const {message} = useNotify()
     const [state, setState] = useState<EditorState>(blankState())
     const [saving, setSaving] = useState(false)
+    /** F041：字段级校验错误（key = 字段名，value = 提示文案）。空对象 = 当前无校验错误。 */
+    const [editorErrors, setEditorErrors] = useState<Record<string, string>>({})
+    // F041：弹窗每次打开时清空上一轮的字段错误（错误 state 属 Modal 内部，
+    // 主页面拿不到，故在此用 open 上升沿清理，而非在 openCreate/openEdit 里写）。
+    useEffect(() => {
+        if (open) setEditorErrors({})
+    }, [open])
     const [apiOpen, setApiOpen] = useState(false)
     // 左侧导航当前面板（UI 改版：侧栏导航替代顶部 Tabs）
     const [pane, setPane] = useState<'basic' | 'resource' | 'members' | 'strategy'>('basic')
@@ -765,24 +772,40 @@ function SquadEditorModal({
         setMembers(next)
     }
 
-    async function handleSave() {
-        if (!state.name.trim()) {
-            message.error('请填写小分队名称')
-            return
-        }
+    /**
+     * F041：表单校验改为「字段级errors + 就地展示」，不再逐条弹顶部toast。
+     * 原实现每条不满足就`message.error(...)` 并 return——用户在 1400 行的
+     * Modal 里填 10 个字段，只能看到顶部飘过一条 toast，不知道是哪一栏出错、
+     * 也不知道还有几处没填（每次只能修一个）。
+     * 现在一次性列出全部问题，逐字段标红+ 就地提示。
+     */
+    function validateEditor(): Record<string, string> {
+        const e: Record<string, string> = {}
+        if (!state.name.trim()) e.name = '请填写小分队名称'
         if (state.members.length === 0) {
-            message.error('请至少添加一个成员智能体')
-            return
+            e.members = '请至少添加一个成员智能体'
+        } else {
+            const noAgent = state.members.findIndex((m) => !m.agentId)
+            if (noAgent >= 0) e.members = `第 ${noAgent + 1} 个成员尚未选择智能体`
+            else if (state.mode !== 'pipeline') {
+                const noRole = state.members.findIndex((m) => !m.role.trim())
+                if (noRole >= 0) e.members = `第 ${noRole + 1} 个成员尚未指定角色（执行 WORKER / 评审 CRITIC）`
+            }
         }
-        for (const m of state.members) {
-            if (!m.agentId) {
-                message.error('每个成员都需选择智能体')
-                return
-            }
-            if (state.mode !== 'pipeline' && !m.role.trim()) {
-                message.error('每个成员都需指定角色（执行 WORKER / 评审 CRITIC）')
-                return
-            }
+        return e
+    }
+
+    async function handleSave() {
+        const errs = validateEditor()
+        setEditorErrors(errs)
+        if (Object.keys(errs).length > 0) {
+            // 顶部仍给一条汇总（不弹 toast，避免遮住表单），并跳到首个出错面板——
+            // 否则用户在「基本」面板点保存，却看不到「成员」面板里的错误。
+            const keys = Object.keys(errs)
+            message.warning(`请完善 ${keys.length} 处标记项`)
+            if (keys.includes('members')) setPane('members')
+            else if (keys.includes('name')) setPane('basic')
+            return
         }
         setSaving(true)
         try {
@@ -988,14 +1011,25 @@ function SquadEditorModal({
                                         </Field>
 
                                         {/* 名称 */}
-                                        <Field className="squad-editor__row">
+                                        <Field className="squad-editor__row" error={editorErrors.name}>
                                             <FieldLabel htmlFor="squad-name">名称</FieldLabel>
                                             <Input
                                                 id="squad-name"
                                                 autoComplete="off"
+                                                status={editorErrors.name ? 'error' : undefined}
                                                 placeholder="例如：大A 投研小队"
                                                 value={state.name}
-                                                onChange={(e) => setState((s) => ({...s, name: e.target.value}))}
+                                                onChange={(e) => {
+                                                    setState((s) => ({...s, name: e.target.value}))
+                                                    // 用户一改动即清该字段错误，避免"改完还挂着红框"
+                                                    if (editorErrors.name) {
+                                                        setEditorErrors((prev) => {
+                                                            const next = {...prev}
+                                                            delete next.name
+                                                            return next
+                                                        })
+                                                    }
+                                                }}
                                             />
                                         </Field>
 
@@ -1435,6 +1469,14 @@ function SquadEditorModal({
                                                 </div>
                                             ))}
                                         </div>
+
+                                        {/* F041：成员校验错误就地提示（原为顶部 toast，
+                                            用户看不到是哪一栏、也不知道还差几个） */}
+                                        {editorErrors.members && (
+                                            <div className="app-field__error" role="alert">
+                                                {editorErrors.members}
+                                            </div>
+                                        )}
 
                                         {/* 添加成员：虚线行（选择即入列，即用即清） */}
                                         <div className="squad-editor__add-member">
