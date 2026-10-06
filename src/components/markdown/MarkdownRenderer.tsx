@@ -180,7 +180,7 @@ function MarkdownRendererInner({
       ),
       ...(componentsExt ?? {}),
     } as Record<string, React.FC<Record<string, unknown>>>
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [resolveImageUrl, componentsExt])
 
   const remarkPlugins = useMemo(

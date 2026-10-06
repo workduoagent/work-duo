@@ -78,7 +78,7 @@ export function PluginTestModal({
 
   async function handleTest() {
     if (!plugin) return
-    let args: Record<string, unknown> = {}
+    let args: Record<string, unknown>
     try {
       const parsed = JSON.parse(paramsText)
       if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {

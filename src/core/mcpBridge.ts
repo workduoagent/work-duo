@@ -125,7 +125,7 @@ export async function connectMcpBridge(): Promise<void> {
     }
   })
 
-  // eslint-disable-next-line no-console
+   
   console.log('[mcpBridge] 已注册 mcp:intent 监听（WorkDuo 内建 MCP Server 就绪后可被驱动）')
 }
 

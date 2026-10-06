@@ -127,9 +127,12 @@ export function HitlClamp({
 
 /** 从入参中提取最关键的授权内容行（避免把整段 JSON 堆进通知）。 */
 export function contentLines(req: ApprovalRequest): Array<{ label: string; value: string }> {
-  let args: Record<string, unknown> = {}
+  let args: Record<string, unknown>
   try {
-    args = JSON.parse(req.args || '{}')
+    // JSON.parse 可能返回字符串/数组/数字等非对象值，直接赋值会让下方 args.path 取值语义失真，
+    // 故统一收敛为空对象（与解析失败路径同口径）。
+    const parsed: unknown = JSON.parse(req.args || '{}')
+    args = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : {}
   } catch {
     args = {}
   }

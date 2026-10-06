@@ -16,7 +16,9 @@
     "tauri": "tauri dev",
     "release:gate": "node .workspace/.sys_tool/workduo-mcp/scripts/release_gate.mjs",
     "squad:eval": "node --experimental-sqlite .workspace/.sys_tool/workduo-mcp/scripts/squad_eval_harness.mjs run",
-    "squad:gate": "node --experimental-sqlite .workspace/.sys_tool/workduo-mcp/scripts/squad_eval_harness.mjs gate --out .workspace/.eval-results/squad-20260929-final"
+    "squad:gate": "node --experimental-sqlite .workspace/.sys_tool/workduo-mcp/scripts/squad_eval_harness.mjs gate --out .workspace/.eval-results/squad-20260929-final",
+    "test": "vitest run",
+    "lint": "eslint src"
   },
   "dependencies": {
     "@monaco-editor/react": "^4.7.0",
@@ -62,13 +64,20 @@
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@tauri-apps/cli": "^2",
     "@types/node": "^26.2.0",
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
     "@vitejs/plugin-react": "^4.6.0",
+    "eslint": "^10.12.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "globals": "^17.13.0",
+    "happy-dom": "^20.14.5",
     "sass": "^1.83.0",
     "typescript": "~5.8.3",
-    "vite": "^7.0.4"
+    "typescript-eslint": "^8.71.0",
+    "vite": "^7.0.4",
+    "vitest": "^5.0.3"
   }
 }

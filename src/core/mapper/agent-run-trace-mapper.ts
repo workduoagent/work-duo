@@ -94,7 +94,7 @@ export async function getRunTrace(runId: string): Promise<RunTraceFull | null> {
   )) as TraceRow[]
   const r = rows[0]
   if (!r) return null
-  let events: Array<Record<string, unknown>> = []
+  let events: Array<Record<string, unknown>>
   try {
     events = JSON.parse(r.events_json) as Array<Record<string, unknown>>
   } catch {

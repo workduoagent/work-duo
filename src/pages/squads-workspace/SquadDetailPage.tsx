@@ -437,7 +437,7 @@ export default function SquadDetailPage() {
         } catch (e) {
             message.error(`读取轮次失败：${e instanceof Error ? e.message : String(e)}`)
         }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
+         
     }, [sessions, message])
 
     function selectSessionLocal(sid: string | null) {

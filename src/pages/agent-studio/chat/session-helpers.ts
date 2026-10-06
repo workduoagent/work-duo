@@ -30,7 +30,7 @@ function extractHistoryAttachments(raw: string | undefined): ChatAttachmentInput
     | undefined
   if (!userMsg) return undefined
   const content = userMsg.content
-  let parts: unknown[] = []
+  let parts: unknown[]
   if (Array.isArray(content)) {
     parts = content
   } else if (content && typeof content === 'object' && Array.isArray((content as Record<string, unknown>).content)) {

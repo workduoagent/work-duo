@@ -282,32 +282,28 @@ export default function SkillDetailPage() {
    */
   async function handleSaveEdit(data: SkillFormData) {
     const rawBase = await resolveSkillBasePath()
-    try {
-      const res = await persistSkillFiles(
-        rawBase,
-        data.skill,
-        data.scripts,
-        data.resources,
-      )
-      await upsertSkill(data.skill)
-      if (res) {
-        const parts = [
-          res.written.skillMd ? 'SKILL.md' : '',
-          `${res.written.scripts} 个脚本`,
-          `${res.written.resources} 个资源`,
-        ].filter(Boolean)
-        message.success(`技能已更新，已落盘 ${parts.join('、')}`)
-      } else {
-        message.success('技能已更新')
-      }
-      setEditing(false)
-      setDraftText('')
-      await loadSkill()
-      setReloadTick((t) => t + 1)
-    } catch (e) {
-      // 不在这里弹提示：SkillFormModal 会捕获并展示错误，同时保持弹窗打开
-      throw e
+    // 失败直接向上抛：不在此处弹提示——SkillFormModal 会捕获并展示错误，同时保持弹窗打开
+    const res = await persistSkillFiles(
+      rawBase,
+      data.skill,
+      data.scripts,
+      data.resources,
+    )
+    await upsertSkill(data.skill)
+    if (res) {
+      const parts = [
+        res.written.skillMd ? 'SKILL.md' : '',
+        `${res.written.scripts} 个脚本`,
+        `${res.written.resources} 个资源`,
+      ].filter(Boolean)
+      message.success(`技能已更新，已落盘 ${parts.join('、')}`)
+    } else {
+      message.success('技能已更新')
     }
+    setEditing(false)
+    setDraftText('')
+    await loadSkill()
+    setReloadTick((t) => t + 1)
   }
 
   /** 文件就地编辑：保存回磁盘 */

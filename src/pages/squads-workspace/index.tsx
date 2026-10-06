@@ -2005,9 +2005,11 @@ interface SquadMetricsAccView {
 
 /** S2：花费账目渲染——总用量 + 预算水位 + 成员级明细（解析失败降级纯文本）。 */
 function MetricsRoundView({content}: { content: string }) {
-    let acc: SquadMetricsAccView | null = null
+    let acc: SquadMetricsAccView | null
     try {
-        acc = JSON.parse(content) as SquadMetricsAccView
+        // 同 DecisionCenter.contentLines：非对象 JSON 收敛为 null，走下方纯文本降级分支
+        const parsed: unknown = JSON.parse(content)
+        acc = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? (parsed as SquadMetricsAccView) : null
     } catch {
         acc = null
     }

@@ -103,7 +103,7 @@ export function extractFilePaths(content: string): string[] {
   const out: string[] = []
   for (const m of matches) {
     // 去除末尾标点，避免把 markdown 句尾标点纳入路径
-    let raw = m[0].replace(/[.,;:)\}\]>`]+$/, '')
+    const raw = m[0].replace(/[.,;:)\]>`]+$/, '')
     if (!raw) continue
     // 排除 URL 片段：若匹配前紧邻 http(s):// 则跳过
     const prefix = content.slice(Math.max(0, m.index - 10), m.index)
@@ -143,9 +143,11 @@ export function resolveImagePath(p: string, workspace?: string | null): string {
 
 /** 裸图片文件名识别（与 FILE_PATH_RE 互补，专收「demo-cat.png」这类无目录前缀的相对名）。
  *  字符类不含 ASCII 括号——否则 markdown `![](...)` 的 `(` 会被吞进匹配、`](` 前缀跳过失效；
- *  中文括号保留（中文文件名常见）。 */
+ *  中文括号保留（中文文件名常见）。
+ *  两处 '-' 置于字符类首位表「字面量」——置于尾部会与前一字符构成反向范围
+ *  （【】- 即 U+3011..U+002D 恒空），JS 虽容忍但语义是死字符。 */
 const BARE_IMAGE_NAME_RE =
-  /(?<![\w\\/.\-])[\w\u4e00-\u9fff·（）[\]【】\-]+\.(?:png|jpe?g|webp|gif|bmp|ico)(?![\w.])/gi
+  /(?<![-\w\\/.])[-\w\u4e00-\u9fff·（）[\]【】]+\.(?:png|jpe?g|webp|gif|bmp|ico)(?![\w.])/gi
 
 /**
  * 提取正文中可内联渲染的图片路径：
@@ -205,11 +207,16 @@ export function formatTime(ts?: number): string {
   return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
-/** 简易 token 估算：CJK 字符 ≈ 1 token；其余按空格分词 ≈ 1.3 token/词。 */
+/** 简易 token 估算：CJK 字符 ≈ 1 token；其余按空格分词 ≈ 1.3 token/词。
+ *  CJK 区段用 \u 转义显式书写，避免源码内混入 U+3000 全角空格等不可见字符
+ *  （原先字面量写法会被 ESLint no-irregular-whitespace 报错，且易被编辑器/复制链路改写）。 */
+const CJK_CHAR_RE =
+  /[\u4e00-\u9fff\u3000-\u303f\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af]/g
+
 export function estimateTokens(text: string): number {
   if (!text) return 0
-  const cjk = (text.match(/[一-鿿　-〿぀-ゟ゠-ヿ가-힯]/g) ?? []).length
-  const nonCjk = text.replace(/[一-鿿　-〿぀-ゟ゠-ヿ가-힯]/g, ' ')
+  const cjk = (text.match(CJK_CHAR_RE) ?? []).length
+  const nonCjk = text.replace(CJK_CHAR_RE, ' ')
   const words = nonCjk.trim().split(/\s+/).filter(Boolean).length
   return Math.ceil(cjk + words * 1.3)
 }

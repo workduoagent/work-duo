@@ -285,7 +285,11 @@ export function parseMcpServersJson(raw: string): ParsedMcpImport {
   try {
     data = JSON.parse(raw)
   } catch (e) {
-    throw new Error(`JSON 解析失败：${e instanceof Error ? e.message : String(e)}`)
+    // 保留原始错误链：项目 target=ES2020，无法用 Error 的 cause 构造选项（需 ES2022 lib），
+    // 故手工挂 cause 属性——既满足 preserve-caught-error，也不丢诊断信息。
+    const err = new Error(`JSON 解析失败：${e instanceof Error ? e.message : String(e)}`)
+    ;(err as Error & { cause?: unknown }).cause = e
+    throw err
   }
   const root = (data ?? null) as Record<string, unknown> | null
   const servers =

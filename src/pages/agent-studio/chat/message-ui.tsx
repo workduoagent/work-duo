@@ -502,7 +502,7 @@ export function MessageActions({
  *  渲染为可悬浮溯源的引标（hover 展示召回片段内容）；无引用数据时与普通 MarkdownRenderer 等价。 */
 export function CiteAwareMarkdown({ text, kbSources }: { text?: string; kbSources?: KbHit[] }) {
   const remarkExt = useMemo(() => (kbSources?.length ? [makeRemarkKbCites(kbSources)] : undefined), [kbSources])
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   const compsExt = useMemo(
     () =>
       kbSources?.length

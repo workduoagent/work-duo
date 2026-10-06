@@ -3,7 +3,7 @@
  * 若安装后仍报重复声明，删除本文件即可。
  */
 declare module '@xyflow/react' {
-  import type { ComponentType, ReactNode } from 'react'
+  import type { ComponentType } from 'react'
 
   export type Node<T = any> = {
     id: string
