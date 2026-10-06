@@ -61,3 +61,102 @@
   display: flex;
   justify-content: flex-end;
 }
+
+/* ============ F042：统计卡可点击 + 功能入口网格 ============ */
+
+/* 统计卡作为导航入口：整卡可点，hover 用背景/边框变化
+   （项目铁律：hover 禁位移/缩放，此处只改 background 与 border-color） */
+.dash__stat {
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.dash__stat:hover {
+  background: var(--color-background-muted);
+  border-color: var(--color-border-strong);
+}
+
+.dash__stat-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.dash__stat-ico {
+  color: var(--color-foreground-muted);
+  flex: none;
+}
+
+.dash__stat-value.is-failed {
+  color: var(--color-foreground-muted);
+}
+
+/* 功能入口：8 个模块的导航网格 */
+.dash__entries {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+
+@media (min-width: 900px) {
+  .dash__entries {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+.dash__entry {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  text-align: left;
+  background: var(--color-background-subtle);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md, 10px);
+  color: var(--color-foreground);
+  cursor: pointer;
+  font: inherit;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.dash__entry:hover {
+  background: var(--color-background-muted);
+  border-color: var(--color-border-strong);
+}
+
+.dash__entry-ico {
+  color: var(--color-foreground-muted);
+  flex: none;
+}
+
+.dash__entry-text {
+  min-width: 0;
+  flex: 1;
+}
+
+.dash__entry-label {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--color-foreground);
+}
+
+.dash__entry-desc {
+  margin-top: 2px;
+  font-size: 0.75rem;
+  color: var(--color-foreground-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dash__entry-arrow {
+  color: var(--color-foreground-muted);
+  opacity: 0.6;
+  flex: none;
+}
+
+.dash__entry:hover .dash__entry-arrow {
+  opacity: 1;
+}

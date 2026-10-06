@@ -12,6 +12,7 @@ import {
     Puzzle,
     Server,
     ChevronDown,
+    Home,
 } from 'lucide-react'
 import {WindowControls} from './WindowControls'
 import {ThemeToggle} from './ThemeToggle'
@@ -29,7 +30,10 @@ interface MenuNode {
 }
 
 // 顶栏菜单树：百宝箱为分组（含 LLM / MCP / Skill 下拉）；其余为一级叶子。
+// F042：补「首页」项——此前 ROUTES.dashboard虽已注册（index route），但菜单里
+// 没有入口，用户只能手输 hash 才能回首页。
 const MENUS: MenuNode[] = [
+    {key: 'home', label: '首页', icon: Home, path: ROUTES.dashboard},
     {
         key: 'treasure',
         label: '百宝箱',
@@ -52,11 +56,37 @@ const MENUS: MenuNode[] = [
 const PARENT_OF: Record<string, string> = {}
 MENUS.forEach((m) => (m.children ?? []).forEach((c) => (PARENT_OF[c.key] = m.key)))
 
+/**
+ * 路由 → 顶栏选中项。
+ *
+ * F047：原先是逐条 `if (pathname.startsWith(...))` 且**只覆盖 4 条路由**，
+ * 导致 `/knowledge` / `/skill-hub` / `/mcp-hub` / `/plugin-hub` / `/server-hub` /
+ * `/settings` 等 8 条已注册路由进页面后**选中胶囊消失**（`useEffect` 里
+ * `if (!top) return` 直接跳过），用户看不出自己在哪一页。
+ *
+ * 现改为**数据驱动**：从 MENUS 反查（叶子按 path、子项按父容器回退），
+ * 新增菜单项只需改MENUS 一处，不必再维护这份映射。
+ *
+ * 注意 `/` 是首页且是所有路径的前缀，必须**精确相等**而非 startsWith，
+ * 否则任何子页面都会被判为「首页选中」。
+ */
 function routeToTopKey(pathname: string): string | null {
-    if (pathname.startsWith(ROUTES.modelSettings)) return 'treasure'
-    if (pathname.startsWith(ROUTES.sandboxPython)) return 'settings'
-    if (pathname.startsWith(ROUTES.agentStudio)) return 'agent'
-    if (pathname.startsWith(ROUTES.squadsWorkspace)) return 'squads'
+    // 首页：精确匹配（`/` 是所有路径的前缀，用 startsWith 会全盘误判）
+    if (pathname === ROUTES.dashboard) return 'home'
+
+    // 叶子菜单：path 前缀匹配（如 /knowledge/:id 仍归属「知识库」）
+    for (const m of MENUS) {
+        if (!m.children && m.path && pathname.startsWith(m.path)) return m.key
+    }
+    // 分组：任一子项的 path 命中即高亮该分组（原先这里只硬编码了百宝箱）
+    for (const m of MENUS) {
+        if (!m.children) continue
+        for (const c of m.children) {
+            if (c.path && pathname.startsWith(c.path)) return m.key
+        }
+    }
+    // 沙箱页归属「设置」（无独立菜单项，与原行为一致）
+    if (pathname.startsWith(ROUTES.sandboxPython) || pathname.startsWith(ROUTES.sandbox)) return 'settings'
     return null
 }
 
