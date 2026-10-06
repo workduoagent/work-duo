@@ -553,16 +553,24 @@
   /* ---------- 步骤3/4：三栏挑选器 ---------- */
   &__picker {
     display: grid;
-    grid-template-columns: 220px minmax(0, 1fr) 260px;
-    gap: 14px;
+    /* F052：侧栏宽度改用令牌，与设置/详情等页的侧栏统一 */
+    grid-template-columns: var(--sidebar-w) minmax(0, 1fr) var(--aside-w);
+    gap: var(--space-35);
     align-items: start;
     flex: 1 1 auto;
     min-height: 0;
     max-width: 1280px;
     margin: 0 auto;
 
-    @media (max-width: 1100px) {
-      grid-template-columns: 200px minmax(0, 1fr);
+    // F052：折叠阈值由 1100px 提到 1280px。
+    // 依据：tauri.conf.json 的 `minWidth: 1200`，且 lib.rs 会按显示器 work_area
+    // 收敛初始/最小尺寸 —— 1200px 是**可达的最小窗口**。原 1100px 阈值意味着
+    // 1200~1280 区间（笔记本 1200/1280 宽最常见）第三栏仍占位，中栏被挤到
+    // 约 610px，挑选器内容拥挤。提到 1280 后，最小窗口下即折叠为两栏。
+    @media (max-width: 1280px) {
+      // 折叠第三栏（右侧已选/推荐区移至中栏下方，见下方 __picker-aside 的
+      // grid-column 处理），保留左侧导航 + 主内容两栏
+      grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
     }
 
     @media (max-width: 720px) {
@@ -591,7 +599,9 @@
   }
 
   &__picker-aside--right {
-    @media (max-width: 1100px) {
+    // F052：与 __picker 的折叠阈值保持一致（1280px，见该处注释）。
+    // 原来两处各写 1100px，改一处忘另一处会导致折叠后第三栏重叠。
+    @media (max-width: 1280px) {
       grid-column: 1 / -1;
     }
   }
