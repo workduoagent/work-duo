@@ -24,11 +24,36 @@ import {
   lsSave as lsSaveShared,
 } from './localFallback'
 import { safeIso } from './safeTime'
+import { bulkUpsert } from '@/core/db/sqlUtils'
 
 /* ------------------------------------------------------------------ *
  * 行 <-> 领域模型 转换
  * ------------------------------------------------------------------ */
 
+/**
+ * models 表列清单（F024）——`upsertModel` 与 `bulkUpsertModels` 共用。
+ *
+ * 此前两处各写一份 16 列的 INSERT + ON CONFLICT，加一列要改两遍；
+ * 现统一由 `sqlUtils.bulkUpsert` 依此清单生成 SQL。
+ */
+const MODEL_COLUMNS: Array<keyof ModelConfigRow & string> = [
+  'id',
+  'provider',
+  'name',
+  'model_name',
+  'base_url',
+  'api_key',
+  'app_id',
+  'api_secret',
+  'category',
+  'enabled',
+  'tool_calls',
+  'config',
+  'description',
+  'tags',
+  'created_at',
+  'updated_at',
+]
 
 function modelToRow(m: ModelConfig): ModelConfigRow {
   const now = Date.now()
@@ -130,45 +155,11 @@ export async function upsertModel(model: ModelConfig): Promise<ModelConfig[]> {
     return list
   }
   const db = await getDb()
-  const row = modelToRow(model)
-  await db.execute(
-    `INSERT INTO models
-       (id, provider, name, model_name, base_url, api_key, app_id, api_secret, category, enabled, tool_calls, config, description, tags, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT(id) DO UPDATE SET
-       provider    = excluded.provider,
-       name        = excluded.name,
-       model_name  = excluded.model_name,
-       base_url    = excluded.base_url,
-       api_key     = excluded.api_key,
-       app_id      = excluded.app_id,
-       api_secret  = excluded.api_secret,
-       category    = excluded.category,
-       enabled     = excluded.enabled,
-       tool_calls  = excluded.tool_calls,
-       config      = excluded.config,
-       description = excluded.description,
-       tags        = excluded.tags,
-       updated_at  = excluded.updated_at`,
-    [
-      row.id,
-      row.provider,
-      row.name,
-      row.model_name,
-      row.base_url,
-      row.api_key,
-      row.app_id,
-      row.api_secret,
-      row.category,
-      row.enabled,
-      row.tool_calls,
-      row.config,
-      row.description,
-      row.tags,
-      row.created_at,
-      row.updated_at,
-    ],
-  )
+  // F024：复用 sqlUtils.bulkUpsert —— 此前此处与 bulkUpsertModels 各写一份
+  // 16 列的 INSERT + ON CONFLICT，列清单要改两遍（加一列漏一处即漂移），
+  // 且 bulkUpsertModels 逐行 execute 无分批（100 个模型 = 100 次 IPC 往返）。
+  // created_at 冲突时保留原值（见 upsertModel 的注释：更新时保留创建时间）
+  await bulkUpsert(db, 'models', MODEL_COLUMNS, [modelToRow(model)], ['id'], ['created_at'])
   return listModels()
 }
 
@@ -219,46 +210,8 @@ export async function bulkUpsertModels(
     return next
   }
   const db = await getDb()
-  for (const m of models) {
-    const row = modelToRow(m)
-    await db.execute(
-      `INSERT INTO models
-         (id, provider, name, model_name, base_url, api_key, app_id, api_secret, category, enabled, tool_calls, config, description, tags, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(id) DO UPDATE SET
-         provider    = excluded.provider,
-         name        = excluded.name,
-         model_name  = excluded.model_name,
-         base_url     = excluded.base_url,
-         api_key      = excluded.api_key,
-         app_id       = excluded.app_id,
-         api_secret   = excluded.api_secret,
-         category     = excluded.category,
-         enabled      = excluded.enabled,
-         tool_calls  = excluded.tool_calls,
-         config       = excluded.config,
-         description  = excluded.description,
-         tags         = excluded.tags,
-         updated_at   = excluded.updated_at`,
-      [
-        row.id,
-        row.provider,
-        row.name,
-        row.model_name,
-        row.base_url,
-        row.api_key,
-        row.app_id,
-        row.api_secret,
-        row.category,
-        row.enabled,
-        row.tool_calls,
-        row.config,
-        row.description,
-        row.tags,
-        row.created_at,
-        row.updated_at,
-      ],
-    )
-  }
+  // F024：复用 sqlUtils.bulkUpsert —— 共享实现会按列数自动分批（每批 50 行），
+  // 此前逐行 execute 在导入上百个模型时会产生同等数量的 IPC 往返。
+  await bulkUpsert(db, 'models', MODEL_COLUMNS, models.map(modelToRow), ['id'], ['created_at'])
   return listModels()
 }

@@ -200,19 +200,39 @@ export const bulkInsert = async <T extends Record<string, unknown>>(
  *
  * @param conflictKeys 冲突检测键（唯一约束字段），如 ['id'] 或 ['ws_id', 'id']
  */
-export const bulkUpsert = async <T extends Record<string, unknown>>(
+/**
+ * 批量 Upsert（存在即更新，不存在即插入）。
+ *  - 自动生成 ON CONFLICT DO UPDATE 语句；
+ *  - 自动分批（每批 50 行）防止 SQLite 参数过多报错；
+ *  - 自动将 undefined 转为 null（SQLite 不接受 undefined）。
+ *
+ * @param conflictKeys 冲突检测键（唯一约束字段），如 ['id'] 或 ['ws_id', 'id']
+ * @param preserveColumns 冲突时**保留原值**的列（插入时仍写入）。典型是
+ *        `created_at`——「更新时保留创建时间」是 upsert 的常见语义，而默认的
+ *        「所有非键列都更新」会把它覆盖成新值。
+ *
+ * F024：泛型约束由 `Record<string, unknown>` 放宽为 `object` —— 前者要求索引签名，
+ * 而领域行类型（`ModelConfigRow` 等由 `database.d.ts` 声明的 interface）天然没有
+ * 索引签名，会导致「明明结构完整却传不进来」。约束只需保证 `T` 是对象即可，
+ * 取值仍由 `columns` 决定。
+ */
+export const bulkUpsert = async <T extends object>(
   db: Database,
   tableName: string,
   columns: string[],
   data: T[],
   conflictKeys: string[] = ['id'],
+  preserveColumns: string[] = [],
 ): Promise<void> => {
   if (!data || data.length === 0) return
 
   // SQLite 单条 SQL 参数数量有限（约 999），按列数分批到安全范围
   const CHUNK_SIZE = 50
 
-  const updateColumns = columns.filter((col) => !conflictKeys.includes(col))
+  // 冲突时更新的列 = 全部列 - 冲突键 - 需保留原值的列
+  const updateColumns = columns.filter(
+    (col) => !conflictKeys.includes(col) && !preserveColumns.includes(col),
+  )
   let conflictClause: string
   if (updateColumns.length > 0) {
     const setClause = updateColumns
@@ -230,8 +250,10 @@ export const bulkUpsert = async <T extends Record<string, unknown>>(
 
     const flatValues: unknown[] = []
     chunkData.forEach((item) => {
+      // 列名来自调用方的常量清单（schema 固定），此处按动态键取值需显式收窄
+      const row = item as Record<string, unknown>
       columns.forEach((col) => {
-        const val = item[col]
+        const val = row[col]
         flatValues.push(val === undefined ? null : val)
       })
     })
