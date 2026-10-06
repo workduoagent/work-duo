@@ -21,10 +21,12 @@
 
 - **F013 已完成 ✅**（2026-10-05）：squad run 级墙钟——无人值守触发（API/定时/MCP/远程 Resume）装配看门狗，到点置位取消标志复用用户取消收尾链路（不 drop 协程、不新增终态路径），`WD_SQUAD_RUN_TIMEOUT_SECS` 可配默认 7200s；UI 触发不受限；239 Rust 测试通过。
 
+- **F014 已完成 ✅**（2026-10-05）：pipeline expect panic 击穿终态——panic 源消除（`prepare_batch` 预处理，异常节点置 skipped 放行依赖）+ 双入口 JoinError 安全网（run_task 包独立 spawn 任务，panic 转正常错误走非正常终态收尾；Elapsed 分支显式 abort 保持硬超时语义）；240 Rust 测试通过。
+
 ## 下一步候选
 
-1. **F014**：pipeline.rs:299 的 expect panic 击穿 run 终态写入（task_to_plan 返回 Option 时 continue + JoinError 检查）。
-2. **F015-F017**：成员超时硬 drop 半行 JSON / board_json 读改写丢更新 / events.rs 裸锁。
+1. **F015**：成员超时硬 drop 留半行 JSON（squad_orchestrator.rs:3333-3365 + graph.rs:979-990，append_line 原子化）。
+2. **F016-F017**：board_json 读改写丢更新 / events.rs 裸锁持锁深拷贝。
 3. **F018**：前端测试基建（零测试 + 无 Lint，结构性债）。
 
 ## 环境事实（跨设备必读）

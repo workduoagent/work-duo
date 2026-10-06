@@ -171,6 +171,32 @@ fn build_skill_guidance(skills: &[crate::agent::plugins::skill_adapter::SkillToo
     out
 }
 
+/// F014：批内节点预处理。task_to_plan 为 None 的节点（图数据异常 / 非任务节点混入
+/// 就绪队列）自动置 skipped——行为对齐用户 Skip（放行后续依赖、不计入成功闭环），
+/// 替代原 `expect("task node 必存在")` panic：panic 会 unwind 出 spawn 任务，击穿
+/// finalize/emit/end_time 写入，前端整轮"进行中"直到重启。返回（节点 id, 计划）对，
+/// 顺序即 join_all 结果顺序（供下标对齐）。
+fn prepare_batch(graph: &mut KnowledgeGraph, batch: &[String]) -> Vec<(String, PlanSubTask)> {
+    let mut pairs = Vec::with_capacity(batch.len());
+    for id in batch {
+        match graph.task_to_plan(id) {
+            Some(pst) => {
+                graph.set_task_status(id, "running");
+                graph.update_node(id, json!({ "startedAt": now_ms() }));
+                pairs.push((id.clone(), pst));
+            }
+            None => {
+                tracing::warn!("[pipeline] 批内节点 {id} 非任务节点（图数据异常），自动跳过（F014）");
+                graph.update_node(
+                    id,
+                    json!({ "status": "skipped", "summary": "（自动跳过：节点数据异常，非任务节点）" }),
+                );
+            }
+        }
+    }
+    pairs
+}
+
 #[tracing::instrument(skip_all)]
 pub async fn run_pipeline(
     app: &AppHandle,
@@ -286,18 +312,23 @@ pub async fn run_pipeline(
         }
         // 串行：本批仅取 1 个（max_parallel=1），其余下轮（依赖解除后）再拾起。
         let batch: Vec<String> = ready.into_iter().take(max_parallel).collect();
-        // 标记 running + 推送 step_started
-        for id in &batch {
-            graph.set_task_status(id, "running");
-            graph.update_node(id, json!({ "startedAt": now_ms() }));
+        // F014：批内预处理——非任务节点（图数据异常）自动置 skipped（行为对齐用户 Skip：
+        // 放行后续依赖、不计入成功闭环），替代 expect panic——panic 会击穿整个 run 的
+        // 终态写入（finalize/emit/end_time 全跳过，前端整轮"进行中"直到重启）。
+        let batch_pairs = prepare_batch(graph, &batch);
+        let batch_ids: Vec<String> = batch_pairs.iter().map(|(id, _)| id.clone()).collect();
+        // 标记 running（已在 prepare_batch 内完成）+ 推送 step_started
+        for (id, _) in &batch_pairs {
             let (step, title) = node_step_title(graph, id);
             events::emit_step_started(app, step, total, &title);
         }
         // 并发执行本批（join_all 在同一任务内并发轮询，复用共享工具注册表/沙箱/工作区）。
         // 单 Agent 路径下 join_all 并发但图变更在 join_all 之后统一在主循环串行处理，无需锁。
-        let futures = batch.iter().map(|id| {
-            let pst = graph.task_to_plan(id).expect("task node 必存在");
-            let tc = graph.task_context(id);
+        let futures = batch_ids
+            .iter()
+            .zip(batch_pairs.into_iter().map(|(_, pst)| pst))
+            .map(|(id, pst)| {
+                let tc = graph.task_context(id);
             let prior = if tc.prior_summary.trim().is_empty() {
                 "(无，你是第一个步骤)".to_string()
             } else {
@@ -339,7 +370,7 @@ pub async fn run_pipeline(
                     wd_mem_notes: Vec::new(),
                 };
             }
-            let task_node_id = &batch[i];
+            let task_node_id = &batch_ids[i];
             let (step, title) = node_step_title(graph, task_node_id);
             if out.success {
                 graph.update_node(
@@ -424,7 +455,7 @@ pub async fn run_pipeline(
                 // 改为「自动接管重试」——带诊断回灌让 Agent 自愈，累计达上限再自动跳过。
                 // 这才是「零人工打断 + 真正全自动」：不烦用户，但会自己修（含沙箱 selfheal 装依赖）。
                 for (i, out) in failures.into_iter() {
-                    let task_node_id = batch[i].clone();
+                    let task_node_id = batch_ids[i].clone();
                     let (step, title) = node_step_title(graph, &task_node_id);
                     let attempts = graph
                         .get_node(&task_node_id)
@@ -486,7 +517,7 @@ pub async fn run_pipeline(
                 continue; // 回到主循环，置 retrying 的步会被 topo_ready 重新拾起自愈；达上限的步标记 skipped
             }
             for (i, out) in failures.into_iter() {
-                let task_node_id = batch[i].clone();
+                let task_node_id = batch_ids[i].clone();
                 let (step, title) = node_step_title(graph, &task_node_id);
                 // 单步恢复次数上限：进入恢复块的累计次数。超过上限则自动跳过该步，
                 // 打破可能的无限重试循环（用户仍能在前端看到「自动跳过」状态）。
@@ -1832,4 +1863,67 @@ fn now_ms() -> i64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod f014_tests {
+    use super::*;
+    use crate::agent::types::{PlanDAG, PlanSubTask};
+
+    fn dag2() -> PlanDAG {
+        PlanDAG {
+            goal_summary: "test".into(),
+            tasks: vec![
+                PlanSubTask {
+                    step: 1,
+                    task_id: "t1".into(),
+                    title: "step 1".into(),
+                    description: String::new(),
+                    success_criteria: vec![],
+                    depends_on: vec![],
+                },
+                PlanSubTask {
+                    step: 2,
+                    task_id: "t2".into(),
+                    title: "step 2".into(),
+                    description: String::new(),
+                    success_criteria: vec![],
+                    depends_on: vec!["t1".into()],
+                },
+            ],
+        }
+    }
+
+    fn node_by_task(g: &KnowledgeGraph, sid: &str, task_id: &str) -> String {
+        g.session_tasks(sid)
+            .iter()
+            .find(|n| n.props.get("taskId").and_then(|v| v.as_str()) == Some(task_id))
+            .map(|n| n.id.clone())
+            .unwrap()
+    }
+
+    /// F014：批内混入不存在/非任务节点时不再 panic——真实任务进入对齐对并标 running，
+    /// 异常节点被剔除（不存在的节点 update_node 为 no-op，不新建）。
+    #[test]
+    fn prepare_batch_skips_anomalous_nodes_without_panic() {
+        let mut g = KnowledgeGraph::open(None).unwrap();
+        let sid = "s-f014";
+        g.plan_to_graph(&dag2(), sid);
+        let t1 = node_by_task(&g, sid, "t1");
+        let t2 = node_by_task(&g, sid, "t2");
+
+        let pairs = prepare_batch(&mut g, &[t1.clone(), "ghost-node".into(), t2.clone()]);
+        let ids: Vec<&str> = pairs.iter().map(|(id, _)| id.as_str()).collect();
+        assert_eq!(ids, vec![t1.as_str(), t2.as_str()], "异常节点被剔除，真实任务顺序保持");
+
+        // 真实任务标记 running（与原逐个标记行为一致）
+        for id in [&t1, &t2] {
+            assert_eq!(
+                g.get_node(id).unwrap().props.get("status").and_then(|v| v.as_str()),
+                Some("running")
+            );
+        }
+        // 不存在的节点：update_node no-op，不新建（graph 无副作用）
+        assert!(g.get_node("ghost-node").is_none());
+    }
 }

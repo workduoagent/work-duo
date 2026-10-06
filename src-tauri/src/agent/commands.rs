@@ -213,18 +213,35 @@ pub async fn run_agent_task(
             let run_limit = crate::agent::engine::runtime::run_wall_clock_limit();
             let cfg_workspace = cfg.workspace.clone();
             let budget_soft = std::sync::Arc::new(AtomicBool::new(false));
+            // F014：task_state 以 Arc 共享——内层 spawn 任务与外层收尾检查各持一份。
+            let ts_shared = std::sync::Arc::new(task_state);
             let watchdog = spawn_budget_watchdog(
-                task_state.cancel_flag.clone(),
+                ts_shared.cancel_flag.clone(),
                 budget_soft.clone(),
                 run_limit,
             );
             // cfg 被 run_task 消耗，先捕获 run id 供 host_grant 清理（与 gate/审批写入同源）。
             let host_run_id = cfg.round_id.clone();
-            let run_outcome = tokio::time::timeout(
-                run_limit,
-                rt.run_task(&app_clone, cfg, prompt, plan_override, pre_completed, initial_context, &task_state),
-            )
-            .await;
+            // F014：run_task 包进独立 spawn 任务 + JoinError 检查——任务内 panic 原本会
+            // 击穿本 spawn 块（finalize/emit/end_time 全跳过，前端整轮"进行中"直到重启），
+            // 现把 panic 转成正常错误走既有非正常终态收尾路径。
+            let mut run_handle = {
+                let rt2 = rt.clone();
+                let app2 = app_clone.clone();
+                let ts_inner = ts_shared.clone();
+                tokio::spawn(async move {
+                    rt2.run_task(&app2, cfg, prompt, plan_override, pre_completed, initial_context, &ts_inner).await
+                })
+            };
+            let run_outcome: Result<(), String> = match tokio::time::timeout(run_limit, &mut run_handle).await {
+                Ok(Ok(())) => Ok(()),
+                Ok(Err(join)) => Err(format!("运行内部异常退出（panic）：{join}")),
+                Err(_) => {
+                    // 保持既有硬超时语义：到点显式 abort 内层任务（若放弃 handle，任务会脱管续跑）。
+                    run_handle.abort();
+                    Err(format!("运行总时长超时（{}s），已强制终止", run_limit.as_secs()))
+                }
+            };
             if let Some(h) = watchdog {
                 let _ = h.abort();
             }
@@ -235,28 +252,24 @@ pub async fn run_agent_task(
                     crate::host::authz::cleanup_run_grants(&app_clone, rid).await;
                 }
             }
-            match run_outcome {
+            match &run_outcome {
                 Ok(()) => {}
-                Err(_) => {
+                Err(reason) => {
                     tracing::warn!(
-                        "[agent] run_agent_task: run 总墙钟超时（{}s）——强制终态，释放运行锁",
-                        run_limit.as_secs()
+                        "[agent] run_agent_task: run 非正常退出（{reason}）——强制终态，释放运行锁"
                     );
                     // P0-2：非正常终态 reply 必须非空（原因 + 已产出文件表）。
                     crate::agent::events::finalize_run_summary(
                         cfg_workspace.as_deref(),
                         "run_budget_exhausted",
-                        &format!("运行总时长超时（{}s），已强制终止", run_limit.as_secs()),
+                        &reason,
                     );
-                    crate::agent::events::emit_task_error(
-                        &app_clone,
-                        &format!("运行总时长超时（{}s），已强制终止以防任务永不结束", run_limit.as_secs()),
-                    );
+                    crate::agent::events::emit_task_error(&app_clone, &reason);
                 }
             }
             // P0-2：软收尾（预算提前结束）/ 用户取消同样写观测兜底（reply 非空）。
             if run_outcome.is_ok() {
-                if task_state.cancel_requested.load(Ordering::SeqCst) {
+                if ts_shared.cancel_requested.load(Ordering::SeqCst) {
                     crate::agent::events::finalize_run_summary(
                         cfg_workspace.as_deref(),
                         "cancelled_by_user",
@@ -370,45 +383,58 @@ pub async fn run_task_ex(
         let _scope = crate::agent::events::with_run_id_scope(rid.clone(), async move {
             // 支柱① 终态铁律：run 级总墙钟兜底（同 run_agent_task，含预算软窗口两阶段收尾）。
             let run_limit = crate::agent::engine::runtime::run_wall_clock_limit();
+            // F014：task_state 以 Arc 共享——内层 spawn 任务与外层收尾检查各持一份。
+            let ts_shared = std::sync::Arc::new(task_state);
             let watchdog = spawn_budget_watchdog(
-                task_state.cancel_flag.clone(),
+                ts_shared.cancel_flag.clone(),
                 budget_soft.clone(),
                 run_limit,
             );
-            let run_outcome = tokio::time::timeout(
-                run_limit,
-                rt.run_task(
-                    &app_clone,
-                    cfg,
-                    prompt,
-                    plan_override,
-                    pre_completed,
-                    initial_context,
-                    &task_state,
-                ),
-            )
-            .await;
+            // F014：run_task 包进独立 spawn 任务 + JoinError 检查（同 run_agent_task，
+            // panic 转正常错误走非正常终态收尾，不再击穿 finalize/emit/end_time 写入）。
+            let mut run_handle = {
+                let rt2 = rt.clone();
+                let app2 = app_clone.clone();
+                let ts_inner = ts_shared.clone();
+                tokio::spawn(async move {
+                    rt2.run_task(
+                        &app2,
+                        cfg,
+                        prompt,
+                        plan_override,
+                        pre_completed,
+                        initial_context,
+                        &ts_inner,
+                    )
+                    .await
+                })
+            };
+            let run_outcome: Result<(), String> = match tokio::time::timeout(run_limit, &mut run_handle).await {
+                Ok(Ok(())) => Ok(()),
+                Ok(Err(join)) => Err(format!("运行内部异常退出（panic）：{join}")),
+                Err(_) => {
+                    // 保持既有硬超时语义：到点显式 abort 内层任务（若放弃 handle，任务会脱管续跑）。
+                    run_handle.abort();
+                    Err(format!("运行总时长超时（{}s），已强制终止", run_limit.as_secs()))
+                }
+            };
             if let Some(h) = watchdog {
                 let _ = h.abort();
             }
-            match run_outcome {
+            match &run_outcome {
                 Ok(()) => {}
-                Err(_) => {
+                Err(reason) => {
                     to_flag.store(true, Ordering::Relaxed);
                     tracing::warn!(
-                        "[agent] run_task_ex: run 总墙钟超时（{}s）——强制终态，释放运行锁",
-                        run_limit.as_secs()
+                        "[agent] run_task_ex: run 非正常退出（{reason}）——强制终态，释放运行锁"
                     );
                     // P0-2：非正常终态 reply 必须非空（原因 + 已产出文件表）。
                     crate::agent::events::finalize_run_summary(
                         cfg_workspace.as_deref(),
                         "run_budget_exhausted",
-                        &format!("运行总时长超时（{}s），已强制终止", run_limit.as_secs()),
+                        &reason,
                     );
-                    crate::agent::events::emit_task_error(
-                        &app_clone,
-                        &format!("运行总时长超时（{}s），已强制终止以防任务永不结束", run_limit.as_secs()),
-                    );
+                    crate::agent::events::emit_task_error(&app_clone, &reason);
                 }
             }
             // P0-2：软收尾（预算提前结束）/ 用户取消同样写观测兜底（reply 非空）。
