@@ -889,6 +889,20 @@ fn build_handoff_bundle(
 }
 
 /// 把 bundle 的产物从成员私有区**留档**到 squad 级交接箱（shared/inbox/{task_id}/）。
+/// F015：原子文件复制——先写同目录临时文件再 rename 替换。进程中断只会留下
+/// 无人消费的 .tmp（半截产物不再被下游当作完整输入）。
+fn copy_file_atomic(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<u64> {
+    let tmp = std::path::PathBuf::from(format!("{}.tmp", dst.display()));
+    let n = std::fs::copy(src, &tmp)?;
+    match std::fs::rename(&tmp, dst) {
+        Ok(()) => Ok(n),
+        Err(e) => {
+            let _ = std::fs::remove_file(&tmp);
+            Err(e)
+        }
+    }
+}
+
 fn archive_handoff_to_inbox(ws: &str, inbox_root: &str, task_id: &str, bundle: &HandoffBundle) {
     for art in &bundle.artifacts {
         let src = std::path::Path::new(ws).join(&art.path);
@@ -896,7 +910,7 @@ fn archive_handoff_to_inbox(ws: &str, inbox_root: &str, task_id: &str, bundle: &
         if let Some(parent) = dst.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
-        if std::fs::copy(&src, &dst).is_err() {
+        if copy_file_atomic(&src, &dst).is_err() {
             tracing::warn!("[squad] 交接箱留档失败：{} → {}", src.display(), dst.display());
         }
     }
@@ -920,7 +934,7 @@ fn deliver_handoff_to_downstream(
         if let Some(parent) = dst.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
-        if std::fs::copy(&src, &dst).is_ok() {
+        if copy_file_atomic(&src, &dst).is_ok() {
             shown.push(format!("inbox/{}/{}（{} bytes）", task_id, art.path, art.bytes));
         }
     }
@@ -3551,6 +3565,9 @@ async fn run_member_subtask(
             let err = format!(
                 "成员子任务运行超时（{member_run_limit}s），已强制终止——可加大 WD_SQUAD_MEMBER_RUN_MAX_SECS / WD_RUN_MAX_SECS 或拆分任务"
             );
+            // F015：超时 drop 协程会跳过 pipeline 内的落盘点——此处补一次快照，
+            // 把成员图已完成的部分落盘，避免节点状态整体丢失。
+            graph.snapshot(&session_id);
             member_event("finished", false, &err);
             tracing::warn!("[squad] 成员 {} {err}", cfg.agent_id);
             return Err(err);
@@ -5321,5 +5338,46 @@ mod f013_tests {
         if let Some(m) = g.as_mut() {
             m.remove(&sid);
         }
+    }
+}
+
+#[cfg(test)]
+mod f015_tests {
+    use super::*;
+
+    /// F015：原子复制——目标内容完整、无 .tmp 残留、重复复制为原子替换。
+    #[test]
+    fn copy_file_atomic_replaces_and_cleans() {
+        let base = std::env::temp_dir().join(format!("f015_copy_{}", std::process::id()));
+        std::fs::create_dir_all(&base).unwrap();
+        let src = base.join("src.txt");
+        let dst = base.join("dst").join("art.txt");
+        std::fs::create_dir_all(dst.parent().unwrap()).unwrap();
+
+        std::fs::write(&src, "v1").unwrap();
+        copy_file_atomic(&src, &dst).unwrap();
+        assert_eq!(std::fs::read_to_string(&dst).unwrap(), "v1");
+
+        // 覆盖替换：v2 原子替换 v1
+        std::fs::write(&src, "v2").unwrap();
+        copy_file_atomic(&src, &dst).unwrap();
+        assert_eq!(std::fs::read_to_string(&dst).unwrap(), "v2");
+        let tmp = std::path::PathBuf::from(format!("{}.tmp", dst.display()));
+        assert!(!tmp.exists(), "无 .tmp 残留");
+
+        std::fs::remove_dir_all(&base).ok();
+    }
+
+    /// F015：源不存在 → Err 且不产生 .tmp 残留。
+    #[test]
+    fn copy_file_atomic_missing_src_fails_cleanly() {
+        let base = std::env::temp_dir().join(format!("f015_copymiss_{}", std::process::id()));
+        std::fs::create_dir_all(&base).unwrap();
+        let dst = base.join("out.txt");
+        assert!(copy_file_atomic(&base.join("nope.txt"), &dst).is_err());
+        assert!(!dst.exists());
+        let tmp = std::path::PathBuf::from(format!("{}.tmp", dst.display()));
+        assert!(!tmp.exists());
+        std::fs::remove_dir_all(&base).ok();
     }
 }

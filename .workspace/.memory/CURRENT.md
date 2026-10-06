@@ -23,10 +23,12 @@
 
 - **F014 已完成 ✅**（2026-10-05）：pipeline expect panic 击穿终态——panic 源消除（`prepare_batch` 预处理，异常节点置 skipped 放行依赖）+ 双入口 JoinError 安全网（run_task 包独立 spawn 任务，panic 转正常错误走非正常终态收尾；Elapsed 分支显式 abort 保持硬超时语义）；240 Rust 测试通过。
 
+- **F015 已完成 ✅**（2026-10-05）：成员图持久化撕裂防护——append_line 行+换行单次写入 + 撕裂尾补 \n 防御（半行只丢自身不连带后续节点）、交接箱/下游投递 fs::copy 改 .tmp+rename 原子替换、成员超时分支补 graph.snapshot；内存文件单测 4 项，244 Rust 测试通过。
+
 ## 下一步候选
 
-1. **F015**：成员超时硬 drop 留半行 JSON（squad_orchestrator.rs:3333-3365 + graph.rs:979-990，append_line 原子化）。
-2. **F016-F017**：board_json 读改写丢更新 / events.rs 裸锁持锁深拷贝。
+1. **F016**：board_json 单列大 JSON 读-改-写丢更新（CAS 重读或 decisions/actions 拆表）。
+2. **F017**：events.rs 裸 lock().unwrap + 持锁深拷贝。
 3. **F018**：前端测试基建（零测试 + 无 Lint，结构性债）。
 
 ## 环境事实（跨设备必读）

@@ -989,12 +989,27 @@ impl KnowledgeGraph {
 }
 
 /// 追加一行到文件（无则创建）。
+///
+/// F015：行 + 换行合并**单次** write_all——原两次写入之间进程中断会留下无换行的
+/// 半行，与下一次追加拼接成「双 JSON 单行」，load_nodes 解析失败连带丢失后续节点。
+/// 另带撕裂尾防御：历史半行（文件末字节非 \n）先补 \n——半行本身已损坏会被
+/// load 跳过，但后续行不再与之拼接，节点不再连带丢失。
 fn append_line(path: &Path, line: &str) {
-    use std::io::Write;
+    use std::io::{Read, Seek, SeekFrom, Write};
+    let mut buf = String::with_capacity(line.len() + 1);
+    if let Ok(mut f) = std::fs::OpenOptions::new().read(true).open(path) {
+        if f.seek(SeekFrom::End(-1)).is_ok() {
+            let mut last = [0u8; 1];
+            if f.read_exact(&mut last).is_ok() && last[0] != b'\n' {
+                buf.push('\n');
+            }
+        }
+    }
+    buf.push_str(line);
+    buf.push('\n');
     match std::fs::OpenOptions::new().create(true).append(true).open(path) {
         Ok(mut f) => {
-            let _ = f.write_all(line.as_bytes());
-            let _ = f.write_all(b"\n");
+            let _ = f.write_all(buf.as_bytes());
         }
         Err(e) => {
             tracing::warn!("[graph] 追加写 {} 失败：{}", path.display(), e);
@@ -1103,5 +1118,45 @@ mod topo_tests {
         g.plan_to_graph(&dag(vec![(1, "t0", vec![]), (2, "t1", vec!["t0"])]), sid);
         g.set_task_status(&task_node_id(&g, sid, "t0"), "skipped");
         assert_eq!(g.topo_ready(sid).len(), 1, "依赖被 skip 视为满足，t1 可就绪");
+    }
+}
+
+#[cfg(test)]
+mod f015_tests {
+    use super::*;
+
+    fn tmp_path(tag: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!("f015_{tag}_{}.jsonl", std::process::id()))
+    }
+
+    /// F015：追加行完整（行尾必有换行），两次追加互不拼接。
+    #[test]
+    fn append_line_writes_complete_lines() {
+        let p = tmp_path("append");
+        std::fs::remove_file(&p).ok();
+        append_line(&p, "{\"a\":1}");
+        append_line(&p, "{\"b\":2}");
+        let content = std::fs::read_to_string(&p).unwrap();
+        assert_eq!(content, "{\"a\":1}\n{\"b\":2}\n");
+        std::fs::remove_file(&p).ok();
+    }
+
+    /// F015：撕裂尾防御——历史半行（无换行结尾）先被补 \n，后续行不再与之拼接，
+    /// 半行损坏仅丢失自身（load 跳过），不连带污染后续节点。
+    #[test]
+    fn append_line_repairs_torn_tail() {
+        let p = tmp_path("torn");
+        // 模拟历史撕裂尾：一个被截断的 JSON 行（无换行）
+        std::fs::write(&p, "{\"trunc").unwrap();
+        append_line(&p, "{\"ok\":1}");
+        let content = std::fs::read_to_string(&p).unwrap();
+        let lines: Vec<&str> = content.lines().collect();
+        assert_eq!(lines, vec!["{\"trunc", "{\"ok\":1}"], "新行必须独立成行");
+        // 语义验证：坏行解析失败被跳过，新行可正常解析
+        let parsed: Vec<Result<serde_json::Value, _>> =
+            content.lines().map(serde_json::from_str).collect();
+        assert!(parsed[0].is_err());
+        assert!(parsed[1].is_ok());
+        std::fs::remove_file(&p).ok();
     }
 }
