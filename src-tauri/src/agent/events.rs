@@ -384,9 +384,11 @@ pub async fn get_trace_from_db(app: &AppHandle, run_id: &str) -> Option<serde_js
 /// 此前仅前端链路在任务结束后经 updateRound 上报 thinking_content——MCP/无前端链路的轮次
 /// 该列为空，UI 会话历史看不到思考过程（用户实锤「数据均要保存」）。
 pub fn trace_thinking_snapshot(run_id: &str) -> String {
+    // F017：毒化免疫——Mutex 中毒后 unwrap 会永久 panic，击穿 runtime.rs 终态回填
+    // （emit_task_done 已执行但 persist_round_process_if_empty 未执行，轨迹列永久为空）。
     run_traces()
         .lock()
-        .unwrap()
+        .unwrap_or_else(|e| e.into_inner())
         .get(run_id)
         .map(|b| b.thinking.clone())
         .unwrap_or_default()
@@ -395,30 +397,28 @@ pub fn trace_thinking_snapshot(run_id: &str) -> String {
 /// 引擎终态回填用（#8 per-run）：从指定 run 的事件流提取 tool_finished 的工具调用摘要，
 /// 序列化为前端 updateRound 同款落库格式 `[{name,status,args,result,step?}]`
 /// （session-helpers 重建 ToolStep 卡片按此解析）。
+///
+/// F017：持锁段只做**最小提取**（仅 tool_finished 的 step 对象——事件流大头是流式
+/// 增量/思考分片等大对象）；原实现持锁整包 clone `Vec<Value>`（数百事件），阻塞
+/// `push_event` 发射热路径，事件总线成全局串行瓶颈。毒化免疫同上。
 pub fn trace_tool_calls_summary_json(run_id: &str) -> String {
-    let events = run_traces()
-        .lock()
-        .unwrap()
-        .get(run_id)
-        .map(|b| b.events.clone())
-        .unwrap_or_default();
+    let steps: Vec<serde_json::Value> = {
+        let map = run_traces().lock().unwrap_or_else(|e| e.into_inner());
+        map.get(run_id)
+            .map(|b| {
+                b.events
+                    .iter()
+                    .filter_map(|e| e.get("payload"))
+                    .filter(|p| p.get("eventType").and_then(|x| x.as_str()) == Some("tool_finished"))
+                    .filter_map(|p| p.get("step").cloned())
+                    .filter(|step| !step.get("toolName").and_then(|x| x.as_str()).unwrap_or("").is_empty())
+                    .collect()
+            })
+            .unwrap_or_default()
+    }; // 锁已释放：字段挑选与序列化在锁外进行
     let mut out: Vec<serde_json::Value> = Vec::new();
-    for e in events.iter() {
-        let p = match e.get("payload") {
-            Some(p) => p,
-            None => continue,
-        };
-        if p.get("eventType").and_then(|x| x.as_str()) != Some("tool_finished") {
-            continue;
-        }
-        let step = match p.get("step") {
-            Some(s) => s,
-            None => continue,
-        };
+    for step in &steps {
         let name = step.get("toolName").and_then(|x| x.as_str()).unwrap_or("");
-        if name.is_empty() {
-            continue;
-        }
         out.push(serde_json::json!({
             "name": name,
             "status": step.get("status").and_then(|x| x.as_str()).unwrap_or("success"),
@@ -1377,5 +1377,75 @@ mod tests {
         // 作用域外：无 run_id → None
         let outside = CURRENT_RUN_ID.try_with(|_| ()).is_err();
         assert!(outside || current_session_id().is_none(), "作用域外不应有归属会话");
+    }
+}
+
+#[cfg(test)]
+mod f017_tests {
+    use super::*;
+
+    fn sample_trace() -> RunTrace {
+        RunTrace {
+            events: vec![
+                // 应被提取：tool_finished 且有 toolName
+                serde_json::json!({"payload": {"eventType": "tool_finished", "step": {"toolName": "native__read_file", "status": "success", "args": {"path": "a.txt"}, "result": "ok", "step": 1}}}),
+                // 应被提取：tool_finished 无显式 status（默认 success）
+                serde_json::json!({"payload": {"eventType": "tool_finished", "step": {"toolName": "native__write_file", "args": {"path": "b.txt"}, "result": "written", "step": 2}}}),
+                // 不应提取：tool_started / 无 step / toolName 为空
+                serde_json::json!({"payload": {"eventType": "tool_started", "step": {"toolName": "native__read_file"}}}),
+                serde_json::json!({"payload": {"eventType": "tool_finished", "step": {"toolName": "", "status": "failed"}}}),
+                serde_json::json!({"payload": {"eventType": "tool_finished"}}),
+                // 不应提取：无 payload 的杂项事件
+                serde_json::json!({"other": 1}),
+            ],
+            thinking: "t".into(),
+            reply: String::new(),
+            started_at: 0,
+            prompt_tokens: 0,
+            completion_tokens: 0,
+            agent_id: None,
+            session_id: None,
+        }
+    }
+
+    /// F017：提取逻辑等价性重构回归——仅 tool_finished 且有 toolName 的步骤入列，
+    /// 字段（name/status/args/result/step）逐项保留，无 status 默认 success。
+    #[test]
+    fn tool_calls_summary_extracts_tool_finished_only() {
+        run_traces()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert("f017-extract".into(), sample_trace());
+        let out = trace_tool_calls_summary_json("f017-extract");
+        let arr: Vec<serde_json::Value> = serde_json::from_str(&out).unwrap();
+        assert_eq!(arr.len(), 2, "只提取两条合法 tool_finished");
+        assert_eq!(arr[0]["name"], "native__read_file");
+        assert_eq!(arr[0]["status"], "success");
+        assert_eq!(arr[0]["args"]["path"], "a.txt");
+        assert_eq!(arr[1]["name"], "native__write_file");
+        assert_eq!(arr[1]["status"], "success", "无显式 status 默认 success");
+        assert_eq!(arr[1]["result"], "written");
+        // 清理，防跨测试残留
+        run_traces()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove("f017-extract");
+    }
+
+    /// F017 核心场景：Mutex 毒化后两个读取函数不再 panic（原 unwrap 会永久 panic
+    /// 并击穿 runtime.rs 终态回填——轨迹思考/工具列永久为空）。
+    #[test]
+    fn poisoned_mutex_does_not_panic_callers() {
+        // 人为毒化：持锁 panic
+        let _ = std::panic::catch_unwind(|| {
+            let mut g = run_traces().lock().unwrap();
+            g.insert("f017-poison".into(), sample_trace());
+            panic!("poison the mutex");
+        });
+        // 毒化后调用：不再 panic（原 unwrap 在此永久 panic），且经 into_inner 数据完好
+        assert_eq!(trace_thinking_snapshot("f017-poison"), "t");
+        let out = trace_tool_calls_summary_json("f017-poison");
+        let arr: Vec<serde_json::Value> = serde_json::from_str(&out).unwrap();
+        assert_eq!(arr.len(), 2, "毒化不影响读取，提取逻辑照常工作");
     }
 }

@@ -27,11 +27,13 @@
 
 - **F016 已完成 ✅**（2026-10-05）：board_json 读-改-写丢更新——`BOARD_GATES` 逐会话异步门 + `update_board` 唯一写入口（门内读最新快照→增量改→整体写回），三个 persist 函数全部改道；`persist_board` 不再整板覆盖（编排板只权威 tasks/artifacts_index，DB 决策卡/行动项保留）；内存库单测 3 项，247 Rust 测试通过。
 
+- **F017 已完成 ✅**（2026-10-05）：events.rs 两处裸 lock().unwrap 毒化免疫（Mutex 中毒不再永久 panic 击穿终态回填）+ trace_tool_calls_summary_json 持锁段最小提取（只 clone tool_finished 的 step 小对象，序列化移到锁外，push_event 热路径不再被整包深拷贝阻塞）；提取等价性重构回归 + 人为毒化实测；249 Rust 测试通过，裸锁审计清零。**至此走查报告「严重」级 1.8-1.17 十项（P1）全部清完 ✅，P1 仅剩 F018（前端测试基建）。**
+
 ## 下一步候选
 
-1. **F017**：events.rs 两处裸 lock().unwrap + 持锁深拷贝（报告已给处方：unwrap_or_else + mem::take 出锁序列化）。
-2. **F018**：前端测试基建（零测试 + 无 Lint，结构性债）。
-3. **F019-F035**：P2 一般债批次。
+1. **F018**：前端测试基建（零测试 + 无 Lint）——先补关键路径单测（mapper SQL 参数绑定、runtimeStore 事件路由、kbFs 路径守卫），再引 ESLint；属结构性工程债，改动面与验证方式与前序安全项不同，开工前建议先对齐范围。
+2. **F019-F035**：P2 一般债批次（可按序小步快跑）。
+3. **F028 / F031**：P2 中的安全项（PathGuard 盘符逃逸 + symlink TOCTOU；sftp download `..` 防护——后者可复用 F008 的 ensure_path_in_roots 原语）。
 
 ## 环境事实（跨设备必读）
 
