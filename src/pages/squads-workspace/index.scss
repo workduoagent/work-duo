@@ -885,6 +885,18 @@
   padding: 10px 12px;
   background: var(--color-background);
 
+  /* F050：同上 —— 协作轮次可无界增长（rounds 不分页），跳过视口外渲染。
+     高度给 96px 估算（轮次卡片含标签头 + 正文，通常 2-4 行）。
+     ⚠️`--final`（最终汇总）是用户最关心的内容，若被跳过会有感知，
+     故排除——它通常在列表末尾，进入视口即渲染。 */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 96px;
+
+  &--final {
+    // 最终汇总始终参与渲染
+    content-visibility: visible;
+  }
+
   &__head {
     display: flex;
     align-items: center;

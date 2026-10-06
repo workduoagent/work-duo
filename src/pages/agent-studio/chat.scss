@@ -698,6 +698,17 @@
     gap: 10px;
     align-items: flex-start;
 
+    /* F050：长会话渲染优化 —— 跳过视口外消息的渲染工作。
+       长会话（数百轮）此前全量渲染 DOM，滚动与输入回显都随之变慢。
+       `content-visibility: auto` 让浏览器跳过视口外元素的布局与绘制，
+       滚动到附近时才渲染 —— 零依赖、零行为风险（不影响事件绑定与查找）。
+
+       ⚠️ 必须配`contain-intrinsic-size` 兜底高度：否则视口外元素高度按0
+       计算，滚动条长度会随滚动跳变（用户能明显感到抖动）。给的是估算值，
+       真实高度在元素进入视口时替换。 */
+    content-visibility: auto;
+    contain-intrinsic-size: auto 72px;
+
     &--user {
       flex-direction: row-reverse;
     }
