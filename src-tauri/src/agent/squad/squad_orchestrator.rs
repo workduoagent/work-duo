@@ -106,7 +106,7 @@ async fn write_metrics_round(_app: &AppHandle, pool: &sqlx::SqlitePool, squad_id
     let _ = sqlx::query(
         "INSERT INTO agent_squad_round (id, squad_id, session_id, speaker_agent_id, role, content, kind, created_at) \
          VALUES (?, ?, ?, NULL, '系统', ?, 'metrics', ?)")
-    .bind(format!("sqr_{}", now_ms()))
+    .bind(round_id())
     .bind(squad_id)
     .bind(session_id)
     .bind(&payload)
@@ -253,7 +253,7 @@ fn spawn_run_wall_clock(
                 "INSERT INTO agent_squad_round (id, squad_id, session_id, speaker_agent_id, role, content, kind, created_at) \
                  VALUES (?, ?, ?, NULL, '系统', ?, 'system', ?)",
             )
-            .bind(format!("sqr_{}", now_ms()))
+            .bind(round_id())
             .bind(&sqid)
             .bind(&sid)
             .bind(format!(
@@ -374,7 +374,7 @@ async fn pause_checkpoint(
     let _ = sqlx::query(
         "INSERT INTO agent_squad_round (id, squad_id, session_id, speaker_agent_id, role, content, kind, created_at) VALUES (?, ?, ?, NULL, '系统', ?, 'system', ?)",
     )
-    .bind(format!("sqr_{}", now_ms()))
+    .bind(round_id())
     .bind(&squad.squad_id)
     .bind(session_id)
     .bind(&note)
@@ -407,7 +407,7 @@ async fn pause_checkpoint(
         let _ = sqlx::query(
             "INSERT INTO agent_squad_round (id, squad_id, session_id, speaker_agent_id, role, content, kind, created_at) VALUES (?, ?, ?, NULL, '系统', ?, 'system', ?)",
         )
-        .bind(format!("sqr_{}", now_ms()))
+        .bind(round_id())
         .bind(&squad.squad_id)
         .bind(session_id)
         .bind(&note)
@@ -645,7 +645,7 @@ async fn finish_squad_session(
         "INSERT INTO agent_squad_round (id, squad_id, session_id, speaker_agent_id, role, content, kind, created_at) \
          VALUES (?, ?, ?, NULL, '系统', ?, 'system', ?)",
     )
-    .bind(format!("sqr_{}", now_ms()))
+    .bind(round_id())
     .bind(squad_id)
     .bind(session_id)
     .bind(summary)
@@ -671,6 +671,14 @@ async fn finish_squad_session(
             summary: summary.to_string(),
         },
     );
+    // F035：在此**无条件**写 metrics round。
+    // 原实现依赖各调用点在正常路径显式调write_metrics_round，导致早退分支
+    // （如 run_squad_chat 的「无汇总主笔」直接 finish + return）从未落盘，
+    // 而 SquadCancelGuard::drop 会清掉累加器 → 本次 run 的 token 成本彻底丢失，
+    // Delivery Pack 的 cost 字段显示 0。
+    // write_metrics_round 内部是 take 语义（第二次调用 acc 为 None 直接 return），
+    // 故无条件调用幂等且不会重复写。
+    write_metrics_round(app, pool, squad_id, session_id).await;
     // S2：终态组装 Delivery Pack（证据链 + 成本 + 产物索引），尽力而为不阻塞终态。
     build_and_persist_pack(pool, app, squad_id, session_id, status, summary).await;
     tracing::info!("[squad] 会话 {} 终态：{}", session_id, status);
@@ -720,6 +728,10 @@ struct HandoffBundle {
     open_questions: Vec<String>,
     #[serde(default)]
     metrics: HandoffMetrics,
+    /// F033：产物清单是否因超过 200 项上限而被截断。
+    /// 下游成员据此提示「清单不完整，需直接读工作空间」，避免误以为产物已全部交付。
+    #[serde(default)]
+    truncated: bool,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -767,11 +779,20 @@ fn is_ignored_segment(name: &str) -> bool {
 }
 
 /// 递归收集工作空间产物文件（相对路径 + 字节量），排除引擎内部结构；上限 200 个防爆炸。
-fn collect_artifacts(ws: &str) -> Vec<(String, u64)> {
+///
+/// F033：达到上限时原先**静默 return**，既不报错也不 warn——若成员产出了大量文件
+/// （build 产物 /未被 `is_ignored_segment` 覆盖的自定义目录），真正的交付物可能排在
+/// 200 名之后，导致 `HandoffBundle.artifacts` 与 `board.artifacts_index` 双双缺失，
+/// **交付物静默丢失而无人知晓**。
+/// 现返回 `(files, truncated)`：达到上限即置 `truncated`，由调用方 warn + 写入
+/// `HandoffBundle.truncated`，让下游成员与用户明确知道「产物清单已截断」。
+fn collect_artifacts(ws: &str) -> (Vec<(String, u64)>, bool) {
     let mut out = Vec::new();
+    let mut truncated = false;
     let root = std::path::PathBuf::from(ws);
-    fn walk(dir: &std::path::Path, rel: &str, out: &mut Vec<(String, u64)>) {
+    fn walk(dir: &std::path::Path, rel: &str, out: &mut Vec<(String, u64)>, truncated: &mut bool) {
         if out.len() >= 200 {
+            *truncated = true;
             return;
         }
         let Ok(rd) = std::fs::read_dir(dir) else {
@@ -786,7 +807,7 @@ fn collect_artifacts(ws: &str) -> Vec<(String, u64)> {
             }
             let child_rel = if rel.is_empty() { name.clone() } else { format!("{rel}/{name}") };
             match e.file_type() {
-                Ok(t) if t.is_dir() => walk(&e.path(), &child_rel, out),
+                Ok(t) if t.is_dir() => walk(&e.path(), &child_rel, out, truncated),
                 Ok(t) if t.is_file() => {
                     let bytes = e.metadata().map(|m| m.len()).unwrap_or(0);
                     out.push((child_rel, bytes));
@@ -794,12 +815,19 @@ fn collect_artifacts(ws: &str) -> Vec<(String, u64)> {
                 _ => {}
             }
             if out.len() >= 200 {
+                *truncated = true;
                 return;
             }
         }
     }
-    walk(&root, "", &mut out);
-    out
+    walk(&root, "", &mut out, &mut truncated);
+    if truncated {
+        tracing::warn!(
+            "[squad] 产物清单已截断至 200 项（工作空间 {}），其余产物未纳入交接包",
+            ws
+        );
+    }
+    (out, truncated)
 }
 
 /// 读取文本产物前 2KB 作为 preview（二进制内容截断后可能乱码，调用方按扩展名跳过）。
@@ -840,7 +868,7 @@ fn build_handoff_bundle(
     expected: &[String],
 ) -> HandoffBundle {
     let _ = squad_id; // 交接箱落档由调用方（有 pool 上下文）完成；此处仅组装 bundle
-    let files = collect_artifacts(ws);
+    let (files, truncated) = collect_artifacts(ws);
     let mut artifacts = Vec::new();
     for (rel, bytes) in &files {
         artifacts.push(HandoffArtifact {
@@ -885,6 +913,7 @@ fn build_handoff_bundle(
             completion_tokens: usage.1,
             duration_ms: wall_ms,
         },
+        truncated,
     }
 }
 
@@ -958,6 +987,15 @@ fn render_handoff_section(idx: usize, total: usize, bundle: &HandoffBundle, deli
         for q in &bundle.open_questions {
             s.push_str(&format!("- {q}\n"));
         }
+    }
+    // F033：产物清单被 200 项上限截断时必须明确告知下游，否则成员会误以为
+    // 上面列出的就是全部产物，从而遗漏真正的交付物。
+    if bundle.truncated {
+        s.push_str(&format!(
+            "\n⚠️ 注意：上游产物清单已达 200 项上限被**截断**，以上并非全部产物。\
+             若你需要的文件不在列表中，请直接读上游交接箱（shared/inbox/{}/）确认，勿臆造其存在。\n",
+            bundle.task_id
+        ));
     }
     s.push_str("\n请基于以上交接继续你的任务；若交接不足，先读文件或说明缺口，不要臆造。");
     s
@@ -2369,7 +2407,7 @@ async fn finish_orchestrator_tail(
         "INSERT INTO agent_squad_round (id, squad_id, session_id, speaker_agent_id, role, content, kind, created_at) \
          VALUES (?, ?, ?, NULL, '汇总', ?, 'summary', ?)",
     )
-    .bind(format!("sqr_{}", now_ms()))
+    .bind(round_id())
     .bind(&squad.squad_id)
     .bind(session_id)
     .bind(&summary)
@@ -2532,7 +2570,7 @@ pub async fn resume_squad_session(app: &AppHandle, squad_key: &str, session_id: 
     let _ = sqlx::query(
         "INSERT INTO agent_squad_round (id, squad_id, session_id, speaker_agent_id, role, content, kind, created_at) VALUES (?, ?, ?, NULL, '系统', ?, 'system', ?)",
     )
-    .bind(format!("sqr_{}", now_ms()))
+    .bind(round_id())
     .bind(&squad.squad_id)
     .bind(session_id)
     .bind(&note)
@@ -2703,7 +2741,7 @@ pub async fn squad_broadcast_note(
     let _ = sqlx::query(
         "INSERT INTO agent_squad_round (id, squad_id, session_id, speaker_agent_id, role, content, kind, created_at) VALUES (?, ?, ?, NULL, '广播', ?, 'system', ?)",
     )
-    .bind(format!("sqr_{}", now_ms()))
+    .bind(round_id())
     .bind(squad_id)
     .bind(session_id)
     .bind(&row)
@@ -3795,7 +3833,7 @@ async fn run_squad_pipeline(
                     "INSERT INTO agent_squad_round (id, squad_id, session_id, speaker_agent_id, role, content, kind, created_at) \
                      VALUES (?, ?, ?, NULL, '系统', ?, 'system', ?)",
                 )
-                .bind(format!("sqr_{}", now_ms()))
+                .bind(round_id())
                 .bind(&squad.squad_id)
                 .bind(session_id)
                 .bind(format!("流水线 DAG 存在循环依赖，无法执行：{e}"))
@@ -4153,7 +4191,7 @@ async fn run_squad_pipeline(
         "INSERT INTO agent_squad_round (id, squad_id, session_id, speaker_agent_id, role, content, kind, created_at) \
          VALUES (?, ?, ?, NULL, '汇总', ?, 'summary', ?)",
     )
-    .bind(format!("sqr_{}", now_ms()))
+    .bind(round_id())
     .bind(&squad.squad_id)
     .bind(session_id)
     .bind(&summary)
@@ -4329,7 +4367,7 @@ async fn run_squad_chat(
                 "INSERT INTO agent_squad_round (id, squad_id, session_id, speaker_agent_id, role, content, kind, created_at) \
                  VALUES (?, ?, ?, ?, ?, ?, 'message', ?)",
             )
-            .bind(format!("sqr_{}", now_ms()))
+            .bind(round_id())
             .bind(&squad.squad_id)
             .bind(session_id)
             .bind(&member.agent.agent_id)
@@ -4400,7 +4438,7 @@ async fn run_squad_chat(
             "INSERT INTO agent_squad_round (id, squad_id, session_id, speaker_agent_id, role, content, kind, created_at) \
              VALUES (?, ?, ?, NULL, '系统', ?, 'system', ?)",
         )
-        .bind(format!("sqr_{}", now_ms()))
+        .bind(round_id())
         .bind(&squad.squad_id)
         .bind(session_id)
         .bind(&note)
@@ -4471,7 +4509,7 @@ async fn run_squad_chat(
         "INSERT INTO agent_squad_round (id, squad_id, session_id, speaker_agent_id, role, content, kind, created_at) \
          VALUES (?, ?, ?, NULL, '汇总', ?, 'summary', ?)",
     )
-    .bind(format!("sqr_{}", now_ms()))
+    .bind(round_id())
     .bind(&squad.squad_id)
     .bind(session_id)
     .bind(&summary)
@@ -4514,7 +4552,7 @@ async fn run_squad_chat(
             let _ = sqlx::query(
                 "INSERT INTO agent_squad_round (id, squad_id, session_id, speaker_agent_id, role, content, kind, created_at) VALUES (?, ?, ?, NULL, '系统', ?, 'system', ?)",
             )
-            .bind(format!("sqr_{}", now_ms()))
+            .bind(round_id())
             .bind(&squad.squad_id)
             .bind(session_id)
             .bind(&note)
@@ -4576,7 +4614,7 @@ async fn run_squad_chat(
             let _ = sqlx::query(
                 "INSERT INTO agent_squad_round (id, squad_id, session_id, speaker_agent_id, role, content, kind, created_at) VALUES (?, ?, ?, NULL, '系统', ?, 'system', ?)",
             )
-            .bind(format!("sqr_{}", now_ms()))
+            .bind(round_id())
             .bind(&squad.squad_id)
             .bind(session_id)
             .bind(&done_note)
@@ -4686,6 +4724,7 @@ mod s1_tests {
             }],
             open_questions: vec!["C 企业版价格需登录".into()],
             metrics: HandoffMetrics::default(),
+            truncated: false,
         };
         let s = render_handoff_section(1, 2, &bundle, &["inbox/t1/notes.md（1024 bytes）".to_string()]);
         assert!(s.contains("上游交接 1/2"));
@@ -4694,6 +4733,28 @@ mod s1_tests {
         assert!(s.contains("inbox/t1/notes.md"));
         assert!(s.contains("C 企业版价格需登录"));
         assert!(s.contains("不要臆造"));
+    }
+
+    /// F033：`truncated` 时交接段须明确提示下游「产物清单不完整」，
+    /// 否则下游会误以为已拿到全部产物。
+    #[test]
+    fn render_handoff_section_warns_when_truncated() {
+        let bundle = HandoffBundle {
+            from_agent_id: "agent-1".into(),
+            from_role: "工程师".into(),
+            task_id: "t1".into(),
+            status: "ok".into(),
+            summary: "已完成".into(),
+            artifacts: vec![],
+            open_questions: vec![],
+            metrics: HandoffMetrics::default(),
+            truncated: true,
+        };
+        let s = render_handoff_section(1, 1, &bundle, &[]);
+        assert!(
+            s.contains("截断") || s.contains("不完整"),
+            "产物清单被截断时须在交接段提示下游，actual={s}"
+        );
     }
 
     /// S1 批次2：决策卡解析——【squad-decisions】尾块宽容解析（有标记/无标记/坏 JSON/非法 kind）。
@@ -4726,11 +4787,23 @@ mod s1_tests {
             artifacts: vec![],
             open_questions: vec![],
             metrics: HandoffMetrics { prompt_tokens: 10, completion_tokens: 2, duration_ms: 500 },
+            truncated: false,
         };
         let json = serde_json::to_string(&bundle).unwrap();
         let back: HandoffBundle = serde_json::from_str(&json).unwrap();
         assert_eq!(back.status, "failed");
         assert_eq!(back.metrics.prompt_tokens, 10);
+        assert!(!back.truncated);
+    }
+
+    /// F033：`truncated` 字段的向后兼容——旧 JSON 无该字段时应默认为 false。
+    #[test]
+    fn handoff_bundle_truncated_defaults_false_on_legacy_json() {
+        let legacy = r#"{"from_agent_id":"a","from_role":"r","task_id":"t1",
+            "status":"ok","summary":"s","artifacts":[],"open_questions":[],
+            "metrics":{"prompt_tokens":1,"completion_tokens":1,"duration_ms":1}}"#;
+        let back: HandoffBundle = serde_json::from_str(legacy).expect("旧 bundle_json 应可解析");
+        assert!(!back.truncated, "旧数据缺该字段时须默认 false 而非报错");
     }
 
     /// S1：产物扫描排除引擎内部结构；expectedArtifacts 对照进 open_questions。
@@ -4743,8 +4816,9 @@ mod s1_tests {
         std::fs::write(sub.join("data.csv"), "a,b").unwrap();
         std::fs::create_dir_all(tmp.join(".wd_mem")).unwrap();
         std::fs::write(tmp.join(".wd_mem").join("internal.json"), "{}").unwrap();
-        let files = collect_artifacts(tmp.to_str().unwrap());
+        let (files, truncated) = collect_artifacts(tmp.to_str().unwrap());
         assert_eq!(files.len(), 2, "应排除 .wd_mem 内部结构");
+        assert!(!truncated, "仅2 个产物，不应触发截断");
         // preview：md/csv 可读，未知扩展名跳过
         assert!(read_preview(tmp.to_str().unwrap(), "report.md").is_some());
         // expected 对照：缺失产物进 open_questions（走 build_handoff_bundle）
@@ -4753,6 +4827,27 @@ mod s1_tests {
             (1, 1), 100, &["missing.md".to_string()],
         );
         assert!(bundle.open_questions.iter().any(|q| q.contains("missing.md")));
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    /// F033：产物数超上限时必须置 `truncated` 并透传到 HandoffBundle，
+    /// 不能静默截断（否则真实交付物可能落在 200 名之后而无人知晓）。
+    #[test]
+    fn collect_artifacts_flags_truncation() {
+        let tmp = std::env::temp_dir().join(format!("wd_s1_trunc_{}", std::process::id()));
+        std::fs::create_dir_all(&tmp).unwrap();
+        for i in 0..230 {
+            std::fs::write(tmp.join(format!("f{i:04}.txt")), "x").unwrap();
+        }
+        let (files, truncated) = collect_artifacts(tmp.to_str().unwrap());
+        assert_eq!(files.len(), 200, "应在 200 项处停止");
+        assert!(truncated, "超过上限必须置 truncated");
+        // 该标志须进入 bundle 供下游成员判断
+        let bundle = build_handoff_bundle(
+            tmp.to_str().unwrap(), "sqd", "agent", "角色", "t1", "完成", "ok",
+            (0, 0), 1, &[],
+        );
+        assert!(bundle.truncated, "truncated 须透传到 HandoffBundle");
         std::fs::remove_dir_all(&tmp).ok();
     }
 

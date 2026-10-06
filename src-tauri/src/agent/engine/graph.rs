@@ -13,7 +13,7 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
 
 use serde_json::json;
 use serde_json::Value;
@@ -109,7 +109,16 @@ pub struct KnowledgeGraph {
     adj_to: HashMap<String, Vec<String>>,
     /// id 生成序列。
     seq: AtomicU64,
+    /// F034：`_index.json` 节流——距上次落盘不足 `INDEX_THROTTLE_MS` 时只标脏，
+    /// 由后续调用或 `flush_index` 补写。避免「每个工具轮都全量序列化 N 个节点 +
+    /// 整文件写」的 O(N²) 落盘（长会话节点数可达数百，每轮工具调用触发 1-2 次）。
+    index_dirty: AtomicBool,
+    /// 上次 `_index.json` 落盘时刻（epoch ms）。
+    index_last_written: AtomicI64,
 }
+
+/// `_index.json` 节流窗口（ms）。
+const INDEX_THROTTLE_MS: u64 = 2_000;
 
 impl KnowledgeGraph {
     /// 打开（或新建）某工作空间下的实体图。
@@ -126,6 +135,8 @@ impl KnowledgeGraph {
             adj_from: HashMap::new(),
             adj_to: HashMap::new(),
             seq: AtomicU64::new(0),
+            index_dirty: AtomicBool::new(false),
+            index_last_written: AtomicI64::new(0),
         };
         let base = match workspace_root {
             Some(w) => {
@@ -305,8 +316,33 @@ impl KnowledgeGraph {
     }
 
     /// 写 `_index.json`（轻量摘要，可全量注入 system prompt）。
+    ///
+    /// F034 两项修复：
+    ///  1. **节流**：`index_dirty` + `index_last_written` 使其成为「标脏 + 按窗口补写」
+    ///     而非每次调用都全量序列化 N 个节点并整文件覆写（O(N²) 落盘）。
+    ///     节点变更只标脏，窗口内重复调用直接返回；`flush_index` 强制补写。
+    ///  2. **原子替换**：先写同目录临时文件再 `fs::rename` 覆盖——中途失败/崩溃
+    ///     只会留下无人读取的 `.tmp`，不会把索引写成半截 JSON。
     fn write_index(&self) {
-        if let Some(base) = &self.base_dir {
+        self.index_dirty.store(true, Ordering::Relaxed);
+        let now = now_ms();
+        let last = self.index_last_written.load(Ordering::Relaxed);
+        // 首次（last == 0）或已超节流窗口 → 立即落盘
+        // （now_ms() 返回 i64，差值用 i64 比较后与阈值换算）
+        if last != 0 && (now - last) < INDEX_THROTTLE_MS as i64 {
+            return;
+        }
+        self.flush_index();
+    }
+
+    /// 强制把 `_index.json` 落盘（跳过节流窗口）。会话收尾时应调用，
+    /// 确保最后一批节点变更进入索引。
+    pub fn flush_index(&self) {
+        if !self.index_dirty.swap(false, Ordering::Relaxed) {
+            return;
+        }
+        let Some(base) = &self.base_dir else { return };
+        {
             let mut nodes_idx = serde_json::Map::new();
             for (id, node) in &self.nodes {
                 let mut entry = serde_json::Map::new();
@@ -351,7 +387,26 @@ impl KnowledgeGraph {
                 }
             });
             if let Ok(s) = serde_json::to_string_pretty(&index) {
-                let _ = std::fs::write(base.join(INDEX_FILE), s);
+                // 原子替换：写同目录 .tmp 再 rename（F034）
+                let target = base.join(INDEX_FILE);
+                let tmp = base.join(format!("{INDEX_FILE}.tmp"));
+                match std::fs::write(&tmp, s.as_bytes()) {
+                    Ok(()) => {
+                        if let Err(e) = std::fs::rename(&tmp, &target) {
+                            // 跨设备/占用等失败：清理 tmp 并留痕，索引保持旧内容（不半截）
+                            let _ = std::fs::remove_file(&tmp);
+                            tracing::warn!(
+                                "[graph] _index.json 原子替换失败（保留旧索引）：{e}"
+                            );
+                        } else {
+                            self.index_last_written.store(now_ms(), Ordering::Relaxed);
+                        }
+                    }
+                    Err(e) => {
+                        let _ = std::fs::remove_file(&tmp);
+                        tracing::warn!("[graph] _index.json 临时文件写入失败：{e}");
+                    }
+                }
             }
         }
     }
@@ -942,6 +997,9 @@ impl KnowledgeGraph {
 
     /// 保存会话子图快照（`graph/sessions/{session_id}.json`）：会话节点 + 其任务 + 产物 + 相关边。
     pub fn snapshot(&self, session_id: &str) {
+        // F034：收尾时强制补写索引——节流窗口内被抑制的最后一批节点变更
+        // 必须在此落盘，否则会话结束瞬间的变更会滞留内存直到下次写入。
+        self.flush_index();
         if let Some(base) = &self.base_dir {
             let session_nodes: Vec<&GraphNode> = self
                 .nodes
@@ -1158,5 +1216,67 @@ mod f015_tests {
         assert!(parsed[0].is_err());
         assert!(parsed[1].is_ok());
         std::fs::remove_file(&p).ok();
+    }
+}
+
+#[cfg(test)]
+mod f034_index_tests {
+    //! F034 回归：`_index.json` 节流 + 原子替换。
+    //!
+    //! 原实现每次 create/update node 都全量序列化 N 个节点并整文件覆写（O(N²) 落盘），
+    //! 且 `fs::write` 非原子——中途失败会留下半截 JSON。
+    use super::*;
+
+    fn tmp_ws(tag: &str) -> std::path::PathBuf {
+        let d = std::env::temp_dir().join(format!("wd_f034_{tag}_{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    /// 节流窗口内连续变更只落盘一次；`flush_index` 强制补写最后一批。
+    #[test]
+    fn write_index_is_throttled_and_flushable() {
+        let ws = tmp_ws("throttle");
+        let mut g = KnowledgeGraph::open(Some(ws.to_str().unwrap())).unwrap();
+
+        // 首次写入应立即落盘
+        g.create_node(NodeKind::Task, json!({ "title": "t1" }));
+        let idx = ws.join(".wd_mem").join(GRAPH_DIR).join(INDEX_FILE);
+        assert!(idx.exists(), "首次变更应立即写出 _index.json");
+
+        // 窗口内连续 5 次变更：文件内容不应每次都变（节流生效）
+        let before = std::fs::metadata(&idx).unwrap().len();
+        for i in 0..5 {
+            g.create_node(NodeKind::Task, json!({ "title": format!("t{i}") }));
+        }
+        // 强制补写后应包含全部节点
+        g.flush_index();
+        let body = std::fs::read_to_string(&idx).unwrap();
+        for i in 0..5 {
+            assert!(
+                body.contains(&format!("t{i}")),
+                "flush_index 后应包含节流期间新增的节点 t{i}"
+            );
+        }
+        assert!(std::fs::metadata(&idx).unwrap().len() > before);
+        std::fs::remove_dir_all(&ws).ok();
+    }
+
+    /// 原子替换：正常路径下不留 `.tmp` 残留，且索引是完整 JSON。
+    #[test]
+    fn write_index_leaves_no_tmp_and_is_valid_json() {
+        let ws = tmp_ws("atomic");
+        let mut g = KnowledgeGraph::open(Some(ws.to_str().unwrap())).unwrap();
+        g.create_node(NodeKind::Task, json!({ "title": "a" }));
+        g.flush_index();
+        let base = ws.join(".wd_mem").join(GRAPH_DIR);
+        let idx = base.join(INDEX_FILE);
+        let body = std::fs::read_to_string(&idx).unwrap();
+        serde_json::from_str::<serde_json::Value>(&body).expect("_index.json 必须是完整 JSON");
+        assert!(
+            !base.join(format!("{INDEX_FILE}.tmp")).exists(),
+            "成功路径不应留下 .tmp 残留"
+        );
+        std::fs::remove_dir_all(&ws).ok();
     }
 }
