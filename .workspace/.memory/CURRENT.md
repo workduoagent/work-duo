@@ -25,11 +25,13 @@
 
 - **F015 已完成 ✅**（2026-10-05）：成员图持久化撕裂防护——append_line 行+换行单次写入 + 撕裂尾补 \n 防御（半行只丢自身不连带后续节点）、交接箱/下游投递 fs::copy 改 .tmp+rename 原子替换、成员超时分支补 graph.snapshot；内存文件单测 4 项，244 Rust 测试通过。
 
+- **F016 已完成 ✅**（2026-10-05）：board_json 读-改-写丢更新——`BOARD_GATES` 逐会话异步门 + `update_board` 唯一写入口（门内读最新快照→增量改→整体写回），三个 persist 函数全部改道；`persist_board` 不再整板覆盖（编排板只权威 tasks/artifacts_index，DB 决策卡/行动项保留）；内存库单测 3 项，247 Rust 测试通过。
+
 ## 下一步候选
 
-1. **F016**：board_json 单列大 JSON 读-改-写丢更新（CAS 重读或 decisions/actions 拆表）。
-2. **F017**：events.rs 裸 lock().unwrap + 持锁深拷贝。
-3. **F018**：前端测试基建（零测试 + 无 Lint，结构性债）。
+1. **F017**：events.rs 两处裸 lock().unwrap + 持锁深拷贝（报告已给处方：unwrap_or_else + mem::take 出锁序列化）。
+2. **F018**：前端测试基建（零测试 + 无 Lint，结构性债）。
+3. **F019-F035**：P2 一般债批次。
 
 ## 环境事实（跨设备必读）
 

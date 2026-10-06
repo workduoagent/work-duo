@@ -1682,7 +1682,7 @@ fn round_id() -> String {
 
 /// S1（§4.5）：黑板 L2 状态板（board_json 列）——任务状态机 + handoff 引用 + 全队产物索引。
 /// 单写者=调度协程；Wave 内并行成员不直接 UPDATE session 行（读-改-写会丢更新）。
-#[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 struct BoardTask {
     title: String,
     assignee: String,
@@ -1706,16 +1706,65 @@ struct BoardState {
     actions: Vec<SquadAction>,
 }
 
+/// F016：board_json 写者门（进程内逐会话串行）。写者三类：编排协程 persist_board
+/// （tasks/artifacts_index 权威）+ 决策/行动项挂载（persist_decisions/persist_actions，
+/// MCP 广播可在任意 await 点并发进入）。跨进程不在范围内（产品事实单实例，见 F011）。
+static BOARD_GATES: std::sync::Mutex<
+    Option<std::collections::HashMap<String, std::sync::Arc<tokio::sync::Mutex<()>>>>,
+> = std::sync::Mutex::new(None);
+
+async fn board_gate(session_id: &str) -> std::sync::Arc<tokio::sync::Mutex<()>> {
+    let arc = {
+        let mut g = BOARD_GATES.lock().unwrap_or_else(|e| e.into_inner());
+        g.get_or_insert_with(std::collections::HashMap::new)
+            .entry(session_id.to_string())
+            .or_insert_with(|| std::sync::Arc::new(tokio::sync::Mutex::new(())))
+            .clone()
+    };
+    arc
+}
+
+/// board_json 唯一写入口（F016）：按会话串行的「读最新快照 → 增量修改 → 整体写回」。
+/// 消除两类丢更新：编排协程内存旧值整板覆盖并发写入的决策卡；并发读-改-写互相踩踏。
+async fn update_board<T>(
+    pool: &sqlx::SqlitePool,
+    session_id: &str,
+    mutate: impl FnOnce(&mut BoardState) -> T,
+) -> Result<T, String> {
+    let gate = board_gate(session_id).await;
+    let _g = gate.lock().await;
+    use sqlx::Row;
+    let raw = sqlx::query("SELECT board_json FROM agent_squad_session WHERE id = ?")
+        .bind(session_id)
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| format!("board_json 读取失败：{e}"))?
+        .and_then(|r| r.try_get::<Option<String>, _>("board_json").ok().flatten());
+    let mut board: BoardState = raw
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default();
+    let out = mutate(&mut board);
+    let json =
+        serde_json::to_string(&board).map_err(|e| format!("board_json 序列化失败：{e}"))?;
+    sqlx::query("UPDATE agent_squad_session SET board_json=? WHERE id=?")
+        .bind(json)
+        .bind(session_id)
+        .execute(pool)
+        .await
+        .map_err(|e| format!("board_json 写回失败：{e}"))?;
+    Ok(out)
+}
+
 async fn persist_board(pool: &sqlx::SqlitePool, session_id: &str, board: &BoardState) {
-    match serde_json::to_string(board) {
-        Ok(json) => {
-            let _ = sqlx::query("UPDATE agent_squad_session SET board_json=? WHERE id=?")
-                .bind(json)
-                .bind(session_id)
-                .execute(pool)
-                .await;
-        }
-        Err(e) => tracing::warn!("[squad] board_json 序列化失败：{e}"),
+    // F016：编排协程只对 tasks / artifacts_index 有权威（内存板从不携带 decisions/actions，
+    // 并发决策卡/行动项经门内挂载写入 DB）——整板覆盖会丢并发写入，此处保留 DB 最新值。
+    if let Err(e) = update_board(pool, session_id, |b| {
+        b.tasks = board.tasks.clone();
+        b.artifacts_index = board.artifacts_index.clone();
+    })
+    .await
+    {
+        tracing::warn!("[squad] {e}");
     }
 }
 
@@ -1896,25 +1945,13 @@ async fn persist_decisions(
         .execute(pool)
         .await;
     }
-    // board_json 挂载决策引用（读-改-写：会话终态单点，无并发写者）
-    if let Ok(Some((bj,))) = sqlx::query_as::<_, (Option<String>,)>(
-        "SELECT board_json FROM agent_squad_session WHERE id=?",
-    )
-    .bind(session_id)
-    .fetch_optional(pool)
-    .await
-    {
-        let mut board: BoardState = bj
-            .and_then(|s| serde_json::from_str(&s).ok())
-            .unwrap_or_default();
-        board.decisions.extend(decisions.iter().cloned());
-        if let Ok(json) = serde_json::to_string(&board) {
-            let _ = sqlx::query("UPDATE agent_squad_session SET board_json=? WHERE id=?")
-                .bind(json)
-                .bind(session_id)
-                .execute(pool)
-                .await;
-        }
+    // board_json.decisions 挂载（F016：经会话门读-合并-写，与编排协程整板写/并发广播互不丢失）
+    let r = update_board(pool, session_id, |b| {
+        b.decisions.extend(decisions.iter().cloned());
+    })
+    .await;
+    if let Err(e) = r {
+        tracing::warn!("[squad] {e}");
     }
     tracing::info!("[squad] 决策卡落盘：session={session_id} 共 {} 条", decisions.len());
     let _ = app;
@@ -1944,25 +1981,13 @@ async fn persist_actions(
         .execute(pool)
         .await;
     }
-    // board_json.actions 挂载（读-改-写：会话终态单点，无并发写者）
-    if let Ok(Some((bj,))) = sqlx::query_as::<_, (Option<String>,)>(
-        "SELECT board_json FROM agent_squad_session WHERE id=?",
-    )
-    .bind(session_id)
-    .fetch_optional(pool)
-    .await
-    {
-        let mut board: BoardState = bj
-            .and_then(|s| serde_json::from_str(&s).ok())
-            .unwrap_or_default();
-        board.actions.extend(actions.iter().cloned());
-        if let Ok(json) = serde_json::to_string(&board) {
-            let _ = sqlx::query("UPDATE agent_squad_session SET board_json=? WHERE id=?")
-                .bind(json)
-                .bind(session_id)
-                .execute(pool)
-                .await;
-        }
+    // board_json.actions 挂载（F016：经会话门读-合并-写，与编排协程整板写互不丢失）
+    let r = update_board(pool, session_id, |b| {
+        b.actions.extend(actions.iter().cloned());
+    })
+    .await;
+    if let Err(e) = r {
+        tracing::warn!("[squad] {e}");
     }
     tracing::info!("[squad] 行动项落盘：session={session_id} 共 {} 条", actions.len());
     let _ = app;
@@ -5379,5 +5404,108 @@ mod f015_tests {
         let tmp = std::path::PathBuf::from(format!("{}.tmp", dst.display()));
         assert!(!tmp.exists());
         std::fs::remove_dir_all(&base).ok();
+    }
+}
+
+#[cfg(test)]
+mod f016_tests {
+    use super::*;
+
+    async fn test_pool() -> sqlx::SqlitePool {
+        let pool = sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap();
+        sqlx::query("CREATE TABLE agent_squad_session (id TEXT PRIMARY KEY, board_json TEXT)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        pool
+    }
+
+    fn decision(text: &str) -> BoardDecision {
+        BoardDecision { kind: "scope".into(), text: text.into() }
+    }
+
+    fn action(title: &str) -> SquadAction {
+        SquadAction { title: title.into(), assignee: None, detail: None }
+    }
+
+    async fn board_of(pool: &sqlx::SqlitePool, sid: &str) -> BoardState {
+        load_board(pool, sid).await
+    }
+
+    /// F016 核心场景：编排协程整板写（内存板无 decisions）不得覆盖并发挂载的决策卡。
+    /// 并发写者（MCP 广播挂载）以 update_board 直驱——persist_decisions 的挂载段即此调用。
+    #[tokio::test]
+    async fn orchestrator_board_write_preserves_concurrent_decisions() {
+        let pool = test_pool().await;
+        sqlx::query("INSERT INTO agent_squad_session (id) VALUES ('s1')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        // 并发写者（MCP 广播）：门内挂载决策卡
+        update_board(&pool, "s1", |b: &mut BoardState| b.decisions.push(decision("并发决策卡")))
+            .await
+            .unwrap();
+        // 编排协程：内存板只有 tasks，整板写
+        let mut board = BoardState::default();
+        board.tasks.insert(
+            "t1".into(),
+            BoardTask {
+                title: "调研".into(),
+                assignee: "a".into(),
+                status: "done".into(),
+                handoff_id: None,
+            },
+        );
+        persist_board(&pool, "s1", &board).await;
+
+        let b = board_of(&pool, "s1").await;
+        assert_eq!(b.tasks.len(), 1, "tasks 权威写入生效");
+        assert_eq!(b.decisions.len(), 1, "并发决策卡不被整板写覆盖");
+        assert_eq!(b.decisions[0].text, "并发决策卡");
+    }
+
+    /// 并发挂载两批决策卡：会话门串行，两条都落盘（无丢更新）。
+    #[tokio::test]
+    async fn concurrent_decision_appends_serialize() {
+        let pool = test_pool().await;
+        sqlx::query("INSERT INTO agent_squad_session (id) VALUES ('s2')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let p1 = pool.clone();
+        let j1 = tokio::spawn(async move {
+            update_board(&p1, "s2", |b: &mut BoardState| b.decisions.push(decision("批1"))).await
+        });
+        let p2 = pool.clone();
+        let j2 = tokio::spawn(async move {
+            update_board(&p2, "s2", |b: &mut BoardState| b.decisions.push(decision("批2"))).await
+        });
+        j1.await.unwrap().unwrap();
+        j2.await.unwrap().unwrap();
+        let b = board_of(&pool, "s2").await;
+        let mut texts: Vec<&str> = b.decisions.iter().map(|d| d.text.as_str()).collect();
+        texts.sort_unstable();
+        assert_eq!(texts, vec!["批1", "批2"], "两条并发挂载都落盘（无丢更新）");
+    }
+
+    /// actions 与 decisions 独立挂载互不覆盖。
+    #[tokio::test]
+    async fn actions_and_decisions_mount_independently() {
+        let pool = test_pool().await;
+        sqlx::query("INSERT INTO agent_squad_session (id) VALUES ('s3')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        update_board(&pool, "s3", |b: &mut BoardState| b.actions.push(action("行动1")))
+            .await
+            .unwrap();
+        update_board(&pool, "s3", |b: &mut BoardState| b.decisions.push(decision("决策1")))
+            .await
+            .unwrap();
+        let b = board_of(&pool, "s3").await;
+        assert_eq!(b.actions.len(), 1);
+        assert_eq!(b.actions[0].title, "行动1");
+        assert_eq!(b.decisions.len(), 1);
+        assert_eq!(b.decisions[0].text, "决策1");
     }
 }
