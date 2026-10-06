@@ -14,6 +14,7 @@ import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore, type Mut
 import { invoke } from '@tauri-apps/api/core'
 import type { ChatSegment } from '@/pages/agent-studio/chat/types'
 import { isTauri } from '@/core/config'
+import { LONG_RUN_WARN_MS as WD_LONG_RUN_WARN_MS } from '@/core/constants/runtime'
 import type {
   ApprovalDecision,
   ApprovalRequest,
@@ -75,7 +76,9 @@ export interface AgentSessionState {
 }
 
 /** 长任务兜底告警时长（仅提示，不结束任务）。 */
-const LONG_RUN_WARN_MS = 20 * 60_000
+
+// F027：阈值单一事实源见 core/constants/runtime.ts（与 Rust WD_RUN_MAX_SECS 的关系见该文件说明）
+const LONG_RUN_WARN_MS = WD_LONG_RUN_WARN_MS
 
 export function useAgentSession(sessionId: string | null): AgentSessionState {
   // 绑定当前查看会话：读的是「该会话自己的」运行态。

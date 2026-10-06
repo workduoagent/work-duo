@@ -245,13 +245,36 @@ export async function deleteProject(id: string): Promise<void> {
     return
   }
   const db = await getDb()
-  // 取该工程下会话 id，先删轮次
-  const sessRows = await db.select<{ id: string }[]>('SELECT id FROM agent_conversation_session WHERE project_id = ?', [id])
-  for (const row of sessRows) {
-    await db.execute('DELETE FROM agent_conversation_round WHERE session_id = ?', [row.id])
+  // F026：原为「逐条删」（删 N 个会话的轮次 → 删会话 → 删工程），中途失败会留下
+  // 「轮次已删、会话残留」的半删除状态。改为事务包裹：任一步失败整体回滚。
+  //
+  // 注：DDL 里 agent_conversation_session.project_id 与
+  // agent_conversation_round.session_id 都声明了 ON DELETE CASCADE，实测
+  // node:sqlite（SQLite ≥3.26 默认 foreign_keys=ON）删父行会连带删子行，
+  // 因此两条级联 DELETE 已足够；此处仍显式保留轮次删除并在事务内 —— 不依赖
+  // 连接级的 PRAGMA 设置（若将来连接串关掉外键，显式删除仍能保证正确性），
+  // 事务则负责「要么全删要么全不删」。
+  await db.execute('BEGIN')
+  try {
+    const sessRows = await db.select<{ id: string }[]>(
+      'SELECT id FROM agent_conversation_session WHERE project_id = ?',
+      [id],
+    )
+    for (const row of sessRows) {
+      await db.execute('DELETE FROM agent_conversation_round WHERE session_id = ?', [row.id])
+    }
+    await db.execute('DELETE FROM agent_conversation_session WHERE project_id = ?', [id])
+    await db.execute('DELETE FROM agent_project WHERE id = ?', [id])
+    await db.execute('COMMIT')
+  } catch (err) {
+    // 回滚失败不应掩盖原始错误，故单独 try 吞掉（仅记录）
+    try {
+      await db.execute('ROLLBACK')
+    } catch (rollbackErr) {
+      console.error('[agent-project-mapper] deleteProject 回滚失败：', rollbackErr)
+    }
+    throw err
   }
-  await db.execute('DELETE FROM agent_conversation_session WHERE project_id = ?', [id])
-  await db.execute('DELETE FROM agent_project WHERE id = ?', [id])
 }
 
 /* ------------------------------------------------------------------ *

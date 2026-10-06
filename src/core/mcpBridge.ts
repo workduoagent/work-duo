@@ -573,9 +573,14 @@ async function dispatch(intent: string, payload: unknown): Promise<unknown> {
       fe.info('mcpBridge.skill', `skill:delete identifier=${identifier} id=${id}`)
       await deleteSkill(id)
       const rawBase = await resolveSkillBasePath()
-      // 与 skill-hub handleDelete 一致：磁盘清理失败（如目录已不存在）不阻断「库行已删」的结果
-      await removeSkillDir(rawBase, identifier).catch(() => {})
-      return { id, identifier, deleted: true }
+      // F025：磁盘清理失败不阻断「库行已删」（目录可能已不存在，属预期），
+      // 但必须留痕 + 在返回值里如实告知调用方，避免 MCP 客户端误以为目录也已清除。
+      let dirCleaned = true
+      await removeSkillDir(rawBase, identifier).catch((e) => {
+        dirCleaned = false
+        fe.warn('mcpBridge.skill', `skill:delete 磁盘目录清理失败 identifier=${identifier}：${e instanceof Error ? e.message : String(e)}`)
+      })
+      return { id, identifier, deleted: true, dirCleaned }
     }
     case 'skill:set_status': {
       const p = payload as { id?: string; identifier?: string; status?: number }

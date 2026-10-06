@@ -13,6 +13,7 @@
  * 注意：真实的 STDIO 进程拉起应在后端 / Tauri Rust 命令内完成，这里仅做
  * 网页端可执行的 HTTP / SSE 探测，足以验证「接入」是否可达并拉取工具清单。
  */
+import { MCP_TIMEOUT_SEC_DEFAULT, timeoutHint } from '@/core/constants/runtime'
 import { invoke } from '@tauri-apps/api/core'
 import { isTauri } from '@/core/config'
 import {
@@ -132,7 +133,7 @@ export async function testMcpConnection(
   >,
 ): Promise<McpConnectionResult> {
   const start = performance.now()
-  const timeoutMs = (mcp.timeoutSec ?? 120) * 1000
+  const timeoutMs = (mcp.timeoutSec ?? MCP_TIMEOUT_SEC_DEFAULT) * 1000
   const fail = (error: string): McpConnectionResult => ({
     status: 2,
     ok: false,
@@ -217,7 +218,7 @@ export async function testMcpConnection(
     const err = e as Error
     return fail(
       err.name === 'AbortError'
-        ? '连接超时（>15s），请检查地址与网络'
+        ? `连接超时（${timeoutHint(mcp.timeoutSec ?? MCP_TIMEOUT_SEC_DEFAULT)}），请检查地址与网络`
         : `连接异常：${err.message}`,
     )
   } finally {
@@ -253,7 +254,7 @@ export async function connectMcp(
         headers: mcp.headers ?? {},
         authType: mcp.authType,
         authConfig: mcp.authConfig ?? {},
-        timeoutSec: mcp.timeoutSec ?? 120,
+        timeoutSec: mcp.timeoutSec ?? MCP_TIMEOUT_SEC_DEFAULT,
       },
     })
     const tools: McpToolDefinition[] = (res.tools ?? []).map((t) => mapTool(t))
@@ -300,7 +301,7 @@ export async function callMcpTool(
           headers: mcp.headers ?? {},
           authType: mcp.authType,
           authConfig: mcp.authConfig ?? {},
-          timeoutSec: mcp.timeoutSec ?? 120,
+          timeoutSec: mcp.timeoutSec ?? MCP_TIMEOUT_SEC_DEFAULT,
           toolName,
           arguments: args ?? {},
         },
@@ -417,7 +418,7 @@ async function callMcpToolFetch(
   const url = mcp.endpointUrl
   const headers = buildHeaders(mcp)
   const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), (mcp.timeoutSec ?? 120) * 1000)
+  const timer = setTimeout(() => controller.abort(), (mcp.timeoutSec ?? MCP_TIMEOUT_SEC_DEFAULT) * 1000)
 
   try {
     // 1) initialize 握手
@@ -475,7 +476,7 @@ async function callMcpToolFetch(
     const err = e as Error
     return fail(
       err.name === 'AbortError'
-        ? '连接超时（>15s），请检查地址与网络'
+        ? `连接超时（${timeoutHint(mcp.timeoutSec ?? MCP_TIMEOUT_SEC_DEFAULT)}），请检查地址与网络`
         : `调用异常：${err.message}`,
     )
   } finally {

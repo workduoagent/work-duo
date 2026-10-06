@@ -45,6 +45,7 @@ import {
 import { listByScope } from '@/core/mapper/scenario-mapper'
 import type { ScenarioCategory } from '@/types/core'
 import { persistSkillFiles, removeSkillDir } from '@/core/file/skillFs'
+import { fe } from '@/core/logBridge'
 import { skillDetailPath } from '@/core/router/paths'
 import { SkillFormModal } from './components/SkillFormModal'
 import { SkillImportModal } from './components/SkillImportModal'
@@ -184,8 +185,13 @@ export default function SkillHubPage() {
       }
     } catch (e) {
       // 回滚：清掉可能已写入的磁盘目录与 DB 行
-      await removeSkillDir(rawBase, data.skill.identifier).catch(() => {})
-      await deleteSkill(data.skill.id).catch(() => {})
+      // F025：回滚路径允许静默（不能掩盖原始错误），但补 warn 留痕便于事后追溯
+      await removeSkillDir(rawBase, data.skill.identifier).catch((e) =>
+        fe.warn('skill-hub', `回滚：清理磁盘目录失败：${e instanceof Error ? e.message : String(e)}`),
+      )
+      await deleteSkill(data.skill.id).catch((e) =>
+        fe.warn('skill-hub', `回滚：删除库行失败：${e instanceof Error ? e.message : String(e)}`),
+      )
       throw e
     }
   }
@@ -193,8 +199,15 @@ export default function SkillHubPage() {
   async function handleDelete(s: SkillInfo) {
     const rawBase = await resolveSkillBasePath()
     setRecords(await deleteSkill(s.id))
-    await removeSkillDir(rawBase, s.identifier).catch(() => {})
-    message.success('技能已删除')
+    // F025：原为 `.catch(() => {})` —— 磁盘目录删除失败被完全吞掉，用户看到「技能已删除」
+    // 而磁盘目录仍在（技能文件残留）。改为如实告知：记录已删但目录清理失败。
+    try {
+      await removeSkillDir(rawBase, s.identifier)
+      message.success('技能已删除')
+    } catch (e) {
+      message.warning(`技能记录已删除，但磁盘目录清理失败（可手动删除 ${s.identifier} 目录）`)
+      fe.warn('skill-hub', `删除技能 ${s.identifier} 的磁盘目录失败：${e instanceof Error ? e.message : String(e)}`)
+    }
   }
 
   async function handleImport(data: SkillFormData) {
@@ -206,8 +219,13 @@ export default function SkillHubPage() {
       setRecords(list)
       message.success('导入完成')
     } catch (e) {
-      await removeSkillDir(rawBase, data.skill.identifier).catch(() => {})
-      await deleteSkill(data.skill.id).catch(() => {})
+      // F025：回滚路径允许静默（不能掩盖原始错误），但补 warn 留痕便于事后追溯
+      await removeSkillDir(rawBase, data.skill.identifier).catch((e) =>
+        fe.warn('skill-hub', `回滚：清理磁盘目录失败：${e instanceof Error ? e.message : String(e)}`),
+      )
+      await deleteSkill(data.skill.id).catch((e) =>
+        fe.warn('skill-hub', `回滚：删除库行失败：${e instanceof Error ? e.message : String(e)}`),
+      )
       throw e
     }
   }
