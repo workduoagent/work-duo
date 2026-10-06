@@ -126,7 +126,10 @@ CREATE TABLE IF NOT EXISTS mcp_info
     auth_type    TEXT   NOT NULL,
     auth_config  TEXT,
     is_active    INTEGER NOT NULL DEFAULT 1,
-    status       INTEGER NOT NULL DEFAULT 1,
+    -- F020：语义为 0 未测试 / 1 正常 / 2 异常（见上方注释），代码侧 mcp-mapper 读回时
+    -- 用 `?? 0`（未测）。原 DEFAULT 1 会让任何绕过 mapper 的 INSERT 把新 MCP 直接标成
+    -- 「已连通」，UI 亮绿灯误导用户——故对齐为 0。
+    status       INTEGER NOT NULL DEFAULT 0,
     capabilities TEXT,
     properties   TEXT,
     description  TEXT,
@@ -463,6 +466,11 @@ CREATE TABLE IF NOT EXISTS agent_conversation_round
     end_time           INTEGER,
     created_at         INTEGER NOT NULL,
     updated_at         INTEGER NOT NULL,
+    -- F019：交错时间线（ChatSegment[]：旁白/工具/正文按真实时序）。NULL = 旧 round 走旧渲染路径。
+    -- 原先只存在于 updater.sql v26，破坏「init.sql 为 DDL 单一事实源」约定：新库建表即缺列，
+    -- 须靠 updater 补齐，mapper 读 r.segments_json 恒为 undefined。updater.sql 的同名列保留
+    -- （新库执行 ALTER 时会命中 duplicate column name 分支被安全跳过，幂等）。
+    segments_json      TEXT,
     FOREIGN KEY(session_id) REFERENCES agent_conversation_session(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_agent_round_session ON agent_conversation_round(session_id, round_index);
@@ -578,6 +586,9 @@ CREATE TABLE IF NOT EXISTS agent_squad
     run_strategy    TEXT,
     supports_file_input INTEGER NOT NULL DEFAULT 0,
     workspace_dir   TEXT,
+    -- F019：定时调度上次触发时刻（epoch 毫秒），防同一分钟重复触发。
+    -- 原先只存在于 updater.sql v24；squad_scheduler.rs 以 Option<i64> 读取。
+    last_scheduled_at INTEGER,
     created_at      INTEGER NOT NULL,
     updated_at      INTEGER NOT NULL
 );

@@ -215,75 +215,84 @@ export async function getSession(id: string): Promise<AgentConversationSession |
   return rows[0] ? rowToSession(rows[0]) : undefined
 }
 
-/** 更新会话基础信息（名称/状态/结束时间/摘要/错误）。 */
+/**
+ * 更新会话基础信息（名称/状态/结束时间/摘要/错误/工程绑定）。
+ *
+ * F021 语义约定（替换原 COALESCE 方案）：
+ *   - 字段**不在 patch 里 / 值为 undefined** → 不修改该列；
+ *   - 字段值 **null** → 显式置 NULL（可用于「清空摘要/错误信息」「解绑工程」）；
+ *   - 其余 → 写入新值。
+ * 原实现对每列用 `COALESCE(?, col)`，导致传 null 时恒取旧值、任何字段都无法置空，
+ * 已被迫用 clearSessionProject 打补丁绕过（见本文件下方该函数）。现改为按 patch
+ * 实际出现的键动态生成 SET 子句，两种语义都不再需要特例函数。
+ */
 export async function updateSession(
   id: string,
-  patch: Partial<
-    Pick<
-      AgentConversationSession,
-      | 'sessionName'
-      | 'status'
-      | 'endTime'
-      | 'summary'
-      | 'errorMessage'
-      | 'totalPromptTokens'
-      | 'totalCompletionTokens'
-      | 'toolsTokens'
-    >
-  > & {
-    /** 允许传 null 以解绑工程（置为自由会话）。 */
+  patch: {
+    sessionName?: string | null
+    status?: string | null
+    endTime?: number | null
+    summary?: string | null
+    errorMessage?: string | null
+    totalPromptTokens?: number | null
+    totalCompletionTokens?: number | null
+    toolsTokens?: number | null
+    /** null = 解绑工程（置为自由会话）。 */
     projectId?: string | null
   },
 ): Promise<void> {
   const now = Date.now()
+  // 列名白名单：键取自 patch 的显式 own-property，避免拼出未授权列名
+  const COLUMNS = {
+    sessionName: 'session_name',
+    status: 'status',
+    endTime: 'end_time',
+    summary: 'summary',
+    errorMessage: 'error_message',
+    totalPromptTokens: 'total_prompt_tokens',
+    totalCompletionTokens: 'total_completion_tokens',
+    toolsTokens: 'tools_tokens',
+    projectId: 'project_id',
+  } as const
+
   if (!isTauri) {
-    const list = lsRead<AgentConversationSession>(LS_SESSION).map((s) =>
-      s.id === id
-        ? {
-            ...s,
-            sessionName: patch.sessionName ?? s.sessionName,
-            status: patch.status ?? s.status,
-            endTime: patch.endTime ?? s.endTime,
-            summary: patch.summary ?? s.summary,
-            errorMessage: patch.errorMessage ?? s.errorMessage,
-            totalPromptTokens: patch.totalPromptTokens ?? s.totalPromptTokens,
-            totalCompletionTokens: patch.totalCompletionTokens ?? s.totalCompletionTokens,
-            toolsTokens: patch.toolsTokens ?? s.toolsTokens,
-            projectId: patch.projectId ?? s.projectId,
-            updatedAt: new Date(now).toISOString(),
-          }
-        : s,
-    )
+    const list = lsRead<AgentConversationSession>(LS_SESSION).map((s) => {
+      if (s.id !== id) return s
+      const next: AgentConversationSession = { ...s, updatedAt: new Date(now).toISOString() }
+      // localStorage 分支存的是领域模型（驼峰），与 Tauri 分支的蛇形列名不同。
+      // null 语义 = 置空 → 领域模型里表现为「无值」，故 delete 该键。
+      // 逐键显式列出（而非遍历 patch）：领域模型字段类型各异，遍历会退化成
+      // Record<string, unknown> 强制转换，TS 无法校验。中间层用 unknown 收窄。
+      const set = (k: string, v: unknown) => {
+        if (v === undefined) return
+        const rec = next as unknown as Record<string, unknown>
+        if (v === null) delete rec[k]
+        else rec[k] = v
+      }
+      for (const [k, v] of Object.entries(patch)) set(k, v)
+      return next
+    })
     lsWrite(LS_SESSION, list)
     return
   }
   const db = await getDb()
+  // F021：按 patch 实际出现的键动态生成 SET 子句（列名取自上方白名单，非用户输入）。
+  // 值为 undefined 的键跳过（不改该列）；值为 null 的键写入 NULL（显式置空）。
+  const sets: string[] = []
+  const params: unknown[] = []
+  for (const [key, column] of Object.entries(COLUMNS)) {
+    if (!Object.prototype.hasOwnProperty.call(patch, key)) continue
+    const v = patch[key as keyof typeof patch]
+    if (v === undefined) continue
+    sets.push(`${column} = ?`)
+    params.push(v)
+  }
+  if (sets.length === 0) return // 无字段可改：避免无意义写库（updated_at 也不动）
+  sets.push('updated_at = ?')
+  params.push(now, id)
   await db.execute(
-    `UPDATE agent_conversation_session SET
-        session_name = COALESCE(?, session_name),
-        status = COALESCE(?, status),
-        end_time = COALESCE(?, end_time),
-        summary = COALESCE(?, summary),
-        error_message = COALESCE(?, error_message),
-        total_prompt_tokens = COALESCE(?, total_prompt_tokens),
-        total_completion_tokens = COALESCE(?, total_completion_tokens),
-        tools_tokens = COALESCE(?, tools_tokens),
-        project_id = COALESCE(?, project_id),
-        updated_at = ?
-     WHERE id = ?`,
-    [
-      patch.sessionName ?? null,
-      patch.status ?? null,
-      patch.endTime ?? null,
-      patch.summary ?? null,
-      patch.errorMessage ?? null,
-      patch.totalPromptTokens ?? null,
-      patch.totalCompletionTokens ?? null,
-      patch.toolsTokens ?? null,
-      patch.projectId ?? null,
-      now,
-      id,
-    ],
+    `UPDATE agent_conversation_session SET ${sets.join(', ')} WHERE id = ?`,
+    params,
   )
 }
 
@@ -367,25 +376,12 @@ export async function renameSession(id: string, name: string): Promise<void> {
 
 /**
  * 显式解绑会话所属工程（置 project_id 为 NULL，变回自由会话）。
- *  - 不能用 `updateSession({ projectId: null })`：其 SQL 对 project_id 用 `COALESCE(?, project_id)`，
- *    传入 null 时恒取旧值，解绑无效（见 #20260915004 B1）。
- *  - 本函数用**显式** `project_id = ?` 且参数传 null，保证写空。
+ *
+ * F021 后 updateSession 已支持 `projectId: null` 显式置空，本函数退化为语义化薄封装
+ * （保留是为了让调用方意图自明，并避免 localStorage 分支重复实现）。
  */
 export async function clearSessionProject(id: string): Promise<void> {
-  const now = Date.now()
-  if (!isTauri) {
-    const list = lsRead<AgentConversationSession>(LS_SESSION).map((s) =>
-      s.id === id ? { ...s, projectId: undefined, updatedAt: new Date(now).toISOString() } : s,
-    )
-    lsWrite(LS_SESSION, list)
-    return
-  }
-  const db = await getDb()
-  await db.execute('UPDATE agent_conversation_session SET project_id = ?, updated_at = ? WHERE id = ?', [
-    null,
-    now,
-    id,
-  ])
+  await updateSession(id, { projectId: null })
 }
 
 /** 切换归档。 */
