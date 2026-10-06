@@ -1,0 +1,27 @@
+/* 列表页三态容器（F046） */
+
+.app-list-state {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.app-list-state__spin {
+  display: block;
+}
+
+/* 加载文案：与内容同宽居中，避免 loading 态高度突变 */
+.app-list-state__loading-text:not(:empty) {
+  text-align: center;
+  font-size: 0.8125rem;
+  color: var(--color-foreground-muted);
+  padding: 4px 0;
+}
+
+.app-list-state__err {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}

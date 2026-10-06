@@ -50,6 +50,9 @@ export interface ModelListProps {
     category: string
     models: ModelConfig[]
     loading?: boolean
+    /** F046：加载失败（此前 try/finally 无 catch，失败后列表空→ 被误读为「没有数据」）*/
+    error?: Error | string | null
+    onRetry?: () => void
     onEdit: (model: ModelConfig) => void
     onDelete: (id: string) => void
     onToggleEnabled: (id: string, enabled: boolean) => void
@@ -67,6 +70,8 @@ export function ModelList({
                               category,
                               models,
                               loading,
+                              error,
+                              onRetry,
                               onEdit,
                               onDelete,
                               onToggleEnabled,
@@ -98,6 +103,26 @@ export function ModelList({
         }
         setCopiedId(id)
         window.setTimeout(() => setCopiedId((cur) => (cur === id ? null : cur)), 1500)
+    }
+
+    // F046：错误优先于 loading —— 否则加载失败会落进下面的空态分支，
+    // 用户把「加载失败」误读为「没有数据」，排查方向从一开始就错。
+    if (error) {
+        return (
+            <div className="model-list">
+                <div className="model-list--empty">
+                    <p className="model-list__empty-title">模型配置加载失败</p>
+                    <p className="model-list__empty-desc">
+                        {typeof error === 'string' ? error : error.message}
+                    </p>
+                    {onRetry && (
+                        <Button size="sm" variant="soft" onClick={onRetry} style={{marginTop: 8}}>
+                            重试
+                        </Button>
+                    )}
+                </div>
+            </div>
+        )
     }
 
     if (loading) {

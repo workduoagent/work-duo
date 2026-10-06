@@ -7,7 +7,7 @@
  */
 import { useCallback, useEffect, useState } from 'react'
 import { SlidersHorizontal, Brain, ShieldCheck, Info, Palette } from 'lucide-react'
-import { Spin } from '@/components/ui'
+import { ListState } from '@/components/ui'
 import { PythonLogo } from '@/components/icons/PythonLogo'
 import { NodeLogo } from '@/components/icons/NodeLogo'
 import SandboxPythonPage from '@/pages/sandbox/python'
@@ -64,11 +64,26 @@ const GROUPS: NavGroup[] = [
 
 export default function SettingsPage() {
   const [settings, setSettings] = useState<AppSettings | null>(null)
+  // F046：加载失败此前无catch —— Promise 静默reject，页面永久停在 Spin（白屏），
+  // 且用户无从得知是「加载失败」而非「还在加载」
+  const [loadError, setLoadError] = useState<Error | null>(null)
+  const [reloadKey, setReloadKey] = useState(0)
   const [active, setActive] = useState<SectionId>('system')
 
   useEffect(() => {
-    void loadSettings().then(setSettings)
-  }, [])
+    let alive = true
+    setLoadError(null)
+    void loadSettings()
+      .then((v) => {
+        if (alive) setSettings(v)
+      })
+      .catch((e: unknown) => {
+        if (alive) setLoadError(e instanceof Error ? e : new Error(String(e)))
+      })
+    return () => {
+      alive = false
+    }
+  }, [reloadKey])
 
   const commit = useCallback((patch: Partial<AppSettings>) => {
     setSettings((prev) => {
@@ -79,10 +94,16 @@ export default function SettingsPage() {
     })
   }, [])
 
-  if (!settings) {
+  // F046：加载失败显式呈现 + 提供重试；不再让用户面对裸 Spin 白屏
+  if (!settings || loadError) {
     return (
       <div className="settings settings--loading">
-        <Spin />
+        <ListState
+          loading={!loadError}
+          error={loadError}
+          onRetry={() => setReloadKey((k) => k + 1)}
+          emptyText="暂无配置"
+        />
       </div>
     )
   }

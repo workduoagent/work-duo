@@ -30,6 +30,9 @@ export default function ModelSettingsPage() {
   const [category, setCategory] = useState<string>('all')
   const [models, setModels] = useState<ModelConfig[]>([])
   const [loading, setLoading] = useState(true)
+  // F046：此前 try/finally 无 catch —— 加载失败后 models 保持空数组，
+  // 页面显示「暂无模型配置」，用户误判为「没有数据」而非「加载失败」
+  const [loadError, setLoadError] = useState<Error | null>(null)
   const [modalOpen, setModalOpen] = useState(false)
   const [importOpen, setImportOpen] = useState(false)
   const [exportOpen, setExportOpen] = useState(false)
@@ -38,8 +41,11 @@ export default function ModelSettingsPage() {
 
   const reload = useCallback(async () => {
     setLoading(true)
+    setLoadError(null)
     try {
       setModels(await listModels())
+    } catch (e: unknown) {
+      setLoadError(e instanceof Error ? e : new Error(String(e)))
     } finally {
       setLoading(false)
     }
@@ -151,6 +157,8 @@ export default function ModelSettingsPage() {
           category={category}
           models={visibleModels}
           loading={loading}
+          error={loadError}
+          onRetry={() => void reload()}
           onEdit={openEdit}
           onDelete={handleDelete}
           onToggleEnabled={handleToggle}
