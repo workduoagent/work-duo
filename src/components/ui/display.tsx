@@ -4,7 +4,8 @@
  */
 export { Spin } from 'antd'
 export { Empty } from 'antd'
-export { Tag } from 'antd'
+// F051：改用主题感知包装（新增 variant 语义色；antd 预设 color仍向后兼容）
+export { Tag, type TagProps, type TagVariant } from './Tag'
 export { Tooltip } from 'antd'
 export { Pagination } from 'antd'
 export { Tabs } from 'antd'

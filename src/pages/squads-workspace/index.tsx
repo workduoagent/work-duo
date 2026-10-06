@@ -10,6 +10,7 @@
  * 数据来自 squad-mapper（Tauri 走 SQLite，非 Tauri 回退 localStorage）；运行走 Tauri 命令
  * `run_squad_task`，事件经 @tauri-apps/api/event 订阅。
  */
+import type { TagVariant } from '@/components/ui' // F051：任务状态标签语义色
 import {useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent} from 'react'
 import { openPath } from '@tauri-apps/plugin-opener'
 import { SquadCard } from './SquadCard' // F045：卡片抽 memo 组件
@@ -1688,12 +1689,13 @@ const DECISION_KIND_META: Record<string, {label: string; color: string}> = {
 }
 
 /** 任务状态 → Tag 颜色。 */
-const BOARD_STATUS_META: Record<string, {color: string; label: string}> = {
-    pending: {color: 'default', label: '待执行'},
-    running: {color: 'processing', label: '进行中'},
-    done: {color: 'success', label: '已完成'},
-    failed: {color: 'error', label: '受阻'},
-    skipped: {color: 'warning', label: '已跳过'},
+/** F051：任务状态标签。语义色（跟随主题）替代 antd 预设色。 */
+const BOARD_STATUS_META: Record<string, { variant: TagVariant; label: string }> = {
+    pending: { variant: 'neutral', label: '待执行' },
+    running: { variant: 'brand', label: '进行中' },
+    done: { variant: 'success', label: '已完成' },
+    failed: { variant: 'danger', label: '受阻' },
+    skipped: { variant: 'warn', label: '已跳过' },
 }
 
 export function RoundBoard({rounds, summary, board}: { rounds: BoardRound[]; summary?: string; board?: SquadBoardView | null }) {
@@ -1709,14 +1711,14 @@ export function RoundBoard({rounds, summary, board}: { rounds: BoardRound[]; sum
             {board && (taskList.length > 0 || (board.decisions && board.decisions.length > 0) || (board.actions && board.actions.length > 0)) && (
                 <div className="squad-round squad-round--board">
                     <div className="squad-round__head">
-                        <Tag color="geekblue">任务状态板</Tag>
+                        <Tag variant="info">任务状态板</Tag>
                     </div>
                     <div className="squad-round__content">
                         {taskList.map((t) => {
-                            const meta = BOARD_STATUS_META[t.status] ?? {color: 'default', label: t.status}
+                            const meta = BOARD_STATUS_META[t.status] ?? { variant: 'neutral' as TagVariant, label: t.status }
                             return (
                                 <div key={t.taskId} style={{display: 'flex', alignItems: 'center', gap: 6, padding: '2px 0'}}>
-                                    <Tag color={meta.color} style={{marginInlineEnd: 0}}>{meta.label}</Tag>
+                                    <Tag variant={meta.variant} style={{marginInlineEnd: 0}}>{meta.label}</Tag>
                                     <span>{t.title}</span>
                                     <span style={{color: 'var(--color-text-tertiary, #999)'}}>· {t.assignee}</span>
                                 </div>
@@ -1759,7 +1761,7 @@ export function RoundBoard({rounds, summary, board}: { rounds: BoardRound[]; sum
                 return (
                     <div className={`squad-round squad-round--${r.kind}`} key={i}>
                         <div className="squad-round__head">
-                            <Tag color={meta.color}>{meta.label}</Tag>
+                            <Tag variant={meta.variant}>{meta.label}</Tag>
                             <span className="squad-round__role">{r.role}</span>
                         </div>
                         {r.kind === 'metrics' ? (

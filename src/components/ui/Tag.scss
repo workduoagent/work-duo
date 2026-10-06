@@ -1,0 +1,76 @@
+/* 主题感知的标签（F051）
+ *
+ * 全部走 --color-* 令牌，故随明暗与 5 套色调自动变化。
+ * 用「浅底 + 同色描边 + 深色文字」而非 antd 的实心预设色：
+ * 实心色在浅色主题下对比度不足且不随主题走。
+ */
+
+.app-tag {
+  border-radius: 999px;
+  font-weight: 500;
+  /* 统一内边距，避免不同 variant 因字数不同而高低不齐 */
+  padding-inline: 8px;
+}
+
+.app-tag--brand {
+  color: var(--color-brand-700);
+  background: var(--color-brand-50);
+  border-color: var(--color-brand-200);
+}
+
+.app-tag--info {
+  color: var(--color-brand-700);
+  background: var(--color-brand-50);
+  border-color: var(--color-brand-100);
+}
+
+.app-tag--success {
+  color: var(--color-success-600);
+  background: var(--color-success-bg);
+  border-color: var(--color-success-50);
+}
+
+.app-tag--warn {
+  color: var(--color-warning);
+  background: var(--color-warning-50);
+  border-color: var(--color-warning-50);
+}
+
+.app-tag--danger {
+  color: var(--color-danger);
+  background: var(--color-danger-bg);
+  border-color: var(--color-danger-50);
+}
+
+.app-tag--neutral {
+  color: var(--color-foreground-muted);
+  background: var(--color-background-muted);
+  border-color: var(--color-border);
+}
+
+/* 暗色下加深文字对比（底色已在各variant 中用半透明令牌，此处只调文字） */
+.dark .app-tag--brand,
+.dark .app-tag--info {
+  color: var(--color-brand-300);
+  border-color: var(--color-brand-700);
+}
+
+.dark .app-tag--success {
+  color: var(--color-success);
+  border-color: var(--color-success-600, var(--color-success));
+}
+
+.dark .app-tag--warn {
+  color: var(--color-warning);
+  border-color: var(--color-warning-50);
+}
+
+.dark .app-tag--danger {
+  color: var(--color-danger);
+  border-color: var(--color-danger);
+}
+
+.dark .app-tag--neutral {
+  color: var(--color-foreground-muted);
+  border-color: var(--color-border);
+}

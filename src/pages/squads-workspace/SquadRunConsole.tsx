@@ -192,7 +192,7 @@ export function SquadRunConsole({
                                             const st: AgentMotionState = r.kind === 'handoff' ? 'handoff' : memberMotion[member.role] ?? 'idle'
                                             return <PixelAgent appearance={agentAppearanceOf(agents, member.agentId)} state={st} size={24} className="squad-round__avatar"/>
                                         })()}
-                                        <Tag color={meta.color}>{meta.label}</Tag>
+                                        <Tag variant={meta.variant}>{meta.label}</Tag>
                                         <span className="squad-round__role">{r.role}</span>
                                     </div>
                                     {r.kind === 'metrics' ? (
