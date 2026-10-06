@@ -548,6 +548,8 @@ impl crate::agent::engine::tools::AgentTool for HostSyncTool {
         let local_tree = sftp_impl::list_local_tree(&local_dir).map_err(ToolError::ExecutionFailed)?;
 
         let (mut up_files, mut down_files, mut del_files) = (0u64, 0u64, 0u64);
+        // F029：删除失败单独计数（破坏性操作不可静默失败）
+        let mut del_failed: u64 = 0;
         let (mut up_bytes, mut down_bytes) = (0u64, 0u64);
 
         // S9：判异升级「size + mtime（容差 2s）」——旧「仅 size」漏检同 size 不同内容。
@@ -610,8 +612,21 @@ impl crate::agent::engine::tools::AgentTool for HostSyncTool {
             if direction == "download" || direction == "both" {
                 for e in &local_tree {
                     if !remote_map.contains_key(&e.rel) {
-                        let _ = tokio::fs::remove_file(local_dir.join(&e.rel)).await;
-                        del_files += 1;
+                        // F029：原为 `let _ = remove_file(...); del_files += 1;`
+                        // —— 删除失败（文件被占用/ 权限不足）被完全吞掉，回执仍报
+                        //    deleted: N，用户与模型均无法察觉数据未真正删除
+                        //    （破坏性操作静默失败，审计价值缺失）。
+                        //    改为分别计数 + warn 留痕，并在返回值里暴露 delete_failed。
+                        match tokio::fs::remove_file(local_dir.join(&e.rel)).await {
+                            Ok(_) => del_files += 1,
+                            Err(err) => {
+                                del_failed += 1;
+                                tracing::warn!(
+                                    "[host_sync] 删除本地多余文件失败 {}：{}",
+                                    e.rel, err
+                                );
+                            }
+                        }
                     }
                 }
             }
@@ -626,7 +641,7 @@ impl crate::agent::engine::tools::AgentTool for HostSyncTool {
             "ok": true, "direction": direction,
             "uploaded": up_files, "uploadedBytes": up_bytes,
             "downloaded": down_files, "downloadedBytes": down_bytes,
-            "deleted": del_files, "deleteExtraneous": delete_extraneous,
+            "deleted": del_files, "deleteFailed": del_failed, "deleteExtraneous": delete_extraneous,
         })
         .to_string())
     }

@@ -405,3 +405,66 @@ fn logical_normalize(p: &Path) -> Result<PathBuf, ToolError> {
     Ok(result)
 }
 
+
+#[cfg(test)]
+mod path_guard_tests {
+    use super::*;
+    use std::path::Path;
+
+    /// F028 复核：**走查报告称「`C:foo` 盘符相对路径可逃逸」，实测为误判。**
+    ///
+    /// Rust 的 `Path::new("C:foo.txt").is_absolute()` 为 false（走`ws.join` 分支），
+    /// 但 `Path::join` 在右侧含 Prefix 组件时会**丢弃左侧前缀**（Windows 语义），
+    /// 于是 candidate 仍是 `C:foo.txt` 而非 `D:/workspace/C:foo.txt`；
+    /// `logical_normalize` 保留 Prefix 段，最终 `starts_with(ws)` 为 false →
+    /// **被正确拒绝**。
+    ///
+    /// 本测试把该结论固化为回归断言——若将来 `PathGuard::check` 的
+    /// is_absolute/join 语义或归一化逻辑变更导致真实逃逸，此测试会立即失败。
+    #[test]
+    fn drive_relative_prefix_is_rejected_not_escaped() {
+        // 关键前提：Rust Path::join 对含盘符前缀的右侧 operand 会替换整个路径
+        let ws = Path::new(r"D:/workspace");
+        let candidate = ws.join(Path::new(r"C:foo.txt"));
+        assert_eq!(
+            candidate, Path::new(r"C:foo.txt"),
+            "Rust Path::join 遇盘符前缀应丢弃左侧，而非拼成 workspace\\C:foo.txt"
+        );
+        // 且归一化后不以 workspace 开头
+        let normalized = logical_normalize(&candidate).expect("含 Prefix 但无 ..，不应判逃逸");
+        assert!(
+            !normalized.starts_with(ws),
+            "盘符相对路径归一化后必须落在 workspace 之外（被拒绝），实际={normalized:?}"
+        );
+    }
+
+    #[test]
+    fn parent_dir_escape_is_rejected() {
+        let ws = Path::new(r"D:/workspace");
+        let candidate = ws.join(Path::new(r"..\..\Windows\evil.txt"));
+        // logical_normalize 在栈顶为 Root/Prefix 时报逃逸
+        assert!(
+            logical_normalize(&candidate).is_err(),
+            "连续 .. 越过盘符根必须被判逃逸"
+        );
+    }
+
+    #[test]
+    fn plain_relative_stays_inside_workspace() {
+        let ws = Path::new(r"D:/workspace");
+        let candidate = ws.join(Path::new(r"sub\file.txt"));
+        let normalized = logical_normalize(&candidate).expect("合法相对路径不应判逃逸");
+        assert!(normalized.starts_with(ws));
+    }
+
+    #[test]
+    fn boundary_prefix_sibling_not_mistaken_as_inside() {
+        // 字符串前缀比对的经典陷阱：base=D:/proj 时 D:/proj_secret 不应被放行
+        let base = Path::new(r"D:/proj");
+        let sibling = Path::new(r"D:/proj_secret/x.txt");
+        assert!(
+            !sibling.starts_with(base),
+            "组件级比对不应把兄弟目录误判为在 base 之内"
+        );
+    }
+}

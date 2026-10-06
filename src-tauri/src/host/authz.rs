@@ -254,11 +254,24 @@ async fn lookup_grant(
 }
 
 async fn bump_grant_uses(app: &AppHandle, grant_id: &str) {
-    if let Ok(pool) = crate::agent::engine::round_compactor::get_pool(app).await {
-        let _ = sqlx::query("UPDATE host_grant SET uses = uses + 1 WHERE grant_id = ?")
-            .bind(grant_id)
-            .execute(&pool)
-            .await;
+    // F030：原实现两处失败都`let _ =` 静默吞掉——取池失败与 UPDATE 失败均无痕迹。
+    // UPDATE 失败会导致 `uses` 不增、该 grant 的 max_uses 额度永不清零（方向偏安全，
+    // 但事后无法判断「额度为何没被消耗」）。审计链关键路径，不可静默。
+    let pool = match crate::agent::engine::round_compactor::get_pool(app).await {
+        Ok(p) => p,
+        Err(e) => {
+            tracing::error!("[host_authz] 取 DB 连接失败，授权次数未累加 grant_id={grant_id}：{e}");
+            return;
+        }
+    };
+    if let Err(e) = sqlx::query("UPDATE host_grant SET uses = uses + 1 WHERE grant_id = ?")
+        .bind(grant_id)
+        .execute(&pool)
+        .await
+    {
+        tracing::error!(
+            "[host_authz] 授权次数累加失败（该 grant 的 max_uses 额度不会消耗）grant_id={grant_id}：{e}"
+        );
     }
 }
 
@@ -419,7 +432,20 @@ async fn write_authz_log(
     .bind(scope_digest(input))
     .bind(crate::agent::engine::runtime::now_ms())
     .execute(&pool)
-    .await;
+    .await
+    // F030：审计写入失败原为 `let _ = ...`（Result 被丢弃）——deny / pending_approval
+    // 这类高危决策在写库失败时将**完全没有审计记录**，事后无法追溯。
+    // 保持不向上抛：审计写失败不应阻断已在执行的主决策（宁可少一条日志，
+    // 也不能让整个授权流程失败）。
+    .inspect_err(|e| {
+        tracing::error!(
+            "[host_authz] 审计日志写入失败 action={} decision={} server_id={}：{e}",
+            input.action.as_str(),
+            decision,
+            input.server_id
+        );
+    })
+    .ok();
     let _ = binding;
 }
 

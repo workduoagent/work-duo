@@ -217,7 +217,17 @@ pub async fn download(
                 continue;
             }
             let rel = p.trim_start_matches(remote.trim_end_matches('/'));
-            let local_file = local.join(rel.trim_start_matches('/'));
+            // F031：原实现直接 `local.join(rel.trim_start_matches('/'))` 落盘，
+            // 未校验 `rel` 是否含 `..` —— 远端 SFTP 服务器若返回 `../../xxx`
+            // 形式的 entry.path()，拼接结果会逃出 `local` 目录写到任意可写位置
+            // （对比 native/fs.rs 的 zip_extract 已有 `..` 拒绝 + within_parent
+            // 二次校验，此处缺失同等校验）。
+            // 复用 F008 的边界原语 ensure_path_in_roots：以 local 为唯一允许根，
+            // 折叠 + canonicalize + 组件级比对，并返回规范化后的真实路径，
+            // 使下游 IO 即便比对层有漏也不接触带 `..` 的原始串。
+            let rel = rel.trim_start_matches('/');
+            let local_file = crate::fs_helper::ensure_path_in_roots(&local.join(rel), &[local.to_path_buf()])
+                .map_err(|e| format!("远端路径越出下载目录（已拒绝）：{e}"))?;
             if let Some(parent) = local_file.parent() {
                 tokio::fs::create_dir_all(parent)
                     .await
