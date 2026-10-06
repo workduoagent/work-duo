@@ -72,7 +72,7 @@ import type {
     SquadMemoryCategory,
     SquadApiConfig,
 } from '@/types/core'
-import {listen, type UnlistenFn} from '@tauri-apps/api/event'
+import type { UnlistenFn } from '@tauri-apps/api/event' // F039：事件订阅已收敛到 useSquadRunEvents，本文件不再直接 listen
 import { useTauriEvent } from '@/hooks/useTauriEvent'
 import {invoke} from '@tauri-apps/api/core'
 import {saveTextFile} from '@/core/file/export-file'
@@ -89,6 +89,7 @@ import {
     type Edge,
     type Connection,
 } from '@xyflow/react'
+import {subscribeSquadRunEvents} from './useSquadRunEvents' // F039：与 SquadDetailPage 共用的事件订阅层
 import '@xyflow/react/dist/style.css'
 import './index.scss'
 
@@ -1735,50 +1736,28 @@ export function SquadRunConsole({
         setRunning(true)
         sessionIdRef.current = null
         try {
-            const offStart = await listen<{ squadId: string; sessionId: string; mode: string }>(
-                'agent-squad-session-started',
-                (e) => {
-                    if (e.payload.squadId === squad.id) sessionIdRef.current = e.payload.sessionId
+            // F039：事件订阅收敛到共用层（原先此处与 SquadDetailPage 各写一遍，
+            // 已漂移出「delivery 门禁只在列表页处理」的行为差异）
+            unlistenRef.current = await subscribeSquadRunEvents<AgentMotionState>({
+                squadId: squad.id,
+                acceptRound: (pl) => !(sessionIdRef.current && pl.sessionId !== sessionIdRef.current),
+                setRounds: (updater) => setRounds(updater),
+                onPlanPending: () => setPlanPending(true),
+                onCheckpointPending: () => setCheckpointPending(true),
+                onDeliveryPending: () => setDeliveryPending(true),
+                setSummary,
+                // 直接透传 setState（类型即Record<string, AgentMotionState>），
+                // 不要包一层箭头函数——那会让 updater 的参数类型被推断成宽泛的string
+                setMemberMotion,
+                // 成员动作态用默认枚举映射（working/cheer/error/handoff）
+                onSessionStarted: (sessionId) => {
+                    sessionIdRef.current = sessionId
                 },
-            )
-            const offRound = await listen<{
-                squadId: string
-                sessionId: string
-                speakerAgentId: string | null
-                role: string
-                kind: string
-                content: string
-            }>('agent-squad-round', (e) => {
-                const pl = e.payload
-                if (pl.squadId !== squad.id) return
-                if (sessionIdRef.current && pl.sessionId !== sessionIdRef.current) return
-                if (pl.kind === 'plan') setPlanPending(true)
-                if (pl.kind === 'checkpoint') setCheckpointPending(true)
-                if (pl.kind === 'delivery') setDeliveryPending(true)
-                setRounds((r) => [...r, {
-                    role: pl.role,
-                    kind: pl.kind,
-                    content: pl.content,
-                    speakerAgentId: pl.speakerAgentId
-                }])
-            })
-            const offDone = await listen<{ squadId: string; sessionId: string; summary: string }>(
-                'agent-squad-session-done',
-                (e) => {
-                    if (e.payload.squadId !== squad.id) return
-                    setSummary(e.payload.summary)
+                onSessionDone: () => {
                     setRunning(false)
                     cleanup()
                 },
-            )
-            const offMember = await listen<{ squadId: string; memberRole: string; phase: string; ok: boolean }>('squad-member-event', (e) => {
-                if (e.payload.squadId !== squad.id) return
-                const role = e.payload.memberRole
-                const state: AgentMotionState = e.payload.phase === 'started' ? 'working' : e.payload.ok ? 'cheer' : 'error'
-                setMemberMotion((m) => ({...m, [role]: state}))
-                if (e.payload.phase !== 'started') setTimeout(() => setMemberMotion((m) => ({...m, [role]: 'idle'})), 3000)
             })
-            unlistenRef.current = [offStart, offRound, offDone, offMember]
             await invoke('run_squad_task', { input: { squad_id: squad.id, prompt: p } })
         } catch (e) {
             message.error(`启动失败：${e instanceof Error ? e.message : String(e)}`)

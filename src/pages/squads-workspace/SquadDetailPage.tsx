@@ -12,6 +12,7 @@ import {getSquad, listSquadSessions, listSquadRounds, deleteSquadSession, listSq
 import {listAgents} from '@/core/mapper/agent-mapper'
 import type {AgentInfo, SquadInfo, SquadSession, SquadMemory, SquadMemoryCategory} from '@/types/core'
 import {memberLabel, agentAppearanceOf, type BoardRound, type SquadBoardView} from './index'
+import {subscribeSquadRunEvents} from './useSquadRunEvents' // F039：与列表页共用的事件订阅层
 // 舞台背景：开放式像素会议室（无会议桌，开阔地板，4:3，全屏填充）
 import ROOM_BG from '@/assets/images/squad-meeting-room-open.png'
 
@@ -449,37 +450,45 @@ export default function SquadDetailPage() {
 
     useEffect(() => {
         if (!squad) return
-        const offs: Array<() => void> = []
+        let offs: Array<() => void> = []
+        let disposed = false
         void (async () => {
-            offs.push(await listen<{squadId: string; sessionId: string}>('agent-squad-session-started', (e) => {
-                if (e.payload.squadId !== squad.id) return
-                sessionIdRef.current = e.payload.sessionId
-                setSelected(e.payload.sessionId)
-                setRounds([]); setBoard(null); setSummary(''); setView('dialog')
-                void reloadSessions()
-            }))
-            offs.push(await listen<{squadId: string; sessionId: string; speakerAgentId: string | null; role: string; kind: string; content: string}>('agent-squad-round', (e) => {
-                const pl = e.payload
-                if (pl.squadId !== squad.id) return
-                if (sessionIdRef.current && pl.sessionId !== sessionIdRef.current) return
-                if (pl.kind === 'plan') setPlanPending(true)
-                if (pl.kind === 'checkpoint') setCheckpointPending(true)
-                setRounds((r) => [...r, {role: pl.role, kind: pl.kind, content: pl.content, speakerAgentId: pl.speakerAgentId, fresh: true}])
-            }))
-            offs.push(await listen<{squadId: string; sessionId: string; summary: string}>('agent-squad-session-done', (e) => {
-                if (e.payload.squadId !== squad.id) return
-                setSummary(e.payload.summary)
-                setMemberMotion({})
-                void reloadSessions()
-            }))
-            offs.push(await listen<{squadId: string; memberRole: string; phase: string; ok: boolean}>('squad-member-event', (e) => {
-                if (e.payload.squadId !== squad.id) return
-                const st = e.payload.phase === 'started' ? 'working' : e.payload.ok ? 'cheer' : 'error'
-                setMemberMotion((m) => ({...m, [e.payload.memberRole]: st}))
-                if (e.payload.phase !== 'started') setTimeout(() => setMemberMotion((m) => ({...m, [e.payload.memberRole]: 'idle'})), 3000)
-            }))
+            // F039：事件订阅收敛到共用层（原先与 index.tsx 各写一遍，已漂移出
+            // 「delivery 门禁只在列表页处理」的行为差异——详情页收不到交付待确认信号）
+            const registered = await subscribeSquadRunEvents({
+                squadId: squad.id,
+                acceptRound: (pl) => !(sessionIdRef.current && pl.sessionId !== sessionIdRef.current),
+                setRounds: (updater) => setRounds(updater),
+                onPlanPending: () => setPlanPending(true),
+                onCheckpointPending: () => setCheckpointPending(true),
+                // 注：详情页的 delivery 门禁不由事件驱动，而是由
+                // `selectedSession.status === 'awaiting_delivery'` 推导（见 TimelineView
+                // 的 delivery prop），故这里无需 onDeliveryPending——两页门禁的数据来源
+                // 本就不同（列表页靠事件即时置位，详情页靠会话状态轮询），不是漂移。
+                setSummary,
+                setMemberMotion,
+                onSessionStarted: (sessionId) => {
+                    sessionIdRef.current = sessionId
+                    setSelected(sessionId)
+                    setRounds([])
+                    setBoard(null)
+                    setSummary('')
+                    setView('dialog')
+                    void reloadSessions()
+                },
+                onSessionDone: () => {
+                    setMemberMotion({})
+                    void reloadSessions()
+                },
+            })
+            // 异步注册期间组件可能已卸载
+            if (disposed) registered.forEach((f) => f())
+            else offs = registered
         })()
-        return () => offs.forEach((f) => f())
+        return () => {
+            disposed = true
+            offs.forEach((f) => f())
+        }
     }, [squad, reloadSessions])
 
     async function handleStart() {
