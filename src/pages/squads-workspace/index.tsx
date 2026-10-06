@@ -12,12 +12,23 @@
  */
 import {useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent} from 'react'
 import { openPath } from '@tauri-apps/plugin-opener'
-import { SquadCard } from './SquadCard' // F045：卡片抽memo 组件
+import { SquadCard } from './SquadCard' // F045：卡片抽 memo 组件
+import { roundTagMeta } from './roundTags' // F038：轮次标签映射已抽出
+import { agentAppearanceOf, memberLabel, MODE_OPTIONS } from './squad-shared' // F038：共享工具已抽出
+
+// 对外 API 保持不变（SquadDetailPage 等仍从本文件取）
+export { agentAppearanceOf, memberLabel, MODE_OPTIONS }
+import { MetricsRoundView } from './MetricsRoundView' // F038：花费账目渲染已抽出
+
+// F038：对外 API 保持不变——SquadDetailPage 等仍从本文件取这两个
+export { SquadRunConsole } from './SquadRunConsole'
+export { MetricsRoundView } from './MetricsRoundView'
+export { roundTagMeta } from './roundTags'
+export type { SquadRoundView } from './SquadRunConsole'
 import { useNavigate } from 'react-router-dom'
 import {
     Plus,
     Trash2,
-    Play,
     Users,
     Settings2,
     FileUp,
@@ -34,8 +45,7 @@ import {
 } from 'lucide-react'
 import {Button, Modal, Field, FieldLabel, Input, Select, Segmented, Switch, InputNumber, Empty, Spin, Popconfirm, Tag, Tooltip, Alert} from '@/components/ui'
 import { PixelAgent } from '@/components/ui/pixel-agent'
-import { generateAvatarByScenario } from '@/components/ui/pixel-agent'
-import type { AgentMotionState, PixelAgentAppearance } from '@/components/ui/pixel-agent'
+import type { PixelAgentAppearance } from '@/components/ui/pixel-agent'
 import {useNotify} from '@/components/ui/notify'
 import {listAgents} from '@/core/mapper/agent-mapper'
 import {
@@ -72,7 +82,6 @@ import type {
     SquadMemoryCategory,
     SquadApiConfig,
 } from '@/types/core'
-import type { UnlistenFn } from '@tauri-apps/api/event' // F039：事件订阅已收敛到 useSquadRunEvents，本文件不再直接 listen
 import { useTauriEvent } from '@/hooks/useTauriEvent'
 import {invoke} from '@tauri-apps/api/core'
 import {saveTextFile} from '@/core/file/export-file'
@@ -89,15 +98,8 @@ import {
     type Edge,
     type Connection,
 } from '@xyflow/react'
-import {subscribeSquadRunEvents} from './useSquadRunEvents' // F039：与 SquadDetailPage 共用的事件订阅层
 import '@xyflow/react/dist/style.css'
 import './index.scss'
-
-const MODE_OPTIONS: { label: string; value: SquadMode; desc: string }[] = [
-    {label: '编排式', value: 'orchestrator', desc: '主管拆解委派成员，逐子任务执行后汇总'},
-    {label: '流水线', value: 'pipeline', desc: '成员线性串流，前步产出喂后步输入'},
-    {label: '群聊', value: 'chat', desc: '共享黑板轮流发言，Moderator 收口'},
-]
 
 const EXEC_OPTIONS: { label: string; value: SquadExecutionMode }[] = [
     {label: '手动', value: 'manual'},
@@ -254,18 +256,6 @@ function fromTemplate(t: SquadTemplateJson): EditorState {
  * ------------------------------------------------------------------ */
 
 /** §4.12.5：成员外观解析——有 appearance 用之；从未设计过则按场景+agentId 稳定生成兜底。 */
-export function agentAppearanceOf(agents: AgentInfo[], agentId?: string): PixelAgentAppearance {
-    const a = agents.find((x) => x.id === agentId)
-    if (a?.appearance) return a.appearance
-    return generateAvatarByScenario(a?.scenario, agentId)
-}
-
-/** 列表卡成员显示名：role 为空（如流水线工序位）回退智能体名，杜绝裸 agentId。 */
-export function memberLabel(m: { role?: string; agentId: string }, agents: AgentInfo[]): string {
-    if (m.role && m.role.trim()) return m.role
-    return agents.find((a) => a.id === m.agentId)?.name || '未命名成员'
-}
-
 /** 卡片实时徽标文案（最新会话非终态才显示；终态无标记）。 */
 const INPUT_NODE_ID = '__squad_input__'
 
@@ -1658,311 +1648,6 @@ function SquadEditorModal({
     )
 }
 
-interface SquadRoundView {
-    role: string
-    kind: string
-    content: string
-    speakerAgentId?: string | null
-}
-
-export function SquadRunConsole({
-                            open,
-                            squad,
-                               agents,
-                            onClose,
-                            embedded = false,
-                        }: {
-    open: boolean
-    agents: AgentInfo[]
-    squad: SquadInfo
-    onClose: () => void
-    embedded?: boolean
-}) {
-    const {message} = useNotify()
-    const [prompt, setPrompt] = useState('')
-    const [running, setRunning] = useState(false)
-    const [rounds, setRounds] = useState<SquadRoundView[]>([])
-    const [summary, setSummary] = useState('')
-    const [memberMotion, setMemberMotion] = useState<Record<string, AgentMotionState>>({})
-    const [planPending, setPlanPending] = useState(false)
-    const [checkpointPending, setCheckpointPending] = useState(false)
-    const [deliveryPending, setDeliveryPending] = useState(false)
-    // S2：插话输入（打断 / 预嘱）
-    const [injectTarget, setInjectTarget] = useState('')
-    const [injectMode, setInjectMode] = useState<'soft' | 'hard' | 'pre_talk'>('soft')
-    const [injectText, setInjectText] = useState('')
-    const [injectBusy, setInjectBusy] = useState(false)
-    const sessionIdRef = useRef<string | null>(null)
-    const unlistenRef = useRef<UnlistenFn[]>([])
-
-    const cleanup = useCallback(() => {
-        for (const off of unlistenRef.current) off()
-        unlistenRef.current = []
-    }, [])
-
-    useEffect(() => {
-        if (!open) {
-            cleanup()
-            setRounds([])
-            setSummary('')
-            setRunning(false)
-            setMemberMotion({})
-            setPlanPending(false)
-            setCheckpointPending(false)
-            setDeliveryPending(false)
-            setInjectTarget('')
-            setInjectText('')
-            sessionIdRef.current = null
-        }
-    }, [open, cleanup])
-
-    useEffect(() => () => cleanup(), [cleanup])
-
-    async function handleRun() {
-        const p = prompt.trim()
-        if (!p) {
-            message.error('请描述协作任务')
-            return
-        }
-        setRounds([])
-        setSummary('')
-        setRunning(true)
-        sessionIdRef.current = null
-        try {
-            // F039：事件订阅收敛到共用层（原先此处与 SquadDetailPage 各写一遍，
-            // 已漂移出「delivery 门禁只在列表页处理」的行为差异）
-            unlistenRef.current = await subscribeSquadRunEvents<AgentMotionState>({
-                squadId: squad.id,
-                acceptRound: (pl) => !(sessionIdRef.current && pl.sessionId !== sessionIdRef.current),
-                setRounds: (updater) => setRounds(updater),
-                onPlanPending: () => setPlanPending(true),
-                onCheckpointPending: () => setCheckpointPending(true),
-                onDeliveryPending: () => setDeliveryPending(true),
-                setSummary,
-                // 直接透传 setState（类型即Record<string, AgentMotionState>），
-                // 不要包一层箭头函数——那会让 updater 的参数类型被推断成宽泛的string
-                setMemberMotion,
-                // 成员动作态用默认枚举映射（working/cheer/error/handoff）
-                onSessionStarted: (sessionId) => {
-                    sessionIdRef.current = sessionId
-                },
-                onSessionDone: () => {
-                    setRunning(false)
-                    cleanup()
-                },
-            })
-            await invoke('run_squad_task', { input: { squad_id: squad.id, prompt: p } })
-        } catch (e) {
-            message.error(`启动失败：${e instanceof Error ? e.message : String(e)}`)
-            setRunning(false)
-            cleanup()
-        }
-    }
-
-    async function handleInject() {
-        const text = injectText.trim()
-        if (!text) {
-            message.error('请输入要补充的内容')
-            return
-        }
-        if (!injectTarget) {
-            message.error('请选择插话目标（成员）')
-            return
-        }
-        if (!sessionIdRef.current) {
-            message.error('协作尚未开始，无法插话')
-            return
-        }
-        const targetMember = squad.members.find((m) => m.agentId === injectTarget)
-        setInjectBusy(true)
-        try {
-            await invoke<string>('squad_inject_send', {
-                squadId: squad.id,
-                sessionId: sessionIdRef.current,
-                taskId: injectTarget,
-                content: text,
-                mode: injectMode,
-            })
-            const modeLabel = injectMode === 'pre_talk' ? '预嘱已入队，将在其任务启动时生效' : '已打断，将在该成员下一轮生效'
-            message.success(`已送达 ${targetMember?.role || injectTarget}：${modeLabel}`)
-            setInjectText('')
-        } catch (e) {
-            message.error(`插话失败：${e instanceof Error ? e.message : String(e)}`)
-        } finally {
-            setInjectBusy(false)
-        }
-    }
-
-    const panelContent = (
-        <>
-            <div className="squad-console">
-                <div className="squad-console__input">
-                    <Input.TextArea
-                        autoComplete="off"
-                        rows={3}
-                        placeholder="描述这次要协作完成的任务…"
-                        value={prompt}
-                        disabled={running}
-                        onChange={(e) => setPrompt(e.target.value)}
-                    />
-                    <Button variant="solid" onClick={handleRun} disabled={running}>
-                        <Play size={14}/> {running ? '协作进行中…' : '运行协作'}
-                    </Button>
-                </div>
-
-                <div className="squad-console__board">
-                    {rounds.length === 0 && !running && !summary && (
-                        <div className="squad-console__empty">运行后将在此显示成员讨论 / 子任务交付与最终汇总</div>
-                    )}
-                    <Spin spinning={running && rounds.length === 0}>
-                        {rounds.map((r, i) => {
-                            const meta = roundTagMeta(r.kind)
-                            return (
-                                <div className={`squad-round squad-round--${r.kind}`} key={i}>
-                                    <div className="squad-round__head">
-                                        {(() => {
-                                            const member = squad.members.find((m) => m.role === r.role)
-                                            if (!member) return null
-                                            const st: AgentMotionState = r.kind === 'handoff' ? 'handoff' : memberMotion[member.role] ?? 'idle'
-                                            return <PixelAgent appearance={agentAppearanceOf(agents, member.agentId)} state={st} size={24} className="squad-round__avatar"/>
-                                        })()}
-                                        <Tag color={meta.color}>{meta.label}</Tag>
-                                        <span className="squad-round__role">{r.role}</span>
-                                    </div>
-                                    {r.kind === 'metrics' ? (
-                                        <MetricsRoundView content={r.content}/>
-                                    ) : (
-                                        <div className="squad-round__content">{r.content}</div>
-                                    )}
-                                </div>
-                            )
-                        })}
-                    {planPending && (
-                        <div className="squad-round squad-round--system" style={{border: '1px solid var(--color-warning, #faad14)'}}>
-                            <div className="squad-round__head"><Tag color="orange">L1 计划门禁</Tag></div>
-                            <div className="squad-round__content">委派计划已生成，等待你的批准。</div>
-                            <div style={{display: 'flex', gap: 8, marginTop: 8}}>
-                                <Button variant="solid" onClick={() => {
-                                    setPlanPending(false)
-                                    void invoke<{ok: boolean}>('squad_plan_approve', { sessionId: sessionIdRef.current, approved: true })
-                                }}>
-                                    批准执行
-                                </Button>
-                                <Button variant="ghost" onClick={() => {
-                                    setPlanPending(false)
-                                    void invoke('squad_plan_approve', { sessionId: sessionIdRef.current, approved: false })
-                                }}>
-                                    拒绝
-                                </Button>
-                            </div>
-                        </div>
-                    )}
-                    {checkpointPending && (
-                        <div className="squad-round squad-round--system" style={{border: '1px solid var(--color-warning, #faad14)'}}>
-                            <div className="squad-round__head"><Tag color="orange">L2 检查点</Tag></div>
-                            <div className="squad-round__content">本波任务已完成，等待你的决议。返工将重跑本波全部任务（其上游交接保留）。</div>
-                            <div style={{display: 'flex', gap: 8, marginTop: 8}}>
-                                <Button variant="solid" onClick={() => {
-                                    setCheckpointPending(false)
-                                    void invoke<{ok: boolean}>('squad_checkpoint_resolve', { sessionId: sessionIdRef.current, decision: 'continue' })
-                                }}>
-                                    继续
-                                </Button>
-                                <Button variant="ghost" onClick={() => {
-                                    setCheckpointPending(false)
-                                    void invoke('squad_checkpoint_resolve', { sessionId: sessionIdRef.current, decision: 'rework' })
-                                }}>
-                                    返工本波
-                                </Button>
-                            </div>
-                        </div>
-                    )}
-                    {deliveryPending && (
-                        <div className="squad-round squad-round--system" style={{border: '1px solid var(--color-primary, #1677ff)'}}>
-                            <div className="squad-round__head"><Tag color="gold">L4 交付确认</Tag></div>
-                            <div className="squad-round__content">Delivery Pack 已生成（含成员执行证据与成本账目）。确认后协作收尾；要求修订将按取消收尾（产物保留在交接箱）。</div>
-                            <div style={{display: 'flex', gap: 8, marginTop: 8}}>
-                                <Button variant="solid" onClick={() => {
-                                    setDeliveryPending(false)
-                                    void invoke<{ok: boolean}>('squad_delivery_resolve', { sessionId: sessionIdRef.current, approved: true })
-                                }}>
-                                    确认交付
-                                </Button>
-                                <Button variant="ghost" onClick={() => {
-                                    setDeliveryPending(false)
-                                    void invoke('squad_delivery_resolve', { sessionId: sessionIdRef.current, approved: false })
-                                }}>
-                                    要求修订
-                                </Button>
-                            </div>
-                        </div>
-                    )}
-                    </Spin>
-                    {summary && (
-                        <div className="squad-round squad-round--summary squad-round--final">
-                            <div className="squad-round__head">
-                                <Tag color="gold">最终汇总</Tag>
-                            </div>
-                            <div className="squad-round__content">{summary}</div>
-                        </div>
-                    )}
-                </div>
-
-                {/* S2（§4.11）：插话输入——运行中打断 / 未启动预嘱；目标为小分队成员 */}
-                <div className="squad-console__inject">
-                    <Select
-                        style={{minWidth: 150}}
-                        placeholder="插话目标"
-                        value={injectTarget || undefined}
-                        onChange={(v) => setInjectTarget(v)}
-                        options={squad.members.map((m) => ({value: m.agentId, label: m.role || m.agentId}))}
-                    />
-                    <Segmented
-                        value={injectMode}
-                        onChange={(v) => setInjectMode(v as 'soft' | 'hard' | 'pre_talk')}
-                        options={[
-                            {value: 'soft', label: '打断'},
-                            {value: 'hard', label: '强打断'},
-                            {value: 'pre_talk', label: '预嘱'},
-                        ]}
-                    />
-                    <Input
-                        autoComplete="off"
-                        placeholder={injectMode === 'pre_talk' ? '任务启动前要交代的要求…' : '运行中要补充 / 纠偏的话…'}
-                        value={injectText}
-                        maxLength={2000}
-                        onChange={(e) => setInjectText(e.target.value)}
-                        onPressEnter={() => void handleInject()}
-                    />
-                    <Button variant="soft" onClick={() => void handleInject()} disabled={injectBusy || !running}>
-                        送达
-                    </Button>
-                </div>
-            </div>
-        </>
-    )
-
-    if (embedded) {
-        return <div className="squad-page-panel">{panelContent}</div>
-    }
-
-    return (
-        <Modal
-            open={open}
-            onOpenChange={onClose}
-            title={`运行 · ${squad.name}`}
-            description={`协作模式：${MODE_OPTIONS.find((o) => o.value === squad.mode)?.label ?? squad.mode}`}
-            width={760}
-            footer={
-                <Button variant="ghost" onClick={onClose}>
-                    关闭
-                </Button>
-            }
-        >
-            {panelContent}
-        </Modal>
-    )
-}
 
 const CAT_OPTIONS: { label: string; value: SquadMemoryCategory }[] = [
     {label: '通用', value: 'general'},
@@ -1981,93 +1666,6 @@ export interface BoardRound {
     speakerAgentId?: string | null
     /** 运行中由事件实时推来的新轮（区别于历史回放）——前端据此做打字机流式。 */
     fresh?: boolean
-}
-
-function roundTagMeta(kind: string): { label: string; color: string } {
-    switch (kind) {
-        case 'summary':
-            return {label: '汇总', color: 'gold'}
-        case 'delegation':
-            return {label: '委派规划', color: 'blue'}
-        case 'message':
-            return {label: '发言', color: 'green'}
-        case 'system':
-            return {label: '系统', color: 'default'}
-        case 'plan':
-            return {label: '计划门禁', color: 'orange'}
-        case 'handoff':
-            return {label: '交接', color: 'cyan'}
-        case 'metrics':
-            return {label: '花费账目', color: 'geekblue'}
-        case 'checkpoint':
-            return {label: '检查点', color: 'orange'}
-        case 'delivery':
-            return {label: '交付确认', color: 'gold'}
-        case 'inject':
-            return {label: '用户插话', color: 'purple'}
-        default:
-            return {label: '交付', color: 'green'}
-    }
-}
-
-/** S2：metrics round 的 content（后端 SquadMetricsAcc JSON，snake_case 字段）。 */
-interface SquadMetricsAccView {
-    prompt_tokens?: number
-    completion_tokens?: number
-    budget?: number
-    members?: Array<{
-        agent_id?: string
-        role?: string
-        prompt_tokens?: number
-        completion_tokens?: number
-        wall_ms?: number
-    }>
-}
-
-/** S2：花费账目渲染——总用量 + 预算水位 + 成员级明细（解析失败降级纯文本）。 */
-function MetricsRoundView({content}: { content: string }) {
-    let acc: SquadMetricsAccView | null
-    try {
-        // 同 DecisionCenter.contentLines：非对象 JSON 收敛为 null，走下方纯文本降级分支
-        const parsed: unknown = JSON.parse(content)
-        acc = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? (parsed as SquadMetricsAccView) : null
-    } catch {
-        acc = null
-    }
-    if (!acc || (acc.prompt_tokens === undefined && acc.completion_tokens === undefined)) {
-        return <div className="squad-round__content">{content}</div>
-    }
-    const prompt = acc.prompt_tokens ?? 0
-    const completion = acc.completion_tokens ?? 0
-    const total = prompt + completion
-    const budget = acc.budget ?? 0
-    const pct = budget > 0 ? Math.min(100, Math.round((total / budget) * 100)) : null
-    return (
-        <div className="squad-round__content">
-            <div style={{display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center'}}>
-                <Tag color="geekblue" style={{marginInlineEnd: 0}}>总 tokens {total.toLocaleString()}</Tag>
-                <Tag style={{marginInlineEnd: 0}}>输入 {prompt.toLocaleString()}</Tag>
-                <Tag style={{marginInlineEnd: 0}}>输出 {completion.toLocaleString()}</Tag>
-                {budget > 0 && (
-                    <Tag color={pct && pct >= 100 ? 'red' : pct && pct >= 80 ? 'orange' : 'green'} style={{marginInlineEnd: 0}}>
-                        预算 {total.toLocaleString()} / {budget.toLocaleString()}（{pct}%）
-                    </Tag>
-                )}
-            </div>
-            {acc.members && acc.members.length > 0 && (
-                <div style={{marginTop: 6, borderTop: '1px dashed var(--color-border, #eee)', paddingTop: 6}}>
-                    {acc.members.map((m, i) => (
-                        <div key={i} style={{display: 'flex', alignItems: 'center', gap: 8, padding: '2px 0', fontSize: 12}}>
-                            <span style={{minWidth: 90}}>{m.role || m.agent_id || '成员'}</span>
-                            <span style={{color: 'var(--color-text-tertiary, #999)'}}>
-                                tokens {(m.prompt_tokens ?? 0) + (m.completion_tokens ?? 0)} · 用时 {Math.round((m.wall_ms ?? 0) / 1000)}s
-                            </span>
-                        </div>
-                    ))}
-                </div>
-            )}
-        </div>
-    )
 }
 
 /** 复用的讨论黑板渲染（运行控制台实时流 / 历史回显共用）。 */

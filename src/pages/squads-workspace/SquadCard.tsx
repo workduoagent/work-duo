@@ -2,7 +2,7 @@ import { memo, useCallback } from 'react'
 import { Card, Tag, Button, Popconfirm } from '@/components/ui'
 import { FolderOpen, Pencil, Play, Trash2, Users } from 'lucide-react'
 import { PixelAgent } from '@/components/ui/pixel-agent'
-import { agentAppearanceOf, memberLabel } from './index'
+import { agentAppearanceOf, memberLabel } from './squad-shared'
 import type { AgentInfo, SquadInfo, SquadMode } from '@/types/core'
 
 /**
