@@ -301,7 +301,7 @@ async fn run_bun_sidecar(
     args: Vec<String>,
     cwd: Option<&Path>,
 ) -> Result<(String, String, Option<i32>), String> {
-    run_bun_sidecar_policy(app, bun_root, args, cwd, crate::mamba_manager::NetPolicy::Allow).await
+    run_bun_sidecar_policy(app, bun_root, args, cwd, crate::mamba_manager::NetPolicy::Allow, "").await
 }
 
 async fn run_bun_sidecar_policy(
@@ -310,6 +310,8 @@ async fn run_bun_sidecar_policy(
     args: Vec<String>,
     cwd: Option<&Path>,
     net: crate::mamba_manager::NetPolicy,
+    // F049：本次运行的取消 id（空串 = 不参与取消，如依赖安装通道）
+    run_id: &str,
 ) -> Result<(String, String, Option<i32>), String> {
     // 沙箱守卫（文件系统有界 + 网络默认关）：运行用户脚本时 --preload guard.js（依赖安装通道不注入）。
     // fs / net 两段独立启用（逃生阀 WD_SANDBOX_FS=off / WD_SANDBOX_NET=on 分别放行）；
@@ -369,27 +371,37 @@ async fn run_bun_sidecar_policy(
         .and_then(|s| s.trim().parse::<u64>().ok())
         .filter(|v| *v > 0)
         .unwrap_or(600);
-    let waited = tokio::time::timeout(
-        std::time::Duration::from_secs(sandbox_timeout),
-        async {
-            while let Some(event) = rx.recv().await {
-                match event {
-                    CommandEvent::Stdout(bytes) => stdout.push_str(&String::from_utf8_lossy(&bytes)),
-                    CommandEvent::Stderr(bytes) => stderr.push_str(&String::from_utf8_lossy(&bytes)),
-                    CommandEvent::Error(err) => stderr.push_str(&err),
-                    CommandEvent::Terminated(payload) => code = payload.code,
-                    _ => {}
+    let mut cancel_rx = crate::script_cancel::subscribe_cancel(run_id);
+    // F049：超时与取消共用一个 select（与 mamba run_sidecar_policy 同款）。
+    // 三态：None=自然结束 / Some(Err)=超时 / Some(Ok)=用户取消。
+    let interrupted: Option<Result<(), ()>> = tokio::select! {
+        res = tokio::time::timeout(
+            std::time::Duration::from_secs(sandbox_timeout),
+            async {
+                while let Some(event) = rx.recv().await {
+                    match event {
+                        CommandEvent::Stdout(bytes) => stdout.push_str(&String::from_utf8_lossy(&bytes)),
+                        CommandEvent::Stderr(bytes) => stderr.push_str(&String::from_utf8_lossy(&bytes)),
+                        CommandEvent::Error(err) => stderr.push_str(&err),
+                        CommandEvent::Terminated(payload) => code = payload.code,
+                        _ => {}
+                    }
                 }
-            }
-        },
-    )
-    .await;
-    if waited.is_err() {
-        let _ = child.kill(); // 超时强杀，防孤儿进程
-        return Err(format!(
-            "沙箱脚本执行超时（{}s），已强制终止进程。长任务请拆分或分段落盘中间结果。",
-            sandbox_timeout
-        ));
+            },
+        ) => res.err().map(|_| Err(())),
+        _ = crate::mamba_manager::recv_cancel(&mut cancel_rx) => Some(Ok(())),
+    };
+    if let Some(res) = interrupted {
+        // 取舍 1：先杀整组（连带 npm 的子进程），再 kill 兜底
+        crate::script_cancel::kill_process_tree(child.pid());
+        let _ = child.kill();
+        return match res {
+            Err(()) => Err(format!(
+                "沙箱脚本执行超时（{}s），已强制终止进程。长任务请拆分或分段落盘中间结果。",
+                sandbox_timeout
+            )),
+            Ok(()) => Err("沙箱脚本已被用户取消，进程已终止。".into()),
+        };
     }
 
     Ok((stdout, stderr, code))
@@ -710,6 +722,8 @@ async fn run_script_with_selfheal(
     bun_root: &Path,
     tmp_path: &Path,
     cwd: Option<&Path>,
+    // F049：本次运行的取消 id（空串 = 不参与取消）
+    run_id: &str,
 ) -> Result<ScriptRunResult, String> {
     let args = vec![tmp_path.to_string_lossy().to_string()];
     // 网络默认关（2026-09-24）：运行用户 JS 一律注入断网 env；F010 起 preload 守卫
@@ -717,7 +731,7 @@ async fn run_script_with_selfheal(
     // 不遵守代理 env 的通道不再穿透。依赖安装走 install_packages_silent 的 Allow 通道不受影响。
     let net = crate::mamba_manager::NetPolicy::Blocked;
     let (stdout, stderr, code) =
-        run_bun_sidecar_policy(app, bun_root, args, cwd, net).await?;
+        run_bun_sidecar_policy(app, bun_root, args, cwd, net, run_id).await?;
     if code != Some(0) {
         if let Some(mods) = missing_modules(&stderr) {
             tracing::info!(
@@ -729,7 +743,7 @@ async fn run_script_with_selfheal(
                     tracing::info!("[agent] run_node: 已自动安装依赖（{}），重试执行", specs);
                     let args2 = vec![tmp_path.to_string_lossy().to_string()];
                     let (o2, e2, c2) =
-                        run_bun_sidecar_policy(app, bun_root, args2, cwd, net).await?;
+                        run_bun_sidecar_policy(app, bun_root, args2, cwd, net, run_id).await?;
                     return match c2 {
                         Some(0) => Ok(ScriptRunResult { stdout: o2, exit_code: c2 }),
                         Some(c) => Err(format!("脚本执行失败（退出码 {c}）：\n{e2}")),
@@ -773,7 +787,11 @@ pub async fn run_node_script(
     // 原地执行后，相对导入按脚本真实所在目录解析，恢复「同目录 import」语义；
     // 已安装依赖（bun_root/node_modules）的解析由 run_bun_sidecar 注入的 NODE_PATH 兜底。
     // cwd 设为原脚本所在目录，便于脚本内相对路径文件操作仍按原位置解析。
-    let result = run_script_with_selfheal(&app, &bun_root, &script, original_parent.as_deref()).await;
+    // F049：注册可取消的运行（UI 直跑入口）
+    let (run_id, _cancel_rx) = crate::script_cancel::register_script_run();
+    let result =
+        run_script_with_selfheal(&app, &bun_root, &script, original_parent.as_deref(), &run_id).await;
+    crate::script_cancel::unregister_script_run(&run_id);
     // 用户侧 Tauri 命令保持「返回 stdout 字符串」契约不变（前端 invoke 依赖），
     // 退出码/结构化结果仅供 agent 运行时（run_node_in_sandbox）使用。
     result.map(|r| r.stdout)
@@ -799,7 +817,11 @@ pub async fn run_node_in_sandbox(
     // 关键修复：与原地执行一致（见 run_node_script）。不再复制到 run_tmp，
     // 否则同目录相对导入（./calc.js）会按临时目录解析而失败；已安装依赖解析由 NODE_PATH 兜底。
     // 有效工作目录：Agent 注入的 cwd（通常为工作空间根）优先；未提供时回退到脚本所在目录（UI 行为）。
-    let result = run_script_with_selfheal(app, &bun_root, &script, cwd.or(original_parent.as_deref())).await;
+    // F049：注册可取消的运行（Agent 调用入口）
+    let (run_id, _cancel_rx) = crate::script_cancel::register_script_run();
+    let result =
+        run_script_with_selfheal(app, &bun_root, &script, cwd.or(original_parent.as_deref()), &run_id).await;
+    crate::script_cancel::unregister_script_run(&run_id);
     result
 }
 

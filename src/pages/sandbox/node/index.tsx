@@ -26,8 +26,7 @@ import {
   Eye,
   Cpu,
   FolderOpen,
-  Search,
-} from 'lucide-react'
+  Search, Square } from 'lucide-react'
 import {
   Button,
   Card,
@@ -50,6 +49,8 @@ import {
   uninstallPackages,
   resetEnv,
   runScript,
+  lastScriptRunId,
+  cancelScript,
   type BunEnvInfo,
   type PackageInfo,
 } from '@/core/mapper/bun-mapper'
@@ -93,6 +94,8 @@ export default function SandboxNodePage() {
   const [runOpen, setRunOpen] = useState(false)
   const [runEnv, setRunEnv] = useState('')
   const [runPath, setRunPath] = useState('')
+  // F049：当前运行的 run_id（用于「停止」按钮）
+  const [runId, setRunId] = useState<string | null>(null)
   const [runOutput, setRunOutput] = useState('')
 
   /** 依赖列表按搜索关键字实时过滤（不区分大小写），空关键字返回全量。 */
@@ -235,17 +238,43 @@ export default function SandboxNodePage() {
     }
     setBusy(`run:${runEnv}`)
     setRunOutput('运行中…')
+    // F049：注册后立即抓 run_id 供「停止」使用（Rust 侧 register 在 spawn 之前）
+    void lastScriptRunId()
+      .then((id) => setRunId(id))
+      .catch(() => setRunId(null))
     runScript(runEnv, runPath.trim())
       .then((res) => {
         if (res.ok) {
           setRunOutput(res.data || '（无输出）')
           message.success('脚本执行完成')
+        } else if (res.error?.includes('已取消')) {
+          setRunOutput('（已取消）')
+          message.info('脚本已取消')
         } else {
           setRunOutput(res.error || '执行失败')
           message.error('脚本执行失败')
         }
       })
-      .finally(() => setBusy(null))
+      .finally(() => {
+        setBusy(null)
+        setRunId(null)
+      })
+  }
+
+  /** F049：停止正在运行的脚本。 */
+  const handleStop = async () => {
+    const id = runId ?? (await lastScriptRunId())
+    if (!id) {
+      message.info('没有正在运行的脚本')
+      return
+    }
+    setRunOutput('正在停止…')
+    const ok = await cancelScript(id)
+    if (ok) {
+      message.info('已请求停止，进程树正在终止')
+    } else {
+      message.info('脚本已结束，无需停止')
+    }
   }
 
   return (
@@ -395,6 +424,18 @@ export default function SandboxNodePage() {
             >
               运行
             </Button>
+            {/* F049：运行中时可停止（终止进程树连带子进程） */}
+            {busy === `run:${runEnv}` && (
+              <Button
+                variant="ghost"
+                danger
+                icon={<Square size={15} />}
+                onClick={() => void handleStop()}
+                title="停止运行（会终止脚本及其子进程）"
+              >
+                停止
+              </Button>
+            )}
           </>
         }
       >

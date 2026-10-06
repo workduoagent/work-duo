@@ -85,6 +85,9 @@ export function deleteEnv(envName: string): Promise<OpResult> {
   return toResult(invoke('delete_mamba_env', { envName }))
 }
 
+// F049：取消能力由script-cancel 共享（Python / Node 两页同用一组命令）
+export { lastScriptRunId, cancelScript } from './script-cancel'
+
 /** 在某环境中运行 Python 脚本，成功返回脚本 stdout。 */
 export function runScript(envName: string, scriptPath: string): Promise<OpResult> {
   return toResult(invoke('run_python_script', { envName, scriptPath }))

@@ -93,3 +93,32 @@ export function deleteEnv(_envName: string): Promise<OpResult> {
 export function runScript(envName: string, scriptPath: string): Promise<OpResult> {
   return toResult(invoke('run_node_script', { envName, scriptPath }))
 }
+
+/**
+ * 取最近一次脚本运行的 run_id（F049）。
+ *
+ * `runScript` 的返回契约是「stdout 字符串」（前端 invoke 依赖，不可改），
+ * 拿不到 run_id；而取消需要。故提供此查询命令——单用户单窗口下
+ * 「最近一次注册」即当前这次运行。
+ */
+export async function lastScriptRunId(): Promise<string | null> {
+  try {
+    return await invoke<string | null>('last_script_run_id')
+  } catch {
+    return null
+  }
+}
+
+/**
+ * 取消一次脚本运行（F049）。
+ *
+ * @param runId 来自 `lastScriptRunId()`
+ * @returns true=已发出取消信号；false=该 run 已结束/不存在
+ */
+export async function cancelScript(runId: string): Promise<boolean> {
+  try {
+    return await invoke<boolean>('cancel_script', { runId })
+  } catch {
+    return false
+  }
+}

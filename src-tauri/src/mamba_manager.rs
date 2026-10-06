@@ -709,15 +709,24 @@ async fn run_sidecar(
     cwd: Option<&Path>,
     extra_envs: &[(String, String)],
 ) -> Result<(String, String, Option<i32>), String> {
-    run_sidecar_policy(app, args, cwd, extra_envs, NetPolicy::Allow).await
+    run_sidecar_policy(app, args, cwd, extra_envs, NetPolicy::Allow, "").await
 }
 
+/// 执行一条沙箱侧命令并收集输出。
+///
+/// F049：新增 `run_id` 支持**用户主动取消**——与硬超时共用同一个
+/// `select!`（取舍2：超时与取消是同一个等待分支的两条竞速路径）。
+/// 取消时先杀进程组（子进程也会被终止），再 kill 兜底。
+///
+/// 返回 `(stdout, stderr, exit_code)`；`exit_code` 为 `None` 表示未收到
+/// `Terminated` 事件（异常终止，或本次是被超时/取消打断的）。
 async fn run_sidecar_policy(
     app: &AppHandle,
     args: Vec<String>,
     cwd: Option<&Path>,
     extra_envs: &[(String, String)],
     net: NetPolicy,
+    run_id: &str,
 ) -> Result<(String, String, Option<i32>), String> {
     let mut cmd = app
         .shell()
@@ -751,9 +760,14 @@ async fn run_sidecar_policy(
         .and_then(|s| s.trim().parse::<u64>().ok())
         .filter(|v| *v > 0)
         .unwrap_or(600);
-    let waited = tokio::time::timeout(
-        std::time::Duration::from_secs(sandbox_timeout),
-        async {
+    // F049：订阅本run 的取消信号（spawn 之后订阅，此时 run_id 已在注册表里）。
+    let mut cancel_rx = crate::script_cancel::subscribe_cancel(run_id);
+
+    // F049：超时与取消共用一个 select（取舍 2）—— 两者都是「抢同一个等待」。
+    // Interrupted 三态：None=自然结束 / Some("timeout") / Some("cancelled")。
+    // 注意 timeout 分支须把「是否超时」透出，故用 Option<Result<..>> 包一层。
+    let interrupted: Option<Result<(), ()>> = tokio::select! {
+        res = tokio::time::timeout(std::time::Duration::from_secs(sandbox_timeout), async {
             while let Some(event) = rx.recv().await {
                 match event {
                     CommandEvent::Stdout(bytes) => stdout.push_str(&String::from_utf8_lossy(&bytes)),
@@ -763,18 +777,48 @@ async fn run_sidecar_policy(
                     _ => {}
                 }
             }
-        },
-    )
-    .await;
-    if waited.is_err() {
-        let _ = child.kill(); // 超时强杀，防孤儿进程
-        return Err(format!(
-            "沙箱脚本执行超时（{}s），已强制终止进程。长任务请拆分或分段落盘中间结果。",
-            sandbox_timeout
-        ));
+        // timeout 分支：Err(Elapsed) = 超时，Ok = 进程自然结束（后者整体返回 None）。
+        // 统一收敛成 Option<Result<(), ()>>：Some(Err)=超时 / Some(Ok)=取消 / None=自然结束。
+        }) => res.err().map(|_| Err(())),
+        _ = recv_cancel(&mut cancel_rx) => Some(Ok(())),  // 取消
+    };
+
+    if let Some(res) = interrupted {
+        // 取舍 1：先杀整组（连带 pip/npm 的子进程），再 kill 兜底
+        crate::script_cancel::kill_process_tree(child.pid());
+        let _ = child.kill();
+        return match res {
+            Err(()) => Err(format!(
+                "沙箱脚本执行超时（{}s），已强制终止进程。长任务请拆分或分段落盘中间结果。",
+                sandbox_timeout
+            )),
+            Ok(()) => Err("沙箱脚本已被用户取消，进程已终止。".into()),
+        };
     }
 
     Ok((stdout, stderr, code))
+}
+
+/// 等待取消信号；返回端已关闭（run 已注销）时视为「无取消」并挂起，
+/// 避免 `rx.recv()` 返回 `Err(Lagged/Closed)` 造成 select 分支误触发。
+pub(crate) async fn recv_cancel(rx: &mut Option<tokio::sync::broadcast::Receiver<()>>) {
+    match rx {
+        Some(r) => {
+            // 循环直到真收到信号：Closed/Lagged 都继续等
+            loop {
+                match r.recv().await {
+                    Ok(()) => return,
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                        // 注册表已清理且无其他订阅者：视为不再会收到取消，
+                        // 挂起等待直到外层 timeout 分支兜底。
+                        std::future::pending::<()>().await
+                    }
+                }
+            }
+        }
+        None => std::future::pending::<()>().await,
+    }
 }
 
 /// 构造 micromamba **全局选项**，必须位于子命令之前：
@@ -1227,13 +1271,14 @@ async fn run_script_with_selfheal(
     tmp_path: &Path,
     cwd: Option<&Path>,
     extra_envs: &[(String, String)],
+    run_id: &str,
 ) -> Result<ScriptRunResult, String> {
     let args = build_run_args(mamba_root, rc, env, tmp_path);
     // 沙箱双守卫（2026-09-24）：运行用户脚本一律注入网络默认关 + 文件系统有界
     // （依赖安装走 install_packages_silent 的 Allow 通道，不受影响）；组装一次供首跑+自愈重试共用。
     let net_envs = with_sandbox_guards(mamba_root, extra_envs, cwd)?;
     let (stdout, stderr, code) =
-        run_sidecar_policy(app, args, cwd, &net_envs, NetPolicy::Blocked).await?;
+        run_sidecar_policy(app, args, cwd, &net_envs, NetPolicy::Blocked, run_id).await?;
     if code != Some(0) {
         if let Some(mods) = missing_modules(&stderr) {
             tracing::info!(
@@ -1245,7 +1290,7 @@ async fn run_script_with_selfheal(
                     tracing::info!("[agent] run_python: 已自动安装依赖（{}），重试执行", specs);
                     let args2 = build_run_args(mamba_root, rc, env, tmp_path);
                     let (o2, e2, c2) =
-                        run_sidecar_policy(app, args2, cwd, &net_envs, NetPolicy::Blocked).await?;
+                        run_sidecar_policy(app, args2, cwd, &net_envs, NetPolicy::Blocked, run_id).await?;
                     return match c2 {
                         Some(0) => Ok(ScriptRunResult { stdout: o2, exit_code: c2 }),
                         Some(c) => Err(format!("脚本执行失败（退出码 {c}）：\n{e2}")),
@@ -1321,6 +1366,8 @@ pub async fn run_python_script(
     // 执行与缺失库自愈统一走 run_script_with_selfheal（含临时脚本清理）。
     // 注入 PYTHONPATH：脚本被复制到 run_tmp 后，同目录 `import` 会失效，需把原始目录加回搜索路径。
     let extra_envs = pythonpath_env(original_parent.as_deref(), None)?;
+    // F049：注册可取消的运行（UI 直跑的入口，用户可点「停止」）
+    let (run_id, _cancel_rx) = crate::script_cancel::register_script_run();
     let result = run_script_with_selfheal(
         &app,
         mgr.inner(),
@@ -1330,8 +1377,10 @@ pub async fn run_python_script(
         &tmp_path,
         original_parent.as_deref(),
         &extra_envs,
+        &run_id,
     )
     .await;
+    crate::script_cancel::unregister_script_run(&run_id);
     let _ = std::fs::remove_file(&tmp_path);
     // 用户侧 Tauri 命令保持「返回 stdout 字符串」契约不变（前端 invoke 依赖），
     // 退出码/结构化结果仅供 agent 运行时（run_python_in_sandbox）使用。
@@ -1378,6 +1427,8 @@ pub async fn run_python_in_sandbox(
     // 注入 PYTHONPATH：脚本被复制到 run_tmp 后，同目录 `import` 会失效，需把原始目录与
     // 有效工作目录一并加回模块搜索路径，恢复「同目录 import」语义。
     let extra_envs = pythonpath_env(original_parent.as_deref(), cwd)?;
+    // F049：注册可取消的运行（Agent 调用入口同样可被 stop 打断）
+    let (run_id, _cancel_rx) = crate::script_cancel::register_script_run();
     let result = run_script_with_selfheal(
         app,
         mgr,
@@ -1387,8 +1438,10 @@ pub async fn run_python_in_sandbox(
         &tmp_path,
         cwd.or(original_parent.as_deref()),
         &extra_envs,
+        &run_id,
     )
     .await;
+    crate::script_cancel::unregister_script_run(&run_id);
     let _ = std::fs::remove_file(&tmp_path);
     result
 }

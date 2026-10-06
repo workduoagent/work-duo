@@ -12,6 +12,7 @@ mod host;
 mod logging;
 mod mcp_server;
 mod net;
+mod script_cancel;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -133,6 +134,9 @@ pub fn run() {
             mamba_manager::reset_mamba_env,
             mamba_manager::delete_mamba_env,
             mamba_manager::run_python_script,
+            script_cancel::cancel_script,
+            script_cancel::list_active_script_runs,
+            script_cancel::last_script_run_id,
             bun_manager::init_bun_env,
             bun_manager::list_bun_envs,
             bun_manager::list_bun_packages,
