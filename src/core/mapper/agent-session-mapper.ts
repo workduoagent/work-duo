@@ -13,6 +13,7 @@
 import { isTauri } from '@/core/config'
 import { safeIso } from './safeTime'
 import { getDb } from '@/core/db/SqlService'
+import { safeParse } from './localFallback'
 import type {
   AgentConversationRound,
   AgentConversationSession,
@@ -28,14 +29,6 @@ import type {
  * 行 <-> 领域模型 转换
  * ---------------------------------------------------------------- */
 
-function safeParse<T>(s: string | null | undefined, fallback: T): T {
-  if (!s) return fallback
-  try {
-    return JSON.parse(s) as T
-  } catch {
-    return fallback
-  }
-}
 
 function rowToSession(r: AgentConversationSessionRow): AgentConversationSession {
   return {

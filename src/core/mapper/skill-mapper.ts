@@ -16,19 +16,12 @@ import { safeIso } from './safeTime'
 import type { SkillInfo } from '@/core/file/skill-file'
 import type { SkillInfoRow } from '@/types/database'
 import { getDb } from '@/core/db/SqlService'
+import { safeParse } from './localFallback'
 
 /* ------------------------------------------------------------------ *
  * 行 <-> 领域模型 转换
  * ------------------------------------------------------------------ */
 
-function safeParse<T>(s: string | null, fallback: T): T {
-  if (!s) return fallback
-  try {
-    return JSON.parse(s) as T
-  } catch {
-    return fallback
-  }
-}
 
 const DEFAULT_SKILL_PATH = '$APPDATA/.skills'
 

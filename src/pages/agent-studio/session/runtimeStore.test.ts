@@ -23,6 +23,8 @@ import {
   getRunningSessionId,
   isSessionRunning,
   setTerminalHandler,
+  resetRuntime,
+  __debugEntryStats,
 } from './runtimeStore'
 
 function fire(name: string, payload: unknown) {
@@ -69,7 +71,7 @@ describe('runtimeStore 事件归属路由（F007）', () => {
   it('F007 核心：外来会话的终态事件不清当前运行态（并发 run 不串台）', () => {
     const terminals: Array<{ sessionId: string; ok: boolean }> = []
     setTerminalHandler('f018-test', (info) => terminals.push({ sessionId: info.sessionId, ok: info.ok }))
-    beginRun('s1', 'a1', {})
+    beginRun('s1', 'a1', { lastPrompt: '' })
     // s2 的终态事件到达（用户已切到 s1 跑新任务）
     fire('agent-task-done', { sessionId: 's2', promptTokens: 1, completionTokens: 1 })
     // 当前运行态不受外来终态影响
@@ -84,7 +86,7 @@ describe('runtimeStore 事件归属路由（F007）', () => {
   })
 
   it('task-error 与 task-done 同享归属路由契约', () => {
-    beginRun('s1', 'a1', {})
+    beginRun('s1', 'a1', { lastPrompt: '' })
     fire('agent-task-error', { sessionId: 's2', message: 'boom' })
     expect(getRunningSessionId()).toBe('s1')
     fire('agent-task-error', { sessionId: 's1', message: 'boom' })
@@ -95,5 +97,54 @@ describe('runtimeStore 事件归属路由（F007）', () => {
     endRun()
     expect(() => fire('agent-task-done', { promptTokens: 1, completionTokens: 1 })).not.toThrow()
     expect(() => fire('agent-event', { payload: { sessionId: undefined } })).not.toThrow()
+  })
+})
+
+/**
+ * F023 回归：运行态条目 LRU 淘汰。
+ *
+ * 背景：entries 原本只增不减——每访问过一个会话就永久驻留（toolSteps / segments /
+ * traceThinking 数组全量保留）。加了上限后必须保证「正在运行的会话绝不淘汰」，
+ * 否则 UI 会立刻丢失进行中的工具步骤。
+ */
+describe('runtimeStore 条目 LRU（F023）', () => {
+  beforeEach(() => {
+    endRun()
+    ensureRuntimeBridge()
+  })
+
+  it('超过上限时淘汰旧条目，条目数不超上限', () => {
+    const { max } = __debugEntryStats()
+    for (let i = 0; i < max + 20; i++) {
+      beginRun('bulk-${i}', 'agent-x', { lastPrompt: '' })
+      endRun()
+    }
+    const after = __debugEntryStats()
+    expect(after.size).toBeLessThanOrEqual(after.max)
+  })
+
+  it('正在运行的会话不被淘汰（工具步骤不丢）', () => {
+    const { max } = __debugEntryStats()
+    // 先造满并全部结束（可淘汰）
+    for (let i = 0; i < max + 5; i++) {
+      beginRun('old-${i}', 'agent-x', { lastPrompt: '' })
+      endRun()
+    }
+    // 再建一个「正在运行」的会话
+    beginRun('hot-running', 'agent-x', { lastPrompt: '' })
+    // 继续造大量新条目，迫使淘汰
+    for (let i = 0; i < max + 5; i++) {
+      beginRun('new-${i}', 'agent-y', { lastPrompt: '' })
+      endRun()
+    }
+    // 运行中的会话必须仍在
+    expect(isSessionRunning('hot-running')).toBe(true)
+  })
+
+  it('resetRuntime 后条目回到初始态且不再占额度优势', () => {
+    beginRun('r1', 'agent-x', { lastPrompt: '' })
+    endRun()
+    resetRuntime('r1')
+    expect(isSessionRunning('r1')).toBe(false)
   })
 })

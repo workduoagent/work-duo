@@ -31,19 +31,12 @@ import type {
   AgentSquadSessionRow,
 } from '@/types/database'
 import { getDb } from '@/core/db/SqlService'
+import { safeParse } from './localFallback'
 
 /* ------------------------------------------------------------------ *
  * 行 <-> 领域模型 转换
  * ------------------------------------------------------------------ */
 
-function safeParse<T>(s: string | null | undefined, fallback: T): T {
-  if (!s) return fallback
-  try {
-    return JSON.parse(s) as T
-  } catch {
-    return fallback
-  }
-}
 
 function toJson(v: unknown): string | null {
   if (v === null || v === undefined) return null
@@ -54,12 +47,14 @@ function now(): number {
   return Date.now()
 }
 
-async function loadMembers(db: Awaited<ReturnType<typeof getDb>>, squadId: string): Promise<SquadMember[]> {
-  const rows = await db.select<AgentSquadMemberRow[]>(
-    'SELECT * FROM agent_squad_member WHERE squad_id = ? ORDER BY CASE WHEN pipeline_order IS NULL THEN 0 ELSE 1 END, pipeline_order ASC, created_at ASC',
-    [squadId],
-  )
-  return rows.map((r) => ({
+/** 无 chat_config 行时的默认配置（与 DDL 语义一致：最多 8 轮、不启用结论转执行）。 */
+function DEFAULT_CHAT_CONFIG(): SquadInfo['chatConfig'] {
+  return { maxRounds: 8, summarizerAgentId: null, executeActions: false }
+}
+
+/** 行 → 成员领域模型。F022 起由 loadMembers（单编队）与 listSquads（批量）共用。 */
+function memberRowToMember(r: AgentSquadMemberRow): SquadMember {
+  return {
     id: r.id,
     squadId: r.squad_id,
     agentId: r.agent_id,
@@ -71,7 +66,25 @@ async function loadMembers(db: Awaited<ReturnType<typeof getDb>>, squadId: strin
     toolProfile: safeParse<SquadMember['toolProfile']>(r.tool_profile_json ?? null, undefined),
     isLeader: r.is_leader === 1,
     createdAt: safeIso(r.created_at),
-  }))
+  }
+}
+
+/** 行 → chatConfig。 */
+function chatRowToConfig(r: AgentSquadChatConfigRow): SquadInfo['chatConfig'] {
+  return {
+    maxRounds: r.max_rounds,
+    summarizerAgentId: r.summarizer_agent_id ?? null,
+    // S3 批次2（§7.1）：结论转执行（DDL v38，默认关）。
+    executeActions: r.execute_actions === 1,
+  }
+}
+
+async function loadMembers(db: Awaited<ReturnType<typeof getDb>>, squadId: string): Promise<SquadMember[]> {
+  const rows = await db.select<AgentSquadMemberRow[]>(
+    'SELECT * FROM agent_squad_member WHERE squad_id = ? ORDER BY CASE WHEN pipeline_order IS NULL THEN 0 ELSE 1 END, pipeline_order ASC, created_at ASC',
+    [squadId],
+  )
+  return rows.map(memberRowToMember)
 }
 
 async function loadChatConfig(
@@ -82,15 +95,7 @@ async function loadChatConfig(
     'SELECT * FROM agent_squad_chat_config WHERE squad_id = ?',
     [squadId],
   )
-  if (rows[0]) {
-    return {
-      maxRounds: rows[0].max_rounds,
-      summarizerAgentId: rows[0].summarizer_agent_id ?? null,
-      // S3 批次2（§7.1）：结论转执行（DDL v38，默认关）。
-      executeActions: rows[0].execute_actions === 1,
-    }
-  }
-  return { maxRounds: 8, summarizerAgentId: null, executeActions: false }
+  return rows[0] ? chatRowToConfig(rows[0]) : DEFAULT_CHAT_CONFIG()
 }
 
 function rowToSquad(
@@ -157,10 +162,42 @@ export async function listSquads(): Promise<SquadInfo[]> {
     [],
   )
   const out: SquadInfo[] = []
+  // F022：原为「每编队 2 次额外查询」的 N+1（N 个编队 = 2N+1 次 IPC 往返）。
+  // 改为两次批量查询 + Map 聚合，整体固定 3 次；并对 IN 列表做分批，
+  // 避免编队数过多时超出 SQLite 变量上限。
+  if (rows.length === 0) return out
+  const CHUNK = 50
+  const membersBySquad = new Map<string, SquadMember[]>()
+  const chatBySquad = new Map<string, SquadInfo['chatConfig']>()
+  for (let i = 0; i < rows.length; i += CHUNK) {
+    const chunk = rows.slice(i, i + CHUNK)
+    const ids = chunk.map((r) => r.id)
+    const ph = ids.map(() => '?').join(',')
+    const [memberRows, chatRows] = await Promise.all([
+      db.select<AgentSquadMemberRow[]>(
+        `SELECT * FROM agent_squad_member WHERE squad_id IN (${ph}) ORDER BY CASE WHEN pipeline_order IS NULL THEN 0 ELSE 1 END, pipeline_order ASC, created_at ASC`,
+        ids,
+      ),
+      db.select<AgentSquadChatConfigRow[]>(
+        `SELECT * FROM agent_squad_chat_config WHERE squad_id IN (${ph})`,
+        ids,
+      ),
+    ])
+    for (const m of memberRows) {
+      const list = membersBySquad.get(m.squad_id) ?? []
+      list.push(memberRowToMember(m))
+      membersBySquad.set(m.squad_id, list)
+    }
+    for (const c of chatRows) chatBySquad.set(c.squad_id, chatRowToConfig(c))
+  }
   for (const r of rows) {
-    const members = await loadMembers(db, r.id)
-    const chat = await loadChatConfig(db, r.id)
-    out.push(rowToSquad(r, members, chat))
+    out.push(
+      rowToSquad(
+        r,
+        membersBySquad.get(r.id) ?? [],
+        chatBySquad.get(r.id) ?? DEFAULT_CHAT_CONFIG(),
+      ),
+    )
   }
   return out
 }

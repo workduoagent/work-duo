@@ -25,19 +25,12 @@ import type {
 import type { McpInfo, McpToolDefinition } from '@/core/file/mcp-file'
 import type { McpInfoRow, McpToolDefinitionRow } from '@/types/database'
 import { getDb } from '@/core/db/SqlService'
+import { safeParse } from './localFallback'
 
 /* ------------------------------------------------------------------ *
  * 行 <-> 领域模型 转换
  * ------------------------------------------------------------------ */
 
-function safeParse<T>(s: string | null, fallback: T): T {
-  if (!s) return fallback
-  try {
-    return JSON.parse(s) as T
-  } catch {
-    return fallback
-  }
-}
 
 function mcpToRow(m: McpInfo): McpInfoRow {
   const now = Date.now()

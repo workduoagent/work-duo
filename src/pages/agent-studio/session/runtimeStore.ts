@@ -192,7 +192,46 @@ export function subscribeRuntime(cb: () => void): () => void {
 /** 读取某会话的运行态快照（未创建则返回冻结空态，引用稳定）。 */
 export function getRuntimeSnapshot(sessionId: string | null): RuntimeState {
   if (!sessionId) return EMPTY
+  touch(sessionId)
   return entries.get(sessionId)?.rt ?? EMPTY
+}
+
+/**
+ * F023：运行态条目上限（LRU）。
+ *
+ * 背景：entries 原本只增不减——每访问过一个会话就永久驻留，其 toolSteps / segments /
+ * traceThinking 数组全量保留。数百次会话后累积数十 MB，且 notify() 的快照读取
+ * 频率高，内存与 GC 压力持续。
+ *
+ * 淘汰规则（保守优先）：
+ *  1. **正在运行的会话绝不淘汰**（isRunning）——否则 UI 立刻丢失进行中的工具步骤；
+ *  2. 其余按「最近访问时间」升序淘汰，保留最近 MAX 轮次；
+ *  3. 超限时一次性清到阈值以下，避免每次插入都扫全表。
+ */
+const MAX_ENTRIES = 50
+/** 会话最近访问时间戳（毫秒）。与 entries 同步维护，不额外占内存量级。 */
+const lastAccessAt = new Map<string, number>()
+
+/** 标记会话为「最近使用」。 */
+function touch(sessionId: string): void {
+  lastAccessAt.set(sessionId, Date.now())
+}
+
+/** 淘汰超出上限的非运行条目，返回被淘汰的会话 id（供测试断言）。 */
+function evictOverflow(): string[] {
+  if (entries.size <= MAX_ENTRIES) return []
+  const candidates = [...entries.keys()]
+    .filter((id) => entries.get(id)?.rt.isRunning !== true)
+    .sort((a, b) => (lastAccessAt.get(a) ?? 0) - (lastAccessAt.get(b) ?? 0))
+  const evictCount = entries.size - MAX_ENTRIES
+  const evicted: string[] = []
+  for (const id of candidates) {
+    if (evicted.length >= evictCount) break
+    entries.delete(id)
+    lastAccessAt.delete(id)
+    evicted.push(id)
+  }
+  return evicted
 }
 
 /** 取（必要时创建）某会话的可写条目。 */
@@ -201,6 +240,10 @@ function entryOf(sessionId: string, create: boolean): Entry | undefined {
   if (!e && create) {
     e = { rt: emptyState(), refs: emptyRefs() }
     entries.set(sessionId, e)
+    touch(sessionId)
+    evictOverflow()
+  } else if (e) {
+    touch(sessionId)
   }
   return e
 }
@@ -219,7 +262,15 @@ export function resetRuntime(sessionId: string) {
   if (!e) return
   e.rt = emptyState()
   e.refs = emptyRefs()
+  // 重置后条目已回到初始态，删除访问时间让它被视为「最旧」，
+  // 下次超限淘汰时优先被清（避免刚被重置的条目占着额度）。
+  lastAccessAt.delete(sessionId)
   notify()
+}
+
+/** 仅供测试：当前条目数与 LRU 上限（F023 可观测性）。 */
+export function __debugEntryStats(): { size: number; max: number } {
+  return { size: entries.size, max: MAX_ENTRIES }
 }
 
 export function getRunningSessionId(): string | null {
@@ -228,6 +279,7 @@ export function getRunningSessionId(): string | null {
 
 export function isSessionRunning(sessionId: string | null): boolean {
   if (!sessionId) return false
+  touch(sessionId)
   return entries.get(sessionId)?.rt.isRunning === true
 }
 

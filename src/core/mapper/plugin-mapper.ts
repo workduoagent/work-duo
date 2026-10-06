@@ -20,19 +20,12 @@ import { safeIso } from './safeTime'
 import type { UserPluginTool, PluginRunLog, UpsertUserPluginInput } from '@/core/file/plugin-file'
 import type { UserPluginToolRow, PluginRunLogRow } from '@/types/database'
 import { getDb } from '@/core/db/SqlService'
+import { safeParse } from './localFallback'
 
 /* ------------------------------------------------------------------ *
  * 行 <-> 领域模型 转换
  * ------------------------------------------------------------------ */
 
-function safeParse<T>(s: string | null, fallback: T): T {
-  if (!s) return fallback
-  try {
-    return JSON.parse(s) as T
-  } catch {
-    return fallback
-  }
-}
 
 function runStatusFromRow(v: number | null): UserPluginTool['lastRunStatus'] {
   if (v === 1) return 'success'

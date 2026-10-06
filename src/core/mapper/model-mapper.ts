@@ -18,20 +18,13 @@ import type { ModelProvider } from '@/types/core'
 import type { ModelConfig } from '@/core/file/model-file'
 import type { ModelConfigRow } from '@/types/database'
 import { getDb } from '@/core/db/SqlService'
+import { safeParse } from './localFallback'
 import { safeIso } from './safeTime'
 
 /* ------------------------------------------------------------------ *
  * 行 <-> 领域模型 转换
  * ------------------------------------------------------------------ */
 
-function safeParse<T>(s: string | null, fallback: T): T {
-  if (!s) return fallback
-  try {
-    return JSON.parse(s) as T
-  } catch {
-    return fallback
-  }
-}
 
 function modelToRow(m: ModelConfig): ModelConfigRow {
   const now = Date.now()

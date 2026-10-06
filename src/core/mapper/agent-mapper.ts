@@ -34,20 +34,13 @@ import type {
   AgentSkillRefRow,
 } from '@/types/database'
 import { getDb } from '@/core/db/SqlService'
+import { safeParse } from './localFallback'
 import { safeIso } from './safeTime'
 
 /* ------------------------------------------------------------------ *
  * 行 <-> 领域模型 转换
  * ------------------------------------------------------------------ */
 
-function safeParse<T>(s: string | null | undefined, fallback: T): T {
-  if (!s) return fallback
-  try {
-    return JSON.parse(s) as T
-  } catch {
-    return fallback
-  }
-}
 
 function toJson(v: Record<string, unknown> | undefined): string | null {
   if (!v || Object.keys(v).length === 0) return null
