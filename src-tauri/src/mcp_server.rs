@@ -1194,7 +1194,8 @@ async fn call_tool(app: &AppHandle, name: &str, args: &Value) -> Value {
                 Ok(cfg) => {
                     let prompt = prompt.or(cfg.run_strategy.schedule_prompt.clone()).unwrap_or_default();
                     if wait {
-                        let session_id = run_squad_task(app, cfg, prompt, contract_tasks, None).await;
+                        // F013：MCP 触发无人值守——装配 run 级墙钟（wait 阻塞也由此有界）。
+                        let session_id = run_squad_task(app, cfg, prompt, contract_tasks, None, true).await;
                         json!({ "ok": true, "sessionId": session_id, "waited": true })
                     } else {
                         let session_id = format!(
@@ -1205,7 +1206,8 @@ async fn call_tool(app: &AppHandle, name: &str, args: &Value) -> Value {
                         let app2 = app.clone();
                         let sid2 = session_id.clone();
                         tauri::async_runtime::spawn(async move {
-                            run_squad_task(&app2, cfg, prompt, contract_tasks, Some(sid2)).await;
+                            // F013：MCP 异步触发无人值守——装配 run 级墙钟看门狗。
+                            run_squad_task(&app2, cfg, prompt, contract_tasks, Some(sid2), true).await;
                         });
                         json!({ "ok": true, "sessionId": session_id, "waited": false })
                     }

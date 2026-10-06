@@ -19,10 +19,12 @@
 
 - **F012 已完成 ✅**（2026-10-05）：squad 状态机 CAS 化——报告处方两条落地（resume 仅 paused→running、finish 带终态否定守卫），并扫全 11 处状态写点统一守卫（awaiting_*/paused 写半终态守卫、批准回写等值守卫、done/failed 收尾终态否定守卫）；终态不可回退，僵尸 running 不再可能；内存库单测 3 项，237 Rust 测试通过。
 
+- **F013 已完成 ✅**（2026-10-05）：squad run 级墙钟——无人值守触发（API/定时/MCP/远程 Resume）装配看门狗，到点置位取消标志复用用户取消收尾链路（不 drop 协程、不新增终态路径），`WD_SQUAD_RUN_TIMEOUT_SECS` 可配默认 7200s；UI 触发不受限；239 Rust 测试通过。
+
 ## 下一步候选
 
-1. **F013**：squad 路径缺失 run 级墙钟超时（commands.rs:1359 UI 入口 vs 单 Agent 有 timeout；对齐即可）。
-2. **F014-F017**：squad 可靠性批次剩余（pipeline expect panic / 成员超时半行 JSON / board_json 读改写丢更新 / events.rs 锁）。
+1. **F014**：pipeline.rs:299 的 expect panic 击穿 run 终态写入（task_to_plan 返回 Option 时 continue + JoinError 检查）。
+2. **F015-F017**：成员超时硬 drop 半行 JSON / board_json 读改写丢更新 / events.rs 裸锁。
 3. **F018**：前端测试基建（零测试 + 无 Lint，结构性债）。
 
 ## 环境事实（跨设备必读）

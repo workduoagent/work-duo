@@ -217,7 +217,8 @@ async fn route(
                     .unwrap_or_default();
                 if wait {
                     // 阻塞至终态（既有语义，外部可轮询 DB 配合）。
-                    let session_id = run_squad_task(app, cfg, prompt, contract_tasks, None).await;
+                    // F013：API 触发无人值守——装配 run 级墙钟（wait 阻塞也由此有界）。
+                    let session_id = run_squad_task(app, cfg, prompt, contract_tasks, None, true).await;
                     (200, format!("{{\"ok\":true,\"sessionId\":\"{session_id}\",\"waited\":true}}"))
                 } else {
                     // 异步触发（§8）：预生成 session_id 立即返回，任务后台跑。
@@ -234,7 +235,8 @@ async fn route(
                     let app2 = app.clone();
                     let session_id2 = session_id.clone();
                     tauri::async_runtime::spawn(async move {
-                        run_squad_task(&app2, cfg, prompt, contract_tasks, Some(session_id2)).await;
+                        // F013：API 异步触发无人值守——装配 run 级墙钟看门狗。
+                        run_squad_task(&app2, cfg, prompt, contract_tasks, Some(session_id2), true).await;
                     });
                     (200, format!("{{\"ok\":true,\"sessionId\":\"{session_id}\",\"waited\":false}}"))
                 }

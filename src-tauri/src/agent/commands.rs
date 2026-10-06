@@ -1357,8 +1357,9 @@ pub async fn run_squad_task(app: AppHandle, input: RunSquadTaskInput) -> Result<
     let app_clone = app.clone();
     let prompt = input.prompt.clone();
     tauri::async_runtime::spawn(async move {
-        // UI 触发：无合同入参、session_id 由 orchestrator 生成（返回值仅用于日志）。
-        let sid = crate::agent::squad::squad_orchestrator::run_squad_task(&app_clone, squad, prompt, None, None).await;
+        // UI 触发：无合同入参、session_id 由 orchestrator 生成（返回值仅用于日志）；
+        // wall_clock=false——UI 触发有人在场，门禁等人是产品设计（F013 墙钟仅无人值守装配）。
+        let sid = crate::agent::squad::squad_orchestrator::run_squad_task(&app_clone, squad, prompt, None, None, false).await;
         tracing::info!("[squad] UI 触发会话 {sid} 结束");
     });
     Ok(())

@@ -187,6 +187,87 @@ pub fn cancel_squad_sessions(squad_id: &str) -> usize {
     cancelled
 }
 
+/* ---------------- F013：run 级墙钟看门狗（无人值守触发） ---------------- */
+
+/// 按会话精确置位取消标志（墙钟看门狗用）。会话已结束（SquadCancelGuard 已清注册表）
+/// 时为 no-op——看门狗自然失效，无需额外生命周期管理。返回是否置位。
+fn cancel_session_flag(session_id: &str) -> bool {
+    let mut g = SQUAD_CANCELS.lock().unwrap_or_else(|e| e.into_inner());
+    match g.as_mut().and_then(|m| m.get_mut(session_id)) {
+        Some((_, flag)) => {
+            flag.store(true, std::sync::atomic::Ordering::SeqCst);
+            true
+        }
+        None => false,
+    }
+}
+
+/// 墙钟时长（F013）：`WD_SQUAD_RUN_TIMEOUT_SECS` 可配，默认 7200s；显式设 0 禁用，
+/// 非法值回落默认。
+fn squad_run_timeout_secs() -> Option<std::time::Duration> {
+    let secs = match std::env::var("WD_SQUAD_RUN_TIMEOUT_SECS") {
+        Ok(v) => v.trim().parse::<u64>().unwrap_or(7200),
+        Err(_) => 7200,
+    };
+    if secs == 0 {
+        None
+    } else {
+        Some(std::time::Duration::from_secs(secs))
+    }
+}
+
+/// 看门狗 abort 守卫：run 正常结束（任意出口）即撤销定时任务，不留空转。
+struct RunWallClockGuard(tauri::async_runtime::JoinHandle<()>);
+impl Drop for RunWallClockGuard {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
+/// F013：无人值守触发（API / 定时 / MCP）装配 run 级墙钟。
+///
+/// 到点按「会话已无注册表登记 → no-op；仍在跑 → 置位取消标志 + 系统轮次留痕」处理——
+/// 完整复用用户取消的收尾链路（三门禁响应 cancel、成员调用级 ≤180s 退出、既有 CAS
+/// 收尾写终态），不 drop 协程、不新增终态路径。UI 触发不装配：门禁等人是产品设计，
+/// 人本身即超时机制（可随时暂停 / 取消）。
+fn spawn_run_wall_clock(
+    app: &AppHandle,
+    session_id: &str,
+    squad_id: &str,
+) -> Option<RunWallClockGuard> {
+    let wall = squad_run_timeout_secs()?;
+    let sid = session_id.to_string();
+    let sqid = squad_id.to_string();
+    let app = app.clone();
+    let handle = tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(wall).await;
+        if !cancel_session_flag(&sid) {
+            return; // 会话已自然结束，看门狗自然失效
+        }
+        tracing::warn!(
+            "[squad] F013 墙钟超时：session={sid} 已自动取消（无人值守触发，{}s）",
+            wall.as_secs()
+        );
+        if let Ok(pool) = get_pool(&app).await {
+            let _ = sqlx::query(
+                "INSERT INTO agent_squad_round (id, squad_id, session_id, speaker_agent_id, role, content, kind, created_at) \
+                 VALUES (?, ?, ?, NULL, '系统', ?, 'system', ?)",
+            )
+            .bind(format!("sqr_{}", now_ms()))
+            .bind(&sqid)
+            .bind(&sid)
+            .bind(format!(
+                "⏰ 墙钟超时（{}s）：无人值守触发超过运行时限，已自动取消；可在运行控制台 Resume 重入。",
+                wall.as_secs()
+            ))
+            .bind(now_ms())
+            .execute(&pool)
+            .await;
+        }
+    });
+    Some(RunWallClockGuard(handle))
+}
+
 /* ---------------- S3 批次3（§4.10）：生命周期 Pause / Resume ---------------- */
 
 /// 暂停注册表——session_id → 暂停标志。语义=「完成当前节点后挂起」：波次边界（编排式）、
@@ -1942,12 +2023,15 @@ fn contract_tasks_to_delegated(tasks: &[SquadContractTask]) -> Vec<DelegatedTask
 /// 启动一次小分队协作：建会话 → 按模式分派 → 波次执行 → 收尾。返回本会话 session_id。
 /// `session_id`：外部驱动可预生成传入（wait=false 异步触发时先建 id 再 spawn，响应即可回带）。
 /// `contract_tasks`（§8）：外部直接给委派计划——跳过主管规划 LLM 与 L1 门禁（视为已批准）。
+/// `wall_clock`（F013）：无人值守触发（API/定时）传 true——装配 run 级墙钟看门狗，
+/// 到点自动取消（复用取消收尾链路）；UI 触发传 false（门禁等人是产品设计）。
 pub async fn run_squad_task(
     app: &AppHandle,
     squad: SquadRuntimeConfig,
     prompt: String,
     contract_tasks: Option<Vec<SquadContractTask>>,
     session_id: Option<String>,
+    wall_clock: bool,
 ) -> String {
     tracing::info!("[squad] 代码指纹 F4：run_squad_task 启动（应含 S0-4 全部：锁/事件/metrics/墙钟）");
     let pool = match get_pool(app).await {
@@ -1978,6 +2062,13 @@ pub async fn run_squad_task(
         );
     }
     let _cancel_guard = SquadCancelGuard(session_id.clone());
+    // F013：无人值守触发装配 run 级墙钟（到点自动取消，复用取消收尾链路）。
+    // 命名绑定持有至函数结束（`let _ =` 会立即 Drop 撤销看门狗）。
+    let _wall_clock_guard = if wall_clock {
+        spawn_run_wall_clock(app, &session_id, &squad.squad_id)
+    } else {
+        None
+    };
     // S2（§4.11）：打断说话信箱注册——无人值守（schedule/api）会话拒绝一切插话（§4.11.8 三路统一）。
     let unattended = matches!(squad.run_strategy.execution_mode.as_str(), "schedule" | "api");
     squad_inject_register_session(&session_id, unattended);
@@ -2377,6 +2468,8 @@ pub async fn resume_squad_session(app: &AppHandle, squad_key: &str, session_id: 
         );
     }
     let _cancel_guard = SquadCancelGuard(session_id.to_string());
+    // F013：Resume 接管仅由 MCP / API 远程驱动（无人值守）——同样装配 run 级墙钟。
+    let _wall_clock_guard = spawn_run_wall_clock(app, session_id, &squad.squad_id);
     let _pause_guard = SquadPauseGuard(session_id.to_string());
     let unattended = matches!(squad.run_strategy.execution_mode.as_str(), "schedule" | "api");
     squad_inject_register_session(session_id, unattended);
@@ -5183,5 +5276,50 @@ mod f012_tests {
         }
         assert_eq!(status_of(&pool, "t1").await, "cancelled");
         assert_eq!(status_of(&pool, "t2").await, "failed");
+    }
+}
+
+#[cfg(test)]
+mod f013_tests {
+    use super::*;
+
+    /// 墙钟时长解析：默认 7200s；显式 0 = 禁用；非法值回落默认。
+    #[test]
+    fn wall_clock_env_parsing() {
+        // 未设置 → 默认 7200s
+        std::env::remove_var("WD_SQUAD_RUN_TIMEOUT_SECS");
+        assert_eq!(squad_run_timeout_secs(), Some(std::time::Duration::from_secs(7200)));
+        // 显式 0 → 禁用
+        std::env::set_var("WD_SQUAD_RUN_TIMEOUT_SECS", "0");
+        assert_eq!(squad_run_timeout_secs(), None);
+        // 合法值生效
+        std::env::set_var("WD_SQUAD_RUN_TIMEOUT_SECS", "60");
+        assert_eq!(squad_run_timeout_secs(), Some(std::time::Duration::from_secs(60)));
+        // 非法值回落默认
+        std::env::set_var("WD_SQUAD_RUN_TIMEOUT_SECS", "abc");
+        assert_eq!(squad_run_timeout_secs(), Some(std::time::Duration::from_secs(7200)));
+        std::env::remove_var("WD_SQUAD_RUN_TIMEOUT_SECS");
+    }
+
+    /// 会话级取消置位：注册表在册 → 置位返回 true；不在册（会话已结束）→ no-op false。
+    #[test]
+    fn cancel_session_flag_registry_semantics() {
+        let sid = format!("f013_{}", std::process::id());
+        // 未注册：no-op
+        assert!(!cancel_session_flag(&sid));
+        // 注册后置位
+        let flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        {
+            let mut g = SQUAD_CANCELS.lock().unwrap_or_else(|e| e.into_inner());
+            g.get_or_insert_with(std::collections::HashMap::new)
+                .insert(sid.clone(), ("f013_squad".to_string(), flag.clone()));
+        }
+        assert!(cancel_session_flag(&sid));
+        assert!(flag.load(std::sync::atomic::Ordering::SeqCst));
+        // 清理注册表（防跨测试残留）
+        let mut g = SQUAD_CANCELS.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(m) = g.as_mut() {
+            m.remove(&sid);
+        }
     }
 }
