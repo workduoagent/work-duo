@@ -13,5 +13,6 @@ export default defineConfig({
     // happy-dom：runtimeStore / mapper 依赖 localStorage 等浏览器全局
     environment: 'happy-dom',
     include: ['src/**/*.test.{ts,tsx}'],
+    setupFiles: ['./src/test-setup.ts'],
   },
 })
