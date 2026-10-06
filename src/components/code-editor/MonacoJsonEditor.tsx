@@ -1,246 +1,52 @@
+import { Suspense, lazy } from 'react'
+import { Spin } from '@/components/ui'
+import type { MonacoJsonEditorProps } from './MonacoJsonEditorInner'
+
 /**
- * 通用 Monaco JSON / 代码编辑器（本地加载，不依赖 CDN）。
+ * 通用 Monaco JSON / 代码编辑器 —— **懒加载包装层**（F043）。
  *
- * 设计要点：
- *  - 通过 loader.config 传入本地 monaco 实例，不走 CDN，断网 / 弱网也能打开；
- *  - web worker 由 Vite 的 ?worker 导入显式打包并通过 MonacoEnvironment 注册
- *    （ESM 构建默认的 new URL(..., import.meta.url) 在 Vite 下会取不到 worker）；
- *  - 兼容原 JsonView 的调用方式：value / onChange / readOnly / height，
- *    并额外支持 language（默认 json）、主题跟随应用明暗；
- *  - 受控：传入对象/数组/原始值会自动 JSON.stringify 展示；编辑时解析回
- *    原始 JSON 值通过 onChange 回传（非法 JSON 时回传 undefined，由调用方决定）；
- *  - 可随处复用（详情页只读展示 authConfig / headers / 调用结果，工具测试参数编辑等）。
+ * 背景：此前 `MonacoJsonEditor` 直接静态 import `monaco-editor` 及其 4 个 worker
+ * 与 TS 贡献模块，经 9 个页面传导进首屏 chunk —— 实测 `dist/assets/index-*.js`
+ * 达 6.5MB。项目其余重量依赖（pdf / docx / xlsx / ag-grid / jszip / video.js /
+ * wavesurfer / mermaid / echarts）**全部已动态 import**，Monaco 是唯一漏网。
+ *
+ * 做法：实现体拆到 `MonacoJsonEditorInner.tsx`，本文件用 `React.lazy` 异步加载。
+ * 由于 `loader.config` / `?worker` / TS 贡献的静态导入都在 Inner 的**模块顶层**，
+ * 它们只在真正打开编辑器时才求值 —— 这是把 monaco 移出首屏的关键。
+ *
+ * 同时在 `vite.config.ts` 配 `manualChunks: { monaco: [...] }`，让 monaco 及其
+ * worker 独立成 chunk 而非被并进按需块（否则体积虽延后但仍与业务代码同 chunk 下载）。
+ *
+ * 类型走 `import type` —— 类型擦除，不引入运行时依赖。
  */
-import { useEffect, useRef, useState } from 'react'
-import { Editor, loader, type OnMount } from '@monaco-editor/react'
-import * as monaco from 'monaco-editor'
-import { Copy, Wand2 } from 'lucide-react'
-// Vite 的 ?worker 后缀：让打包器显式产出 worker 产物（配合下方 MonacoEnvironment 使用）。
-// 注意：monaco-editor 0.56 的 package.json exports 已把子路径前缀写死为 esm/vs/
-// （"./*": "./esm/vs/*.js"），所以这里不能写成 monaco-editor/esm/vs/... ，
-// 否则会被拼成 esm/vs/esm/vs/... 而解析失败。
-import EditorWorker from 'monaco-editor/editor/editor.worker?worker'
-import JsonWorker from 'monaco-editor/language/json/json.worker?worker'
-// TS/JS 语言 worker：编辑 typescript/javascript 时必须注册，否则编辑器向基础
-// EditorWorker 请求 getSyntacticDiagnostics / getNavigationTree / provideInlayHints
-// 等能力全部落空，控制台随每次按键疯狂报 "Missing requestHandler or method"。
-import TsWorker from 'monaco-editor/language/typescript/ts.worker?worker'
-// TS 语言贡献显式加载（0.56 ESM 拆分后不随主包自动注册）：负责 languages.onLanguage
-// 注册诊断等特性，并导出 typescriptDefaults / javascriptDefaults（与注册闭包同实例）。
-// 静态 import 保证它在下方 setDiagnosticsOptions 之前求值。
-import {
-  typescriptDefaults as tsDefaults,
-  javascriptDefaults as jsDefaults,
-} from 'monaco-editor/language/typescript/monaco.contribution.js'
-import './MonacoJsonEditor.scss'
+const MonacoJsonEditorInner = lazy(() =>
+  import('./MonacoJsonEditorInner').then((m) => ({ default: m.MonacoJsonEditor })),
+)
 
-// 本地加载：直接传入本地 monaco 实例，不走 CDN。
-// 这样即使内网 / 弱网环境，编辑器也能正常打开。
-loader.config({
-  monaco,
-  paths: { vs: '/node_modules/monaco-editor/min/vs' },
-})
-
-// TS/JS 诊断配置：插件脚本运行在沙箱（有 node:crypto / node_modules），但编辑器进程里
-// 没有 node 类型声明，完整语义校验会对正常代码误报红线（如 "Cannot find module 'node:crypto'"）。
-// 关闭语义校验、保留语法校验——拼写/括号错误仍有波浪线，模块导入类误报消失。
-// ★ 必须直接使用上方贡献模块导出的 defaults 实例：0.56 运行时不存在
-//   monaco.languages.typescript 命名空间（d.ts 的 deprecated 桩即运行时现实），
-//   经它配置会静默空转（languageFeatures.js 每次校验前才读取本实例的开关）。
-tsDefaults.setDiagnosticsOptions({
-  noSemanticValidation: true,
-  noSyntaxValidation: false,
-})
-jsDefaults.setDiagnosticsOptions({
-  noSemanticValidation: true,
-  noSyntaxValidation: false,
-})
-
-// --- Monaco web worker（Vite 必配）---
-// monaco 的 ESM 构建用 new URL('...', import.meta.url) 定位 worker，
-// Vite 不会自动打包这些路径，运行时就会报
-// "Failed to load worker script for label: editorWorkerService"。
-// 这里改用 Vite 的 ?worker 导入显式注册，按 label 分发。
-// 后续若要支持其他语言，在此补上对应 worker 即可（如 ts / css / html）。
-type WorkerCtor = new () => Worker
-const LANGUAGE_WORKERS: Record<string, WorkerCtor> = {
-  json: JsonWorker,
-  typescript: TsWorker,
-  javascript: TsWorker,
-}
-;(self as unknown as {
-  MonacoEnvironment?: { getWorker?: (workerId: string, label: string) => Worker }
-}).MonacoEnvironment = {
-  getWorker: (_workerId: string, label: string) =>
-    new (LANGUAGE_WORKERS[label] ?? EditorWorker)(),
-}
-
-export interface MonacoJsonEditorProps {
-  /** 任意 JSON 值（对象 / 数组 / 原始值 / 字符串均可）；mode='code' 时直接传字符串 */
-  value: unknown
-  /** 值变化回调（可编辑时） */
-  onChange?: (value: unknown) => void
-  /** 只读展示（详情页 authConfig / headers / 调用结果用） */
-  readOnly?: boolean
-  /** 高度（CSS 值或像素数），默认 320 */
-  height?: number | string
-  /** 语言，默认 json；可传 yaml / jsonc / python / javascript 等 */
-  language?: string
-  /** 是否显示右上角工具条（格式化 / 复制），默认 true */
-  showToolbar?: boolean
-  /**
-   * 解析模式：
-   *  - 'json'（默认）：编辑内容按 JSON 解析后通过 onChange 回传 unknown；
-   *  - 'code'：原始文本模式，直接把字符串通过 onChange 回传，适用于脚本 / Markdown 等
-   *    非 JSON 内容的编辑（如技能脚本 Python / Node）。
-   */
-  mode?: 'json' | 'code'
-  className?: string
-}
-
-function toText(v: unknown): string {
-  if (v === undefined || v === null) return ''
-  if (typeof v === 'string') return v
-  try {
-    return JSON.stringify(v, null, 2)
-  } catch {
-    return ''
-  }
-}
-
-function safeParse(t: string): unknown {
-  const s = t.trim()
-  if (s === '') return undefined
-  try {
-    return JSON.parse(s)
-  } catch {
-    return undefined
-  }
-}
-
-export function MonacoJsonEditor({
-  value,
-  onChange,
-  readOnly = false,
-  height = 320,
-  language = 'json',
-  showToolbar = true,
-  mode = 'json',
-  className,
-}: MonacoJsonEditorProps) {
-  const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null)
-  const [text, setText] = useState<string>(() => toText(value))
-  const [theme, setTheme] = useState<'light' | 'vs-dark'>(() =>
-    document.documentElement.classList.contains('dark') ? 'vs-dark' : 'light',
-  )
-
-  // 只读态：外部 value 变化直接同步展示
-  useEffect(() => {
-    if (readOnly) setText(toText(value))
-  }, [value, readOnly])
-
-  // 可编辑态同样同步外部 value：内部 text 只在首次 useState 初始化，若不同步，
-  // 「插入模板 / 提取元数据回填 / 弹窗重开换数据」等外部赋值都不会反映到编辑器。
-  // 受控回环安全：输入时父级回传的 value 与当前 text 一致 → no-op，不会打断光标。
-  useEffect(() => {
-    const next = toText(value)
-    setText((prev) => (prev === next ? prev : next))
-  }, [value])
-
-  // 主题跟随应用明暗切换（<html> 上的 .light / .dark）
-  useEffect(() => {
-    const sync = () =>
-      setTheme(document.documentElement.classList.contains('dark') ? 'vs-dark' : 'light')
-    sync()
-    const observer = new MutationObserver(sync)
-    observer.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ['class'],
-    })
-    return () => observer.disconnect()
-  }, [])
-
-  const handleMount: OnMount = (editor) => {
-    editorRef.current = editor
-  }
-
-  const handleChange = (next?: string) => {
-    const t = next ?? ''
-    setText(t)
-    if (!onChange) return
-    onChange(mode === 'code' ? t : safeParse(t))
-  }
-
-  const handleFormat = () => {
-    editorRef.current?.getAction('editor.action.formatDocument')?.run()
-  }
-
-  const handleCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(text)
-    } catch {
-      /* 忽略：剪贴板不可用时静默 */
-    }
-  }
-
+/** 加载中的占位：保持与编辑器一致的高度，避免弹窗内容跳动。 */
+function EditorLoading({ height }: { height?: number | string }) {
+  const h = typeof height === 'number' ? `${height}px` : (height ?? '320px')
   return (
     <div
-      className={`mcphub-monaco${className ? ` ${className}` : ''}`}
-      data-readonly={readOnly ? 'true' : undefined}
+      style={{
+        height: h,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        minHeight: 120,
+      }}
     >
-      {showToolbar && (
-        <div className="mcphub-monaco__toolbar">
-          <span className="mcphub-monaco__lang">{language}</span>
-          <div className="mcphub-monaco__actions">
-            {!readOnly && (
-              <button
-                type="button"
-                className="mcphub-monaco__btn"
-                onClick={handleFormat}
-                title="格式化 JSON"
-              >
-                <Wand2 size={14} />
-                <span>格式化</span>
-              </button>
-            )}
-            <button
-              type="button"
-              className="mcphub-monaco__btn"
-              onClick={handleCopy}
-              title="复制内容"
-            >
-              <Copy size={14} />
-            </button>
-          </div>
-        </div>
-      )}
-      <div className="mcphub-monaco__body">
-        <Editor
-          height={height}
-          language={language}
-          theme={theme}
-          value={text}
-          onChange={handleChange}
-          onMount={handleMount}
-          options={{
-            readOnly,
-            minimap: { enabled: false },
-            fontSize: 13,
-            fontFamily:
-              "'AppMono', ui-monospace, SFMono-Regular, 'JetBrains Mono', Consolas, monospace",
-            scrollBeyondLastLine: false,
-            automaticLayout: true,
-            tabSize: 2,
-            wordWrap: 'on',
-            lineNumbers: 'on',
-            folding: true,
-            renderLineHighlight: readOnly ? 'none' : 'line',
-            scrollbar: { verticalScrollbarSize: 8, horizontalScrollbarSize: 8 },
-            padding: { top: 10, bottom: 10 },
-            formatOnPaste: !readOnly,
-          }}
-        />
-      </div>
+      <Spin wrapperClassName="mcphub-monaco__spin" />
     </div>
   )
 }
+
+export function MonacoJsonEditor(props: MonacoJsonEditorProps) {
+  return (
+    <Suspense fallback={<EditorLoading height={props.height} />}>
+      <MonacoJsonEditorInner {...props} />
+    </Suspense>
+  )
+}
+
+export type { MonacoJsonEditorProps } from './MonacoJsonEditorInner'
