@@ -12,11 +12,11 @@
  */
 import {useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent} from 'react'
 import { openPath } from '@tauri-apps/plugin-opener'
+import { SquadCard } from './SquadCard' // F045：卡片抽memo 组件
 import { useNavigate } from 'react-router-dom'
 import {
     Plus,
     Trash2,
-    Pencil,
     Play,
     Users,
     Settings2,
@@ -32,7 +32,7 @@ import {
     SlidersHorizontal,
     ChevronRight,
 } from 'lucide-react'
-import {Button, Card, Modal, Field, FieldLabel, Input, Select, Segmented, Switch, InputNumber, Empty, Spin, Popconfirm, Tag, Tooltip, Alert} from '@/components/ui'
+import {Button, Modal, Field, FieldLabel, Input, Select, Segmented, Switch, InputNumber, Empty, Spin, Popconfirm, Tag, Tooltip, Alert} from '@/components/ui'
 import { PixelAgent } from '@/components/ui/pixel-agent'
 import { generateAvatarByScenario } from '@/components/ui/pixel-agent'
 import type { AgentMotionState, PixelAgentAppearance } from '@/components/ui/pixel-agent'
@@ -267,13 +267,6 @@ export function memberLabel(m: { role?: string; agentId: string }, agents: Agent
 }
 
 /** 卡片实时徽标文案（最新会话非终态才显示；终态无标记）。 */
-const LIVE_LABELS: Record<string, string> = {
-    running: '协作中',
-    paused: '已暂停',
-    awaiting_plan: '计划待批准',
-    awaiting_checkpoint: '待检查点决议',
-    awaiting_delivery: '待确认交付',
-}
 const INPUT_NODE_ID = '__squad_input__'
 
 interface SquadNodeData {
@@ -2534,6 +2527,8 @@ export function SquadHistoryPanel({
 export default function SquadsWorkspacePage() {
     const {message} = useNotify()
     const nav = useNavigate()
+    // F045：卡片抽离后仍需跳转入口（打开协作工作台）
+    const openWorkspace = useCallback((sq: SquadInfo) => nav(`/squads-workspace/${sq.id}?tab=run`), [nav])
     const [loading, setLoading] = useState(true)
     const [list, setList] = useState<SquadInfo[]>([])
     const [agents, setAgents] = useState<AgentInfo[]>([])
@@ -2632,114 +2627,20 @@ export default function SquadsWorkspacePage() {
                 {list.length > 0 ? (
                     <div className="squads__grid">
                         {list.map((squad) => (
-                            <Card frame="solid" key={squad.id} className="squads__card">
-                                <div className="squads__card-head">
-                                    <div className="squads__card-avatar">
-                                        {squad.logo ? (
-                                            <img src={squad.logo} alt={squad.name} className="squads__card-logo"/>
-                                        ) : (
-                                            <Users size={20}/>
-                                        )}
-                                    </div>
-                                    <div className="squads__card-titles">
-                                        <h3 className="squads__card-title">{squad.name}</h3>
-                                        <div className="squads__card-tags">
-                                            <Tag
-                                                color={
-                                                    squad.mode === 'orchestrator'
-                                                        ? 'blue'
-                                                        : squad.mode === 'pipeline'
-                                                            ? 'purple'
-                                                            : 'cyan'
-                                                }
-                                                bordered={false}
-                                                style={{borderRadius: 999, marginInlineEnd: 0}}
-                                            >
-                                                {MODE_OPTIONS.find((o) => o.value === squad.mode)?.label ?? squad.mode}
-                                            </Tag>
-                                            {LIVE_LABELS[liveStatus[squad.id]] && (
-                                                <span className={`squads__live squads__live--${liveStatus[squad.id]}`}>
-                                                    <i className="squads__live-dot"/>
-                                                    {LIVE_LABELS[liveStatus[squad.id]]}
-                                                </span>
-                                            )}
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <p className="squads__card-desc">{squad.description || '暂无描述'}</p>
-
-                                <div className="squads__card-crew" title={squad.members.map((m) => memberLabel(m, agents)).join('、')}>
-                                    {squad.members.slice(0, 8).map((m, i) => {
-                                        const crewKey = `${squad.id}-${i}`
-                                        return (
-                                            <span
-                                                key={m.id || crewKey}
-                                                className="squads__crew-slot"
-                                                onMouseEnter={() => setHoverCrew(crewKey)}
-                                                onMouseLeave={() => setHoverCrew((k) => (k === crewKey ? null : k))}
-                                            >
-                                                <PixelAgent
-                                                    appearance={agentAppearanceOf(agents, m.agentId)}
-                                                    size={24}
-                                                    motion={liveStatus[squad.id] === 'running' || hoverCrew === crewKey}
-                                                    state="working"
-                                                    className="squads__crew-avatar"
-                                                />
-                                            </span>
-                                        )
-                                    })}
-                                    {squad.members.length > 8 && (
-                                        <span className="squads__crew-more">+{squad.members.length - 8}</span>
-                                    )}
-                                </div>
-
-                                <div className="squads__card-actions">
-                                    <Button
-                                        variant="soft"
-                                        size="sm"
-                                        className="squads__card-main"
-                                        onClick={() => nav(`/squads-workspace/${squad.id}?tab=run`)}
-                                        aria-label="打开协作工作台"
-                                        title="打开协作工作台（运行 / 历史 / 记忆）"
-                                    >
-                                        <Play size={14}/> 工作台
-                                    </Button>
-                                    <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        onClick={() => openEdit(squad)}
-                                        aria-label="编辑"
-                                    >
-                                        <Pencil size={15}/>
-                                    </Button>
-                                    <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        aria-label="打开空间目录"
-                                        title={squad.workspaceDir ? `打开空间目录：${squad.workspaceDir}` : '该编队未配置空间目录'}
-                                        disabled={!squad.workspaceDir}
-                                        onClick={() => {
-                                            if (squad.workspaceDir) void openPath(squad.workspaceDir)
-                                        }}
-                                    >
-                                        <FolderOpen size={15}/>
-                                    </Button>
-                                    <Popconfirm
-                                        title="删除小分队"
-                                        description="将同时清理其成员、群聊配置与运行历史，不可恢复。"
-                                        okText="删除"
-                                        cancelText="取消"
-                                        okButtonProps={{danger: true}}
-                                        onConfirm={() => handleDelete(squad)}
-                                    >
-                                        <Button variant="ghost" size="sm" className="squads__card-del"
-                                                aria-label="删除">
-                                            <Trash2 size={15}/>
-                                        </Button>
-                                    </Popconfirm>
-                                </div>
-                            </Card>
+                            <SquadCard
+                                key={squad.id}
+                                squad={squad}
+                                // F045：只传本卡片自己的状态字符串（而非整个 map），
+                                // 这样其他卡片状态变化不会导致本卡片重渲染
+                                live={liveStatus[squad.id]}
+                                agents={agents}
+                                hoverCrew={hoverCrew}
+                                onHoverCrew={setHoverCrew}
+                                onOpen={openWorkspace}
+                                onEdit={openEdit}
+                                onDelete={handleDelete}
+                                onOpenPath={(dir) => void openPath(dir)}
+                            />
                         ))}
                     </div>
                 ) : (
