@@ -82,6 +82,76 @@
   /* 品牌渐变（强调按钮底：Sky → Mint） */
   --color-brand-gradient: linear-gradient(135deg, #38bdf8, #34d399);
 
+  /* ============================================================
+   * 语义别名层（F036）—— 补齐「引用了但从未定义」的令牌
+   * ------------------------------------------------------------
+   * 背景：全项目 94 个 var() 引用中有 30 个语义色此前只存在于调用点的
+   * fallback 里（如 var(--color-primary, #1677ff)）。因都带 fallback，
+   * 编译不报错、视觉不炸，缺陷被掩盖——但换主题时这批文字永不变化，
+   * 且 fallback 是 antd 旧默认蓝 #1677ff，与 Ocean 调色板 #0ea5e9 不一致，
+   * 导致 chat 页与其它页面出现两套主色。
+   *
+   * 处置：全部映射到下方已定义的基础令牌（而非新增独立色值），
+   * 这样 5 套色调（minimal/sky/mint/lilac × light/dark）自动生效——
+   * .accent-* 只重映射 --color-brand-*，别名层跟随即可，无需逐主题重复定义。
+   * ============================================================ */
+
+  /* 主色：交互焦点/链接/选中。映射 brand-600（浅色下对比度达 AA 的深 Sky）。 */
+  --color-primary: var(--color-brand-600);
+  --color-primary-light: var(--color-brand-500);
+  --color-primary-soft: var(--color-brand-100);
+  --color-primary-border: var(--color-brand-200);
+  --color-primary-bg: var(--color-brand-50);
+
+  /* 文字层级别名（对齐既有 foreground 三档） */
+  --color-text: var(--color-foreground);
+  --color-text-secondary: var(--color-foreground-muted);
+  --color-text-tertiary: var(--color-foreground-muted);
+  --color-muted: var(--color-foreground-muted);
+  --color-foreground-subtle: var(--color-foreground-muted);
+
+  /* 表面/背景别名（surface ≡ background-subtle，是 antd 组件语境的习惯叫法） */
+  --color-surface: var(--color-background-subtle);
+  --color-surface-hover: var(--color-background-muted);
+  --color-surface-muted: var(--color-background-muted);
+  --color-bg: var(--color-background);
+  --color-bg-subtle: var(--color-background-subtle);
+  --color-bg-muted: var(--color-background-muted);
+  --color-background-soft: var(--color-background-subtle);
+  --color-background-base: var(--color-background);
+  --color-background-hover: var(--color-background-muted);
+  --color-fill-quaternary: var(--color-background-subtle);
+
+  /* 边框强弱两档 */
+  --color-border-strong: var(--color-foreground-muted);
+  --color-border-faint: var(--color-border-muted);
+  /* 通用 hover 底（无实义场景的交互反馈） */
+  --color-hover: var(--color-background-muted);
+
+  /* 语义状态色：info 借用主色（项目无独立信息色板，antd 同款做法） */
+  --color-info: var(--color-brand-600);
+  --color-error: var(--color-danger);
+  --color-success-border: var(--color-success);
+  /* 成功/警告的浅底与描边别名 */
+  --color-success-bg: rgba(52, 211, 153, 0.10);
+  --color-danger-bg: var(--color-danger-bg);
+  /* 成功 600：供 skill-hub 等处显式指定深一档的成功色 */
+  --color-success-600: #059669;
+
+  /* 轨迹分类色（F036）：TracePanel 的 plan/exec/selfcheck/chat 四类，
+     此前只存在于调用点 fallback（Tailwind 色阶），换主题不跟随。
+     映射到品牌三色环：规划=brand主色、执行=brand深、自检=warning琥珀、思考=lilac。 */
+  --color-trace-plan: var(--color-brand-600);
+  --color-trace-exec: var(--color-brand-700);
+  --color-trace-selfcheck: #d97706;
+  --color-trace-chat: #8b5cf6;
+
+  /* 交互强调色（F036）：chat.scss 的聚焦光环用，等价 --color-primary。 */
+  --accent: var(--color-brand-600);
+
+  /* 阴影别名：card 与 md 同强度（卡片常态阴影，非弹层） */
+  --shadow-card: 0 2px 12px rgba(7, 30, 48, 0.06);
+
   /* 阴影 - 深海军低透明度，柔和扩散 */
   --shadow-sm: 0 2px 12px rgba(7, 30, 48, 0.06);
   --shadow-md: 0 8px 32px rgba(7, 30, 48, 0.08);
@@ -148,6 +218,58 @@
 
   --color-brand-gradient: linear-gradient(135deg, #38bdf8, #34d399);
 
+  /* ============================================================
+   * 语义别名层（F036）· 暗色
+   * 与浅色段同构，但两处不能简单共用：
+   *  1) --color-primary 暗色需用 brand-600（暗色下 brand-600 已是提亮的
+   *     #7fd9fb，直接复用即可，映射关系与浅色一致）；
+   *  2) 浅底/描边类（primary-soft/bg、success-bg 等）在暗色下须给 rgba，
+   *     否则会因叠加不透明浅色块而「发光」。
+   * ============================================================ */
+  --color-primary: var(--color-brand-600);
+  --color-primary-light: var(--color-brand-400);
+  --color-primary-soft: rgba(56, 189, 248, 0.16);
+  --color-primary-border: rgba(56, 189, 248, 0.32);
+  --color-primary-bg: rgba(56, 189, 248, 0.10);
+
+  --color-text: var(--color-foreground);
+  --color-text-secondary: var(--color-foreground-muted);
+  --color-text-tertiary: var(--color-foreground-muted);
+  --color-muted: var(--color-foreground-muted);
+  --color-foreground-subtle: var(--color-foreground-muted);
+
+  --color-surface: var(--color-background-subtle);
+  --color-surface-hover: var(--color-background-muted);
+  --color-surface-muted: var(--color-background-muted);
+  --color-bg: var(--color-background);
+  --color-bg-subtle: var(--color-background-subtle);
+  --color-bg-muted: var(--color-background-muted);
+  --color-background-soft: var(--color-background-subtle);
+  --color-background-base: var(--color-background);
+  --color-background-hover: var(--color-background-muted);
+  --color-fill-quaternary: var(--color-background-subtle);
+
+  --color-border-strong: var(--color-foreground-muted);
+  --color-border-faint: var(--color-border-muted);
+  --color-hover: var(--color-background-muted);
+
+  --color-info: var(--color-brand-600);
+  --color-error: var(--color-danger);
+  --color-success-border: var(--color-success);
+  --color-success-bg: rgba(52, 211, 153, 0.14);
+  --color-danger-bg: var(--color-danger-bg);
+  --color-success-600: #34d399;
+
+  /* 轨迹分类色（F036）· 暗色：四类需在深底上提亮，保证可辨识 */
+  --color-trace-plan: var(--color-brand-600);
+  --color-trace-exec: var(--color-brand-400);
+  --color-trace-selfcheck: #fbbf24;
+  --color-trace-chat: #c4a8fe;
+
+  --accent: var(--color-brand-600);
+
+  --shadow-card: 0 2px 8px rgba(3, 10, 18, 0.45);
+
   /* 暗色下更深、更集中的阴影 */
   --shadow-sm: 0 2px 8px rgba(3, 10, 18, 0.45);
   --shadow-md: 0 8px 24px rgba(3, 10, 18, 0.55);
@@ -159,6 +281,23 @@
   --topbar-height: 56px;
   /* 稍微增大圆角，配合柔和阴影，现代感更强 */
   --radius-card: 16px;
+  /* 圆角刻度（F036）：此前散落在调用点的裸值收敛为三档，
+     消费方为 var(--radius-sm/md/lg, <fallback>)——补定义后 fallback 不再生效，
+     全站圆角节奏由此处统一调控。 */
+  --radius-sm: 6px;  /* 徽标 / 小标签 / 内联 code */
+  --radius-md: 10px; /* 按钮 / 输入框 / 菜单项 */
+  --radius-lg: 14px; /* 卡片 / 浮层 / 弹窗 */
+
+  /* 布局常量（F036）：chat 页多处 calc() 依赖，此前只靠调用点 fallback。
+     提升为令牌后，右侧面板宽度等改动只需改这一处。 */
+  --input-h: 48px;  /* 聊天输入框高度 */
+  --right-w: 560px; /* 右侧面板宽度 */
+
+  /* 小分队像素小人步行动画（F036）：--walk-bob 单步时长、--walk-delay 起始延迟，
+     由 SquadsWorkspace 逐成员写入内联样式覆盖，这里给默认值。 */
+  --walk-bob: 0.42s;
+  --walk-delay: 0s;
+
   /* 全局字体：Sans 走自定义 AppSans（阿里巴巴普惠体，经 @font-face 引入）；
      中文 fallback 到 PingFang SC / 微软雅黑，确保字体未就绪时不崩。 */
   --font-sans: "AppSans", system-ui, -apple-system, "Segoe UI", Roboto,
