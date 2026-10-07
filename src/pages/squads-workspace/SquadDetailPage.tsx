@@ -17,6 +17,11 @@ import {subscribeSquadRunEvents} from './useSquadRunEvents' // F039：与列表�
 import ROOM_BG from '@/assets/images/squad-meeting-room-open.png'
 
 const ACTIVE_STATUSES = ['running', 'paused', 'awaiting_plan', 'awaiting_checkpoint', 'awaiting_delivery']
+/**
+ * 终态集合（与 Rust `TERMINAL_STATUSES` 对齐）：会话落定后再挂门禁卡是死路
+ * —— 后端门禁已释放，点击无人接收。判断「是否该显示审批卡」时须先排除。
+ */
+const TERMINAL_STATUSES_FRONT = new Set(['done', 'cancelled', 'failed'])
 const STATUS_PILL: Record<string, {label: string; cls: string}> = {
     running: {label: '运行中', cls: 'live'},
     paused: {label: '已暂停', cls: 'muted'},
@@ -337,6 +342,16 @@ export default function SquadDetailPage() {
 
     const [planPending, setPlanPending] = useState(false)
     const [checkpointPending, setCheckpointPending] = useState(false)
+    /**
+     * 交付待确认门禁的**即时置位**。
+     *
+     * 为什么不用 `selectedSession.status === 'awaiting_delivery'` 直接推导：
+     * 那个值来自会话列表，详情页靠 10s 轮询刷新（`reloadSessions`）——
+     * 后端落delivery 轮时若用户正停在舞台模式，卡最多10 秒后才出现，
+     * 而舞台模式本就没有底部审批条可看，用户会以为功能没做。
+     * 故收到 delivery round 事件即置位，决议后由 `gateCallAsync` 清掉。
+     */
+    const [deliveryPending, setDeliveryPending] = useState(false)
     // 手动无人值守开关：开 = 该队审批/门禁不再等决策（低危自动按推荐方案，L3 高危仍挂起）
     const [unattended, setUnattended] = useState(false)
     // 成员待审批卡（工作台可见即可批；后端 120s×2 兜底自动批）
@@ -389,7 +404,9 @@ export default function SquadDetailPage() {
     }, [rounds, summary, planPending, checkpointPending, selected])
 
     const selectedSession = sessions.find((s) => s.id === selected) || null
-    const isRunning = selectedSession?.status === 'running'
+    // 注：原先此处有 `const isRunning = selectedSession?.status === 'running'`，
+    // 它唯一的用途是在 memberState 里当「发言者呼吸灯」的前置门，导致会话一结束
+    // 全员idle（真机反馈）。呼吸灯语义是「当前发言者」，与运行状态无关，故已移除。
     const boardTasks = useMemo(() => {
         const raw = (board?.tasks ?? []) as unknown
         if (Array.isArray(raw)) return raw as Array<{taskId: string; title: string; assignee: string; status: string}>
@@ -461,10 +478,17 @@ export default function SquadDetailPage() {
                 setRounds: (updater) => setRounds(updater),
                 onPlanPending: () => setPlanPending(true),
                 onCheckpointPending: () => setCheckpointPending(true),
-                // 注：详情页的 delivery 门禁不由事件驱动，而是由
-                // `selectedSession.status === 'awaiting_delivery'` 推导（见 TimelineView
-                // 的 delivery prop），故这里无需 onDeliveryPending——两页门禁的数据来源
-                // 本就不同（列表页靠事件即时置位，详情页靠会话状态轮询），不是漂移。
+                // 🔴 F049 补正（原注释说「详情页靠会话状态轮询，不是漂移」——恰恰是缺陷）：
+                // delivery 轮落库时同步发 round 事件，此处**立即**置位门禁，
+                // 不必等 10s 轮询把 status 刷回来。舞台模式尤其需要（无底部审批条可看）。
+                onDeliveryPending: () => {
+                    setDeliveryPending(true)
+                    void reloadSessions()
+                },
+                onDeliveryResolved: () => {
+                    setDeliveryPending(false)
+                    void reloadSessions()
+                },
                 setSummary,
                 setMemberMotion,
                 onSessionStarted: (sessionId) => {
@@ -535,7 +559,7 @@ export default function SquadDetailPage() {
     const gateCallAsync = useCallback(async (cmd: string, args: Record<string, unknown>, okMsg: string) => {
         try {
             await invoke(cmd, {sessionId: selected ?? sessionIdRef.current, ...args}); message.success(okMsg)
-            setPlanPending(false); setCheckpointPending(false)
+            setPlanPending(false); setCheckpointPending(false); setDeliveryPending(false)
             void reloadSessions()
         } catch (e) { message.error(`操作失败：${e instanceof Error ? e.message : String(e)}`) }
     }, [message, reloadSessions, selected])
@@ -543,6 +567,21 @@ export default function SquadDetailPage() {
     const gateCall = useCallback((cmd: string, args: Record<string, unknown>, okMsg: string) => {
         void gateCallAsync(cmd, args, okMsg)
     }, [gateCallAsync])
+
+    /**
+     * 交付门禁是否该显示 —— **事件置位 OR 会话状态**，两者取或。
+     *
+     * - 事件置位（`deliveryPending`）：后端落 delivery 轮的瞬间即亮，不等轮询；
+     * - status 兜底：覆盖「进入页面时门禁早已挂着」的情况（事件在挂载前就发了）。
+     *
+     * 🔴 终态一律不显示：会话已 done/cancelled/failed 时再弹确认卡是死路
+     * （后端门禁已释放，点确认无人接收）。这同时避免了重跑历史会话时误弹。
+     */
+    const deliveryGate = useMemo(() => {
+        const st = selectedSession?.status
+        if (!st || TERMINAL_STATUSES_FRONT.has(st)) return false
+        return deliveryPending || st === 'awaiting_delivery'
+    }, [deliveryPending, selectedSession?.status])
 
     // 像素头像外观缓存：agentAppearanceOf 在库内未存 appearance 时会现算生成新对象，
     // 直接内联传入会击穿 PixelAgent 的 memo（每次重渲染都重建数百个 rect）；按 agentId 缓存引用。
@@ -579,11 +618,28 @@ export default function SquadDetailPage() {
         return ''
     }, [rounds])
     // 呼吸灯：谁在发言谁亮——事件状态优先，其次取最新一轮的发言者
-    const lastSpeakerId = rounds.length ? (rounds[rounds.length - 1].speakerAgentId ?? null) : null
+    //
+    // 🔴 F039 收尾修复（2026-10-07 真机实测）：原实现直接取 `rounds[length-1]`，
+    // 但 rounds 末尾会追加**系统轮**（kind = summary / metrics / delivery，
+    // speakerAgentId 为 null），运行中的会话正是最常出现这些系统轮的时刻 ——
+    // 于是 lastSpeakerId 恒为 null，谁都不亮，呼吸灯整个失效。
+    // 真机证据（技术评审圆桌会话 9 轮）：索引 0-5 是真实发言，
+    // 索引 6/7/8 分别是 summary/metrics/delivery（speaker 均为 null）。
+    //
+    // 修法：从后往前找**第一个有发言者的轮次**（跳过系统轮），
+    // 这样「谁在发言」取的是最后一个真正说过话的成员。
+    const lastSpeakerId = useMemo(() => {
+        for (let i = rounds.length - 1; i >= 0; i--) {
+            const id = rounds[i].speakerAgentId
+            if (id) return id
+        }
+        return null
+    }, [rounds])
     /**
-     * 成员动作状态（舞台用）：
+     * 成员动作状态（舞台 + 右栏成员状态共用）：
      * - working/cheer/error：成员事件优先（执行中保持不动）
-     * - speaking：当前发言者（保持不动）
+     * - speaking：**当前发言者** —— 语义只有这一条，「轮到谁发言谁亮」，
+     *   不按会话是否 running 分叉（真机反馈：已完成会话里呼吸灯全灭，看不出谁主导了讨论）
      * - waiting：会话暂停 / 待审批门禁
      * - idle：其余（含运行中非发言者 → 走动）
      */
@@ -592,9 +648,12 @@ export default function SquadDetailPage() {
         if (ev && ev !== 'idle') return ev
         const st = selectedSession?.status
         if (st === 'paused' || (st && st.startsWith('awaiting'))) return 'waiting'
-        if (isRunning && agentId === lastSpeakerId) return 'speaking'
+        // 🔴 原为 `isRunning && agentId === lastSpeakerId` —— 多了 isRunning 这道门，
+        // 会话一旦非 running（如已完成）就全员idle，呼吸灯整个消失。
+        // 呼吸灯的语义是「当前发言者」，与运行状态无关，故去掉该条件。
+        if (lastSpeakerId && agentId === lastSpeakerId) return 'speaking'
         return 'idle'
-    }, [memberMotion, isRunning, lastSpeakerId, selectedSession?.status])
+    }, [memberMotion, lastSpeakerId, selectedSession?.status])
 
     if (loading) return <div className="squads squads--detail"><Spin spinning wrapperClassName="squads__spin"/></div>
     if (!squad) {
@@ -738,6 +797,8 @@ export default function SquadDetailPage() {
                         pendingApprovals={pendingApprovals}
                         onApprove={(id) => void resolveMemberApproval(id, 'approve')}
                         onSkip={(id) => void resolveMemberApproval(id, 'skip')}
+                        delivery={deliveryGate}
+                        onGate={gateCall}
                     />
 
                     {/* 对话视图：底部审批条；舞台视图改为气泡，见 StageView */}
@@ -764,7 +825,7 @@ export default function SquadDetailPage() {
                         memberMotion={memberMotion}
                         planPending={planPending}
                         checkpointPending={checkpointPending}
-                        delivery={selectedSession?.status === 'awaiting_delivery'}
+                        delivery={deliveryGate}
                         showEmpty={!isDraft}
                         summary={summary}
                         onGate={gateCall}
@@ -1041,7 +1102,7 @@ function useStageWalk(
 }
 
 /** 像素舞台：开放会议室 + 走动待机 + 发言/审批气泡 + 表情动作 */
-const StageView = memo(function StageView({mode, members, agents, spots, appearanceOf, memberState, lastWords, systemWord, activeSpeakerId, chatCard, canInject, onPick, pendingApprovals, onApprove, onSkip}: {
+const StageView = memo(function StageView ({mode, members, agents, spots, appearanceOf, memberState, lastWords, systemWord, activeSpeakerId, chatCard, canInject, onPick, pendingApprovals, onApprove, onSkip, delivery, onGate}: {
     mode: string; members: Members; agents: AgentInfo[];
     spots: Array<{x: number; y: number; role: string; depth: 'near' | 'far'}>;
     appearanceOf: AppearanceOf; memberState: (agentId: string, role: string) => string;
@@ -1051,6 +1112,9 @@ const StageView = memo(function StageView({mode, members, agents, spots, appeara
     pendingApprovals?: Array<{approvalId: string; toolName: string}>;
     onApprove?: (id: string) => void;
     onSkip?: (id: string) => void;
+    /**交付确认门禁（与 TimelineView 同源；此前只挂在对话视图，舞台无法审批）。 */
+    delivery?: boolean;
+    onGate?: (cmd: string, args: Record<string, unknown>, okMsg: string) => void;
 }) {
     // PixelAgent 动作状态：与 memberState 对齐（含 waiting/thinking/speaking 等）
     const agentMotion = (motion: string): AgentMotionState => {
@@ -1120,11 +1184,36 @@ const StageView = memo(function StageView({mode, members, agents, spots, appeara
                         </div>
                     )
                 })}
-                {/* 系统机器人：左上角盆栽桌；系统消息 / 审批都走气泡 */}
-                <div className={`sw-robot-stand is-table${(systemWord || pendingApprovals?.length) ? ' has-word' : ''}`} style={{left: '10%', top: '52%'}} title="系统">
-                    {(systemWord || pendingApprovals?.length) ? (
+                {/* 系统机器人：左上角盆栽桌；系统消息 / 审批 / 交付确认都走气泡 */}
+                <div className={`sw-robot-stand is-table${(systemWord || pendingApprovals?.length || delivery) ? ' has-word' : ''}`} style={{left: '10%', top: '52%'}} title="系统">
+                    {(systemWord || pendingApprovals?.length || delivery) ? (
                         <div className="sw-walker__say is-sys">
                             {systemWord && <StageTypewriter text={systemWord} speed={20}/>}
+                            {/* 🔴 交付确认门禁卡：此前只存在于对话视图的 TimelineView，
+                                舞台模式无任何审批入口 ⇒ 用户必须切回「对话」才能审批。
+                                这里复用同一套 sw-say-approval 结构，与成员授权请求同框呈现。 */}
+                            {delivery && (
+                                <div className="sw-say-approval is-delivery">
+                                    <div className="sw-say-approval__title">📦 交付待确认</div>
+                                    <div className="sw-say-approval__tool">协作已完成，Delivery Pack 已生成</div>
+                                    <div className="sw-say-approval__actions">
+                                        <button
+                                            type="button"
+                                            className="sw-say-approval__btn is-ok"
+                                            onClick={(e) => { e.stopPropagation(); onGate?.('squad_delivery_resolve', { approved: true }, '已确认交付') }}
+                                        >
+                                            确认交付
+                                        </button>
+                                        <button
+                                            type="button"
+                                            className="sw-say-approval__btn"
+                                            onClick={(e) => { e.stopPropagation(); onGate?.('squad_delivery_resolve', { approved: false }, '已要求修订') }}
+                                        >
+                                            要求修订
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
                             {pendingApprovals?.map((pa) => (
                                 <div key={pa.approvalId} className="sw-say-approval">
                                     <div className="sw-say-approval__title">⚠ 授权请求</div>
@@ -1327,13 +1416,39 @@ const AsideFloat = memo(function AsideFloat({squadId, members, agents, appearanc
                 <div className="sw-panel__body">
                     {tab === 'members' && (members || []).map((m) => {
                         const motion = memberState(m.agentId, m.role)
-                        const bub = motion === 'working' ? 'work' : motion === 'cheer' ? 'work' : motion === 'error' ? 'think' : 'idle'
-                        const label = motion === 'working' ? '执行中' : motion === 'cheer' ? '已完成' : motion === 'error' ? '受阻' : '待命'
+                        //🔴 原来只映射 work/cheer/error → speaking 被当成 idle 兜底，
+                        // 于是「发言者」在右栏显示为「待命」+ 气泡 idle —— 呼吸灯看不见。
+                        // 现按语义逐档映射：speaking 即发言者（气泡与小人同步亮）。
+                        const bub =
+                            motion === 'working' || motion === 'speaking' ? 'work'
+                            : motion === 'cheer' ? 'work'
+                            : motion === 'error' ? 'think'
+                            : motion === 'waiting' ? 'idle'
+                            : 'idle'
+                        const label =
+                            motion === 'working' ? '执行中'
+                            : motion === 'speaking' ? '发言中'
+                            : motion === 'cheer' ? '已完成'
+                            : motion === 'error' ? '受阻'
+                            : motion === 'waiting' ? '等待中'
+                            : '待命'
+                        const speaking = motion === 'speaking'
                         return (
-                            <div key={m.id || m.agentId} className="sw-mrow">
+                            <div key={m.id || m.agentId} className={`sw-mrow${speaking ? ' is-speaking' : ''}`}>
                                 <div className="sw-mrow__pa-wrap">
                                     <div className={`sw-mrow__pa${members[0]?.agentId === m.agentId ? ' sw-mrow__pa--lead' : ''}`}>
-                                        <PixelAgent appearance={appearanceOf(m.agentId)} size={34} motion={bub === 'work'} state={motion === 'working' ? 'working' : motion === 'cheer' ? 'cheer' : motion === 'error' ? 'error' : 'idle'}/>
+                                        <PixelAgent
+                                            appearance={appearanceOf(m.agentId)}
+                                            size={34}
+                                            motion={bub === 'work'}
+                                            state={
+                                                motion === 'working' ? 'working'
+                                                : motion === 'cheer' ? 'cheer'
+                                                : motion === 'error' ? 'error'
+                                                : speaking ? 'speaking'
+                                                : 'idle'
+                                            }
+                                        />
                                     </div>
                                     <div className={`sw-mrow__bubble sw-mrow__bubble--${bub}`}/>
                                 </div>

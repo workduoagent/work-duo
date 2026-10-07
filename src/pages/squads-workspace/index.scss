@@ -2205,6 +2205,57 @@
 }
 .sw-say-approval__btn.is-ok:hover { background: #FBBF24; }
 
+/* 交付确认门禁卡（舞台模式）：与成员授权请求同结构，用绿色区分「可交付」而非「待授权」 */
+.sw-say-approval.is-delivery {
+  background: #DCFCE7;
+  border-color: #16A34A;
+  color: #14532D;
+}
+.sw-say-approval.is-delivery .sw-say-approval__btn {
+  border-color: #16A34A;
+  color: #14532D;
+}
+.sw-say-approval.is-delivery .sw-say-approval__btn:hover { background: #BBF7D0; }
+.sw-say-approval.is-delivery .sw-say-approval__btn.is-ok {
+  background: #16A34A;
+  border-color: #15803D;
+  color: #fff;
+}
+.sw-say-approval.is-delivery .sw-say-approval__btn.is-ok:hover { background: #15803D; }
+
+/* 暗色主题适配（沿用 F037 令牌化铁律：此处原为固定浅底 + 深字，暗色下会突兀） */
+.dark .sw-say-approval {
+  background: rgba(120, 53, 15, .35);
+  border-color: #B45309;
+  color: #FDE68A;
+}
+.dark .sw-say-approval__btn {
+  background: transparent;
+  border-color: #B45309;
+  color: #FDE68A;
+}
+.dark .sw-say-approval__btn:hover { background: rgba(180, 83, 9, .3); }
+.dark .sw-say-approval__btn.is-ok {
+  background: #B45309;
+  border-color: #D97706;
+  color: #FEF3C7;
+}
+.dark .sw-say-approval.is-delivery {
+  background: rgba(20, 83, 45, .45);
+  border-color: #16A34A;
+  color: #BBF7D0;
+}
+.dark .sw-say-approval.is-delivery .sw-say-approval__btn {
+  border-color: #16A34A;
+  color: #BBF7D0;
+}
+.dark .sw-say-approval.is-delivery .sw-say-approval__btn:hover { background: rgba(22, 163, 74, .3); }
+.dark .sw-say-approval.is-delivery .sw-say-approval__btn.is-ok {
+  background: #16A34A;
+  border-color: #22C55E;
+  color: #052E16;
+}
+
 @keyframes sw-say-in { from { opacity: 0; transform: translate(-50%, 4px); } to { opacity: 1; transform: translate(-50%, -6px); } }
 @keyframes sw-say-in-front { from { opacity: 0; transform: translate(-50%, -4px); } to { opacity: 1; transform: translate(-50%, 6px); } }
 
@@ -2464,6 +2515,21 @@
 .sw-mrow__state { font-size: 10px; padding: 1px 7px; border-radius: 999px; flex: none; background: rgba(22, 163, 74, .12); color: #16a34a; }
 .sw-mrow__state--idle { background: var(--color-background-muted, var(--swborder)); color: var(--color-foreground-muted); }
 .sw-mrow__state--work { background: rgba(240, 249, 255, .9); color: #075985; }
+
+/* 当前发言者：右栏「轮到谁发言谁亮」的落点。
+   与舞台上PixelAgent 的 speaking 姿态同步（气泡复用 --work 动画节奏）。
+   只用 background / box-shadow，不做位移缩放（遵守 hover 禁位移铁律）。 */
+.sw-mrow.is-speaking {
+  background: rgba(240, 249, 255, .55);
+  border-color: #0ea5e9;
+}
+.dark .sw-mrow.is-speaking {
+  background: rgba(14, 165, 233, .1);
+}
+.sw-mrow.is-speaking .sw-mrow__state {
+  background: #0ea5e9;
+  color: #fff;
+}
 
 .sw-mem {
   padding: 8px 10px; border-radius: 9px; background: var(--swbg);

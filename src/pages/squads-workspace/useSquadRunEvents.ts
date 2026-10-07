@@ -52,6 +52,14 @@ export interface SubscribeOptions<S extends string = string> {
   onPlanPending?: () => void
   onCheckpointPending?: () => void
   onDeliveryPending?: () => void
+  /**
+   * 交付门禁**已决议**（确认/ 要求修订）后清掉本地置位。
+   *
+   * 为什么需要：`onDeliveryPending` 是「收到 delivery 轮 ⇒ 立即亮卡」，但决议后
+   * 若不清，卡会一直挂着直到下次轮询刷 status。舞台模式没有底部审批条兜着，
+   * 挂住的卡比不显示更糟（用户点了没反应）。
+   */
+  onDeliveryResolved?: () => void
   setSummary: (s: string) => void
   setMemberMotion: (updater: (prev: Record<string, S>) => Record<string, S>) => void
   /**
