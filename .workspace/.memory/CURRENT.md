@@ -2,38 +2,45 @@
 
 > 每次收工刷新本文件；详细脉络见 `.memory/` 按日文件。
 
-## 当前状态（2026-10-06 刷新）
+## 当前状态（2026-10-07 刷新）
 
-- **走查摘要 P0 已全部完成 ✅**：F001（MCP 信任协议）/ F002（脚本路径边界）/ F003（CSP + fs 收敛）/ F004（DAG 双层断裂）/ F005（kbFs 越界）/ F006（MCP 桥载荷校验）/ F007（事件归属）。完成状态与 commit 固化在 `.workspace/.fix/20261002-走查报告原文.md` 的各节 ✅ 横幅；完成 F 单按约定已从 `.fix/` 删除。
-- **F053 已完成 ✅**（`376fd15`）：Node 沙箱页运行工作空间 `.js` 报 `Error occurred loading entry point: JSError`，根因是 Windows `resource_dir()` 返回 `\\?\` verbatim 路径，Bun 1.4 无法加载带此前缀的 `--preload guard.js`。`bun_manager::base_dir` 已统一归一化盘符/UNC 前缀；真实 UIA 测试输出 `hello node from workspace`，桌面脚本仍被 F002 越界边界拒绝。
-- **F003 fs 手选路径闭环已凭据化收口 ✅**（2026-10-04）：审查指出渲染层可经 plugin-sql 直改 app_config/agent_project/agent_squad，「直信 SQLite 路径恢复 scope」构成提权链。现架构：dialog 手选自动 allow（目录选择加 `recursive: true`）；跨重启目录由 `record_fs_scope_grant` 签发 HMAC-SHA256 凭据（密钥在 keyring）落 `fs_scope_grant` 表（schema v40），启动 `restore_fs_scope` 验签 + 来源字段二次比对后恢复；签发门禁 = 运行时 fs scope（dialog 授予）或 $HOME 静态可信根，越权路径一律拒。CDP 真实渲染层 E2E 三用例全过（越权拒/非法 key 拒/签发→重启恢复），217 Rust 测试 + tsc 通过。
-- F003 的 CSP 严格策略与 fs 读权限收敛已在运行实例回归：MCP KB/Skill/插件全过，知识库/智能体/编辑向导 UIA 截图正常。
+### 代码走查修复：47 项全部开工，43 项闭环，4 项残项
 
-- **F008 已完成 ✅**（2026-10-05）：host 本地路径闸门 `local_guard` 前缀绕过 + `..` 穿越——重构为 `fs_helper::ensure_path_in_roots` 共享边界原语（折叠 + 最深已存在祖先 canonicalize + 组件级比对 + Windows 大小写折叠），sftp 拿规范化路径双保险；无边界场景从放行收紧为拒绝；F002 迁移共用原语；224 Rust 测试通过。远端闸门 `policy::check_path` 复核正确未动。
+**P0 致命 7 项（F001-F007）全部完成 ✅** —— MCP 信任协议（配对制）/ 脚本路径边界 / CSP + fs 收敛（凭据化签发，schema v40）/ DAG 双层断裂（字段名 + taskId 命名空间）/ kbFs 越界 / MCP 桥载荷校验 / 事件归属。均在 2026-10-02~10-04 完成。
 
-- **F010 已完成 ✅**（2026-10-05）：Bun/Node 沙箱网络隔离——`SANDBOX_GUARD_JS` 增加 net 段（fetch/WebSocket/http(s)/net/tls/dgram/dns/Bun 原生 connect·listen·udpSocket·serve 全拦），注入条件改 fs/net 两段独立启用；真实 bun CLI E2E 封网 16 通道全拒 + 放行场景无误伤；226 Rust 测试通过。
+**P1 严重 11 项（F008-F018）全部完成 ✅**（2026-10-05~10-06）—— F008 路径边界原语 `fs_helper::ensure_path_in_roots` / F009 命令边界 / F010 沙箱封网 / F011-F016 squad 状态机 CAS 化、owner_pid 清扫、run 级墙钟、panic 安全网、成员图原子写、board 读改写门 / F017 events 裸锁 / F018 前端测试基建 + ESLint。
 
-- **F009 已完成 ✅**（2026-10-05）：`native__execute_command` 的 `cmd /C` 整串透传——`ensure_command_in_boundary` 前置护栏拦 `..` 路径段（git 区间语法不误伤）、盘符/UNC 绝对路径、段首嵌套 shell（python/node 项目运行时保留），审批卡原文兜底残留；230 Rust 测试通过。
+**UI 致命 2 项（F036/F037）完成 ✅** —— CSS 令牌半失效（补 42 项真实缺失）+ .dark 块 163 处旧深色字面量令牌化。
 
-- **F011 已完成 ✅**（2026-10-05）：squad 启动清扫误杀——schema v41 加 `agent_squad_session.owner_pid`（INSERT/Resume 接管写入），清扫按「无主（NULL/异 PID/本进程无协程登记）才收敛 + CAS 单条 UPDATE」重构，活跃会话绝不触碰；内存库单测 4 项，234 Rust 测试通过，运行时冒烟 v41 落库正常。
+**P2 与工程债主体完成 ✅** —— F019-F035 全清（含 F028 经 Rust 实测**证伪为误判**并补 4 项回归）；F042/F047 首页 + 顶栏、F043 Monaco 懒加载（6.5MB→1.08MB）、F044 Field 自动关联、F045 列表 memo、F046 列表三态、F048 导入进度、F049 沙箱脚本可取消（进程组 kill）、F050 长列表、F051 Tag variant、F052 间距刻度。
 
-- **F012 已完成 ✅**（2026-10-05）：squad 状态机 CAS 化——报告处方两条落地（resume 仅 paused→running、finish 带终态否定守卫），并扫全 11 处状态写点统一守卫（awaiting_*/paused 写半终态守卫、批准回写等值守卫、done/failed 收尾终态否定守卫）；终态不可回退，僵尸 running 不再可能；内存库单测 3 项，237 Rust 测试通过。
+**🔴 4 项已开工未闭环（2026-10-07 逐节回读代码确认，README 原写「全部完成」属表述失真，已修正）**：
 
-- **F013 已完成 ✅**（2026-10-05）：squad run 级墙钟——无人值守触发（API/定时/MCP/远程 Resume）装配看门狗，到点置位取消标志复用用户取消收尾链路（不 drop 协程、不新增终态路径），`WD_SQUAD_RUN_TIMEOUT_SECS` 可配默认 7200s；UI 触发不受限；239 Rust 测试通过。
+| 项 | 残缺内容 | 证据 |
+|---|---|---|
+| **F038 第二阶段** | `SquadEditorModal` 未拆，仍内嵌 `index.tsx` 531-1700 行（1170 行 / 10 个 useState）；4 个 Pane 与 `useSquadEditor` 未创建 | `ls squads-workspace/` 无 Pane 文件 |
+| **F024 尾项** | `lsRead`/`lsWrite` 10 处本地副本未收敛到 `localFallback.ts`（safeParse 与 bulkUpsert 已完成） | agent-project 6 / server 2 / squad 2 |
+| **F041 尾项** | 表单就地校验仅 squads 编辑器一处试点，其余未迁移到 `Field.error` | `grep -rl error=` 仅 6 个业务文件 |
+| **F028 子项** | symlink TOCTOU 未做（Windows 缺 `GetFinalPathNameByHandleW`） | `tools.rs:306-307` 注释自认 |
 
-- **F014 已完成 ✅**（2026-10-05）：pipeline expect panic 击穿终态——panic 源消除（`prepare_batch` 预处理，异常节点置 skipped 放行依赖）+ 双入口 JoinError 安全网（run_task 包独立 spawn 任务，panic 转正常错误走非正常终态收尾；Elapsed 分支显式 abort 保持硬超时语义）；240 Rust 测试通过。
+**刻意保留 ≠ 缺口**（理由写在报告原文各节）：F050 不引入虚拟化库（流式动态高度风险高）；F051/F052/F046 存量走渐进迁移。
 
-- **F015 已完成 ✅**（2026-10-05）：成员图持久化撕裂防护——append_line 行+换行单次写入 + 撕裂尾补 \n 防御（半行只丢自身不连带后续节点）、交接箱/下游投递 fs::copy 改 .tmp+rename 原子替换、成员超时分支补 graph.snapshot；内存文件单测 4 项，244 Rust 测试通过。
+### 基线状态（2026-10-07 实测）
 
-- **F016 已完成 ✅**（2026-10-05）：board_json 读-改-写丢更新——`BOARD_GATES` 逐会话异步门 + `update_board` 唯一写入口（门内读最新快照→增量改→整体写回），三个 persist 函数全部改道；`persist_board` 不再整板覆盖（编排板只权威 tasks/artifacts_index，DB 决策卡/行动项保留）；内存库单测 3 项，247 Rust 测试通过。
+- 前端测试 **161 项 / 24 文件全绿**；Rust `#[test]` **265 项**（F049 时 265）。
+- `tsc --noEmit` **0 error**；ESLint **0 error / 59 warning**（exhaustive-deps + shims 第三方 any，属可接受债）。
+- 工作区干净，HEAD = `827da67`，`.fix/` 无待修单文件。
+- 首屏体积 1.08MB（Monaco 懒加载 + manualChunks）。
 
-- **F017 已完成 ✅**（2026-10-05）：events.rs 两处裸 lock().unwrap 毒化免疫（Mutex 中毒不再永久 panic 击穿终态回填）+ trace_tool_calls_summary_json 持锁段最小提取（只 clone tool_finished 的 step 小对象，序列化移到锁外，push_event 热路径不再被整包深拷贝阻塞）；提取等价性重构回归 + 人为毒化实测；249 Rust 测试通过，裸锁审计清零。**至此走查报告「严重」级 1.8-1.17 十项（P1）全部清完 ✅，P1 仅剩 F018（前端测试基建）。**
+### 🔴 最大遗留缺口：真机 UIA 回归从未跑过
 
-## 下一步候选
-
-1. **F018**：前端测试基建（零测试 + 无 Lint）——先补关键路径单测（mapper SQL 参数绑定、runtimeStore 事件路由、kbFs 路径守卫），再引 ESLint；属结构性工程债，改动面与验证方式与前序安全项不同，开工前建议先对齐范围。
-2. **F019-F035**：P2 一般债批次（可按序小步快跑）。
-3. **F028 / F031**：P2 中的安全项（PathGuard 盘符逃逸 + symlink TOCTOU；sftp download `..` 防护——后者可复用 F008 的 ensure_path_in_roots 原语）。
+连续多轮改动集中在 UI 层（组件拆分 / 令牌体系 / Field error / Tag variant / 表单校验 / 删除确认 / 长列表 / 导入进度 / Monaco 懒加载），单测 + tsc + ESLint **测不出「组件拆完页面还歪不歪」**。优先验：
+1. **squads-workspace**（改动最集中）
+2. **agent-studio 向导 1280px 断点**（`minWidth: 1200`，笔记本最常见宽度）
+3. **沙箱「停止」按钮**（F049 只验了信号链路 + 代码路径，**未验真实进程树中断**）
+4. 首页 dashboard 统计与入口跳转
+5. chat 页 Field 自动 id + 令牌明暗切换
+6. 列表三态在断网/断库下是否显示「加载失败 + 重试」
 
 ## 环境事实（跨设备必读）
 
