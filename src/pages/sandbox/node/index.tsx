@@ -51,6 +51,8 @@ import {
   runScript,
   lastScriptRunId,
   cancelScript,
+  isScriptCancelled,
+  stripCancelledPrefix,
   type BunEnvInfo,
   type PackageInfo,
 } from '@/core/mapper/bun-mapper'
@@ -238,27 +240,31 @@ export default function SandboxNodePage() {
     }
     setBusy(`run:${runEnv}`)
     setRunOutput('运行中…')
-    // F049：注册后立即抓 run_id 供「停止」使用（Rust 侧 register 在 spawn 之前）
-    void lastScriptRunId()
-      .then((id) => setRunId(id))
-      .catch(() => setRunId(null))
-    runScript(runEnv, runPath.trim())
-      .then((res) => {
+    // 🔴 F049 收尾修复（时序）：必须**串行** —— 先等 register 完成再取 run_id。
+    // 原实现并发发起，读到上一次遗留的陈旧 id，导致第二次运行点「停止」无效。
+    // 详见python 页同款注释（含真机日志实证）。
+    void (async () => {
+      const running = runScript(runEnv, runPath.trim())
+      void lastScriptRunId()
+        .then((id) => setRunId(id))
+        .catch(() => setRunId(null))
+      try {
+        const res = await running
         if (res.ok) {
           setRunOutput(res.data || '（无输出）')
           message.success('脚本执行完成')
-        } else if (res.error?.includes('已取消')) {
-          setRunOutput('（已取消）')
+        } else if (isScriptCancelled(res.error)) {
+          setRunOutput(stripCancelledPrefix(res.error!))
           message.info('脚本已取消')
         } else {
           setRunOutput(res.error || '执行失败')
           message.error('脚本执行失败')
         }
-      })
-      .finally(() => {
+      } finally {
         setBusy(null)
         setRunId(null)
-      })
+      }
+    })()
   }
 
   /** F049：停止正在运行的脚本。 */

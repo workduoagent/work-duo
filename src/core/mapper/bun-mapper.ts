@@ -95,30 +95,13 @@ export function runScript(envName: string, scriptPath: string): Promise<OpResult
 }
 
 /**
- * 取最近一次脚本运行的 run_id（F049）。
- *
- * `runScript` 的返回契约是「stdout 字符串」（前端 invoke 依赖，不可改），
- * 拿不到 run_id；而取消需要。故提供此查询命令——单用户单窗口下
- * 「最近一次注册」即当前这次运行。
+ * 取消能力（F049）与 Python 侧**共用同一份实现** —— 两个 mapper 调的是
+ * 同一组 Tauri 命令（`last_script_run_id` / `cancel_script`），逻辑完全相同，
+ * 各自写一份只会带来行为漂移（历史上已出现过两侧判定口径不一致）。
  */
-export async function lastScriptRunId(): Promise<string | null> {
-  try {
-    return await invoke<string | null>('last_script_run_id')
-  } catch {
-    return null
-  }
-}
-
-/**
- * 取消一次脚本运行（F049）。
- *
- * @param runId 来自 `lastScriptRunId()`
- * @returns true=已发出取消信号；false=该 run 已结束/不存在
- */
-export async function cancelScript(runId: string): Promise<boolean> {
-  try {
-    return await invoke<boolean>('cancel_script', { runId })
-  } catch {
-    return false
-  }
-}
+export {
+  lastScriptRunId,
+  cancelScript,
+  isScriptCancelled,
+  stripCancelledPrefix,
+} from './script-cancel'

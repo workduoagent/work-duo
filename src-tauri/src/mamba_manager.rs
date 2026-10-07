@@ -792,7 +792,14 @@ async fn run_sidecar_policy(
                 "沙箱脚本执行超时（{}s），已强制终止进程。长任务请拆分或分段落盘中间结果。",
                 sandbox_timeout
             )),
-            Ok(()) => Err("沙箱脚本已被用户取消，进程已终止。".into()),
+            // 🔴 F049 收尾修复：取消不是「错误」，但契约限制下必须走 Err 通道
+            // （前端 invoke 拿的是 stdout 字符串，没有结构化返回位）。
+            // 故在消息前加机器可读的稳定前缀 `CANCELLED:`，前端据此判定状态，
+            // 不再靠 `includes('已取消')` 匹配中文——文案一改就失效（真机实测已失效）。
+            Ok(()) => Err(format!(
+                "{}沙箱脚本已被用户取消，进程已终止。",
+                crate::script_cancel::CANCELLED_PREFIX
+            )),
         };
     }
 

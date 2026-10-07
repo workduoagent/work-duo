@@ -44,3 +44,33 @@ export async function cancelScript(runId: string): Promise<boolean> {
     return false
   }
 }
+
+/**
+ * 「本次执行是被用户取消」的机器可读前缀 —— **必须与 Rust 侧
+ * `script_cancel::CANCELLED_PREFIX` 逐字一致**（后端加前缀、前端据此判定）。
+ *
+ * 🔴 为什么不能靠中文文案匹配（2026-10-07 真机实测教训）：
+ * 原实现用 `error.includes('已取消')`，但 Tauri 会把 Rust 的 `Err(String)`
+ * 包一层再抛给前端，字符串形态与源码文案不保证一致 —— 实测导致「已取消」
+ * 被误判为「脚本运行错误」弹红 toast。判定必须基于稳定前缀，不能基于文案。
+ */
+export const CANCELLED_PREFIX = 'CANCELLED:'
+
+/**
+ * 判断一次脚本执行的结果是否属于「用户主动取消」。
+ *
+ * @param error `OpResult.error` 的原文
+ * @returns true=用户取消（前端应显示「已取消」）；false=真实失败
+ */
+export function isScriptCancelled(error: string | undefined | null): boolean {
+  return typeof error === 'string' && error.includes(CANCELLED_PREFIX)
+}
+
+/**
+ * 剥掉机器可读前缀，取出给用户看的中文文案。
+ *
+ * 失败/取消都要展示点什么，直接把 `CANCELLED:` 显示给用户是实现细节泄漏。
+ */
+export function stripCancelledPrefix(error: string): string {
+  return error.startsWith(CANCELLED_PREFIX) ? error.slice(CANCELLED_PREFIX.length) : error
+}

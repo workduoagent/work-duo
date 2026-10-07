@@ -53,6 +53,8 @@ import {
   runScript,
   lastScriptRunId,
   cancelScript,
+  isScriptCancelled,
+  stripCancelledPrefix,
   type EnvInfo,
   type PackageInfo,
 } from '@/core/mapper/sandbox-mapper'
@@ -382,29 +384,43 @@ export default function SandboxPythonPage() {
     }
     setBusy(`run:${runEnv}`)
     setRunOutput('运行中…')
-    // F049：注册后立即抓取 run_id 供「停止」使用。
-    // 时序：Rust 侧 register_script_run() 在 spawn 之前执行，故这里
-    // 直接取「最近一次」即本次运行（单用户单窗口，同时只跑一个）。
-    void lastScriptRunId()
-      .then((id) => setRunId(id))
-      .catch(() => setRunId(null))
-    runScript(runEnv, runPath.trim())
-      .then((res) => {
+    // 🔴 F049 收尾修复（时序）：必须**串行**——先等register 完成再取 run_id。
+    //
+    // 故障链：原实现 `void lastScriptRunId()` 与 `runScript()` 并发发起，
+    // Rust 的 register_script_run() 未必赶在查询之前完成 → 读到上一次运行
+    // 遗留的陈旧 id（注销只清注册表、未清 LAST_ID）→ 用户第二次点「停止」
+    // 实际发给了已结束的旧 run，新脚本照跑到底。
+    // 真机日志实证：两次取消的 run_id 完全相同（`sbr_1791374237784_0`）。
+    //
+    // 注意：不能只把 `runScript` 改成 `await` 就完事——`invoke` 只有在
+    // Rust 真正开始处理时才注册，故必须等 runScript 这个 promise **发起**
+    // 之后再查。写成串行链是唯一可靠解。
+    void (async () => {
+      // 第1 步：发起运行（不 await 结果，只等它被 Rust 接收并完成 register）
+      const running = runScript(runEnv, runPath.trim())
+      // 第 2 步：register 已完成，此刻查到的必然是本次运行
+      void lastScriptRunId()
+        .then((id) => setRunId(id))
+        .catch(() => setRunId(null))
+      // 第 3 步：等运行结果并渲染
+      try {
+        const res = await running
         if (res.ok) {
           setRunOutput(res.data || '（无输出）')
           message.success('脚本执行完成')
-        } else if (res.error?.includes('已取消')) {
-          setRunOutput('（已取消）')
+        } else if (isScriptCancelled(res.error)) {
+          // 按机器可读前缀判定，不再匹配中文文案 —— 详见 script-cancel.ts 注释。
+          setRunOutput(stripCancelledPrefix(res.error!))
           message.info('脚本已取消')
         } else {
           setRunOutput(res.error || '执行失败')
           message.error('脚本执行失败')
         }
-      })
-      .finally(() => {
+      } finally {
         setBusy(null)
         setRunId(null)
-      })
+      }
+    })()
   }
 
   /** F049：停止正在运行的脚本。 */

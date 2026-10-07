@@ -400,7 +400,12 @@ async fn run_bun_sidecar_policy(
                 "沙箱脚本执行超时（{}s），已强制终止进程。长任务请拆分或分段落盘中间结果。",
                 sandbox_timeout
             )),
-            Ok(()) => Err("沙箱脚本已被用户取消，进程已终止。".into()),
+            // 🔴 F049 收尾修复：与 mamba_manager 同款——加机器可读前缀，
+            // 前端据此把「取消」与「执行失败」区分开（详见 script_cancel::CANCELLED_PREFIX）。
+            Ok(()) => Err(format!(
+                "{}沙箱脚本已被用户取消，进程已终止。",
+                crate::script_cancel::CANCELLED_PREFIX
+            )),
         };
     }
 
