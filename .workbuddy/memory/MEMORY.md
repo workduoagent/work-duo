@@ -58,8 +58,14 @@
 - **🚫 Java 沙箱：用户拍板永久放弃（2026-09-24），以后任何待办清单/规划/讨论中不再提及此任务。**沙箱多语言止步于 Python+JS/Bun。
 - **沙箱守卫双层（2026-09-24 定型）**：默认离线（代理 env+sitecustomize 禁 socket）+ 文件系统有界（sitecustomize/guard.js patch 写删移，白名单=工作空间+%TEMP%）；运行用户脚本一律注入，install/环境管理走 Allow；逃生开关 WD_SANDBOX_NET=on / WD_SANDBOX_FS=off。**Bun/Node 侧无网络守卫（F010 待补）**——原生 fetch 不读 `HTTP_PROXY`，sandbox_audit 是 observe-only 不拦截。
 - **汇报用语的硬要求（2026-09-28 用户明确）**：禁止用内部代号（S-CANCEL-1 / S0-4 这类编号）向用户汇报；直接说「做了什么功能、需要用户验证什么操作」。代号只允许存在于代码注释/文档/记忆文件内部。**注意：用户在修复单语境下自己会用 F001 这类编号提问，此时可沿用其编号作答。**
-- **工程基建现状（2026-10-07 实测校准）**：Rust **265** 个 `#[test]`；前端 **161 项 / 24 文件 Vitest 全绿**（`vitest.config.ts` happy-dom + `eslint.config.js` 平面配置，scripts `test`/`lint`）；**ESLint 0 error / 59 warning**（exhaustive-deps + shims 第三方 any，属可接受债）；`tsc --noEmit` 0 error；首屏 1.08MB（Monaco 懒加载）。`squads-workspace/index.tsx` 已 2670→2268 行（F038 一阶段），但 **`SquadEditorModal` 仍内嵌其中 1170 行 / 10 个 useState 未拆**；SquadDetailPage 1402 行。表单 `Field` 已具error/hint 能力（仅 squads 试点）。
-- **🔴 走查 47 项的真实口径（2026-10-07 逐节回读代码校准）**：**43 项闭环，4 项已开工未闭环** —— F038 二阶段（SquadEditorModal 未拆）/ F024尾项（10 处 lsRead/lsWrite 本地副本）/ F041 尾项（表单就地校验仅试点）/ F028 子项（symlink TOCTOU，Windows 缺 GetFinalPathNameByHandleW）。`.fix/` 目录清空 ≠ 全部完成，**README 曾误写「47 项全清」已修正**；另有 F050/F051/F052/F046 存量属**刻意保留的渐进迁移**，不算缺口。走查报告见 `.workspace/.fix/20261002-走查报告原文.md`。
+- **工程基建现状（2026-10-07 实测校准）**：Rust **268** 个 `#[test]`；前端 **204 项 / 27 文件 Vitest 全绿**（`vitest.config.ts` happy-dom + `eslint.config.js` 平面配置，scripts `test`/`lint`）；**ESLint 0 error / 59 warning**（exhaustive-deps + shims 第三方 any，属可接受债）；`tsc --noEmit` 0 error；首屏 1.08MB（Monaco 懒加载）。`squads-workspace/index.tsx` 已 2670→2268 行（F038 一阶段），但 **`SquadEditorModal` 仍内嵌其中 1170 行 / 10 个 useState 未拆**；SquadDetailPage 1402 行。表单 `Field` 已具error/hint 能力（仅 squads 试点）。
+- **🔴 走查 47 项的真实口径（2026-10-07 逐节回读代码校准）**：**43 项闭环，3 项未闭环 + 1 项误判已推翻**。**残项权威口径 = `.workspace/.fix/残项台账.md`（优先于 README 与报告各节）**：
+  - **F038 第二阶段**（唯一真技术债）：`SquadEditorModal` 未拆，仍内嵌 `index.tsx` 531-1700 行 = **1170 行 / 10 个 useState**；4 个 Pane 与 `useSquadEditor` 从未创建。拆分前须先定状态归属，且必须真机验布局。
+  - **F041 尾项**：表单就地校验仅 squads 编辑器一处试点。能力已就位，随各表单下次改动顺带迁移。
+  - **F028 子项**：symlink TOCTOU 未做（Windows 无 `GetFinalPathNameByHandleW`）。**需用户决策**是否可接受该窗口。
+  - **F024 ✅ 实际已完成**（2026-10-07 复核推翻此前「10 处未接线」的判断）：那10 处全部已在调用 `lsList`/`lsSave`，每处函数体仅 1 行；**是必要的类型标注 + storage key 封装，不该拆**（拆了 key 会散落到业务代码）。全项目仅 `config-mapper.ts:73/77` 直调 localStorage，属正确保留（存 `Record<string,string>` 字典非数组）。
+  - **刻意保留 ≠ 缺口**：F050 不引入虚拟化库、F051/F052/F046 存量渐进迁移。
+- **🔴 判定残项必须回读函数体，不能只数定义处（2026-10-07 铁律级误判）**：我曾 grep 到 `function lsRead` 有 10 处就下结论「未接线、值得收敛」，报告写「主动放弃」我就信了—— 实际打开一看**全部已接共享实现**。**报告/文档对「已做/未做」的陈述本身也可能是错的**（本项目已多次出现：各节横幅写「部分完成」而汇总处宣称全清）。核实一律以代码为准。
 - **🔴 真机 UIA 回归从未跑过（2026-10-07 最大遗留缺口）**：连续多轮改动集中在 UI 层，单测+tsc+ESLint 测不出「组件拆完页面还歪不歪」。F049「停止」按钮与 F052 向导 1280px 断点**只做了静态与单测验证**。
   - **2026-10-07 第一轮（自动部分已过）**：Rust 当日 ERROR 0 条；MCP 经前端真实 handler 返回 10 智能体 + 5 KB + 2 MCP + 4 编队 + 6 技能全通（证 F005/F006/F011-F016/F020前端与引擎改造未断链）；**F049 进程树终止真机实测通过**（父子树 2/2 零残留）。DB schema v41 正常（exe 19:02 新构建，非旧包）。
   - **🔴 盲区（制度性缺口）**：`logBridge.fe.*` 只在业务代码**手动**调用，不捕获 console/未捕获异常；全项目**无 `window.onerror`/`unhandledrejection` 全局监听、无全局 ErrorBoundary**（仅 MultiFileViewer 局部有）⇒ **JS 崩溃白屏在日志里完全看不到**，只能人眼发现。这是建议加 UI 冒烟测试（挂载不白屏 + 无 console error）的直接理由。
