@@ -12,7 +12,6 @@ import {
     Puzzle,
     Server,
     ChevronDown,
-    Home,
 } from 'lucide-react'
 import {WindowControls} from './WindowControls'
 import {ThemeToggle} from './ThemeToggle'
@@ -30,10 +29,15 @@ interface MenuNode {
 }
 
 // 顶栏菜单树：百宝箱为分组（含 LLM / MCP / Skill 下拉）；其余为一级叶子。
-// F042：补「首页」项——此前 ROUTES.dashboard虽已注册（index route），但菜单里
-// 没有入口，用户只能手输 hash 才能回首页。
+//
+// 🔴 首页菜单暂时移除（2026-10-08，用户决定）：首页内容尚未设计好，不想在正式
+// 菜单里暴露半成品入口。移除前 F042 曾补「首页」项以解决「用户只能手输 hash 才能
+// 回首页」——那个诉求现在由**默认落地页**承担：应用启动时 hash 为空即渲染 index
+// route（`/`），效果等价于「打开就是首页」，且不占菜单位。
+// 待首页设计定稿后，把下面一行加回 MENUS 即可（同时在 lucide import 里补回 `Home,`）：
+//   {key: 'home', label: '首页', icon: Home, path: ROUTES.dashboard},
+// 届时 routeToTopKey 的 `pathname === ROUTES.dashboard` 分支也需一并恢复。
 const MENUS: MenuNode[] = [
-    {key: 'home', label: '首页', icon: Home, path: ROUTES.dashboard},
     {
         key: 'treasure',
         label: '百宝箱',
@@ -67,13 +71,13 @@ MENUS.forEach((m) => (m.children ?? []).forEach((c) => (PARENT_OF[c.key] = m.key
  * 现改为**数据驱动**：从 MENUS 反查（叶子按 path、子项按父容器回退），
  * 新增菜单项只需改MENUS 一处，不必再维护这份映射。
  *
- * 注意 `/` 是首页且是所有路径的前缀，必须**精确相等**而非 startsWith，
- * 否则任何子页面都会被判为「首页选中」。
+ * 🔴 2026-10-08（首页菜单移除）：`/` 不再有对应菜单项，故返回 `null` 而非 `'home'`——
+ * 否则 selected 指向一个不存在的 key，`measure()` 里
+ * `querySelector('[data-nav-value="home"]')` 返回 null → 滑块静默不定位，
+ * 且 `if (!top) return` 会让后续路由变化也不更新选中态。
+ * 首页当前是**默认落地页**（hash 为空即渲染它），本就没有菜单入口，不参与高亮。
  */
 function routeToTopKey(pathname: string): string | null {
-    // 首页：精确匹配（`/` 是所有路径的前缀，用 startsWith 会全盘误判）
-    if (pathname === ROUTES.dashboard) return 'home'
-
     // 叶子菜单：path 前缀匹配（如 /knowledge/:id 仍归属「知识库」）
     for (const m of MENUS) {
         if (!m.children && m.path && pathname.startsWith(m.path)) return m.key
