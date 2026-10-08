@@ -1,0 +1,489 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>WorkDuo 工作台 · 设计稿 v2</title>
+<style>
+:root{
+  --bg:#f6f7f9; --surface:#fff; --surface-2:#fafbfc;
+  --border:#e5e7eb; --border-2:#d1d5db;
+  --text:#111827; --text-2:#6b7280; --text-3:#9ca3af;
+  --accent:#2563eb; --accent-soft:#eff6ff;
+  --green:#16a34a; --amber:#d97706; --red:#dc2626; --purple:#7c3aed; --teal:#0891b2;
+  --r:10px; --r-lg:14px;
+  --sh:0 1px 2px rgba(16,24,40,.06),0 1px 3px rgba(16,24,40,.1);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font:14px/1.55 -apple-system,"Segoe UI","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--text);padding:16px}
+.wrap{max-width:1560px;margin:0 auto}
+
+.note{background:#fffbeb;border:1px solid #fde68a;border-radius:var(--r);padding:10px 14px;margin-bottom:14px;font-size:12.5px;color:#78350f}
+.note b{color:#92400e}
+
+.win{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);box-shadow:var(--sh);overflow:hidden}
+
+/* 顶栏 */
+.top{height:46px;border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 14px;gap:12px;background:var(--surface)}
+.brand{display:flex;align-items:center;gap:8px;font-weight:600}
+.logo{width:22px;height:22px;background:linear-gradient(135deg,var(--accent),var(--teal));border-radius:6px}
+.ver{font-size:10px;padding:1px 6px;background:var(--surface-2);border:1px solid var(--border);border-radius:20px;color:var(--text-2)}
+.nav{display:flex;gap:2px;margin-left:8px}
+.nav a{padding:5px 12px;border-radius:7px;color:var(--text-2);text-decoration:none;font-size:13px}
+.nav a.on{background:var(--accent-soft);color:var(--accent);font-weight:500}
+.nav a:hover{background:var(--surface-2)}
+.top-r{margin-left:auto;display:flex;align-items:center;gap:10px}
+.icon-btn{width:28px;height:28px;border:1px solid var(--border);border-radius:7px;background:var(--surface);cursor:pointer;font-size:13px}
+.icon-btn:hover{background:var(--surface-2)}
+
+.btn{padding:6px 12px;border:1px solid var(--border-2);border-radius:7px;background:var(--surface);cursor:pointer;font-size:12.5px;color:var(--text)}
+.btn:hover{background:var(--surface-2)}
+.btn.pri{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn.pri:hover{background:#1d4ed8}
+
+.body{padding:16px 20px 24px}
+.row{display:grid;gap:14px}
+.mid{grid-template-columns:1.15fr 1fr}
+/* 列栈：每列内部纵向排布多张卡，下方卡片 flex:1 吃掉上方卡片留下的空白 */
+.col-stack{display:flex;flex-direction:column;gap:14px;min-width:0}
+.low{grid-template-columns:1fr 1fr}
+/* 两卡等高：任务卡撑满，小纸条高度对齐（否则一边高一边矮） */
+.low>.card{height:100%}
+/* 幻灯片区在小纸条卡内垂直居中 */
+.low .slides{height:auto;min-height:170px}
+
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);box-shadow:var(--sh);overflow:hidden}
+.card-h{padding:11px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px}
+.card-h h3{font-size:13.5px;font-weight:600}
+.card-h .more{margin-left:auto;font-size:11.5px;color:var(--text-2);cursor:pointer}
+.card-h .more:hover{color:var(--accent)}
+.card-b{padding:12px 14px}
+
+/* 热力图 */
+.heat{display:grid;grid-template-columns:repeat(auto-fill,minmax(11px,1fr));gap:3px}
+.hc{aspect-ratio:1;border-radius:2.5px;cursor:pointer;transition:.1s}
+.hc:hover{outline:1.5px solid var(--accent);outline-offset:1px}
+.legend{font-size:11.5px;color:var(--text-2);margin-top:9px;display:flex;align-items:center;gap:6px}
+.legend i{width:10px;height:10px;border-radius:2.5px;display:inline-block}
+.months{display:flex;font-size:10px;color:var(--text-3);margin-bottom:4px;gap:3px}
+.months span{flex:1;text-align:left}
+.heat-scroll{overflow-x:auto;padding-bottom:2px}
+
+/* 任务卡：补足「近期概览」移除后腾出的纵向空间 */
+.tasks-tall{display:flex;flex-direction:column;height:100%}
+.tasks-tall .card-b{flex:1;display:flex;flex-direction:column;justify-content:space-between}
+
+/* 工作日历 */
+.cal{display:grid;grid-template-columns:repeat(7,1fr);gap:3px;font-size:11px}
+.cal-h{text-align:center;padding:4px 0;color:var(--text-2);font-weight:500;font-size:10.5px}
+.cal-d{aspect-ratio:1;border-radius:6px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;cursor:pointer;border:1px solid transparent}
+.cal-d:hover{background:var(--surface-2);border-color:var(--border)}
+.cal-d.out{color:var(--text-3);opacity:.4}
+.cal-d.today{background:var(--accent);color:#fff;font-weight:600}
+.cal-d.has{background:var(--accent-soft)}
+.cal-d.has.today{background:var(--accent)}
+.cal-d .dots{display:flex;gap:2px;height:4px}
+.cal-d .dots i{width:3px;height:3px;border-radius:50%}
+.cal-d.today .dots i{background:#fff!important}
+
+/* 任务 */
+.task{display:flex;align-items:center;gap:9px;padding:7px 0;border-bottom:1px dashed var(--border)}
+/* 卡片拉高后，行距跟着放开，避免下方留大片空白 */
+.tasks-tall .task{padding:11px 0}
+.tasks-tall .task:last-child{border:0;padding-bottom:0}
+.task:first-child{padding-top:0}
+.tasks-tall .task:first-child{padding-top:2px}
+.ck{width:15px;height:15px;border:1.5px solid var(--border-2);border-radius:4px;flex:none;cursor:pointer}
+.ck:hover{border-color:var(--accent)}
+.task-t{flex:1;font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.task.done .task-t{text-decoration:line-through;color:var(--text-3)}
+.tag{font-size:10.5px;padding:1px 7px;border-radius:20px;flex:none}
+.t-run{background:#dbeafe;color:#1e40af} .t-ok{background:#dcfce7;color:#166534}
+.t-wait{background:#fef3c7;color:#92400e}
+.pri{width:3px;height:15px;border-radius:2px;flex:none}
+
+/* ── 小纸条：幻灯片卡片 ── */
+.slides{
+  position:relative;height:186px;border-radius:10px;overflow:hidden;
+  background:var(--surface-2);border:1px solid var(--border);
+}
+/* 卡片堆叠：3D 透视，靠后两张压暗缩小 */
+.slide{
+  position:absolute;inset:12px;border-radius:10px;padding:13px 14px;
+  display:flex;flex-direction:column;justify-content:space-between;
+  box-shadow:0 2px 8px rgba(16,24,40,.08);
+  transition:transform .42s cubic-bezier(.34,1.24,.64,1),opacity .34s ease,filter .34s ease;
+  cursor:pointer;
+}
+.slide.s0{z-index:5}
+.slide.s1{z-index:4;transform:translateY(9px) scale(.955) rotate(-1.1deg);filter:brightness(.9);opacity:.82}
+.slide.s2{z-index:3;transform:translateY(17px) scale(.91) rotate(1.4deg);filter:brightness(.78);opacity:.62}
+.slide.s3{z-index:2;transform:translateY(24px) scale(.87) rotate(-2deg);filter:brightness(.68);opacity:.42}
+.slide.s4{z-index:1;transform:translateY(30px) scale(.83) rotate(2.2deg);filter:brightness(.6);opacity:.26}
+.slide-t{font-size:12.5px;font-weight:600;display:flex;align-items:center;gap:6px}
+.slide-t .dot{width:6px;height:6px;border-radius:50%;flex:none}
+.slide-x{color:inherit;opacity:.45;cursor:pointer;font-size:14px;margin-left:auto}
+.slide-x:hover{opacity:.9}
+.slide-c{flex:1;font-size:12.5px;line-height:1.55;margin:7px 0;overflow:hidden}
+.slide-m{font-size:10.5px;opacity:.62;display:flex;align-items:center;gap:7px}
+/* 幻灯片底部：左右切换 + 指示点 */
+.slide-nav{
+  position:absolute;bottom:7px;left:50%;transform:translateX(-50%);
+  display:flex;align-items:center;gap:9px;z-index:9;
+}
+.sd{width:5px;height:5px;border-radius:50%;background:var(--border-2);cursor:pointer;transition:.2s}
+.sd.on{background:var(--accent);width:14px;border-radius:3px}
+.slide-arrow{
+  position:absolute;top:50%;transform:translateY(-50%);z-index:9;
+  width:22px;height:22px;border-radius:50%;border:1px solid var(--border);
+  background:var(--surface);cursor:pointer;font-size:11px;color:var(--text-2);
+  display:grid;place-items:center;opacity:0;transition:.18s;
+}
+.slides:hover .slide-arrow{opacity:1}
+.slide-arrow:hover{background:var(--accent);color:#fff;border-color:var(--accent)}
+.slide-arrow.prev{left:6px} .slide-arrow.next{right:6px}
+.slide-hint{font-size:10px;color:var(--text-3);text-align:center;margin-top:6px}
+/* 五色纸条 */
+.sl-y{background:#fef9c3;border:1px solid #fde68a;color:#713f12}
+.sl-b{background:#dbeafe;border:1px solid #bfdbfe;color:#1e3a8a}
+.sl-g{background:#dcfce7;border:1px solid #bbf7d0;color:#14532d}
+.sl-p{background:#f3e8ff;border:1px solid #e9d5ff;color:#581c87}
+.sl-r{background:#ffe4e6;border:1px solid #fecdd3;color:#9f1239}
+
+/* ── 悬浮拨号盘（老式电话）── */
+.dial-hub{
+  position:fixed;right:26px;bottom:26px;z-index:60;
+  display:flex;flex-direction:column;align-items:center;gap:10px;
+}
+/* 展开的工具扇面 */
+.dial-items{
+  display:grid;grid-template-columns:repeat(4,1fr);gap:8px;
+  width:296px;padding:13px;border-radius:18px;
+  background:var(--surface);border:1px solid var(--border);
+  box-shadow:0 10px 30px rgba(16,24,40,.16),0 2px 8px rgba(16,24,40,.08);
+  /* 收起时用 opacity/transform 过渡，不用 display，避免出现生硬闪现 */
+  opacity:0;transform:translateY(14px) scale(.9);transform-origin:bottom center;
+  pointer-events:none;transition:opacity .22s ease,transform .28s cubic-bezier(.34,1.3,.64,1);
+}
+.dial-items.open{opacity:1;transform:translateY(0) scale(1);pointer-events:auto}
+.dial-it{
+  display:flex;flex-direction:column;align-items:center;gap:3px;
+  padding:9px 3px;border-radius:11px;cursor:pointer;transition:.13s;
+}
+.dial-it:hover{background:var(--accent-soft);color:var(--accent)}
+.dial-it .ic{font-size:19px;line-height:1}
+.dial-it .nm{font-size:10.5px;font-weight:500;text-align:center;line-height:1.2}
+
+/* 拨号盘主体 */
+.dial{
+  width:74px;height:74px;border-radius:50%;
+  background:conic-gradient(from 0deg,#1e40af,#2563eb,#3b82f6,#0891b2,#2563eb,#1e40af);
+  border:none;cursor:pointer;position:relative;
+  box-shadow:0 6px 20px rgba(37,99,235,.4),0 2px 6px rgba(16,24,40,.2);
+  display:grid;place-items:center;color:#fff;
+  animation:dial-spin 9s linear infinite;
+  transition:box-shadow .2s;
+}
+.dial:hover{box-shadow:0 8px 26px rgba(37,99,235,.52),0 2px 8px rgba(16,24,40,.24)}
+.dial:active{transform:scale(.97)}
+.dial.open{
+  animation:dial-spin .6s cubic-bezier(.5,-0.4,.3,1.4) forwards;
+  /* 停时轻微回弹到 -28deg 并高亮，像挂断 */
+  background:conic-gradient(from 0deg,#dc2626,#f87171,#dc2626);
+  box-shadow:0 6px 22px rgba(220,38,38,.42),0 2px 6px rgba(16,24,40,.2);
+}
+/* 中心按钮（暂停旋转，像老电话的转盘中心孔） */
+.dial::after{
+  content:'';position:absolute;inset:14px;border-radius:50%;
+  background:var(--surface);box-shadow:inset 0 1px 3px rgba(16,24,40,.18);
+}
+.dial-ic{position:relative;z-index:2;font-size:20px;line-height:1;color:var(--accent)}
+.dial.open .dial-ic{color:var(--red)}
+
+@keyframes dial-spin{to{transform:rotate(360deg)}}
+/* 呼吸光晕，暗示可交互 */
+.dial::before{
+  content:'';position:absolute;inset:-5px;border-radius:50%;
+  background:radial-gradient(circle,rgba(37,99,235,.22),transparent 70%);
+  animation:dial-halo 2.6s ease-in-out infinite;
+}
+.dial.open::before{background:radial-gradient(circle,rgba(220,38,38,.2),transparent 70%)}
+@keyframes dial-halo{0%,100%{transform:scale(1);opacity:.7}50%{transform:scale(1.1);opacity:.35}}
+
+/* 拨号盘刻度装饰 */
+.dial-ticks{position:absolute;inset:4px;border-radius:50%;pointer-events:none}
+.dial-ticks i{position:absolute;left:50%;top:2px;width:1.5px;height:5px;background:rgba(255,255,255,.5);border-radius:1px;transform-origin:50% 35px}
+
+/* 活动流 */
+.flow{display:grid;grid-template-columns:1fr 1fr;gap:9px 22px}
+.flow-i{display:flex;gap:9px;font-size:12px;align-items:flex-start}
+.flow-dot{width:6px;height:6px;border-radius:50%;margin-top:6px;flex:none}
+.flow-x{flex:1;min-width:0}
+.flow-x p{margin:0;line-height:1.45;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.flow-x time{font-size:10.5px;color:var(--text-3)}
+
+/* 深色 */
+.dark{
+  --bg:#0f1115;--surface:#171a21;--surface-2:#1d212a;
+  --border:#272c36;--border-2:#39404d;
+  --text:#e5e7eb;--text-2:#9ca3af;--text-3:#6b7280;
+  --accent:#3b82f6;--accent-soft:#16203a;
+  --sh:0 1px 2px rgba(0,0,0,.3);
+}
+.dark .btn.pri{background:var(--accent);border-color:var(--accent)}
+.dark .cal-d.has{background:var(--accent-soft)}
+.dark .hc:hover{outline-color:#60a5fa}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<div class="note">
+  <b>设计稿 v3 · 工作台</b> —— 相比 v2 调整：① <b>去掉工作日历底部的今日日程行</b>（与「进行中的任务」重复）② <b>「便签」→「小纸条」</b>并改为<b>幻灯片堆叠式</b>（3D 透视卡堆、点击翻页、底部指示点），语义明确为「当日备忘」③ 「近期概览」指标卡已移除，腾出的高度由<b>「进行中的任务」卡片拉高补足</b>。
+</div>
+
+<div class="win" id="win">
+  <div class="top">
+    <div class="brand"><div class="logo"></div>Work Duo<span class="ver">v0.0.1</span></div>
+    <div class="nav">
+      <a class="on">工作台</a><a>百宝箱</a><a>知识库</a><a>智能体</a><a>小分队</a><a>设置</a>
+    </div>
+    <div class="top-r">
+      <button class="icon-btn" onclick="tog()">◐</button>
+      <button class="icon-btn">─</button><button class="icon-btn">✕</button>
+    </div>
+  </div>
+
+  <div class="body">
+
+    <!-- 左列：活跃热力图（占约1/2 高）+ 进行中的任务（拉高填补下方空白）
+         右列：工作日历 + 小纸条，两列各自成栈，整体高度对齐 -->
+    <div class="row mid">
+      <div class="col-stack">
+      <div class="card">
+        <div class="card-h"><h3>活跃热力图</h3><span class="more">按天 · 近 26 周 →</span></div>
+        <div class="card-b">
+          <div class="heat-scroll">
+            <div class="months"><span>5月</span><span>6月</span><span>7月</span><span>8月</span><span>9月</span><span>10月</span></div>
+            <div class="heat" id="heat"></div>
+          </div>
+          <div class="legend">
+            <span>少</span>
+            <i style="background:#e8ebf0"></i><i style="background:#c7d7f5"></i>
+            <i style="background:#8fb3ee"></i><i style="background:#5a8de0"></i>
+            <i style="background:#2563eb"></i>
+            <span>多</span>
+            <span style="margin-left:auto;color:var(--text-3)">每日运行轮次 · 峰值 87</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 任务卡：紧贴热力图下方并拉高，填补热力图只占 1/2 高度留下的空白 -->
+      <div class="card tasks-tall">
+        <div class="card-h"><h3>进行中的任务</h3><span class="more">全部 →</span></div>
+        <div class="card-b">
+          <div class="task"><span class="pri" style="background:var(--red)"></span><span class="ck"></span><span class="task-t">修复沙箱取消：陈旧 run_id</span><span class="tag t-ok">已完成</span></div>
+          <div class="task"><span class="pri" style="background:var(--amber)"></span><span class="ck"></span><span class="task-t">小分队呼吸灯三处失效定位</span><span class="tag t-ok">已完成</span></div>
+          <div class="task done"><span class="pri" style="background:var(--green)"></span><span class="ck"></span><span class="task-t">交付门禁卡舞台模式入口</span><span class="tag t-ok">已完成</span></div>
+          <div class="task"><span class="pri" style="background:var(--accent)"></span><span class="ck"></span><span class="task-t">F038 SquadEditorModal 拆分</span><span class="tag t-run">进行中</span></div>
+          <div class="task"><span class="pri" style="background:var(--text-3)"></span><span class="ck"></span><span class="task-t">F028 symlink TOCTOU 决策</span><span class="tag t-wait">待确认</span></div>
+          <div class="task"><span class="pri" style="background:var(--purple)"></span><span class="ck"></span><span class="task-t">工作台信息架构设计</span><span class="tag t-run">进行中</span></div>
+          <div class="task"><span class="pri" style="background:var(--teal)"></span><span class="ck"></span><span class="task-t">热力图统计口径确认（轮次 / token）</span><span class="tag t-wait">待确认</span></div>
+          <div class="task"><span class="pri" style="background:var(--green)"></span><span class="ck"></span><span class="task-t">前端崩溃白屏检测（ErrorBoundary 缺失）</span><span class="tag t-wait">待排期</span></div>
+        </div>
+      </div>
+      </div>
+
+      <div class="col-stack">
+      <div class="card">
+        <div class="card-h"><h3>工作日历</h3><span class="more">月视图 →</span></div>
+        <div class="card-b">
+          <div class="cal">
+            <div class="cal-h">一</div><div class="cal-h">二</div><div class="cal-h">三</div><div class="cal-h">四</div><div class="cal-h">五</div><div class="cal-h">六</div><div class="cal-h">日</div>
+            <div class="cal-d out">29</div><div class="cal-d out">30</div><div class="cal-d">1<div class="dots"><i style="background:var(--accent)"></i></div></div>
+            <div class="cal-d has">2<div class="dots"><i style="background:var(--green)"></i><i style="background:var(--accent)"></i></div></div>
+            <div class="cal-d">3</div>
+            <div class="cal-d has">4<div class="dots"><i style="background:var(--amber)"></i></div></div>
+            <div class="cal-d">5</div><div class="cal-d">6</div>
+            <div class="cal-d has">7<div class="dots"><i style="background:var(--accent)"></i><i style="background:var(--purple)"></i></div></div>
+            <div class="cal-d has today">8<div class="dots"><i style="background:#fff"></i></div></div>
+            <div class="cal-d">9</div><div class="cal-d">10</div>
+            <div class="cal-d has">11<div class="dots"><i style="background:var(--green)"></i></div></div>
+            <div class="cal-d">12</div><div class="cal-d">13</div><div class="cal-d">14</div>
+            <div class="cal-d has">15<div class="dots"><i style="background:var(--accent)"></i></div></div>
+            <div class="cal-d">16</div><div class="cal-d">17</div><div class="cal-d">18</div><div class="cal-d">19</div>
+            <div class="cal-d has">20<div class="dots"><i style="background:var(--red)"></i></div></div><div class="cal-d">21</div><div class="cal-d">22</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-h"><h3>小纸条</h3><span class="more">今日 3 条 · 查看全部 →</span></div>
+        <div class="card-b">
+          <div class="slides" id="slides">
+            <div class="slide sl-y s0">
+              <div class="slide-t"><span class="dot" style="background:var(--amber)"></span>待确认<span class="slide-x">×</span></div>
+              <div class="slide-c">F028 的 TOCTOU 窗口能否接受——若工作空间不放symlink，可判为刻意保留。</div>
+              <div class="slide-m"><span>21:05 创建</span></div>
+            </div>
+            <div class="slide sl-b s1">
+              <div class="slide-t"><span class="dot" style="background:var(--accent)"></span>提醒<span class="slide-x">×</span></div>
+              <div class="slide-c">首页改叫「工作台」，定稿后要把菜单入口加回去（需同步三处）。</div>
+              <div class="slide-m"><span>20:30 创建</span></div>
+            </div>
+            <div class="slide sl-g s2">
+              <div class="slide-t"><span class="dot" style="background:var(--green)"></span>已完成<span class="slide-x">×</span></div>
+              <div class="slide-c">沙箱取消的两个缺陷已定位并提交，等真机复测后落库。</div>
+              <div class="slide-m"><span>20:14 创建</span></div>
+            </div>
+            <div class="slide sl-p s3">
+              <div class="slide-t"><span class="dot" style="background:var(--purple)"></span>想法<span class="slide-x">×</span></div>
+              <div class="slide-c">拨号盘工具可以再分「常用 / 全部」两档，常用的直接排在前面。</div>
+              <div class="slide-m"><span>19:48 创建</span></div>
+            </div>
+            <div class="slide sl-r s4">
+              <div class="slide-t"><span class="dot" style="background:var(--red)"></span>备忘<span class="slide-x">×</span></div>
+              <div class="slide-c">残项台账还剩 F038 拆分与 F028 两项，其余都是文档口径修正。</div>
+              <div class="slide-m"><span>19:20 创建</span></div>
+            </div>
+            <button class="slide-arrow prev" onclick="turn(-1)">‹</button>
+            <button class="slide-arrow next" onclick="turn(1)">›</button>
+            <div class="slide-nav" id="sdNav"></div>
+          </div>
+          <div class="slide-hint">点击卡片翻页 · 悬停出现左右箭头</div>
+        </div>
+      </div>
+      </div>
+    </div>
+    </div>
+
+    <!-- 最近活动（独占一行，双列） -->
+    <div class="card" style="margin-top:14px">
+      <div class="card-h"><h3>最近活动</h3><span class="more">全部日志 →</span></div>
+      <div class="card-b">
+        <div class="flow">
+          <div class="flow-i"><span class="flow-dot" style="background:var(--green)"></span><div class="flow-x"><p><b>技术评审圆桌</b> 完成交付确认，会话 sqs_…324100 收尾</p><time>20:51</time></div></div>
+          <div class="flow-i"><span class="flow-dot" style="background:var(--accent)"></span><div class="flow-x"><p>修复 <b>脚本取消</b>：陈旧 run_id + 取消被误判为执行错误</p><time>20:14</time></div></div>
+          <div class="flow-i"><span class="flow-dot" style="background:var(--purple)"></span><div class="flow-x"><p>新增回归测试 <b>script-cancel.test.ts</b>（10 项）</p><time>20:07</time></div></div>
+          <div class="flow-i"><span class="flow-dot" style="background:var(--amber)"></span><div class="flow-x"><p>导航索引回填完成，<b>24 条</b>已向量化</p><time>19:46</time></div></div>
+          <div class="flow-i"><span class="flow-dot" style="background:var(--teal)"></span><div class="flow-x"><p>MCP Server 已启动 · 0.0.0.0:18755 · 本机信任</p><time>19:03</time></div></div>
+          <div class="flow-i"><span class="flow-dot" style="background:var(--green)"></span><div class="flow-x"><p><b>需求发布流水线</b> 完成 L5 交付阶段，产出 3 份文档</p><time>18:22</time></div></div>
+        </div>
+      </div>
+    </div>
+
+</div>
+</div>
+
+<!-- 悬浮拨号盘 -->
+<div class="dial-hub">
+  <div class="dial-items" id="dialItems">
+    <div class="dial-it"><div class="ic">🖌</div><div class="nm">画布</div></div>
+    <div class="dial-it"><div class="ic">📝</div><div class="nm">写字板</div></div>
+    <div class="dial-it"><div class="ic">🧠</div><div class="nm">思维导图</div></div>
+    <div class="dial-it"><div class="ic">📊</div><div class="nm">表格</div></div>
+    <div class="dial-it"><div class="ic">📌</div><div class="nm">便签墙</div></div>
+    <div class="dial-it"><div class="ic">📅</div><div class="nm">工作日历</div></div>
+    <div class="dial-it"><div class="ic">⏱</div><div class="nm">专注钟</div></div>
+    <div class="dial-it"><div class="ic">📄</div><div class="nm">白板</div></div>
+  </div>
+  <button class="dial" id="dial" aria-label="展开工具">
+    <span class="dial-ticks" id="ticks"></span>
+    <span class="dial-ic" id="dialIc">✛</span>
+  </button>
+</div>
+
+<script>
+function tog(){document.getElementById('win').classList.toggle('dark');}
+
+// 热力图：26 周 × 7 天。刻意用确定性伪随机（sin 造节奏），保证每次刷新图案一致，
+// 否则截图对比无意义。
+(function(){
+  const box=document.getElementById('heat');
+  if(!box)return;
+  const colors=['#e8ebf0','#c7d7f5','#8fb3ee','#5a8de0','#2563eb'];
+  for(let w=0;w<26;w++){
+    for(let d=0;d<7;d++){
+      const c=document.createElement('div');
+      c.className='hc';
+      const recency=(w*7+d)/182;
+      const wave=(Math.sin(w*0.55+d*1.3)+1)/2;
+      const weekend=(d>=5)?0.35:1;
+      let v=(recency*0.5+wave*0.45)*weekend;
+      if(w===25&&d<=3) v=Math.min(1,v+0.35);
+      c.style.background=colors[Math.min(4,Math.floor(v*4.6))];
+      c.title=`第 ${w+1} 周第 ${d+1} 天 · ${(w*37+d*17)%29} 轮`;
+      box.appendChild(c);
+    }
+  }
+})();
+
+// 拨号盘刻度（12 格环一圈）
+(function(){
+  const t=document.getElementById('ticks');
+  if(!t)return;
+  for(let i=0;i<12;i++){
+    const el=document.createElement('i');
+    el.style.transform=`rotate(${i*30}deg)`;
+    t.appendChild(el);
+  }
+})();
+
+// 拨号盘开合
+(function(){
+  const dial=document.getElementById('dial');
+  const items=document.getElementById('dialItems');
+  const ic=document.getElementById('dialIc');
+  if(!dial||!items||!ic)return;
+  dial.onclick=()=>{
+    const open=items.classList.toggle('open');
+    dial.classList.toggle('open',open);
+    ic.textContent=open?'✕':'✛';
+    dial.setAttribute('aria-label',open?'收起工具':'展开工具');
+  };
+})();
+
+// 小纸条幻灯片
+(function(){
+  const box=document.getElementById('slides');
+  const nav=document.getElementById('sdNav');
+  if(!box||!nav)return;
+  const SLIDES=[...box.querySelectorAll('.slide')];
+  let cur=0;
+  function render(){
+    SLIDES.forEach((el,i)=>{
+      const off=(i-cur+SLIDES.length)%SLIDES.length;
+      el.className='slide '+el.className.replace(/\bs\d\b/g,'').trim()+' s'+Math.min(off,4);
+    });
+    nav.innerHTML='';
+    SLIDES.forEach((_,i)=>{
+      const d=document.createElement('span');
+      d.className='sd'+(i===cur?' on':'');
+      d.onclick=e=>{e.stopPropagation();cur=i;render();};
+      nav.appendChild(d);
+    });
+  }
+  function turn(step){cur=(cur+step+SLIDES.length)%SLIDES.length;render();}
+  window.turn=turn;//供 inline onclick 调用
+  box.addEventListener('click',e=>{
+    if(e.target.closest('.slide-arrow')||e.target.closest('.slide-nav'))return;
+    turn(1);
+  });
+  render();
+})();
+
+// 任务勾选
+document.querySelectorAll('.ck').forEach(c=>{
+  c.onclick=()=>{
+    const row=c.closest('.task');
+    row.classList.toggle('done');
+    const on=row.classList.contains('done');
+    c.style.background=on?'var(--green)':'';
+    c.style.borderColor=on?'var(--green)':'';
+    const tag=row.querySelector('.tag');
+    if(tag){tag.textContent=on?'已完成':'待办';tag.className='tag '+(on?'t-ok':'t-wait');}
+  };
+});
+</script>
+</body>
+</html>
