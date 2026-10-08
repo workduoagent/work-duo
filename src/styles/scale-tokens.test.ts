@@ -94,3 +94,65 @@ describe('wizard 三栏折叠阈值（F052）', () => {
     expect(WIZARD).toMatch(/@media \(max-width: 720px\) \{\s*grid-template-columns: 1fr;/)
   })
 })
+
+/**
+ * 回归：两栏挑选器（__picker--two，步骤 4~7：编排 Skill / 本地插件 /
+ * 绑定知识库 / 绑定服务器）的右栏「已编排/已绑定」不应被挤到页面底部。
+ *
+ * 背景（真实 bug）：__picker--two 的折叠断点是 1100px，而通用的
+ * __picker-aside--right 有一条 1280px 的 `grid-column: 1 / -1`
+ *（为三栏 __picker 的折叠而设）。tauri.conf.json 的 minWidth=1200
+ * ⇒ **1200~1280px 是完全可达的窗口区间**，该区间内：
+ *   网格仍是两栏（1fr 260px），但右栏被强制跨满整行 → 掉到主栏下方，
+ *   右侧明明还有 260px 空位，视觉上像是「布局坏了」。
+ *
+ * 修复：__picker--two 在 ≤1280px 显式 `grid-column: auto` 抵消，
+ * 只在真正折叠成单栏（≤1100px）时才让右栏落到下方。
+ */
+describe('两栏挑选器右栏不被挤到底部（回归）', () => {
+  it('__picker--two 在 ≤1280px 显式抵消右栏的 grid-column: 1 / -1', () => {
+    expect(
+      WIZARD,
+      '两栏变体必须在 ≤1280px 写 `grid-column: auto` 抵消通用右栏规则',
+    ).toMatch(
+      /&__picker--two \{[\s\S]*?@media \(max-width: (\d+)px\) \{\s*>\s*\.agent-wizard__picker-aside--right \{\s*grid-column: auto;/,
+    )
+  })
+
+  it('抵消断点必须与通用右栏换行断点相同（1280px），否则又会被压到底部', () => {
+    const override = WIZARD.match(
+      /&__picker--two \{[\s\S]*?> \.agent-wizard__picker-aside--right \{[\s\S]*?@media \(max-width: (\d+)px\)/,
+    )
+    const asideBreak = WIZARD.match(
+      /&__picker-aside--right \{[\s\S]*?@media \(max-width: (\d+)px\) \{\s*grid-column: 1 \/ -1/,
+    )
+    expect(override, '应找到 __picker--two 的抵消断点').toBeTruthy()
+    expect(asideBreak, '应找到通用右栏换行断点').toBeTruthy()
+    expect(
+      override![1],
+      '抵消断点必须等于通用右栏换行断点，否则右栏仍会在两栏网格里被跨行压到底部',
+    ).toBe(asideBreak![1])
+  })
+
+  it('两栏网格的折叠断点（1100px）低于抵消断点，保证抵消期间网格仍是两栏', () => {
+    const collapse = WIZARD.match(
+      /&__picker--two \{[\s\S]*?@media \(max-width: (\d+)px\) \{\s*grid-template-columns: minmax\(0, 1fr\);/,
+    )
+    const override = WIZARD.match(
+      /&__picker--two \{[\s\S]*?> \.agent-wizard__picker-aside--right \{[\s\S]*?@media \(max-width: (\d+)px\)/,
+    )
+    expect(collapse, '应找到 __picker--two 的折叠断点').toBeTruthy()
+    expect(override, '应找到 __picker--two 的抵消断点').toBeTruthy()
+    expect(
+      Number(collapse![1]),
+      '折叠断点必须小于抵消断点；若两者相同或更大，右栏就没有「留在右侧」的窗口',
+    ).toBeLessThan(Number(override![1]))
+  })
+
+  it('网格行按内容撑开（align-content: start），避免右栏与主栏之间出现莫名空档', () => {
+    expect(
+      WIZARD,
+      '__picker 应设 align-content: start，否则 picker 填满内容区高度时行被拉伸',
+    ).toMatch(/&__picker \{[\s\S]*?align-content: start;/)
+  })
+})

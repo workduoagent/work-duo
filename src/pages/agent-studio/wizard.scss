@@ -557,6 +557,10 @@
     grid-template-columns: var(--sidebar-w) minmax(0, 1fr) var(--aside-w);
     gap: var(--space-35);
     align-items: start;
+    // 行高按内容撑开，不 stretch：picker 本身 flex:1 填满内容区高度，若行被拉伸，
+    // 主栏内容较少时会在主栏与右侧「已编排」之间凭空撑出一大段空白
+    // （表现为「已编排」被顶到页面底部，与主栏之间出现莫名空档）。
+    align-content: start;
     flex: 1 1 auto;
     min-height: 0;
     max-width: 1280px;
@@ -579,10 +583,23 @@
   }
 
   &__picker--two {
-    grid-template-columns: 1fr 260px;
+    grid-template-columns: minmax(0, 1fr) 260px;
 
+    // 折叠阈值 1100px：低于此宽度右侧「已编排」栏改为落到主栏下方。
+    // 注意必须与下面 __picker-aside--right 的 1280px 规则解耦（见该处说明），
+    // 否则 1200~1280px 区间（本应用 minWidth=1200 的常见窗口）会出现
+    // 「两栏网格 + 右栏强制跨满整行」= 右侧栏被无端挤到页面底部。
     @media (max-width: 1100px) {
-      grid-template-columns: 1fr;
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    // 抵消 __picker-aside--right 在 ≤1280px 时的 grid-column: 1 / -1。
+    // 本变体在 1100~1280px 仍是两栏网格，右栏应继续留在右侧，
+    // 只有真正折叠成单栏（≤1100px）时才允许落到下方。
+    @media (max-width: 1280px) {
+      > .agent-wizard__picker-aside--right {
+        grid-column: auto;
+      }
     }
   }
 
@@ -599,8 +616,10 @@
   }
 
   &__picker-aside--right {
-    // F052：与 __picker 的折叠阈值保持一致（1280px，见该处注释）。
-    // 原来两处各写 1100px，改一处忘另一处会导致折叠后第三栏重叠。
+    // F052：与三栏 __picker 的折叠阈值保持一致（1280px，见该处注释）。
+    // ⚠️ 本规则只对三栏 __picker（步骤 3 MCP）生效；两栏 __picker--two
+    // 已在上面用 `grid-column: auto` 显式抵消，否则会出现上面注释描述的
+    // 「右栏被挤到底部」问题（改一处忘另一处就会复现）。
     @media (max-width: 1280px) {
       grid-column: 1 / -1;
     }
