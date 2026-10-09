@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 使用问题 / 讨论
+    url: https://github.com/workduoagent/work-duo/discussions
+    about: 一般性使用问题、想法讨论请走 Discussions
+  - name: 安全问题
+    url: https://github.com/workduoagent/work-duo/security/advisories/new
+    about: 发现安全漏洞请私下报告，不要公开提 Issue

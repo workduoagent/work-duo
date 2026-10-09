@@ -108,11 +108,30 @@ feat(memory): 记忆宫殿支持按标签筛选
 | 凭证 | `host/credential.rs` | AES-256-GCM，主密钥存 OS 凭据管理器 |
 | SSRF 防御 | `native/mod.rs` + `net.rs` | DNS 解析层拦截内网与云元数据 |
 
-**若发现安全缺陷，请勿公开披露细节**，先私下联系维护者。
+**若发现安全缺陷，请勿公开披露细节**，请用GitHub 的[私密安全报告](https://github.com/workduoagent/work-duo/security/advisories/new)私下提交。
+
+> ⚠️ **凭证一旦公开过即视为已泄露** —— 若你不小心提交了密钥/Token，**请立即到对应平台吊销该凭证**（改密码 / 重置 token），仅删除 commit 不足以撤销他人已抓取的可能。
 
 ## Issue 反馈
 
-带上：操作系统、版本、复现步骤、相关日志（`logs/workduo.log.YYYY-MM-DD.log`）。日志已做脱敏，但提交前仍请自行确认无敏感信息。
+请使用对应的 Issue 模板（提交时会自动加载）：
+
+| 类型 | 场景 |
+|---|---|
+| [🐛 Bug 反馈](https://github.com/workduoagent/work-duo/issues/new?template=bug_report.yml) | 可复现的功能缺陷 |
+| [✨ 功能建议](https://github.com/workduoagent/work-duo/issues/new?template=feature_request.yml) | 新功能或改进想法 |
+| [❓ 使用问题](https://github.com/workduoagent/work-duo/issues/new?template=question.yml) | 使用疑问（也可走 [Discussions](https://github.com/workduoagent/work-duo/discussions)） |
+
+反馈时请带上：操作系统与版本、复现步骤、相关日志。
+
+**日志位置**（按本地日期滚动）：
+
+| 文件 | 内容 |
+|---|---|
+| `logs/workduo.log.YYYY-MM-DD.log` | 统一日志（Rust + 前端汇入同一份） |
+| `logs/sandbox-audit.YYYY-MM-DD.log` | 沙箱审计 |
+
+日志已做脱敏，但**提交前仍请自行确认无敏感信息**（API Key、Token、内网地址、真实用户名）。
 
 ## 许可
 
