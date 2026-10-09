@@ -1,8 +1,0 @@
-{
-  "id": "py-security-auth-regex-redos",
-  "tier": "security",
-  "targetDir": "redos-proj",
-  "testCmd": "pytest test_auth_compat.py -v",
-  "artifacts": ["redos-proj/redos_fix.md"],
-  "prompt": "工作空间子目录 redos-proj/ 的 auth_compat.parse_www_authenticate 存在 CVE-2020-8492（bpo-39503）同型灾难性回溯：形如 'x,'*20000 的恶意 WWW-Authenticate 头会让正则卡死数分钟以上。请修复（重构正则或改写解析逻辑），合法输入的解析行为保持不变（大小写不敏感、无 realm 返回 None）；test_auth_compat.py 为验收标准（含子进程超时判分，10s 内必须返回）。\n完成后写 redos_fix.md：缺陷描述 + 修复方案 + 测试结果。\n⚠️ 最终交付物核对（收尾前逐项核对，缺一不可）：\n- redos-proj/redos_fix.md（相对 redos-proj/，文件名逐字一致）\n- 收尾规则：先落盘全部产物，再输出文字总结。"
-}
