@@ -1,9 +1,0 @@
-[
-  {
-    "caseId": "S-J6",
-    "seedId": "py-security-crlf-injection",
-    "testCmd": "pytest test_client.py -v",
-    "wsDir": "E:/Codes/ABC/work-duo/eval-workspace/eval-S-J6/crlf-proj",
-    "outFile": "E:/Codes/ABC/work-duo/docs/eval-results/2026-09-24-base16/judge/S-J6.txt"
-  }
-]
