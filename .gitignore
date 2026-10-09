@@ -32,7 +32,9 @@ dist-verify2
 *.sln
 *.sw?
 
-pnpm-lock.yaml
+# 注：pnpm-lock.yaml **必须入库**（开源项目惯例 + CI 的 --frozen-lockfile 前提）。
+# 曾被忽略导致 CI 每次 push 都失败：锁文件缺失 → frozen-lockfile 必失败。
+# pnpm-lock.yaml 由此处移除。
 
 # 运行时产物（小分队工作区/交接箱/记忆），不进 git
 src-tauri/.wd_mem/

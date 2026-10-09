@@ -1,13 +1,30 @@
-# 最小 CI（2026-09-25 设立）
-# 三步：typecheck → cargo test → release gate（离线静态层）。
+# CI：typecheck + lint + vitest → cargo test → release gate（离线静态层）
 #
-# 本地等效命令（推送前自检）：
-#   pnpm typecheck
-#   cargo test --manifest-path src-tauri/Cargo.toml
-#   node .workspace/.sys_tool/workduo-mcp/scripts/release_gate.mjs --offline --version local
+# 触发：push 到 master/main，或任意 PR
 #
-# 注：release gate 依赖仓库内的 .workspace/ 工具目录，该目录随仓库分发。
-#     若改用浅克隆（--depth 1）请确认工具目录完整。
+# 🔴 关键约束（都是实际踩过的坑，改动前先读）：
+#
+#  ① pnpm-lock.yaml **必须入库**。
+#     2026-10-09 之前它在 .gitignore 里且从未提交 → CI 里锁文件缺失 →
+#     `pnpm install --frozen-lockfile` 100% 失败 → 本CI 每次 push 全红，
+#     GitHub连续发失败邮件。已修复（锁文件已入库 + gitignore 移除该行）。
+#
+#  ② sidecar 二进制（src-tauri/binaries/，约 372MB）必须排除。
+#     仓库 clone 后约 570MB，每个任务都全量下载极易超时。
+#     用 sparse-checkout + `sparse-checkout-cone-mode: false`——
+#     默认 cone 模式只认目录，这里写文件列表会被忽略导致检出全量。
+#
+#  ③ release_gate.mjs 曾有 5 处硬编码本机 Windows 绝对路径 + 一处
+#     `squadGate is not defined`（变量声明在块内却在块外引用）。
+#     已改为「默认相对仓库根 + 参数可覆盖」，本地与 CI 通用。
+#
+#  ④ gate 断言的是**已入库的历史证据**（docs/eval-results/），不是本次新跑的结果。
+#     真正跑新测评是发布前的本地动作：`npm run release:gate`
+#     （结果落 .workspace/.eval-results/，gitignore 不入库）。
+#     CI 每次 clone 后没有新测评数据，若把 --out 指向空目录必然 FAIL。
+#
+#  ⑤ cargo test 必须保留 src-tauri/icons —— build.rs 调 tauri_build::build()
+#     会读 tauri.conf.json 的 bundle.icon 列表，缺图标会在编译期失败。
 
 name: ci
 
@@ -26,6 +43,30 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # ② 排除 sidecar 二进制（约 372MB，typecheck/测试都不需要）
+          #    必须设 sparse-checkout-cone-mode: false —— 默认 cone 模式只认
+          #    目录，写文件列表会被忽略导致检出全量。
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            src
+            src-tauri/src
+            src-tauri/Cargo.toml
+            src-tauri/Cargo.lock
+            src-tauri/build.rs
+            src-tauri/tauri.conf.json
+            src-tauri/capabilities
+            src-tauri/icons
+            package.json
+            pnpm-lock.yaml
+            pnpm-workspace.yaml
+            tsconfig.json
+            tsconfig.node.json
+            vite.config.ts
+            vitest.config.ts
+            eslint.config.js
+            index.html
+            public
       - uses: pnpm/action-setup@v4
         with:
           version: 9
@@ -35,15 +76,28 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
+      - run: pnpm lint
+      - run: pnpm test
 
   rust-test:
     name: cargo test (windows, msvc)
     runs-on: windows-latest
-    defaults:
-      run:
-        working-directory: src-tauri
     steps:
       - uses: actions/checkout@v4
+        with:
+          # ② cargo test 需要完整源码，但 sidecar 二进制本身不参与编译，
+          #    仍排除以省流量（约 372MB）。
+          #    注意 build.rs 会调 tauri_build::build()，它读 tauri.conf.json 的
+          #    bundle.icon 列表—— icons/ 缺失会导致编译期失败，务必包含。
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            src-tauri/src
+            src-tauri/Cargo.toml
+            src-tauri/Cargo.lock
+            src-tauri/build.rs
+            src-tauri/tauri.conf.json
+            src-tauri/capabilities
+            src-tauri/icons
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
@@ -51,7 +105,6 @@ jobs:
       - name: cargo test
         run: cargo test --locked
         env:
-          # Tauri/WebView2 相关构建在 CI 无窗口环境的标准开关
           CARGO_INCREMENTAL: 0
 
   release-gate-offline:
@@ -59,13 +112,29 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
         with:
-          version: 9
+          # ③ release_gate.mjs 是纯 node 脚本（无前端依赖），只需两样：
+          #    工具目录 + 已入库的历史证据。不装依赖、不需要 src/。
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            .workspace/.sys_tool
+            docs/eval-results
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
       - name: release gate --offline
-        run: node .workspace/.sys_tool/workduo-mcp/scripts/release_gate.mjs --offline --version ci-${{ github.sha }}
+        # 说明：
+        #  · 必须显式传 --out / --squad-dir——脚本默认指向
+        #    .workspace/.eval-results/latest，CI 里没有新测评数据会判FAIL。
+        #  · 这里指向**已入库的历史证据**（docs/eval-results/），断言的是
+        #    「已固化的基线仍达标」，而非「本次跑出了新结果」。
+        #    实测该配置 8 项全绿：32 用例 / done 100% / 产物 100% /
+        #    resolved 100% / Squad 17-17 全通。
+        #  · 真正跑新测评是发布前的本地动作（npm run release:gate），
+        #    结果落到 .workspace/.eval-results/（gitignore，不入库）。
+        run: >
+          node .workspace/.sys_tool/workduo-mcp/scripts/release_gate.mjs
+          --offline
+          --version ci-${{ github.sha }}
+          --out docs/eval-results/2026-09-24-full
+          --squad-dir docs/eval-results/squad-20260929-final

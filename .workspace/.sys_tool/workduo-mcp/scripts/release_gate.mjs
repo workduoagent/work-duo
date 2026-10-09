@@ -17,10 +17,23 @@ const argv = process.argv.slice(2)
 const get = (k, d) => { const i = argv.indexOf('--' + k); return i >= 0 ? argv[i + 1] : d }
 const flag = (k) => argv.includes('--' + k)
 const VERSION = get('version', 'v' + new Date().toISOString().slice(0, 10).replace(/-/g, ''))
-const OUT = get('out', 'E:/Codes/ABC/work-duo/.workspace/.eval-results/2026-09-24-full')
+
+// ── 路径解析：默认相对仓库根（可用 --repo-root 覆盖）────────────────────
+// 历史问题：这五处曾硬编码本机 Windows 绝对路径（E:/Codes/...），
+// 在 Linux CI 上目录不存在 → 写文件失败 / 误判证据缺失。
+// 改为「默认相对仓库根 + 可参数覆盖」，CI 与本地都能跑。
+//
+// 注意：__dirname = <repo>/.workspace/.sys_tool/workduo-mcp/scripts，
+//向上 4 层才是仓库根（scripts→workduo-mcp→.sys_tool→.workspace→repo）。
+const REPO_ROOT = path.resolve(get('repo-root', path.join(__dirname, '..', '..', '..', '..')))
+// 命令行传入的路径按 CWD 解析（CI 里 CWD= 仓库根），避免被再拼一层前缀
+const abs = (p) => (path.isAbsolute(p) ? p : path.resolve(process.cwd(), p))
+const EVAL_DIR = abs(get('eval-dir', path.join(REPO_ROOT, '.workspace', '.eval-results')))
+const OUT = abs(get('out', path.join(EVAL_DIR, 'latest')))
 const OFFLINE = flag('offline')
-const RELEASE_DIR = 'E:/Codes/ABC/work-duo/.workspace/.eval-results/release'
-const SQUAD_DIR = get('squad-dir', 'E:/Codes/ABC/work-duo/.workspace/.eval-results/squad-20260929-final')
+const RELEASE_DIR = abs(get('release-dir', path.join(EVAL_DIR, 'release')))
+const SQUAD_DIR = abs(get('squad-dir', path.join(EVAL_DIR, 'squad-20260929-final')))
+const FAULTS_DIR = abs(get('faults-dir', OUT))
 const DROP_PCT = 5 // 指标环比降幅阈值（百分点）
 
 // 发布指标聚合（与 buildScorecard 同款去重口径：同 caseId 多槽位取 mtime 最新）
@@ -67,7 +80,7 @@ async function main() {
       const h = await import('file:///' + path.resolve(__dirname, 'l2_eval_harness.mjs').replace(/\\/g, '/'))
       // 故障注入证据目录：OUT 无 fault 证据时回退到 2026-09-23 基线目录
       const hasFaults = fs.existsSync(OUT) && fs.readdirSync(OUT).some((f) => f.startsWith('fault-'))
-      const faultsDir = get('faults-dir', hasFaults ? OUT : 'E:/Codes/ABC/work-duo/.workspace/.eval-results/2026-09-23')
+      const faultsDir = get('faults-dir', hasFaults ? OUT : FAULTS_DIR)
       const r = await h.gate({ outDir: OUT, faultsDir })
       const gateJson = JSON.parse(fs.readFileSync(path.join(OUT, 'gate.json'), 'utf8'))
       add('L2 gate 全量断言', !!r, `${gateJson.checks.filter((c) => c.ok).length}/${gateJson.checks.length} 项`)
@@ -96,8 +109,10 @@ async function main() {
   if (cur.resolvedPct != null) add('客观判分 resolved≥80%', cur.resolvedPct >= 80, `${cur.resolvedPct}%（${cur.judgedCount} 判分用例）`)
 
   // ②b Squad suite 门禁（§10：17 用例回归全绿；--squad-dir 指定证据目录，缺目录记 SKIP 不阻断）
+  // 注：squadGate 必须声明在块外——归档步骤（§3）也要引用它。
+  // 历史 bug：曾声明在此{} 块内却在块外使用 → ReferenceError: squadGate is not defined
+  const squadGate = path.join(SQUAD_DIR, 'gate.json')
   {
-    const squadGate = path.join(SQUAD_DIR, 'gate.json')
     if (fs.existsSync(squadGate)) {
       try {
         const g = JSON.parse(fs.readFileSync(squadGate, 'utf8'))
