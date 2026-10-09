@@ -121,7 +121,10 @@ work-duo/
 │   │   └── fs_helper.rs      # Path boundary validation primitive
 │   ├── binaries/             # Prebuilt sidecars (Bun / Micromamba, ~370 MB)
 │   └── tauri.conf.json       # Tauri configuration and CSP
-├── docs/                     # Architecture documentation
+├── docs/                     # Documentation
+│   ├── ARCHITECTURE.md       # Architecture overview
+│   ├── eval-results/         # Evaluation evidence (baselines and historical results)
+│   └── images/               # README assets
 ├── public/                   # Static assets
 └── package.json
 ```

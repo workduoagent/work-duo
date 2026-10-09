@@ -121,7 +121,10 @@ work-duo/
 │   │   └── fs_helper.rs      # 路径边界校验原语
 │   ├── binaries/             # 预编译 sidecar（Bun / Micromamba，约 370 MB）
 │   └── tauri.conf.json       # Tauri 配置与 CSP
-├── docs/                     # 架构文档
+├── docs/                     # 文档
+│   ├── ARCHITECTURE.md       # 架构说明
+│   ├── eval-results/         # 测评证据（评测基线与历史结果）
+│   └── images/               # README 配图
 ├── public/                   # 静态资源
 └── package.json
 ```

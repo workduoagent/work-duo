@@ -11,7 +11,7 @@
 
 `docs/` 资产已迁入 `.workspace/`（初名 `.workbranchs`，当日按用户定名更正）。**`docs/` 下现在只剩走查报告，记忆里旧 `docs/xxx` 路径一律失效。**
 - `.workspace/.sys_tool/` = 工具与 skill（原 `docs/skills/`）：`workduo-mcp/`（MCP skill + scripts）、`single-agent-capability/`、`single-agent-capability-v2/`
-- `.workspace/.eval-results/` = 测评证据（原 `docs/eval-results/`）
+- `.workspace/.eval-results/` = **运行时产物**（跑案例的临时结果，不入库）。⚠️ **不是证据目录**——测评证据在 `docs/eval-results/`（784 文件，**已入库**，含发布门禁基线 `squad-20260929-final/gate.json`）。2026-10-09 修正：此前记忆误写「证据在 .workspace/.eval-results/」，该处磁盘已丢失过一次，靠 git 历史恢复。
 - `.workspace/.fix/` = 修复单（**完成即删**，状态固化在各单 ✅ 横幅与 commit）
 - `.workspace/.norms/` = 前后端开发规范 + `git-commit.md`
 - `.workspace/.memory/` = **项目记忆权威目录**（本文件 + `CURRENT.md` + `archive/`）
@@ -42,7 +42,7 @@
 - **日志滚动必按本地日期**：`logging.rs::LocalDailyWriter`（自实现 Write，写入前按 `chrono::Local` 校验切文件）。**禁改回 `tracing_appender::Rotation::DAILY`——它按 UTC 命名，与本地时间戳/读取侧错位 8h，导致每日本地 00:00~08:00 日志读不到**（2026-09-24 F-5 实测暴露并修复）。
 
 ## L2 生态测评（2026-09-23 全线闭环 18 commit；2026-09-24 收口：capability 39 用例满贯 25/25+SK/PL 14/14、工具轮基线 8→16、题库 13→19、D' 成本/回滚/限流 agent_snapshot_*、A' release 门禁运营化）
-- 证据 `.workspace/.eval-results/2026-09-23/`；驱动 `l2_eval_harness.mjs`（CLI：run/inject/judge-dump/judge-merge/score）。
+- 证据 `docs/eval-results/2026-09-23/`（**已入库**）；驱动 `l2_eval_harness.mjs`（CLI：run/inject/judge-dump/judge-merge/score）。
 - **改进报告全清**：P0-1 预算 1800s+软窗口；P0-2 失败写 reply+文件表；P1-2 取消三态+no_pending；P1-1 xlsx/png 模板+产物契约；P2 五项（expectedArtifacts/HTTP 重试+错误分类/进度工具/skill_upsert 冲突/并行=多 Agent）。
 - **回归与方法论**：12 个原失败用例 12/12 done、产物 100%；**「堆中间品不交最终件」收尾清单无效，改落盘时机才有效**（骨架先行+增量回写）。
 - **Batch C（SWE-bench-lite 雏形）**：C1 seeds/ 种子包体系（manifest：tier/targetDir/testCmd/prompt/artifacts），7 包三级；C2 客观判分（venv pytest，resolved=全绿）；C3 首张评分卡 **resolved 6/6=100%**。C-H1 挖出引擎真根因：**熔断强制总结「暂定完成」吞掉修复型重试**（有文件写入→转失败回灌）+ 工具轮分级（基线 8/修复+8，WD_SUBTASK_MAX_ITERATIONS）。
@@ -94,3 +94,5 @@
 - **写文档时踩过的自身错误（记录以自警）**：① 加表格行时用替换而非新增，把HITL「失败恢复」行误替换成「交付确认」；② 小分队模板写「4 套」实为 3 个 JSON（`src/assets/squad-templates/`）；③ 角色包写 LEADER 实为 **MODERATOR**（`SquadRolePresetId` 五成员：RESEARCHER/WORKER/CRITIC/INTEGRATOR/MODERATOR）。→ **写完必须回读全文核对，不要依赖一次写对。**
 - **文档不得粉饰已知缺口**：README §7.2 如实列出 MCP OAuth token 与 `models.api_key` 明文存储（`aes_gcm` 仅在 `host/credential.rs` 使用）、Windows symlink TOCTOU 退化为路径重解析、Bun 网络守卫状态字段标注滞后。
 - **记忆迁移铁律（2026-10-09）**：记忆权威目录 = `.workspace/.memory/`，**客户端私有目录 `.workbuddy/` 已彻底删除并加入 `.gitignore`**。目的：换客户端 / 换电脑时只读指定目录即可接续（git pull 即得）。迁移后逐日流水在 `archive/`，专题总结在 `archive/topics/`。**删除客户端目录前必须全量 MD5 校验 + 核对差异文件的小节标题**——本次 42 个文件抽样只查 5 个不够，必须逐个比对才能发现合并版与源版的预期差异。
+- 🔴 **「已入库」≠「不会丢」（2026-10-09 血泪）**：`docs/eval-results/` 曾入库但**磁盘上已丢失**，靠 `git checkout 74a185f --` 才恢复 784 个文件。⇒ **重要数据不能只依赖「它在 git 里」这句记忆**，必须确认① 提交确实存在② 有 commit hash 可恢复 ③ 工作区重置/换设备后能自动回来。**同理，记忆里写的路径必须与磁盘实际一致**——本次记忆误写「证据在 `.workspace/.eval-results/`」而实际在 `docs/`，差点导致下次误判该处有证据。**引用路径前先 `ls` 一次，比什么都便宜。**
+- 🔴 **删除运行时产物前，确认「证据」不是它的副本**（2026-10-09）：gitignore 里 `docs/eval-results/`（证据）与 `.workspace/.eval-results/`（产物）路径相近，清理时须 `git check-ignore` + `git ls-tree` 双向确认，别把「产物可重建」误当成「证据也可重建」。
