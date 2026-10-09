@@ -11,7 +11,7 @@
 
 `docs/` 资产已迁入 `.workspace/`（初名 `.workbranchs`，当日按用户定名更正）。**`docs/` 下现在只剩走查报告，记忆里旧 `docs/xxx` 路径一律失效。**
 - `.workspace/.sys_tool/` = 工具与 skill（原 `docs/skills/`）：`workduo-mcp/`（MCP skill + scripts）、`single-agent-capability/`、`single-agent-capability-v2/`
-- `.workspace/.eval-results/` = **运行时产物**（跑案例的临时结果，不入库）。⚠️ **不是证据目录**——测评证据在 `docs/eval-results/`（784 文件，**已入库**，含发布门禁基线 `squad-20260929-final/gate.json`）。2026-10-09 修正：此前记忆误写「证据在 .workspace/.eval-results/」，该处磁盘已丢失过一次，靠 git 历史恢复。
+- `.workspace/.eval-results/` = **运行时产物**（跑案例的临时结果，不入库）。⚠️ **不是证据目录**——测评证据在 `docs/eval-results/`（**已入库**，瘦身后仅存 170 文件 / 6 个权威批次，含 CI 门禁基线 `squad-20260929-final/gate.json`）。2026-10-09 修正：此前记忆误写「证据在 .workspace/.eval-results/」，该处磁盘已丢失过一次，靠 git 历史恢复。
 - `.workspace/.fix/` = 修复单（**完成即删**，状态固化在各单 ✅ 横幅与 commit）
 - `.workspace/.norms/` = 前后端开发规范 + `git-commit.md`
 - `.workspace/.memory/` = **项目记忆权威目录**（本文件 + `CURRENT.md` + `archive/`）
@@ -88,6 +88,8 @@
 - **🔴 跨进程错误判定禁用文案字符串匹配（2026-10-07 血泪）**：前端 `error.includes('已取消')` 判取消，Tauri 包一层后形态不保证一致 ⇒ 真机上「取消」被判成「执行错误」弹红 toast。已改为机器可读前缀 `script_cancel::CANCELLED_PREFIX = "CANCELLED:"`（Rust 常量 + TS 常量逐字对齐，测试比对源码防漂移）。**凡跨 Rust/JS 边界传状态，必须有稳定机器可读标识，不能靠中文文案。**
 - **🔴 不写无调用方的pub 函数（2026-10-07 dead_code 教训）**：修 F049 时顺手写了 `is_cancelled_message()`「供 Rust 侧自测与前端语义对齐参考」，实际只有测试调用、生产无调用方 → `cargo check` 报 dead_code 告警。**根因是先写了"将来可能有用"的辅助函数再找用途**（本项目里 agent 运行路径 `run_python_in_sandbox` 其实**没有取消入口**，不存在第二个消费方，已 grep 确认）。正确顺序：**先确认消费方存在再写函数**；测试需要的判定直接在测试里用常量表达（`msg.contains(CANCELLED_PREFIX)`），不必在生产代码留 API。**告警不是噪音，是它在告诉你设计超出了需求。**
 
+- 🔴 **`docs/eval-results/` 只保留 6 个权威批次，其余中间批次已删（2026-10-09 瘦身）**：证据目录**必须保留**（CI 发布门禁断言的就是它，删了 CI 直接红），但 62 个批次里 56 个是可重建的中间试跑产物，已用 `git rm` 删除。**现存 6 个**：`2026-09-23`、`2026-09-23-final`、`2026-09-24-full`（CI `--out`）、`squad-20260929-final`（CI `--squad-dir`）、`release`、`host-retest-20260927`。规模 2.7MB/784 文件 → **987KB/170 文件**。已删除的命名族：`capability-*`(41)、`capability2-*`(7)、`squad-20260929-<时间戳>`(5)、`2026-09-23-{am2v3,pre-fix,repeat,faults}`(4)、`2026-09-24-{16iter,base16,bm5,bm5b,fsguard,netguard}`(6)。**回滚锚点 `955ae31`**（`git checkout 955ae31 -- docs/eval-results` 可全量恢复）。瘦身已用 CI 同参命令本地复跑验证：`node .workspace/.sys_tool/workduo-mcp/scripts/release_gate.mjs --offline --out docs/eval-results/2026-09-24-full --squad-dir docs/eval-results/squad-20260929-final` → **8 项全绿PASS**（种子 19 包 / 32 用例 / done 93.8% / 产物 96.9% / resolved 83.3% / Squad 17-17）。**教训：删证据目录前必须先 `grep` 门禁脚本与 workflow 的 `--out`/`--squad-dir` 实际取值**——本次两个路径恰好都落在保留集内才敢删；另注意 `docs/eval-results/2026-09-23-faults` 是 `2026-09-23` 内 3 个 fault 文件的重复子集（门禁 faults 回退实际读 OUT 目录，不读它）。
+
 ## 文档治理（2026-10-08/09）
 
 - **README 是对外门面**：已于 2026-10-08 全量重写为922 行（七章：架构总览/模块化/功能全景/安全架构/数据模型/开发构建/现状与已知限制）。**写文档的纪律：所有数字以代码为准，核实不到就标注「未确认」，不猜。**
@@ -96,3 +98,4 @@
 - **记忆迁移铁律（2026-10-09）**：记忆权威目录 = `.workspace/.memory/`，**客户端私有目录 `.workbuddy/` 已彻底删除并加入 `.gitignore`**。目的：换客户端 / 换电脑时只读指定目录即可接续（git pull 即得）。迁移后逐日流水在 `archive/`，专题总结在 `archive/topics/`。**删除客户端目录前必须全量 MD5 校验 + 核对差异文件的小节标题**——本次 42 个文件抽样只查 5 个不够，必须逐个比对才能发现合并版与源版的预期差异。
 - 🔴 **「已入库」≠「不会丢」（2026-10-09 血泪）**：`docs/eval-results/` 曾入库但**磁盘上已丢失**，靠 `git checkout 74a185f --` 才恢复 784 个文件。⇒ **重要数据不能只依赖「它在 git 里」这句记忆**，必须确认① 提交确实存在② 有 commit hash 可恢复 ③ 工作区重置/换设备后能自动回来。**同理，记忆里写的路径必须与磁盘实际一致**——本次记忆误写「证据在 `.workspace/.eval-results/`」而实际在 `docs/`，差点导致下次误判该处有证据。**引用路径前先 `ls` 一次，比什么都便宜。**
 - 🔴 **删除运行时产物前，确认「证据」不是它的副本**（2026-10-09）：gitignore 里 `docs/eval-results/`（证据）与 `.workspace/.eval-results/`（产物）路径相近，清理时须 `git check-ignore` + `git ls-tree` 双向确认，别把「产物可重建」误当成「证据也可重建」。
+- 🔴 **记忆只写 `.workspace/.memory/`，禁止写 `.workbuddy/`（2026-10-09 用户重申）**：记忆权威目录 = `.workspace/.memory/`（`MEMORY.md` 铁律 / `CURRENT.md` 进度 / `archive/` 逐日流水），`docs/` 放引擎与架构设计。**任何编码工具（含 AI 助手）都不得再往客户端私有目录 `.workbuddy/` 写记忆**——它随客户端/设备变动、已 gitignore、且在 commit `479543f` 中被明确删除。**本项目当日已因此误建 `.workbuddy/memory/2026-10-09.md` 一次（AI 按通用习惯写私有目录），发现后已迁回 `.workspace/.memory/archive/2026-10-09.md` 并删除该目录树。** 写记忆前先`ls .workspace/.memory/` 确认落点，不要凭工具默认行为。

@@ -54,6 +54,28 @@
 5. chat 页 Field 自动 id + 令牌明暗切换
 6. 列表三态在断网/断库下是否显示「加载失败 + 重试」
 
+## 2026-10-09 晚间新增（未提交，工作区）
+
+### dev / 生产环境隔离（本轮改动，`cargo check --locked` + `typecheck` 均通过）
+
+- **问题**：本地 dev 与安装版共用 `%APPDATA%\com.workduo`，开发测试直接读写生产数据。
+- **方案**：Tauri 数据目录由 identifier 决定（编译期，运行期不可改），故在 `src-tauri/build.rs` 对 debug 构建注入 `TAURI_CONFIG={"identifier":"com.workduo.dev"}`（tauri-build 会 merge 到 tauri.conf.json 之上；**只覆盖字符串字段，数组字段如 app.windows 是整体替换，不能碰**）。
+- **改动**：`build.rs`（dev identifier + `WORKDUO_MCP_DEFAULT_PORT=18756`，逃生开关 `WORKDUO_DEV_IDENTIFIER=0`）/ `Cargo.toml`（build-dep serde_json，lock 无需改）/ `mcp_server.rs`（`default_mcp_port()` + 新命令 `mcp_server_port`）/ `lib.rs`（注册）/ `SecurityPanel.tsx`（配对示例端口不再写死）。
+- **首次 dev 启动数据为空**，需沿用生产数据：`cp -r /c/Users/louis/AppData/Roaming/com.workduo /c/Users/louis/AppData/Roaming/com.workduo.dev`。
+
+### 🔴 新发现的既有隐患（与上述改动无关）
+
+`schemars 0.8.22`（tauri-build 依赖）与 rustc 1.97.1 不兼容：`BTreeMap` 现为 3 泛型参数，schemars 仍写 `BTreeMap<K,V>` → E0107。已用基线代码（不含本轮改动）复现同样失败，证明**全新编译必挂**；本机 `target/` 有缓存所以 dev 不受影响，**换机器 / CI 从零编译会失败**。待决：升 tauri-build 或锁 rustc 版本。
+
+### 记忆写入口径（用户 2026-10-09 当日重申）
+
+**禁止再往 `.workbuddy/` 写记忆，统一写 `.workspace/.memory/`。** 本轮曾误建 `.workbuddy/memory/2026-10-09.md`，已迁回 `archive/2026-10-09.md` 并删除该目录树；铁律已写入 `MEMORY.md`。
+
+### 其他待办（沿袭）
+
+- README 922 行重写已被回退，**仍待重做**（见 `.memory/README.md` 待办表）。
+- 本轮改动未提交，push 由用户本人执行。
+
 ## 环境事实（跨设备必读）
 
 - WorkDuo MCP：`127.0.0.1:18755/mcp`；驱动脚本：`.workspace/.sys_tool/workduo-mcp/scripts/`。
