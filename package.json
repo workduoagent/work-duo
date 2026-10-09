@@ -3,6 +3,27 @@
   "private": true,
   "version": "0.0.1",
   "type": "module",
+  "description": "本地优先的 AI 智能体工作台 —— 模型接入、智能体编排、多智能体协作与沙箱执行",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/workduoagent/work-duo.git"
+  },
+  "homepage": "https://github.com/workduoagent/work-duo#readme",
+  "bugs": {
+    "url": "https://github.com/workduoagent/work-duo/issues"
+  },
+  "keywords": [
+    "ai",
+    "agent",
+    "llm",
+    "tauri",
+    "mcp",
+    "sandbox",
+    "local-first",
+    "orchestration",
+    "multi-agent"
+  ],
   "author": {
     "email": "anglebracketstudio@163.com",
     "name": "hi·Jerry",

@@ -1,9 +1,13 @@
-# 最小 CI（台账 P0-6，2026-09-25）
+# 最小 CI（2026-09-25 设立）
 # 三步：typecheck → cargo test → release gate（离线静态层）。
 #
-# ⚠️ 本仓库 remote 为 Gitee：Gitee 不自动执行 GitHub Actions。
-#    本文件作为标准 CI 定义：①推送到 GitHub 镜像即生效；②可迁移为 Gitee Go 流水线蓝本；
-#    ③本地等效命令（推送前自检）：`pnpm typecheck && cd src-tauri && cargo test && node .workspace/.sys_tool/workduo-mcp/scripts/release_gate.mjs --offline --version local`
+# 本地等效命令（推送前自检）：
+#   pnpm typecheck
+#   cargo test --manifest-path src-tauri/Cargo.toml
+#   node .workspace/.sys_tool/workduo-mcp/scripts/release_gate.mjs --offline --version local
+#
+# 注：release gate 依赖仓库内的 .workspace/ 工具目录，该目录随仓库分发。
+#     若改用浅克隆（--depth 1）请确认工具目录完整。
 
 name: ci
 
