@@ -16,8 +16,7 @@ English | [简体中文](README.md)
 
 > **Your data and artifacts stay on your machine; inference runs through cloud APIs.** No backend to deploy — clone and run.
 
-<!-- TODO: Main interface screenshot — save to docs/images/screenshot.png (~1200px wide), then uncomment -->
-<!-- ![Main Interface](docs/images/screenshot.png) -->
+<img src="docs/images/screenshot.png" alt="WorkDuo main interface" width="100%" />
 
 ## Features
 
@@ -27,6 +26,48 @@ English | [简体中文](README.md)
 - **Skill & plugin ecosystem** — Skills turn "model improvisation" into reusable workflows, with optional bundled script tools; local plugins can be registered as atomic tools.
 - **Dual sandbox runtimes** — Ships Micromamba (Python) and Bun (JS). Network is disabled and the filesystem is bounded by default, so user scripts run with zero environment setup.
 - **Long-term memory** — A memory palace UI with automatic recall and anchoring. Capability is controlled at the ability layer (off / active / forced) rather than by prompt wording alone.
+
+## Screenshots
+
+> All screenshots come from a local instance; sensitive data (LAN IPs, server addresses, local paths) is redacted.
+
+<table>
+<tr>
+<td width="50%"><img src="docs/images/chat-dag.png" alt="Agent chat: DAG execution graph and tool traces" /></td>
+<td width="50%"><img src="docs/images/squad-stage.png" alt="Multi-agent collaboration: pixel stage and speech bubbles" /></td>
+</tr>
+<tr>
+<td align="center"><sub>Agent chat — tool traces and planning DAG</sub></td>
+<td align="center"><sub>Multi-agent collaboration — pixel stage and member bubbles</sub></td>
+</tr>
+<tr>
+<td width="50%"><img src="docs/images/agent-wizard.png" alt="7-step agent wizard" /></td>
+<td width="50%"><img src="docs/images/knowledge.png" alt="Knowledge base: vector chunks and semantic retrieval" /></td>
+</tr>
+<tr>
+<td align="center"><sub>7-step wizard — model / MCP / permissions / prompt</sub></td>
+<td align="center"><sub>Knowledge base — vector chunks and semantic retrieval</sub></td>
+</tr>
+<tr>
+<td width="50%"><img src="docs/images/skill-hub.png" alt="Skill center" /></td>
+<td width="50%"><img src="docs/images/plugin-hub.png" alt="Plugin center" /></td>
+</tr>
+<tr>
+<td align="center"><sub>Skill center — turn model improvisation into reusable workflows</sub></td>
+<td align="center"><sub>Plugin center — local plugins as atomic tools</sub></td>
+</tr>
+<tr>
+<td width="50%"><img src="docs/images/sandbox-python.png" alt="Python sandbox runtime" /></td>
+<td width="50%"><img src="docs/images/mcp-hub.png" alt="MCP hub" /></td>
+</tr>
+<tr>
+<td align="center"><sub>Dual sandbox — Micromamba (Python) runtime</sub></td>
+<td align="center"><sub>MCP hub — 98 tools exposed to external clients</sub></td>
+</tr>
+</table>
+
+<img src="docs/images/server-hub.png" alt="Server management: SSH credentials, SFTP sync, connection permissions" width="820" />
+<sub>Remote server management — SSH credentials / SFTP sync / connection-level permission control</sub>
 
 ## Tech Stack
 

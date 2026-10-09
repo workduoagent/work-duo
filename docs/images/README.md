@@ -1,38 +1,37 @@
 # 文档图片
 
-本目录存放 README 引用的图片资源。
+本目录存放 README 引用的图片资源（统一 PNG，统一 1200px 宽）。
 
-## 需要的图片
+## 图片清单
 
-| 文件名 | 用途 | 建议尺寸 | 对应位置 |
-|---|---|---|---|
-| `screenshot.png` | 主界面截图 | 宽约 1200px | README.md / README.en.md 顶部 |
+| 文件名 | 内容 | 尺寸 | 大小 | 对应 README 位置 |
+|---|---|---|---|---|
+| `screenshot.png` | 主界面 dashboard（知识库 / 智能体 / 插件小组 / MCP / 沙箱统计与功能入口） | 1200×309 | 8 KB | 顶部主图（中英文各一处） |
+| `chat-dag.png` | 智能体会话页：消息流 + 工具轨迹 + 右侧 DAG 执行图 | 1200×652 | 25 KB | 界面一览 · 智能体编排 |
+| `squad-stage.png` | 小分队协作：像素舞台 + 成员发言气泡 + 机器人 | 1200×652 | 119 KB | 界面一览 · 多智能体协作 |
+| `agent-wizard.png` | 新建智能体 7 步向导（基本信息 / 模型 / MCP / 权限 / 提示词） | 1200×638 | 16 KB | 界面一览 · 智能体编排 |
+| `knowledge.png` | 知识库：向量库分块列表 + 语义计数 + 上下文位置 | 1200×652 | 56 KB | 界面一览 · 长期记忆 |
+| `skill-hub.png` | 技能中心：技能卡片（内置模板 / 用户自建） | 1200×262 | 15 KB | 界面一览 · 技能与插件 |
+| `plugin-hub.png` | 插件中心：本地插件（Skill / MCP / OpenAPI / SQL / Shell 等） | 1200×328 | 23 KB | 界面一览 · 技能与插件 |
+| `mcp-hub.png` | MCP 接入页：外部 MCP 服务列表 | 1200×496 | 20 KB | 界面一览 · MCP Server |
+| `sandbox-python.png` | Python 沙箱环境：Micromamba 运行时与脚本管理 | 1200×652 | 12 KB | 界面一览 · 双沙箱 |
+| `server-hub.png` | 服务器纳管：远程主机（SSH 凭据 / SFTP 同步 / 禁连接权） | 1200×549 | 14 KB | 界面一览 · 远程纳管 |
 
-## 使用方式
+合计约 308 KB。原始 2560×1392 截图的备份在仓库外（`~/.workbuddy/tmp/img-backup/`），不入库。
 
-图片在两个 README 中均以 HTML 注释形式预留，**截图就位后取消注释即可**：
+## 规范
 
-```markdown
-<!-- TODO: 主界面截图待补 —— 把截图存到 docs/images/screenshot.png（约 1200px 宽）后取消注释 -->
-<!-- ![主界面](docs/images/screenshot.png) -->
-```
+- 统一 **PNG**（动效可用 GIF），不用 WebP —— 部分 Markdown 渲染器兼容性不佳
+- 宽度统一 **1200px**，高度按内容裁剪（去掉大片空白）
+- 单张 **< 500 KB**：处理方式为 256 色调色板量化（`FASTOCTREE` + Floyd–Steinberg 抖动），截图类图片肉眼几乎无损
+- ⚠️ **不得暴露敏感信息**：API Key、模型 base_url / 服务器地址、内网 IP、真实路径（含用户名）
+  - 已处理：`chat-dag.png` 本机绝对路径、`plugin-hub.png` 插件路径、`server-hub.png` 内网 IP 与端口、`knowledge.png` 探针卡片内的 IP 与端口
+  - 处理方式：中性灰实心条覆盖（`(148,158,168)`），不使用马赛克（马赛克在缩放后易被反推）
+- 新增图片请重跑同样的「打码 → 裁剪 → 缩宽 → 量化」流程，坐标按原图 2560×1392 给出
 
-英文版对应：
+## 仍缺的图片
 
-```markdown
-<!-- TODO: Main interface screenshot — save to docs/images/screenshot.png (~1200px wide), then uncomment -->
-<!-- ![Main Interface](docs/images/screenshot.png) -->
-```
-
-## 建议补充的图片（按对开源说服力的影响排序）
-
-1. **智能体会话页** —— 展示 DAG 执行图与工具轨迹，这是本项目最有辨识度的界面
-2. **小分队协作界面** —— 像素舞台 + 多角色气泡
-3. **多格式查看器** —— PDF / Word / 表格 / 音视频预览
-4. **GIF 动效** —— 智能体执行一轮任务的完整过程（比静态图更直观）
-
-## 注意事项
-
-- 请勿在截图中暴露敏感信息（API Key、服务器地址、内网 IP、真实路径）
-- 图片统一用 PNG（截图）或 GIF（动效），不用 WebP（部分 Markdown 渲染器兼容性不佳）
-- 单张控制在 500 KB 以内，避免仓库体积膨胀
+| 建议 | 说明 |
+|---|---|
+| `demo.gif` | 智能体执行一轮任务 / 小分队一轮协作的完整过程（3–5 秒循环），比静态图更直观 |
+| `model-settings.png` | 模型接入页（供应商 / API Key / 端点配置，注意先清空敏感字段） |

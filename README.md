@@ -16,8 +16,7 @@
 
 > **数据与产物留在本机，推理走云端API。** 无需自建后端，克隆即可运行。
 
-<!-- TODO: 主界面截图待补 —— 把截图存到 docs/images/screenshot.png（约 1200px 宽）后取消注释 -->
-<!-- ![主界面](docs/images/screenshot.png) -->
+<img src="docs/images/screenshot.png" alt="WorkDuo 主界面" width="100%" />
 
 ## 特性
 
@@ -27,6 +26,48 @@
 - **技能与插件生态** —— 技能把「模型临场发挥」收敛为可复用工作流，支持随包脚本工具；本地插件可作为原子工具接入
 - **双沙箱运行时** —— 内置 Micromamba（Python）与 Bun（JS），默认断网 + 文件系统有界，用户脚本开箱即跑无需配置环境
 - **长期记忆沉淀** —— 记忆宫殿可视化管理，自动召回与锚定，能力层可控（关闭 / 主动 / 强制三档），非仅提示词约束
+
+## 界面一览
+
+> 全部截图取自本地运行实例，敏感信息（内网 IP、服务器地址、本机路径）已打码。
+
+<table>
+<tr>
+<td width="50%"><img src="docs/images/chat-dag.png" alt="智能体会话页：DAG 执行图与工具轨迹" /></td>
+<td width="50%"><img src="docs/images/squad-stage.png" alt="小分队协作：像素舞台与发言气泡" /></td>
+</tr>
+<tr>
+<td align="center"><sub>智能体会话 —— 工具轨迹与 DAG 执行图</sub></td>
+<td align="center"><sub>小分队协作 —— 像素舞台与成员发言气泡</sub></td>
+</tr>
+<tr>
+<td width="50%"><img src="docs/images/agent-wizard.png" alt="新建智能体 7 步向导" /></td>
+<td width="50%"><img src="docs/images/knowledge.png" alt="知识库：向量分块与语义检索" /></td>
+</tr>
+<tr>
+<td align="center"><sub>7 步向导 —— 模型 / MCP / 权限 / 提示词</sub></td>
+<td align="center"><sub>知识库 —— 向量分块与语义检索</sub></td>
+</tr>
+<tr>
+<td width="50%"><img src="docs/images/skill-hub.png" alt="技能中心" /></td>
+<td width="50%"><img src="docs/images/plugin-hub.png" alt="插件中心" /></td>
+</tr>
+<tr>
+<td align="center"><sub>技能中心 —— 把模型发挥收敛为可复用工作流</sub></td>
+<td align="center"><sub>插件中心 —— 本地插件作为原子工具接入</sub></td>
+</tr>
+<tr>
+<td width="50%"><img src="docs/images/sandbox-python.png" alt="Python 沙箱环境" /></td>
+<td width="50%"><img src="docs/images/mcp-hub.png" alt="MCP 接入" /></td>
+</tr>
+<tr>
+<td align="center"><sub>双沙箱 —— Micromamba（Python）运行时</sub></td>
+<td align="center"><sub>MCP 接入 —— 外部客户端可直连的 98 个工具</sub></td>
+</tr>
+</table>
+
+<img src="docs/images/server-hub.png" alt="服务器纳管：SSH 凭据、SFTP 同步、连接权限" width="820" />
+<sub>远程纳管 —— SSH 凭据 / SFTP 同步 / 连接级权限管控</sub>
 
 ## 技术栈
 
