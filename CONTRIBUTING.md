@@ -76,6 +76,8 @@ feat(memory): 记忆宫殿支持按标签筛选
 
 ## 代码风格
 
+完整前端规范见 [`.workspace/.norms/frontend.md`](.workspace/.norms/frontend.md)（含目录职责、数据层、布局、检查流程），以下是高频红线摘要。
+
 **前端**
 
 - Ant Design **必须**经 `src/components/ui` 封装调用，禁止裸用
@@ -84,6 +86,8 @@ feat(memory): 记忆宫殿支持按标签筛选
 - 表单控件设 `autoComplete="off"`
 - hover 效果禁止位移或缩放
 - Tauri 事件订阅统一走 `useTauriEvent`（避免重渲染重建监听导致泄漏）
+- 页面根容器必须 `width: 100%`，禁止 `max-width` + `margin: 0 auto` 居中限制
+- UI 文案禁止「中文（English）」混排（如 `唯一标识（identifier）`）
 
 **Rust**
 
