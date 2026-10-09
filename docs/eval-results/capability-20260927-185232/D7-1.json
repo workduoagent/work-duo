@@ -1,0 +1,25 @@
+{
+  "caseId": "D7-1",
+  "dim": "D7",
+  "title": "多轮上下文",
+  "status": "done",
+  "autoPass": true,
+  "autoScore": 1,
+  "durationMs": 12143,
+  "asserts": [
+    {
+      "name": "r2_done",
+      "ok": true,
+      "detail": "done"
+    },
+    {
+      "name": "remembers_adou",
+      "ok": true,
+      "detail": "阿杜"
+    }
+  ],
+  "counts": {},
+  "runId": null,
+  "notes": "",
+  "at": "2026-09-27T11:14:26.190Z"
+}

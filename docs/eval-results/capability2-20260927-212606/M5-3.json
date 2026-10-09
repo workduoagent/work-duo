@@ -1,0 +1,33 @@
+{
+  "caseId": "M5-3",
+  "dim": "M记忆",
+  "title": "forced 记忆双轨（宫殿+工程文件）",
+  "status": "done",
+  "autoPass": true,
+  "autoScore": 1,
+  "durationMs": 30310,
+  "asserts": [
+    {
+      "name": "status_done",
+      "ok": true,
+      "detail": "done"
+    },
+    {
+      "name": "memory_row",
+      "ok": true,
+      "detail": "memory_list 3 行"
+    },
+    {
+      "name": "wdmem_file",
+      "ok": true,
+      "detail": "# Work Duo 运行时记忆区：高频碎片忽略，长期资产纳入版本控制\n# 忽略（随运行高频变化，不入库）\nsessions/\nruntime/data/\nru"
+    }
+  ],
+  "counts": {
+    "prompt": 20155,
+    "completion": 542
+  },
+  "runId": "run-1790516046068-6",
+  "notes": "",
+  "at": "2026-09-27T13:34:36.361Z"
+}

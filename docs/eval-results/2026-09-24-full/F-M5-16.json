@@ -1,0 +1,175 @@
+{
+  "caseId": "F-M5",
+  "slot": 16,
+  "scene": "F",
+  "kind": "M",
+  "title": "graph 实体图与 sessions 摘要",
+  "model": "96af449e-dfc0-48ec-b077-aa9f02b43d64",
+  "workspace": "E:/Codes/ABC/work-duo/eval-workspace-full/eval-F-M5-16",
+  "startedAt": "2026-09-23T17:44:00.081Z",
+  "status": "done",
+  "runId": "run-1790185440978-23",
+  "durationMs": 430827,
+  "artifacts": [],
+  "artifactCheck": [
+    {
+      "artifact": "graphprobe/entities.md",
+      "ok": true
+    }
+  ],
+  "traceCounts": {
+    "events": 168,
+    "reply_chars": 1104,
+    "thinking_chars": 3205
+  },
+  "replyLen": 1104,
+  "kbHits": 0,
+  "recoveries": 0,
+  "error": null,
+  "metrics": {
+    "ha": {
+      "terminal": true,
+      "status": "done"
+    },
+    "perf": {
+      "durationMs": 430827
+    },
+    "heal": {
+      "replyLen": 1104
+    }
+  },
+  "files": [
+    {
+      "rel": ".wd_mem/.gitignore",
+      "size": 310,
+      "mtime": 1790185440982.963
+    },
+    {
+      "rel": ".wd_mem/graph/edges.jsonl",
+      "size": 3938,
+      "mtime": 1790185867828.239
+    },
+    {
+      "rel": ".wd_mem/graph/nodes.jsonl",
+      "size": 22702,
+      "mtime": 1790185867827.018
+    },
+    {
+      "rel": ".wd_mem/graph/sessions/fecc031d-4a73-40b7-9179-6204d9cdc71d.json",
+      "size": 12813,
+      "mtime": 1790185867831.712
+    },
+    {
+      "rel": ".wd_mem/graph/_index.json",
+      "size": 3267,
+      "mtime": 1790185867827.018
+    },
+    {
+      "rel": ".wd_mem/knowledge/MEMORY.md",
+      "size": 133,
+      "mtime": 1790185440981.9663
+    },
+    {
+      "rel": ".wd_mem/README.md",
+      "size": 1378,
+      "mtime": 1790185440981.9663
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/injected_recon_graph.py",
+      "size": 1033,
+      "mtime": 1790185571591.0107
+    },
+    {
+      "rel": ".wd_mem/scripts/recon_graph.py",
+      "size": 963,
+      "mtime": 1790185568880.5776
+    },
+    {
+      "rel": "graphprobe/entities.md",
+      "size": 2363,
+      "mtime": 1790185834172.0122
+    },
+    {
+      "rel": "graphprobe/module.md",
+      "size": 724,
+      "mtime": 1790185499206.025
+    }
+  ],
+  "agentId": "43790697-4071-4d15-9137-b573e3a02d85",
+  "agentIdentifier": "l2-f-m5-muee6u1l-l32aef",
+  "modelName": "AG:DeepSeek-V4.1-Flash",
+  "seedTier": null,
+  "seedId": null,
+  "sessionId": "fecc031d-4a73-40b7-9179-6204d9cdc71d",
+  "reply": "已生成/更新 module.md\n已完成“用户—订单”模块文档，包含用户、订单实体及其一对多关系说明。\n\n产出文件：`E:\\Codes\\ABC\\work-duo\\eval-workspace-full\\eval-F-M5-16\\graphprobe\\module.md`  \n同时已生成要求的实体关系文件：`E:\\Codes\\ABC\\work-duo\\eval-workspace-full\\eval-F-M5-16\\graphprobe\\entities.md`\n\n已生成/更新 recon.md\n「核查记忆区并记录结论」已生成/更新 recon_graph.py（执行轮次达预算上限，产物初核通过但未经行为级验收，暂定完成，建议人工复核）\n\n已生成/更新 entities.md\n已生成并复核 `graphprobe/entities.md`，内容包含用户和订单实体、一对多关系，以及本次对 graph 目录和会话摘要检查结果的如实记录。由于 `graphprobe/recon.md` 不存在，且未重复浏览记忆目录，文件中注明无法核验会话摘要前五行。\n\n完整路径：`E:\\Codes\\ABC\\work-duo\\eval-workspace-full\\eval-F-M5-16\\graphprobe\\entities.md`\n\n（暂定完成：无客观依据，建议人工确认）\n已读取记忆图数据，并补充说明其中的实体与关系；未新建其他文件。\n\n- 业务实体：用户、订单；关系为用户与订单一对多。\n- 记忆图实体：会话、任务、文件引用；关系包括任务归属会话、任务依赖，以及任务读取或写入文件。\n\n产出文件：`E:\\Codes\\ABC\\work-duo\\eval-workspace-full\\eval-F-M5-16\\graphprobe\\entities.md`\n\n（暂定完成：无客观依据，建议人工确认）\n已完成当前步骤：\n\n- 已读取 `graphprobe/entities.md`、`graphprobe/module.md` 及 `.wd_mem/graph/` 下的记忆图数据。\n- 已补充并微调实体关系说明：\n  - 业务实体：用户、订单；用户与订单为一对多关系。\n  - 记忆图实体：会话、任务、文件引用。\n  - 记忆图关系：任务归属会话、任务依赖、任务读取文件、任务写入文件。\n- 未新建其他文件。\n- 已复核产物内容无误。\n\n产出文件：`E:\\Codes\\ABC\\work-duo\\eval-workspace-full\\eval-F-M5-16\\graphprobe\\entities.md`",
+  "thinkingLen": 3205,
+  "eventCount": 168,
+  "kbCalls": 0,
+  "artifactScore": 1,
+  "wdMem": {
+    "structureOk": true,
+    "usedCount": 3,
+    "total": 7,
+    "items": [
+      {
+        "key": "memory",
+        "label": "长期记忆 MEMORY.md",
+        "present": true,
+        "used": true,
+        "path": ".wd_mem/knowledge/MEMORY.md",
+        "count": "0KB"
+      },
+      {
+        "key": "sessions",
+        "label": "会话摘要 sessions/",
+        "present": true,
+        "used": false,
+        "path": ".wd_mem/sessions",
+        "count": 0
+      },
+      {
+        "key": "graph",
+        "label": "实体图 graph/",
+        "present": true,
+        "used": true,
+        "path": ".wd_mem/graph",
+        "count": 4
+      },
+      {
+        "key": "artifacts",
+        "label": "设计沉淀 knowledge/artifacts/",
+        "present": true,
+        "used": false,
+        "path": ".wd_mem/knowledge/artifacts",
+        "count": 0
+      },
+      {
+        "key": "scripts",
+        "label": "可复用脚本 runtime/scripts/",
+        "present": true,
+        "used": true,
+        "path": ".wd_mem/runtime/scripts",
+        "count": 1
+      },
+      {
+        "key": "data",
+        "label": "中间数据 runtime/data/",
+        "present": true,
+        "used": false,
+        "path": ".wd_mem/runtime/data",
+        "count": 0
+      },
+      {
+        "key": "outputs",
+        "label": "产物归档 runtime/outputs/",
+        "present": true,
+        "used": false,
+        "path": ".wd_mem/runtime/outputs",
+        "count": 0
+      }
+    ],
+    "leaks": [
+      "graphprobe/entities.md"
+    ]
+  }
+}

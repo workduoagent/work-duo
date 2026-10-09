@@ -1,0 +1,29 @@
+{
+  "caseId": "S-PRETALK-1",
+  "dim": "squad",
+  "title": "等待中预嘱：成员启动时消化",
+  "status": "done",
+  "autoPass": true,
+  "autoScore": 1,
+  "asserts": [
+    {
+      "name": "pre_talk 受理",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "pre_talk delivered",
+      "ok": true,
+      "detail": "[{\"mode\":\"pre_talk\",\"status\":\"delivered\"}]"
+    },
+    {
+      "name": "t2 消化预嘱暗号（软断言）",
+      "ok": true,
+      "detail": "waits.md 找暗号"
+    }
+  ],
+  "sessionId": "sqs_1790661228211250200_1",
+  "durationMs": 131603,
+  "notes": "",
+  "at": "2026-09-29T05:55:59.772Z"
+}

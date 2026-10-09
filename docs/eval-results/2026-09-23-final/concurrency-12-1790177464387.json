@@ -1,0 +1,107 @@
+{
+  "kind": "concurrency",
+  "n": 12,
+  "totalMs": 1500968,
+  "done": 12,
+  "terminal": 12,
+  "survivalRate": 1,
+  "terminalRate": 1,
+  "results": [
+    {
+      "caseId": "A-H1",
+      "slot": 0,
+      "status": "done",
+      "durationMs": 1500816,
+      "artifactScore": 1,
+      "error": null
+    },
+    {
+      "caseId": "A-H2",
+      "slot": 1,
+      "status": "done",
+      "durationMs": 286248,
+      "artifactScore": 1,
+      "error": null
+    },
+    {
+      "caseId": "A-H3",
+      "slot": 2,
+      "status": "done",
+      "durationMs": 475993,
+      "artifactScore": 1,
+      "error": null
+    },
+    {
+      "caseId": "A-H5",
+      "slot": 3,
+      "status": "done",
+      "durationMs": 153890,
+      "artifactScore": 1,
+      "error": null
+    },
+    {
+      "caseId": "A-H6",
+      "slot": 4,
+      "status": "done",
+      "durationMs": 289455,
+      "artifactScore": 1,
+      "error": null
+    },
+    {
+      "caseId": "A-H7",
+      "slot": 5,
+      "status": "done",
+      "durationMs": 247451,
+      "artifactScore": 1,
+      "error": null
+    },
+    {
+      "caseId": "B-H1",
+      "slot": 6,
+      "status": "done",
+      "durationMs": 1076338,
+      "artifactScore": 1,
+      "error": null
+    },
+    {
+      "caseId": "B-H2",
+      "slot": 7,
+      "status": "done",
+      "durationMs": 1238944,
+      "artifactScore": 1,
+      "error": null
+    },
+    {
+      "caseId": "B-H4",
+      "slot": 8,
+      "status": "done",
+      "durationMs": 515651,
+      "artifactScore": 1,
+      "error": null
+    },
+    {
+      "caseId": "B-H5",
+      "slot": 9,
+      "status": "done",
+      "durationMs": 316814,
+      "artifactScore": 1,
+      "error": null
+    },
+    {
+      "caseId": "B-H6",
+      "slot": 10,
+      "status": "done",
+      "durationMs": 982917,
+      "artifactScore": 1,
+      "error": null
+    },
+    {
+      "caseId": "B-H7",
+      "slot": 11,
+      "status": "done",
+      "durationMs": 952777,
+      "artifactScore": 1,
+      "error": null
+    }
+  ]
+}

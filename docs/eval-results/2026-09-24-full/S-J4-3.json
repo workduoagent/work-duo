@@ -1,0 +1,165 @@
+{
+  "caseId": "S-J4",
+  "slot": 3,
+  "scene": "S",
+  "kind": "M",
+  "title": "真实CVE修复：urlparse前导空白绕过",
+  "model": "96af449e-dfc0-48ec-b077-aa9f02b43d64",
+  "workspace": "E:/Codes/ABC/work-duo/eval-workspace-full/eval-S-J4-3",
+  "startedAt": "2026-09-24T02:33:06.986Z",
+  "status": "done",
+  "runId": "run-1790217187205-2",
+  "durationMs": 771326,
+  "artifacts": [],
+  "artifactCheck": [
+    {
+      "artifact": "urlparse_fix.md",
+      "ok": true
+    }
+  ],
+  "traceCounts": {
+    "completion_tokens": 13242,
+    "events": 180,
+    "prompt_tokens": 460780,
+    "reply_chars": 658,
+    "thinking_chars": 3169
+  },
+  "replyLen": 658,
+  "kbHits": 21,
+  "recoveries": 1,
+  "error": null,
+  "metrics": {
+    "ha": {
+      "terminal": true,
+      "status": "done"
+    },
+    "perf": {
+      "durationMs": 771326
+    },
+    "heal": {
+      "replyLen": 658
+    }
+  },
+  "files": [
+    {
+      "rel": ".wd_mem/.gitignore",
+      "size": 310,
+      "mtime": 1790217187211.2173
+    },
+    {
+      "rel": ".wd_mem/graph/edges.jsonl",
+      "size": 2399,
+      "mtime": 1790217954535.4543
+    },
+    {
+      "rel": ".wd_mem/graph/nodes.jsonl",
+      "size": 20654,
+      "mtime": 1790217954531.4536
+    },
+    {
+      "rel": ".wd_mem/graph/sessions/27a21f8b-e214-44ce-a4d0-d649ccd34fad.json",
+      "size": 7866,
+      "mtime": 1790217954538.454
+    },
+    {
+      "rel": ".wd_mem/graph/_index.json",
+      "size": 2836,
+      "mtime": 1790217954533.4548
+    },
+    {
+      "rel": ".wd_mem/knowledge/MEMORY.md",
+      "size": 133,
+      "mtime": 1790217187210.2058
+    },
+    {
+      "rel": ".wd_mem/README.md",
+      "size": 1378,
+      "mtime": 1790217187211.2173
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/injected_urlparse_fix_and_test.py",
+      "size": 2027,
+      "mtime": 1790217883269.1487
+    },
+    {
+      "rel": ".wd_mem/scripts/urlparse_fix_and_test.py",
+      "size": 1958,
+      "mtime": 1790217878886.4941
+    },
+    {
+      "rel": ".wd_mem/urlparse_recon.md",
+      "size": 1835,
+      "mtime": 1790217801420.762
+    },
+    {
+      "rel": "urlfix-proj/.pytest_cache/.gitignore",
+      "size": 37,
+      "mtime": 1790217883761.4985
+    },
+    {
+      "rel": "urlfix-proj/.pytest_cache/CACHEDIR.TAG",
+      "size": 191,
+      "mtime": 1790217883761.4985
+    },
+    {
+      "rel": "urlfix-proj/.pytest_cache/README.md",
+      "size": 302,
+      "mtime": 1790217883760.126
+    },
+    {
+      "rel": "urlfix-proj/.pytest_cache/v/cache/nodeids",
+      "size": 232,
+      "mtime": 1790217883763.745
+    },
+    {
+      "rel": "urlfix-proj/test_urlparse_compat.py",
+      "size": 1062,
+      "mtime": 1790217061814.468
+    },
+    {
+      "rel": "urlfix-proj/urlparse_compat.py",
+      "size": 1275,
+      "mtime": 1790217883482.138
+    },
+    {
+      "rel": "urlfix-proj/urlparse_fix.md",
+      "size": 914,
+      "mtime": 1790217948314.1738
+    },
+    {
+      "rel": "urlfix-proj/__pycache__/test_urlparse_compat.cpython-311-pytest-9.1.1.pyc",
+      "size": 7923,
+      "mtime": 1790217883750.206
+    },
+    {
+      "rel": "urlfix-proj/__pycache__/urlparse_compat.cpython-311.pyc",
+      "size": 2397,
+      "mtime": 1790217883752.4756
+    },
+    {
+      "rel": "urlparse_fix.md",
+      "size": 611,
+      "mtime": 1790217897051.3335
+    }
+  ],
+  "agentId": "ff64e41b-f593-4d32-a8e1-6887a938676f",
+  "agentIdentifier": "l2-s-j4-muex3a3z-24188m",
+  "modelName": "AG:DeepSeek-V4.1-Flash",
+  "seedTier": "security",
+  "seedId": "py-security-urlparse-leading-ws",
+  "sessionId": "27a21f8b-e214-44ce-a4d0-d649ccd34fad",
+  "reply": "已生成/更新 urlparse_recon.md\n已完成勘查并生成记录：`E:/Codes/ABC/work-duo/eval-workspace-full/eval-S-J4-3/.wd_mem/urlparse_recon.md`。\n\n记录涵盖实现与测试位置、测试运行方式，以及 CPython 3.11.4 对前导空格和 C0 控制字符的解析语义。知识库未找到直接相关资料，已补充核对 CPython 上游记录。未在本步骤运行测试。\n\n已生成/更新 urlparse_compat.py\n修复已完成：`parse` 现会在解析前剥离前导 ASCII C0 控制字符及空格，其他解析逻辑未改动。验收测试 **4 项全部通过**，退出码 **0**。\n\n- 实现文件：`E:/Codes/ABC/work-duo/eval-workspace-full/eval-S-J4-3/urlfix-proj/urlparse_compat.py`\n- 修复记录：`E:/Codes/ABC/work-duo/eval-workspace-full/eval-S-J4-3/urlparse_fix.md`\n\n已生成/更新 urlparse_fix.md\n修复报告已生成并确认存在，内容涵盖缺陷描述、修复方案及验收测试结果（4 项全部通过）。\n\n文件路径：`E:\\Codes\\ABC\\work-duo\\eval-workspace-full\\eval-S-J4-3\\urlfix-proj\\urlparse_fix.md`",
+  "thinkingLen": 3169,
+  "eventCount": 180,
+  "kbCalls": 4,
+  "artifactScore": 1,
+  "judge": {
+    "cmd": "pytest test_urlparse_compat.py -v",
+    "passed": 4,
+    "failed": 0,
+    "errors": 0,
+    "resolved": true,
+    "execBy": "outer-bash"
+  },
+  "resolved": true
+}

@@ -1,0 +1,30 @@
+{
+  "caseId": "SK-1",
+  "dim": "Skill",
+  "title": "技能发现",
+  "status": "done",
+  "autoPass": true,
+  "autoScore": 1,
+  "durationMs": 14,
+  "asserts": [
+    {
+      "name": "skill_list_rows",
+      "ok": true,
+      "detail": "n=10"
+    },
+    {
+      "name": "agent_list_skills",
+      "ok": true,
+      "detail": "n=10"
+    },
+    {
+      "name": "known_present_or_empty_env",
+      "ok": true,
+      "detail": "cap-test-skill-imp-muin17x5,cap-test-skill-muin17nb,cap-test-skill-imp-muid3jdm,cap-test-skill-muid3j6w,d1_skill_tools_test,mcp_selftest_import_mubf2x66,mcp_selftest_mubf2x66,mcp_selftest_import_mubeu6ns,mcp_selftest_mubeu6ns,react-ts-vite-antd-sass"
+    }
+  ],
+  "counts": {},
+  "runId": null,
+  "notes": "",
+  "at": "2026-09-27T06:02:13.728Z"
+}

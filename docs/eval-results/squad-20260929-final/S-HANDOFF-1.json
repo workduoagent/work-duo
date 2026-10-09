@@ -1,0 +1,29 @@
+{
+  "caseId": "S-HANDOFF-1",
+  "dim": "squad",
+  "title": "交接继承：Bundle 落库+盘面副本+board 引用",
+  "status": "done",
+  "autoPass": true,
+  "autoScore": 1,
+  "asserts": [
+    {
+      "name": "board 记录下游 handoff_id",
+      "ok": true,
+      "detail": "{\"title\":\"下游继承\",\"assignee\":\"React 前端\",\"status\":\"done\",\"handoff_id\":\"sqdh_1790661216232_00006\"}"
+    },
+    {
+      "name": "agent_squad_handoff 两行且 ok",
+      "ok": true,
+      "detail": "[{\"task_id\":\"t1\",\"status\":\"ok\"},{\"task_id\":\"t2\",\"status\":\"ok\"}]"
+    },
+    {
+      "name": "交接箱盘面存在上游产物副本（下游 inbox）",
+      "ok": true,
+      "detail": "E:\\WorkDuoTest\\3c4c9398-5751-4e6b-89f5-f642471e4d0a\\inbox\\t1\\handoff-note.md"
+    }
+  ],
+  "sessionId": "sqs_1790661159856570900_0",
+  "durationMs": 68353,
+  "notes": "",
+  "at": "2026-09-29T05:53:48.163Z"
+}

@@ -1,0 +1,35 @@
+{
+  "caseId": "D2-2",
+  "dim": "D2",
+  "title": "多步 DAG",
+  "status": "done",
+  "autoPass": true,
+  "autoScore": 1,
+  "durationMs": 125082,
+  "asserts": [
+    {
+      "name": "status_done",
+      "ok": true,
+      "detail": "done"
+    },
+    {
+      "name": "data_csv",
+      "ok": true,
+      "detail": "E:\\Codes\\ABC\\work-duo\\eval-workspace\\capability\\D2-2\\data.csv"
+    },
+    {
+      "name": "summary_md",
+      "ok": true,
+      "detail": "E:\\Codes\\ABC\\work-duo\\eval-workspace\\capability\\D2-2\\summary.md"
+    },
+    {
+      "name": "pass_txt",
+      "ok": true,
+      "detail": "E:\\Codes\\ABC\\work-duo\\eval-workspace\\capability\\D2-2\\PASS.txt"
+    }
+  ],
+  "counts": {},
+  "runId": null,
+  "notes": "",
+  "at": "2026-09-27T05:46:32.910Z"
+}

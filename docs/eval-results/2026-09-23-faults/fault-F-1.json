@@ -1,0 +1,40 @@
+{
+  "faultId": "F-1",
+  "startedAt": "2026-09-23T15:40:49.696Z",
+  "observations": [
+    {
+      "ok": true,
+      "msg": "已对 slot1 下发 agent_cancel_task",
+      "extra": {
+        "agentId": "46eeb986-a9b7-4a1d-8c55-1f70ad473972"
+      }
+    },
+    {
+      "ok": true,
+      "msg": "slot0 → done",
+      "extra": {}
+    },
+    {
+      "ok": true,
+      "msg": "slot1 → cancelled",
+      "extra": {}
+    },
+    {
+      "ok": true,
+      "msg": "slot2 → done",
+      "extra": {}
+    },
+    {
+      "ok": true,
+      "msg": "取消后锁释放/可再跑",
+      "extra": {
+        "ok": true,
+        "first": "done",
+        "second": "done",
+        "secondError": null
+      }
+    }
+  ],
+  "ok": true,
+  "finishedAt": "2026-09-23T15:44:05.930Z"
+}

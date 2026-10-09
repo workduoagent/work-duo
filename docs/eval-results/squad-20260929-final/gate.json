@@ -1,0 +1,104 @@
+{
+  "at": "2026-09-29T07:41:44.133Z",
+  "out": "docs/eval-results/squad-20260929-final",
+  "pass": true,
+  "checks": [
+    {
+      "name": "用例齐全（17）",
+      "ok": true,
+      "detail": "found=17"
+    },
+    {
+      "name": "全部 autoPass 且 done",
+      "ok": true,
+      "detail": "clean"
+    }
+  ],
+  "results": [
+    {
+      "caseId": "S-BUDGET-1",
+      "status": "done",
+      "autoPass": true
+    },
+    {
+      "caseId": "S-CANCEL-1",
+      "status": "done",
+      "autoPass": true
+    },
+    {
+      "caseId": "S-CHAT-1",
+      "status": "done",
+      "autoPass": true
+    },
+    {
+      "caseId": "S-ENV-1",
+      "status": "done",
+      "autoPass": true
+    },
+    {
+      "caseId": "S-FAIL-1",
+      "status": "done",
+      "autoPass": true
+    },
+    {
+      "caseId": "S-HANDOFF-1",
+      "status": "done",
+      "autoPass": true
+    },
+    {
+      "caseId": "S-HITL-1",
+      "status": "done",
+      "autoPass": true
+    },
+    {
+      "caseId": "S-INJECT-1",
+      "status": "done",
+      "autoPass": true
+    },
+    {
+      "caseId": "S-LOCK-1",
+      "status": "done",
+      "autoPass": true
+    },
+    {
+      "caseId": "S-MEM-1",
+      "status": "done",
+      "autoPass": true
+    },
+    {
+      "caseId": "S-ORCH-1",
+      "status": "done",
+      "autoPass": true
+    },
+    {
+      "caseId": "S-PACK-1",
+      "status": "done",
+      "autoPass": true
+    },
+    {
+      "caseId": "S-PIPE-1",
+      "status": "done",
+      "autoPass": true
+    },
+    {
+      "caseId": "S-PIXEL-1",
+      "status": "done",
+      "autoPass": true
+    },
+    {
+      "caseId": "S-PRETALK-1",
+      "status": "done",
+      "autoPass": true
+    },
+    {
+      "caseId": "S-RESUME-1",
+      "status": "done",
+      "autoPass": true
+    },
+    {
+      "caseId": "S-UNATT-1",
+      "status": "done",
+      "autoPass": true
+    }
+  ]
+}

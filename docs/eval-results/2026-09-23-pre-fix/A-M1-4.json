@@ -1,0 +1,136 @@
+{
+  "caseId": "A-M1",
+  "slot": 4,
+  "scene": "A",
+  "kind": "M",
+  "title": "单源爬取+清洗+产物",
+  "model": "96af449e-dfc0-48ec-b077-aa9f02b43d64",
+  "workspace": "E:/Codes/ABC/work-duo/eval-workspace/eval-A-M1-4",
+  "startedAt": "2026-09-23T04:30:21.008Z",
+  "status": "done",
+  "runId": "run-1790137821107-37",
+  "durationMs": 174990,
+  "artifacts": [],
+  "artifactCheck": [
+    {
+      "artifact": "releases.csv",
+      "ok": true
+    },
+    {
+      "artifact": "releases_report.md",
+      "ok": true
+    }
+  ],
+  "traceCounts": {
+    "events": 72,
+    "reply_chars": 450,
+    "thinking_chars": 2775
+  },
+  "replyLen": 450,
+  "kbHits": 0,
+  "recoveries": 0,
+  "error": null,
+  "metrics": {
+    "ha": {
+      "terminal": true,
+      "status": "done"
+    },
+    "perf": {
+      "durationMs": 174990
+    },
+    "heal": {
+      "replyLen": 450
+    }
+  },
+  "files": [
+    {
+      "rel": ".wd_mem/.gitignore",
+      "size": 310,
+      "mtime": 1790137821109.69
+    },
+    {
+      "rel": ".wd_mem/clean_releases.py",
+      "size": 1316,
+      "mtime": 1790137910654.9817
+    },
+    {
+      "rel": ".wd_mem/graph/edges.jsonl",
+      "size": 1534,
+      "mtime": 1790137992641.0764
+    },
+    {
+      "rel": ".wd_mem/graph/nodes.jsonl",
+      "size": 19127,
+      "mtime": 1790137992639.0815
+    },
+    {
+      "rel": ".wd_mem/graph/sessions/1b7c769d-9184-4ed8-9e82-b56f3f4d3776.json",
+      "size": 10216,
+      "mtime": 1790137992645.6887
+    },
+    {
+      "rel": ".wd_mem/graph/_index.json",
+      "size": 2534,
+      "mtime": 1790137992640.0757
+    },
+    {
+      "rel": ".wd_mem/knowledge/MEMORY.md",
+      "size": 133,
+      "mtime": 1790137821109.69
+    },
+    {
+      "rel": ".wd_mem/README.md",
+      "size": 1378,
+      "mtime": 1790137821109.69
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/auto_run_1790137888124.py",
+      "size": 336,
+      "mtime": 1790137888123.9216
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/injected_clean_releases.py",
+      "size": 1380,
+      "mtime": 1790137913229.4941
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/injected_generate_releases_report.py",
+      "size": 2821,
+      "mtime": 1790137957623.315
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/run_generate_releases_report.py",
+      "size": 312,
+      "mtime": 1790137969106.623
+    },
+    {
+      "rel": ".wd_mem/scripts/generate_releases_report.py",
+      "size": 2821,
+      "mtime": 1790137988522.5781
+    },
+    {
+      "rel": "releases.csv",
+      "size": 1063,
+      "mtime": 1790137913389.0288
+    },
+    {
+      "rel": "releases_raw.json",
+      "size": 305286,
+      "mtime": 1790137877937.0637
+    },
+    {
+      "rel": "releases_report.md",
+      "size": 1617,
+      "mtime": 1790137969263.3933
+    }
+  ],
+  "agentId": "55bbc4bd-7687-4432-9538-2d014c6a0468",
+  "agentIdentifier": "l2-a-m1-mudlu6w5",
+  "modelName": "AG:DeepSeek-V4.1-Flash",
+  "sessionId": "1b7c769d-9184-4ed8-9e82-b56f3f4d3776",
+  "reply": "已生成/更新 releases_raw.json\n已完成当前步骤。\n\n产出文件：\n`E:/Codes/ABC/work-duo/eval-workspace/eval-A-M1-4/releases_raw.json`\n\n校验结果：文件为合法 JSON 数组，包含 20 条 release 记录。\n\n已生成/更新 releases.csv\n已完成清洗并生成 CSV，未重复请求接口。\n\n- 产出文件：`E:\\Codes\\ABC\\work-duo\\eval-workspace\\eval-A-M1-4\\releases.csv`\n- 表头：`tag_name,published_at,download_count`\n- 校验结果：共 21 行，包含表头及 20 条数据记录。\n\n已生成/更新 releases_report.md\n「生成 releases_report.md 并汇总路径」已生成/更新 generate_releases_report.py（执行轮次达预算上限，产物经客观校验无误）",
+  "thinkingLen": 2775,
+  "eventCount": 72,
+  "kbCalls": 0,
+  "artifactScore": 1
+}

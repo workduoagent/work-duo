@@ -1,0 +1,25 @@
+{
+  "caseId": "PL-4",
+  "dim": "Plugin",
+  "title": "reject 缺字段",
+  "status": "done",
+  "autoPass": true,
+  "autoScore": 1,
+  "durationMs": 9,
+  "asserts": [
+    {
+      "name": "reject_missing_id",
+      "ok": true,
+      "detail": "{\"data\":{\"error\":\"plugin:upsert 缺少必填字段（name/identifier/description/runtime/scriptContent/parametersS"
+    },
+    {
+      "name": "reject_missing_script",
+      "ok": true,
+      "detail": "{\"data\":{\"error\":\"plugin:upsert 缺少必填字段（name/identifier/description/runtime/scriptContent/parametersS"
+    }
+  ],
+  "counts": {},
+  "runId": null,
+  "notes": "",
+  "at": "2026-09-24T08:06:19.234Z"
+}

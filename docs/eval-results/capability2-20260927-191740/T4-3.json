@@ -1,0 +1,43 @@
+{
+  "caseId": "T4-3",
+  "dim": "T数据",
+  "title": "JSON 结构转换与按月聚合",
+  "status": "done",
+  "autoPass": true,
+  "autoScore": 1,
+  "durationMs": 90425,
+  "asserts": [
+    {
+      "name": "status_done",
+      "ok": true,
+      "detail": "done"
+    },
+    {
+      "name": "lines_jsonl",
+      "ok": true,
+      "detail": "lines.jsonl 应 6 行，实得 6"
+    },
+    {
+      "name": "summary_parseable",
+      "ok": true,
+      "detail": "{\n  \"2026-08\": 550,\n  \"2026-09\": 200\n}\n"
+    },
+    {
+      "name": "sum:2026-08",
+      "ok": true,
+      "detail": "期望 550，实得 550"
+    },
+    {
+      "name": "sum:2026-09",
+      "ok": true,
+      "detail": "期望 200，实得 200"
+    }
+  ],
+  "counts": {
+    "prompt": 30678,
+    "completion": 1060
+  },
+  "runId": "run-1790510172900-53",
+  "notes": "",
+  "at": "2026-09-27T11:57:43.308Z"
+}

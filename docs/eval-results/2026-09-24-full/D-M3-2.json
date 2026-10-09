@@ -1,0 +1,108 @@
+{
+  "caseId": "D-M3",
+  "slot": 2,
+  "scene": "D",
+  "kind": "M",
+  "title": "MCP 工具产出 Excel（能力面）",
+  "model": "96af449e-dfc0-48ec-b077-aa9f02b43d64",
+  "workspace": "E:/Codes/ABC/work-duo/eval-workspace-full/eval-D-M3-2",
+  "startedAt": "2026-09-23T17:44:00.079Z",
+  "status": "timeout",
+  "runId": "run-1790185440274-11",
+  "durationMs": 603139,
+  "artifacts": [],
+  "artifactCheck": [
+    {
+      "artifact": "plugin_probe.md",
+      "ok": true
+    },
+    {
+      "artifact": "report.xlsx",
+      "ok": true
+    }
+  ],
+  "traceCounts": {
+    "events": 81,
+    "reply_chars": 0,
+    "thinking_chars": 2477
+  },
+  "replyLen": 0,
+  "kbHits": 0,
+  "recoveries": 2,
+  "error": null,
+  "metrics": {
+    "ha": {
+      "terminal": false,
+      "status": "timeout"
+    },
+    "perf": {
+      "durationMs": 603139
+    },
+    "heal": {
+      "replyLen": 0
+    }
+  },
+  "files": [
+    {
+      "rel": ".wd_mem/.gitignore",
+      "size": 310,
+      "mtime": 1790185440283.733
+    },
+    {
+      "rel": ".wd_mem/graph/edges.jsonl",
+      "size": 129,
+      "mtime": 1790185553036.0422
+    },
+    {
+      "rel": ".wd_mem/graph/nodes.jsonl",
+      "size": 21520,
+      "mtime": 1790185935505.092
+    },
+    {
+      "rel": ".wd_mem/graph/_index.json",
+      "size": 729,
+      "mtime": 1790185935506.5574
+    },
+    {
+      "rel": ".wd_mem/knowledge/MEMORY.md",
+      "size": 133,
+      "mtime": 1790185440282.7368
+    },
+    {
+      "rel": ".wd_mem/README.md",
+      "size": 1378,
+      "mtime": 1790185440283.733
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/injected_generate_report.py",
+      "size": 14188,
+      "mtime": 1790185889252.3555
+    },
+    {
+      "rel": ".wd_mem/scripts/generate_report.py",
+      "size": 14119,
+      "mtime": 1790185841459.2688
+    },
+    {
+      "rel": "plugin_probe.md",
+      "size": 1990,
+      "mtime": 1790185889716.0637
+    },
+    {
+      "rel": "report.xlsx",
+      "size": 8630,
+      "mtime": 1790185889711.6062
+    }
+  ],
+  "agentId": "b2470cc5-e35f-4a7d-89b4-697dd3d8bc5e",
+  "agentIdentifier": "l2-d-m3-muee6u1t-vvtjp4",
+  "modelName": "AG:DeepSeek-V4.1-Flash",
+  "seedTier": null,
+  "seedId": null,
+  "sessionId": "8529e9a3-a529-4156-9e44-db37865d3d9e",
+  "reply": "",
+  "thinkingLen": 2477,
+  "eventCount": 81,
+  "kbCalls": 0,
+  "artifactScore": 1
+}

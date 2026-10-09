@@ -1,0 +1,30 @@
+{
+  "caseId": "P7-3",
+  "dim": "P插件",
+  "title": "插件参数契约：缺必填快速拒绝",
+  "status": "done",
+  "autoPass": true,
+  "autoScore": 1,
+  "durationMs": 0,
+  "asserts": [
+    {
+      "name": "upsert_ok",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "missing_param_rejected",
+      "ok": true,
+      "detail": "{\"callId\":\"call_1790507816813\",\"depsInstalled\":[],\"durationMs\":254,\"errorMessage\":null,\"errorType\":null,\"exitCode\":0,\"missingPackage\":null,\"ok\":true,\"result\":{\""
+    },
+    {
+      "name": "fast_fail",
+      "ok": true,
+      "detail": "0s"
+    }
+  ],
+  "counts": {},
+  "runId": null,
+  "notes": "",
+  "at": "2026-09-27T11:16:57.074Z"
+}

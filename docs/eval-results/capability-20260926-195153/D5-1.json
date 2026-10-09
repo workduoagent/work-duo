@@ -1,0 +1,30 @@
+{
+  "caseId": "D5-1",
+  "dim": "D5",
+  "title": "客观 criteria",
+  "status": "done",
+  "autoPass": true,
+  "autoScore": 1,
+  "durationMs": 54401,
+  "asserts": [
+    {
+      "name": "status_done",
+      "ok": true,
+      "detail": "done"
+    },
+    {
+      "name": "out_ok",
+      "ok": true,
+      "detail": "PIPELINE_OK"
+    },
+    {
+      "name": "evidence_or_reply",
+      "ok": true,
+      "detail": "已生成/更新 out.txt\n已创建并自检确认文件包含 `PIPELINE_OK`。\n\n文件路径：`E:\\Codes\\ABC\\work-duo\\eval-wor"
+    }
+  ],
+  "counts": {},
+  "runId": null,
+  "notes": "",
+  "at": "2026-09-26T12:12:08.781Z"
+}

@@ -1,0 +1,30 @@
+{
+  "caseId": "PL-6",
+  "dim": "Plugin",
+  "title": "插件绑 Agent",
+  "status": "done",
+  "autoPass": true,
+  "autoScore": 1,
+  "durationMs": 45360,
+  "asserts": [
+    {
+      "name": "terminal",
+      "ok": true,
+      "detail": "done"
+    },
+    {
+      "name": "plugin_tool_used_or_reply",
+      "ok": true,
+      "detail": "custom__cap-test-pl-py-muin201h,custom__cap-test-pl-py-muin201h"
+    },
+    {
+      "name": "run_logs",
+      "ok": true,
+      "detail": "n=2"
+    }
+  ],
+  "counts": {},
+  "runId": null,
+  "notes": "",
+  "at": "2026-09-26T17:04:01.821Z"
+}

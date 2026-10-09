@@ -1,0 +1,25 @@
+{
+  "caseId": "N11-3",
+  "dim": "N模块",
+  "title": "agent×MCP 引用契约（未知 mcpId）",
+  "status": "done",
+  "autoPass": true,
+  "autoScore": 1,
+  "durationMs": 0,
+  "asserts": [
+    {
+      "name": "fast_response",
+      "ok": true,
+      "detail": "19ms（不得挂死）"
+    },
+    {
+      "name": "structured_outcome",
+      "ok": true,
+      "detail": "创建被接受（引用被忽略或登记）"
+    }
+  ],
+  "counts": {},
+  "runId": null,
+  "notes": "",
+  "at": "2026-09-27T12:41:17.980Z"
+}

@@ -1,0 +1,30 @@
+{
+  "caseId": "D3-2",
+  "dim": "D3",
+  "title": "修复型加成",
+  "status": "done",
+  "autoPass": true,
+  "autoScore": 1,
+  "durationMs": 132615,
+  "asserts": [
+    {
+      "name": "status_done",
+      "ok": true,
+      "detail": "done"
+    },
+    {
+      "name": "buggy_fixed",
+      "ok": true,
+      "detail": "def add(a, b):\n    return a + b\n"
+    },
+    {
+      "name": "has_edit_write",
+      "ok": true,
+      "detail": "native__path_exists,native__path_exists,native__path_exists,native__path_exists,native__path_exists,native__path_exists,native__read_file,native__read_file,native__read_file,native__read_file,native__read_file,native__read_file,native__edit_file,native__edit_file,native__run_python_sandbox,native__run_python_sandbox,native__read_file,native__read_file,native__write_file,native__write_file,native__"
+    }
+  ],
+  "counts": {},
+  "runId": null,
+  "notes": "",
+  "at": "2026-09-27T05:49:58.208Z"
+}

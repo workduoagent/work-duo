@@ -1,0 +1,136 @@
+{
+  "caseId": "B-M1",
+  "slot": 8,
+  "scene": "B",
+  "kind": "M",
+  "title": "REST API+最小前端",
+  "model": "96af449e-dfc0-48ec-b077-aa9f02b43d64",
+  "workspace": "E:/Codes/ABC/work-duo/eval-workspace-final/eval-B-M1-8",
+  "startedAt": "2026-09-23T14:43:57.752Z",
+  "status": "done",
+  "runId": "run-1790174637813-1",
+  "durationMs": 427955,
+  "artifacts": [],
+  "artifactCheck": [
+    {
+      "artifact": "todo-api/package.json",
+      "ok": true
+    },
+    {
+      "artifact": "todo-api/server.js",
+      "ok": true
+    },
+    {
+      "artifact": "todo-api/public/index.html",
+      "ok": true
+    },
+    {
+      "artifact": "todo-api/SELFTEST.md",
+      "ok": true
+    }
+  ],
+  "traceCounts": {
+    "events": 137,
+    "reply_chars": 1013,
+    "thinking_chars": 2964
+  },
+  "replyLen": 1013,
+  "kbHits": 0,
+  "recoveries": 0,
+  "error": null,
+  "metrics": {
+    "ha": {
+      "terminal": true,
+      "status": "done"
+    },
+    "perf": {
+      "durationMs": 427955
+    },
+    "heal": {
+      "replyLen": 1013
+    }
+  },
+  "files": [
+    {
+      "rel": ".wd_mem/.gitignore",
+      "size": 310,
+      "mtime": 1790174637819.5508
+    },
+    {
+      "rel": ".wd_mem/graph/edges.jsonl",
+      "size": 2661,
+      "mtime": 1790175060089.7544
+    },
+    {
+      "rel": ".wd_mem/graph/nodes.jsonl",
+      "size": 21134,
+      "mtime": 1790175060088.72
+    },
+    {
+      "rel": ".wd_mem/graph/sessions/b402d06a-978a-4766-a734-7038d5779532.json",
+      "size": 11732,
+      "mtime": 1790175060090.8274
+    },
+    {
+      "rel": ".wd_mem/graph/_index.json",
+      "size": 2373,
+      "mtime": 1790175060088.72
+    },
+    {
+      "rel": ".wd_mem/knowledge/MEMORY.md",
+      "size": 133,
+      "mtime": 1790174637818.5393
+    },
+    {
+      "rel": ".wd_mem/README.md",
+      "size": 1378,
+      "mtime": 1790174637819.5508
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/auto_run_1790175000395.mjs",
+      "size": 220,
+      "mtime": 1790175000396.5078
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/auto_run_1790175012203.mjs",
+      "size": 963,
+      "mtime": 1790175012203.3228
+    },
+    {
+      "rel": "todo-api/package.json",
+      "size": 278,
+      "mtime": 1790174821466.506
+    },
+    {
+      "rel": "todo-api/public/index.html",
+      "size": 10733,
+      "mtime": 1790174920952.6416
+    },
+    {
+      "rel": "todo-api/README.md",
+      "size": 1409,
+      "mtime": 1790175030202.1277
+    },
+    {
+      "rel": "todo-api/SELFTEST.md",
+      "size": 2255,
+      "mtime": 1790175047515.7625
+    },
+    {
+      "rel": "todo-api/server.js",
+      "size": 5494,
+      "mtime": 1790174821470.9033
+    }
+  ],
+  "agentId": "41f7100d-6c24-44bf-b3a1-ed1b6a9df6ae",
+  "agentIdentifier": "l2-b-m1-mue7rav7-y72txh",
+  "modelName": "AG:DeepSeek-V4.1-Flash",
+  "seedTier": null,
+  "seedId": null,
+  "sessionId": "b402d06a-978a-4766-a734-7038d5779532",
+  "reply": "已生成/更新 server.js、package.json\n待办 API 与项目配置已完成，并确认以下文件均已成功生成：\n\n- `E:/Codes/ABC/work-duo/eval-workspace-final/eval-B-M1-8/todo-api/server.js`\n- `E:/Codes/ABC/work-duo/eval-workspace-final/eval-B-M1-8/todo-api/package.json`\n- `E:/Codes/ABC/work-duo/eval-workspace-final/eval-B-M1-8/todo-api/public/index.html`\n- `E:/Codes/ABC/work-duo/eval-workspace-final/eval-B-M1-8/todo-api/SELFTEST.md`\n\nAPI 支持待办列表与完成状态筛选、新建、更新和删除；输入校验及错误状态已处理。运行 `npm start` 启动服务，SQLite 数据库会在 `todo-api/` 下首次启动时自动创建。\n\n已生成/更新 index.html\n单页待办前端已完成，并确认页面包含 `<!DOCTYPE html>`、`fetch(` 和 `/todos`，支持添加待办、切换完成状态、删除，以及查看全部、已完成和未完成项目。\n\n产物已存在：\n- `E:/Codes/ABC/work-duo/eval-workspace-final/eval-B-M1-8/todo-api/public/index.html`\n- `E:/Codes/ABC/work-duo/eval-workspace-final/eval-B-M1-8/todo-api/package.json`\n- `E:/Codes/ABC/work-duo/eval-workspace-final/eval-B-M1-8/todo-api/server.js`\n- `E:/Codes/ABC/work-duo/eval-workspace-final/eval-B-M1-8/todo-api/SELFTEST.md`\n\n已生成/更新 SELFTEST.md\n「编写启动与自测文档并校验项目」已生成/更新 README.md、SELFTEST.md（执行轮次达预算上限，产物经客观校验无误）",
+  "thinkingLen": 2964,
+  "eventCount": 137,
+  "kbCalls": 0,
+  "artifactScore": 1
+}

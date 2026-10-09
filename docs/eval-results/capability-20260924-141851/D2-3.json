@@ -1,0 +1,25 @@
+{
+  "caseId": "D2-3",
+  "dim": "D2",
+  "title": "用户显式路径覆盖",
+  "status": "done",
+  "autoPass": true,
+  "autoScore": 1,
+  "durationMs": 51301,
+  "asserts": [
+    {
+      "name": "status_done",
+      "ok": true,
+      "detail": "done"
+    },
+    {
+      "name": "app_toml",
+      "ok": true,
+      "detail": ".gitignore,edges.jsonl,nodes.jsonl,4e921cf3-0bf6-4c9d-a813-8fe2d92229f6.json,_index.json,MEMORY.md,README.md,app.toml"
+    }
+  ],
+  "counts": {},
+  "runId": null,
+  "notes": "",
+  "at": "2026-09-24T06:23:29.272Z"
+}

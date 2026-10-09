@@ -1,0 +1,20 @@
+{
+  "caseId": "D2-2",
+  "dim": "D2",
+  "title": "多步 DAG",
+  "status": "error",
+  "autoPass": false,
+  "autoScore": 0,
+  "durationMs": 2,
+  "asserts": [
+    {
+      "name": "runner_ok",
+      "ok": false,
+      "detail": "connect ECONNREFUSED 127.0.0.1:18755"
+    }
+  ],
+  "counts": {},
+  "runId": null,
+  "notes": "connect ECONNREFUSED 127.0.0.1:18755",
+  "at": "2026-09-26T11:50:02.364Z"
+}

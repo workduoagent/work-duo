@@ -1,0 +1,143 @@
+{
+  "caseId": "D-M2",
+  "slot": 0,
+  "scene": "D",
+  "kind": "M",
+  "title": "已装配技能/知识的复用能力",
+  "model": "96af449e-dfc0-48ec-b077-aa9f02b43d64",
+  "workspace": "E:/Codes/ABC/work-duo/eval-workspace-full/eval-D-M2",
+  "startedAt": "2026-09-23T18:06:25.985Z",
+  "status": "done",
+  "runId": "run-1790186786042-37",
+  "durationMs": 645119,
+  "artifacts": [],
+  "artifactCheck": [
+    {
+      "artifact": "skill_lifecycle.md",
+      "ok": true
+    },
+    {
+      "artifact": "cleaned.csv",
+      "ok": true
+    }
+  ],
+  "traceCounts": {
+    "events": 187,
+    "reply_chars": 677,
+    "thinking_chars": 3406
+  },
+  "replyLen": 677,
+  "kbHits": 12,
+  "recoveries": 1,
+  "error": null,
+  "metrics": {
+    "ha": {
+      "terminal": true,
+      "status": "done"
+    },
+    "perf": {
+      "durationMs": 645119
+    },
+    "heal": {
+      "replyLen": 677
+    }
+  },
+  "files": [
+    {
+      "rel": ".wd_mem/.gitignore",
+      "size": 310,
+      "mtime": 1790186786044.612
+    },
+    {
+      "rel": ".wd_mem/graph/edges.jsonl",
+      "size": 2406,
+      "mtime": 1790187427641.4424
+    },
+    {
+      "rel": ".wd_mem/graph/nodes.jsonl",
+      "size": 23009,
+      "mtime": 1790187427640.4458
+    },
+    {
+      "rel": ".wd_mem/graph/sessions/cc3f4120-9ec7-4db6-bbd1-4785ea167ccf.json",
+      "size": 8906,
+      "mtime": 1790187427643.6633
+    },
+    {
+      "rel": ".wd_mem/graph/_index.json",
+      "size": 2175,
+      "mtime": 1790187427641.4424
+    },
+    {
+      "rel": ".wd_mem/knowledge/MEMORY.md",
+      "size": 133,
+      "mtime": 1790186786044.612
+    },
+    {
+      "rel": ".wd_mem/README.md",
+      "size": 1378,
+      "mtime": 1790186786044.612
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/auto_run_1790187022200.py",
+      "size": 228,
+      "mtime": 1790187022202.467
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/injected_clean_csv.py",
+      "size": 3149,
+      "mtime": 1790187173840.0408
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/injected_inspect_lifecycle.py",
+      "size": 521,
+      "mtime": 1790187194847.6086
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/injected_verify_lifecycle.py",
+      "size": 634,
+      "mtime": 1790187346824.1743
+    },
+    {
+      "rel": ".wd_mem/scripts/clean_csv.py",
+      "size": 3082,
+      "mtime": 1790187092319.667
+    },
+    {
+      "rel": ".wd_mem/scripts/inspect_lifecycle.py",
+      "size": 454,
+      "mtime": 1790187190323.271
+    },
+    {
+      "rel": ".wd_mem/scripts/verify_lifecycle.py",
+      "size": 567,
+      "mtime": 1790187309394.4578
+    },
+    {
+      "rel": "cleaned.csv",
+      "size": 406,
+      "mtime": 1790187174007.0776
+    },
+    {
+      "rel": "raw.csv",
+      "size": 586,
+      "mtime": 1790186890641.5989
+    },
+    {
+      "rel": "skill_lifecycle.md",
+      "size": 4607,
+      "mtime": 1790187415554.1233
+    }
+  ],
+  "agentId": "4c3dd60f-d4c0-4e3a-87be-e7596b230b24",
+  "agentIdentifier": "l2-d-m2-mueezoi9-azqeia",
+  "modelName": "AG:DeepSeek-V4.1-Flash",
+  "seedTier": null,
+  "seedId": null,
+  "sessionId": "cc3f4120-9ec7-4db6-bbd1-4785ea167ccf",
+  "reply": "已生成/更新 raw.csv、skill_lifecycle.md\n已生成并确认以下文件：\n\n- `E:\\Codes\\ABC\\work-duo\\eval-workspace-full\\eval-D-M2\\raw.csv`：10 条数据记录，含空值、重复行及格式不一致项。\n- `E:\\Codes\\ABC\\work-duo\\eval-workspace-full\\eval-D-M2\\cleaned.csv`：去重并统一格式后的数据。\n- `E:\\Codes\\ABC\\work-duo\\eval-workspace-full\\eval-D-M2\\skill_lifecycle.md`：记录可见技能、实际工具调用和知识库检索结果。\n\n已生成/更新 cleaned.csv\n「清洗并保存数据」已生成/更新 clean_csv.py（执行轮次达预算上限，产物经客观校验无误）\n\n已生成/更新 skill_lifecycle.md\n已完成并核验交付文件：\n\n- 生命周期报告：[skill_lifecycle.md](E:/Codes/ABC/work-duo/eval-workspace-full/eval-D-M2/skill_lifecycle.md)\n- 清洗后数据：[cleaned.csv](E:/Codes/ABC/work-duo/eval-workspace-full/eval-D-M2/cleaned.csv)\n\n报告记录了可见技能与不可见项、知识库检索结果及是否采用、实际工具调用，以及清洗规则。行数为清洗前 10 行、清洗后 6 行。",
+  "thinkingLen": 3406,
+  "eventCount": 187,
+  "kbCalls": 3,
+  "artifactScore": 1
+}

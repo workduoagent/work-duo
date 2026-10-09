@@ -1,0 +1,197 @@
+{
+  "caseId": "S-J6",
+  "slot": 5,
+  "scene": "S",
+  "kind": "M",
+  "title": "真实CVE修复：跨文件CRLF注入",
+  "model": "96af449e-dfc0-48ec-b077-aa9f02b43d64",
+  "workspace": "E:/Codes/ABC/work-duo/eval-workspace-full/eval-S-J6-5",
+  "startedAt": "2026-09-24T02:33:06.997Z",
+  "status": "done",
+  "runId": "run-1790217187189-1",
+  "durationMs": 1216812,
+  "artifacts": [],
+  "artifactCheck": [
+    {
+      "artifact": "crlf_fix.md",
+      "ok": false
+    }
+  ],
+  "traceCounts": {
+    "completion_tokens": 26007,
+    "events": 442,
+    "prompt_tokens": 950430,
+    "reply_chars": 429,
+    "thinking_chars": 5071
+  },
+  "replyLen": 429,
+  "kbHits": 0,
+  "recoveries": 0,
+  "error": null,
+  "metrics": {
+    "ha": {
+      "terminal": true,
+      "status": "done"
+    },
+    "perf": {
+      "durationMs": 1216812
+    },
+    "heal": {
+      "replyLen": 429
+    }
+  },
+  "files": [
+    {
+      "rel": ".pytest_cache/.gitignore",
+      "size": 37,
+      "mtime": 1790218166239.451
+    },
+    {
+      "rel": ".pytest_cache/CACHEDIR.TAG",
+      "size": 191,
+      "mtime": 1790218166239.451
+    },
+    {
+      "rel": ".pytest_cache/README.md",
+      "size": 302,
+      "mtime": 1790218166239.451
+    },
+    {
+      "rel": ".pytest_cache/v/cache/lastfailed",
+      "size": 134,
+      "mtime": 1790218166243.0364
+    },
+    {
+      "rel": ".pytest_cache/v/cache/nodeids",
+      "size": 233,
+      "mtime": 1790218365072.9534
+    },
+    {
+      "rel": ".wd_mem/.gitignore",
+      "size": 310,
+      "mtime": 1790217187193.6826
+    },
+    {
+      "rel": ".wd_mem/crlf_test_runner.py",
+      "size": 341,
+      "mtime": 1790218329356.8704
+    },
+    {
+      "rel": ".wd_mem/graph/edges.jsonl",
+      "size": 2148,
+      "mtime": 1790218399389.8796
+    },
+    {
+      "rel": ".wd_mem/graph/nodes.jsonl",
+      "size": 30871,
+      "mtime": 1790218399387.4177
+    },
+    {
+      "rel": ".wd_mem/graph/sessions/970f121e-3dac-408c-b412-6d8b8d07bb49.json",
+      "size": 7775,
+      "mtime": 1790218399391.8826
+    },
+    {
+      "rel": ".wd_mem/graph/_index.json",
+      "size": 2355,
+      "mtime": 1790218399387.4177
+    },
+    {
+      "rel": ".wd_mem/inspect_crlf.py",
+      "size": 325,
+      "mtime": 1790218204605.4946
+    },
+    {
+      "rel": ".wd_mem/knowledge/MEMORY.md",
+      "size": 133,
+      "mtime": 1790217187193.6826
+    },
+    {
+      "rel": ".wd_mem/README.md",
+      "size": 1378,
+      "mtime": 1790217187193.6826
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/injected_crlf_test_runner.py",
+      "size": 410,
+      "mtime": 1790218364592.5747
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/injected_inspect_crlf.py",
+      "size": 394,
+      "mtime": 1790218219590.8848
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/injected_run_crlf_tests.py",
+      "size": 381,
+      "mtime": 1790218165642.8108
+    },
+    {
+      "rel": ".wd_mem/run_crlf_tests.py",
+      "size": 312,
+      "mtime": 1790218161501.5867
+    },
+    {
+      "rel": "crlf-proj/client.py",
+      "size": 574,
+      "mtime": 1790217061814.468
+    },
+    {
+      "rel": "crlf-proj/crlf_fix.md",
+      "size": 1171,
+      "mtime": 1790218381712.123
+    },
+    {
+      "rel": "crlf-proj/crlf_recon.md",
+      "size": 2429,
+      "mtime": 1790217701502.058
+    },
+    {
+      "rel": "crlf-proj/test_client.py",
+      "size": 1048,
+      "mtime": 1790217061814.468
+    },
+    {
+      "rel": "crlf-proj/validate.py",
+      "size": 387,
+      "mtime": 1790217137991.76
+    },
+    {
+      "rel": "crlf-proj/__pycache__/client.cpython-311.pyc",
+      "size": 958,
+      "mtime": 1790218166190.347
+    },
+    {
+      "rel": "crlf-proj/__pycache__/test_client.cpython-311-pytest-9.1.1.pyc",
+      "size": 5043,
+      "mtime": 1790218166189.3237
+    },
+    {
+      "rel": "crlf-proj/__pycache__/validate.cpython-311.pyc",
+      "size": 810,
+      "mtime": 1790218166192.36
+    }
+  ],
+  "agentId": "1bce9aa3-6710-4029-ad04-9c2c0302fc36",
+  "agentIdentifier": "l2-s-j6-muex3a3y-foqdat",
+  "modelName": "AG:DeepSeek-V4.1-Flash",
+  "seedTier": "security",
+  "seedId": "py-security-crlf-injection",
+  "sessionId": "970f121e-3dac-408c-b412-6d8b8d07bb49",
+  "reply": "已生成/更新 crlf_recon.md\n侦察结论已整理并确认文件生成。报告梳理了 URL 白名单现状、请求构造路径的 CR/LF 注入风险，以及现有测试的验收基线；本步骤未修改实现或运行测试。\n\n产出文件：`E:/Codes/ABC/work-duo/eval-workspace-full/eval-S-J6-5/crlf-proj/crlf_recon.md`\n\n（暂定完成：无客观依据，建议人工确认）\n「修复请求构造层注入」预算耗尽收尾：产物初核通过，但未经行为级验收（暂定完成，建议人工复核）\n\n已生成/更新 crlf_fix.md\n已生成修复记录：[crlf-proj/crlf_fix.md](E:/Codes/ABC/work-duo/eval-workspace-full/eval-S-J6-5/crlf-proj/crlf_fix.md)。\n\n记录说明：当前实现仍未拒绝 URL 中的 CR/LF，相关拒绝测试未通过，因此修复尚未验收。",
+  "thinkingLen": 5071,
+  "eventCount": 442,
+  "kbCalls": 0,
+  "artifactScore": 0,
+  "judge": {
+    "cmd": "pytest -q",
+    "exitCode": -1,
+    "passed": 0,
+    "failed": 0,
+    "errors": 0,
+    "noTests": false,
+    "resolved": false,
+    "raw": ""
+  },
+  "resolved": false
+}

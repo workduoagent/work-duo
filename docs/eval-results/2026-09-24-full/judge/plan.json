@@ -1,0 +1,44 @@
+[
+  {
+    "caseId": "S-J1",
+    "seedId": "py-security-tarfile-traversal",
+    "testCmd": "python -m pytest test_safe_extract.py -v",
+    "wsDir": "E:/Codes/ABC/work-duo/eval-workspace-full/eval-S-J1/tarfix-proj",
+    "outFile": "E:/Codes/ABC/work-duo/docs/eval-results/2026-09-24-full/judge/S-J1.txt"
+  },
+  {
+    "caseId": "S-J2",
+    "seedId": "py-logic-fnmatch-revrange",
+    "testCmd": "python -m pytest test_fnmatch_compat.py -v",
+    "wsDir": "E:/Codes/ABC/work-duo/eval-workspace-full/eval-S-J2-1/fnfix-proj",
+    "outFile": "E:/Codes/ABC/work-duo/docs/eval-results/2026-09-24-full/judge/S-J2.txt"
+  },
+  {
+    "caseId": "S-J3",
+    "seedId": "py-logic-parents-negindex",
+    "testCmd": "python -m pytest test_parents_compat.py -v",
+    "wsDir": "E:/Codes/ABC/work-duo/eval-workspace-full/eval-S-J3-2/pathfix-proj",
+    "outFile": "E:/Codes/ABC/work-duo/docs/eval-results/2026-09-24-full/judge/S-J3.txt"
+  },
+  {
+    "caseId": "S-J4",
+    "seedId": "py-security-urlparse-leading-ws",
+    "testCmd": "pytest test_urlparse_compat.py -v",
+    "wsDir": "E:/Codes/ABC/work-duo/eval-workspace-full/eval-S-J4-3/urlfix-proj",
+    "outFile": "E:/Codes/ABC/work-duo/docs/eval-results/2026-09-24-full/judge/S-J4.txt"
+  },
+  {
+    "caseId": "S-J5",
+    "seedId": "py-security-auth-regex-redos",
+    "testCmd": "pytest test_auth_compat.py -v",
+    "wsDir": "E:/Codes/ABC/work-duo/eval-workspace-full/eval-S-J5-4/redos-proj",
+    "outFile": "E:/Codes/ABC/work-duo/docs/eval-results/2026-09-24-full/judge/S-J5.txt"
+  },
+  {
+    "caseId": "S-J6",
+    "seedId": "py-security-crlf-injection",
+    "testCmd": "pytest test_client.py -v",
+    "wsDir": "E:/Codes/ABC/work-duo/eval-workspace-full/eval-S-J6-5/crlf-proj",
+    "outFile": "E:/Codes/ABC/work-duo/docs/eval-results/2026-09-24-full/judge/S-J6.txt"
+  }
+]

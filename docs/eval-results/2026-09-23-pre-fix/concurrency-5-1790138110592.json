@@ -1,0 +1,50 @@
+{
+  "kind": "concurrency",
+  "n": 5,
+  "totalMs": 289587,
+  "done": 4,
+  "terminal": 4,
+  "survivalRate": 0.8,
+  "terminalRate": 0.8,
+  "results": [
+    {
+      "caseId": "A-M1",
+      "slot": 0,
+      "status": "done",
+      "durationMs": 289519,
+      "artifactScore": 1,
+      "error": null
+    },
+    {
+      "caseId": "A-M1",
+      "slot": 1,
+      "status": "done",
+      "durationMs": 141844,
+      "artifactScore": 1,
+      "error": null
+    },
+    {
+      "caseId": "A-M1",
+      "slot": 2,
+      "status": "done",
+      "durationMs": 175058,
+      "artifactScore": 1,
+      "error": null
+    },
+    {
+      "caseId": "A-M1",
+      "slot": 3,
+      "status": "harness_error",
+      "durationMs": 24,
+      "error": "agent_ui_create 失败: {\"error\":\"error returned from database: (code: 2067) UNIQUE constraint failed: agent_info.identifier\"}"
+    },
+    {
+      "caseId": "A-M1",
+      "slot": 4,
+      "status": "done",
+      "durationMs": 174990,
+      "artifactScore": 1,
+      "error": null
+    }
+  ]
+}

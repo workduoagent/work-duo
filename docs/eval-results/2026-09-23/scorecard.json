@@ -1,0 +1,353 @@
+{
+  "cases": 18,
+  "done": 18,
+  "terminal": 18,
+  "artAvg": 0.8564814814814814,
+  "durations": {
+    "p50": 500690,
+    "p90": 907066,
+    "p99": 949530
+  },
+  "faults": [
+    {
+      "faultId": "F-1",
+      "startedAt": "2026-09-23T06:19:12.776Z",
+      "observations": [
+        {
+          "ok": true,
+          "msg": "已对 slot1 下发 agent_cancel_task",
+          "extra": {
+            "agentId": "bf1a06c1-362b-469b-8e77-3c3c67baa5da"
+          }
+        },
+        {
+          "ok": true,
+          "msg": "slot0 → done",
+          "extra": {}
+        },
+        {
+          "ok": true,
+          "msg": "slot1 → cancelled",
+          "extra": {}
+        },
+        {
+          "ok": true,
+          "msg": "slot2 → done",
+          "extra": {}
+        },
+        {
+          "ok": true,
+          "msg": "取消后锁释放/可再跑",
+          "extra": {
+            "ok": true,
+            "first": "done",
+            "second": "done",
+            "secondError": null
+          }
+        }
+      ],
+      "ok": true,
+      "finishedAt": "2026-09-23T06:23:11.371Z"
+    },
+    {
+      "faultId": "F-3",
+      "startedAt": "2026-09-23T09:13:47.909Z",
+      "observations": [
+        {
+          "ok": true,
+          "msg": "自愈机制观测：step_retrying 事件 ×0（>0=引擎自动诊断重试真实发生；=0 可能源失败被工具层/重试层提前消化）"
+        },
+        {
+          "ok": true,
+          "msg": "A-H5 降级容错 status=done artifacts=1"
+        }
+      ],
+      "ok": true,
+      "autoRetryEvents": 0,
+      "finishedAt": "2026-09-23T09:25:36.091Z"
+    },
+    {
+      "faultId": "F-4",
+      "startedAt": "2026-09-23T06:18:33.195Z",
+      "observations": [
+        {
+          "ok": true,
+          "msg": "检测到计划挂起",
+          "extra": {
+            "status": "running"
+          }
+        },
+        {
+          "ok": true,
+          "msg": "submit_plan_decision approve 已发"
+        },
+        {
+          "ok": true,
+          "msg": "放行后终态 done",
+          "extra": {
+            "status": "done"
+          }
+        }
+      ],
+      "ok": true,
+      "finishedAt": "2026-09-23T06:18:59.983Z"
+    }
+  ],
+  "concs": [
+    {
+      "kind": "concurrency",
+      "n": 12,
+      "totalMs": 949694,
+      "done": 12,
+      "terminal": 12,
+      "survivalRate": 1,
+      "terminalRate": 1,
+      "results": [
+        {
+          "caseId": "A-M2",
+          "slot": 0,
+          "status": "done",
+          "durationMs": 473390,
+          "artifactScore": 1,
+          "error": null
+        },
+        {
+          "caseId": "A-M8",
+          "slot": 1,
+          "status": "done",
+          "durationMs": 307569,
+          "artifactScore": 0,
+          "error": null
+        },
+        {
+          "caseId": "B-M3",
+          "slot": 2,
+          "status": "done",
+          "durationMs": 566929,
+          "artifactScore": 1,
+          "error": null
+        },
+        {
+          "caseId": "B-M5",
+          "slot": 3,
+          "status": "done",
+          "durationMs": 904436,
+          "artifactScore": 0.5,
+          "error": null
+        },
+        {
+          "caseId": "A-H1",
+          "slot": 4,
+          "status": "done",
+          "durationMs": 621093,
+          "artifactScore": 0.6666666666666666,
+          "error": null
+        },
+        {
+          "caseId": "A-H3",
+          "slot": 5,
+          "status": "done",
+          "durationMs": 430930,
+          "artifactScore": 0,
+          "error": null
+        },
+        {
+          "caseId": "A-H6",
+          "slot": 6,
+          "status": "done",
+          "durationMs": 307534,
+          "artifactScore": 1,
+          "error": null
+        },
+        {
+          "caseId": "B-H1",
+          "slot": 7,
+          "status": "done",
+          "durationMs": 615309,
+          "artifactScore": 0.75,
+          "error": null
+        },
+        {
+          "caseId": "B-H2",
+          "slot": 8,
+          "status": "done",
+          "durationMs": 500690,
+          "artifactScore": 1,
+          "error": null
+        },
+        {
+          "caseId": "B-H4",
+          "slot": 9,
+          "status": "done",
+          "durationMs": 397624,
+          "artifactScore": 0,
+          "error": null
+        },
+        {
+          "caseId": "B-H6",
+          "slot": 10,
+          "status": "done",
+          "durationMs": 949530,
+          "artifactScore": 1,
+          "error": null
+        },
+        {
+          "caseId": "B-H7",
+          "slot": 11,
+          "status": "done",
+          "durationMs": 735809,
+          "artifactScore": 1,
+          "error": null
+        }
+      ]
+    },
+    {
+      "kind": "concurrency",
+      "n": 2,
+      "totalMs": 964362,
+      "done": 2,
+      "terminal": 2,
+      "survivalRate": 1,
+      "terminalRate": 1,
+      "results": [
+        {
+          "caseId": "A-H3",
+          "slot": 0,
+          "status": "done",
+          "durationMs": 907066,
+          "artifactScore": 1,
+          "error": null
+        },
+        {
+          "caseId": "B-H4",
+          "slot": 1,
+          "status": "done",
+          "durationMs": 964275,
+          "artifactScore": 1,
+          "error": null
+        }
+      ]
+    },
+    {
+      "kind": "concurrency",
+      "n": 3,
+      "totalMs": 1341340,
+      "done": 3,
+      "terminal": 3,
+      "survivalRate": 1,
+      "terminalRate": 1,
+      "results": [
+        {
+          "caseId": "A-H3",
+          "slot": 0,
+          "status": "done",
+          "durationMs": 1341185,
+          "artifactScore": 0,
+          "error": null
+        },
+        {
+          "caseId": "A-M8",
+          "slot": 1,
+          "status": "done",
+          "durationMs": 388788,
+          "artifactScore": 1,
+          "error": null
+        },
+        {
+          "caseId": "B-H4",
+          "slot": 2,
+          "status": "done",
+          "durationMs": 651064,
+          "artifactScore": 0.5,
+          "error": null
+        }
+      ]
+    },
+    {
+      "kind": "concurrency",
+      "n": 3,
+      "totalMs": 1772055,
+      "done": 2,
+      "terminal": 3,
+      "survivalRate": 0.6666666666666666,
+      "terminalRate": 1,
+      "results": [
+        {
+          "caseId": "B-M5",
+          "slot": 0,
+          "status": "done",
+          "durationMs": 1135952,
+          "artifactScore": 1,
+          "error": null
+        },
+        {
+          "caseId": "A-H1",
+          "slot": 1,
+          "status": "done",
+          "durationMs": 617747,
+          "artifactScore": 1,
+          "error": null
+        },
+        {
+          "caseId": "B-H1",
+          "slot": 2,
+          "status": "error",
+          "durationMs": 1771951,
+          "artifactScore": 0.75,
+          "error": null
+        }
+      ]
+    },
+    {
+      "kind": "concurrency",
+      "n": 5,
+      "totalMs": 801881,
+      "done": 5,
+      "terminal": 5,
+      "survivalRate": 1,
+      "terminalRate": 1,
+      "results": [
+        {
+          "caseId": "C-M1",
+          "slot": 0,
+          "status": "done",
+          "durationMs": 482361,
+          "artifactScore": 1,
+          "error": null
+        },
+        {
+          "caseId": "C-M2",
+          "slot": 1,
+          "status": "done",
+          "durationMs": 491369,
+          "artifactScore": 1,
+          "error": null
+        },
+        {
+          "caseId": "C-H1",
+          "slot": 2,
+          "status": "done",
+          "durationMs": 717379,
+          "artifactScore": 1,
+          "error": null
+        },
+        {
+          "caseId": "C-H2",
+          "slot": 3,
+          "status": "done",
+          "durationMs": 801732,
+          "artifactScore": 1,
+          "error": null
+        },
+        {
+          "caseId": "C-H3",
+          "slot": 4,
+          "status": "done",
+          "durationMs": 409951,
+          "artifactScore": 1,
+          "error": null
+        }
+      ]
+    }
+  ]
+}

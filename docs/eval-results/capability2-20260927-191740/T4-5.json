@@ -1,0 +1,38 @@
+{
+  "caseId": "T4-5",
+  "dim": "T数据",
+  "title": "金额精度：分单位核算（浮点陷阱）",
+  "status": "done",
+  "autoPass": true,
+  "autoScore": 1,
+  "durationMs": 90455,
+  "asserts": [
+    {
+      "name": "status_done",
+      "ok": true,
+      "detail": "done"
+    },
+    {
+      "name": "calc_md",
+      "ok": true,
+      "detail": "calc.md 缺失"
+    },
+    {
+      "name": "total_2507_fen_or_2507",
+      "ok": true,
+      "detail": "期望 2507 分 / 25.07 元"
+    },
+    {
+      "name": "no_long_float_as_answer",
+      "ok": true,
+      "detail": "不应把长浮点串当最终答案（说明性提及可接受）"
+    }
+  ],
+  "counts": {
+    "prompt": 29636,
+    "completion": 724
+  },
+  "runId": "run-1790510293648-55",
+  "notes": "",
+  "at": "2026-09-27T11:59:44.084Z"
+}

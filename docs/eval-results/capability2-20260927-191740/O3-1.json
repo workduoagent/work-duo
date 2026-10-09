@@ -1,0 +1,43 @@
+{
+  "caseId": "O3-1",
+  "dim": "O办公",
+  "title": "Excel 周报产物（xlsx 模板插件链路）",
+  "status": "failed",
+  "autoPass": false,
+  "autoScore": 0,
+  "durationMs": 159697,
+  "asserts": [
+    {
+      "name": "status_done",
+      "ok": true,
+      "detail": "done"
+    },
+    {
+      "name": "xlsx_exists",
+      "ok": true,
+      "detail": "E:\\Codes\\ABC\\work-duo\\eval-workspace\\capability2\\O3-1\\周报.xlsx (5614B)"
+    },
+    {
+      "name": "xlsx_magic_pk",
+      "ok": true,
+      "detail": "文件头应为 zip(PK)——手写二进制会假成功"
+    },
+    {
+      "name": "total_1300",
+      "ok": false,
+      "detail": "未找到 1300；文本数字样例=2,3,1,2,3,1"
+    },
+    {
+      "name": "used_plugin_or_sandbox",
+      "ok": true,
+      "detail": "custom__cap2-test-pl-xlsx,custom__cap2-test-pl-xlsx,custom__cap2-test-pl-xlsx,native__path_exists,custom__cap2-test-pl-xlsx,native__path_exists,native__list_directory,native__path_exists"
+    }
+  ],
+  "counts": {
+    "prompt": 80058,
+    "completion": 1770
+  },
+  "runId": "run-1790509370831-46",
+  "notes": "",
+  "at": "2026-09-27T11:45:30.509Z"
+}

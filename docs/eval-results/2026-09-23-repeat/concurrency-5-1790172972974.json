@@ -1,0 +1,51 @@
+{
+  "kind": "concurrency",
+  "n": 5,
+  "totalMs": 587882,
+  "done": 5,
+  "terminal": 5,
+  "survivalRate": 1,
+  "terminalRate": 1,
+  "results": [
+    {
+      "caseId": "C-M1",
+      "slot": 0,
+      "status": "done",
+      "durationMs": 515463,
+      "artifactScore": 1,
+      "error": null
+    },
+    {
+      "caseId": "C-M2",
+      "slot": 1,
+      "status": "done",
+      "durationMs": 343557,
+      "artifactScore": 1,
+      "error": null
+    },
+    {
+      "caseId": "C-H1",
+      "slot": 2,
+      "status": "done",
+      "durationMs": 587773,
+      "artifactScore": 1,
+      "error": null
+    },
+    {
+      "caseId": "C-H2",
+      "slot": 3,
+      "status": "done",
+      "durationMs": 539533,
+      "artifactScore": 1,
+      "error": null
+    },
+    {
+      "caseId": "C-H3",
+      "slot": 4,
+      "status": "done",
+      "durationMs": 262260,
+      "artifactScore": 1,
+      "error": null
+    }
+  ]
+}

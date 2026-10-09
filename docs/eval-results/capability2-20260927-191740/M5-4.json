@@ -1,0 +1,25 @@
+{
+  "caseId": "M5-4",
+  "dim": "M记忆",
+  "title": "蒸馏候选闭环（观测型）",
+  "status": "done",
+  "autoPass": true,
+  "autoScore": 1,
+  "durationMs": 0,
+  "asserts": [
+    {
+      "name": "candidates_shape",
+      "ok": true,
+      "detail": "候选 0 条"
+    },
+    {
+      "name": "candidates_optional",
+      "ok": true,
+      "detail": "当前无 pending 候选——候选由引擎蒸馏产生，属正常空态"
+    }
+  ],
+  "counts": {},
+  "runId": null,
+  "notes": "候选数=0",
+  "at": "2026-09-27T12:01:57.256Z"
+}

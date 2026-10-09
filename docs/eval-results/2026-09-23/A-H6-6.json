@@ -1,0 +1,121 @@
+{
+  "caseId": "A-H6",
+  "slot": 6,
+  "scene": "A",
+  "kind": "H",
+  "title": "插件故障recovery闭环",
+  "model": "96af449e-dfc0-48ec-b077-aa9f02b43d64",
+  "workspace": "E:/Codes/ABC/work-duo/eval-workspace/eval-A-H6-6",
+  "startedAt": "2026-09-23T06:23:32.409Z",
+  "status": "done",
+  "runId": "run-1790144612553-13",
+  "durationMs": 307534,
+  "artifacts": [],
+  "artifactCheck": [
+    {
+      "artifact": "heal_report.md",
+      "ok": true
+    },
+    {
+      "artifact": "final_data.json",
+      "ok": true
+    }
+  ],
+  "traceCounts": {
+    "events": 59,
+    "reply_chars": 399,
+    "thinking_chars": 973
+  },
+  "replyLen": 399,
+  "kbHits": 0,
+  "recoveries": 0,
+  "error": null,
+  "metrics": {
+    "ha": {
+      "terminal": true,
+      "status": "done"
+    },
+    "perf": {
+      "durationMs": 307534
+    },
+    "heal": {
+      "replyLen": 399
+    }
+  },
+  "files": [
+    {
+      "rel": ".wd_mem/.gitignore",
+      "size": 310,
+      "mtime": 1790144612557.17
+    },
+    {
+      "rel": ".wd_mem/graph/edges.jsonl",
+      "size": 883,
+      "mtime": 1790144916169.6064
+    },
+    {
+      "rel": ".wd_mem/graph/nodes.jsonl",
+      "size": 6232,
+      "mtime": 1790144916169.6064
+    },
+    {
+      "rel": ".wd_mem/graph/sessions/39454d6d-859d-4a16-92e2-5107d86c7e0f.json",
+      "size": 3931,
+      "mtime": 1790144916171.1958
+    },
+    {
+      "rel": ".wd_mem/graph/_index.json",
+      "size": 2007,
+      "mtime": 1790144916169.6064
+    },
+    {
+      "rel": ".wd_mem/knowledge/MEMORY.md",
+      "size": 133,
+      "mtime": 1790144612557.17
+    },
+    {
+      "rel": ".wd_mem/README.md",
+      "size": 1378,
+      "mtime": 1790144612557.17
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/injected_run_l2_fragile_etl_healing.py",
+      "size": 3633,
+      "mtime": 1790144900656.6362
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/l2_fragile_etl.py",
+      "size": 485,
+      "mtime": 1790144900839.8694
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/run_l2_fragile_etl_healing.py",
+      "size": 3569,
+      "mtime": 1790144896540.1697
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/__pycache__/l2_fragile_etl.cpython-311.pyc",
+      "size": 1198,
+      "mtime": 1790144900869.9465
+    },
+    {
+      "rel": "final_data.json",
+      "size": 179,
+      "mtime": 1790144900871.0457
+    },
+    {
+      "rel": "heal_report.md",
+      "size": 878,
+      "mtime": 1790144900872.084
+    }
+  ],
+  "agentId": "fe0ddc31-f84e-45f2-98fd-c2bde7fa817f",
+  "agentIdentifier": "l2-a-h6-mudpvr5w-75tsuj",
+  "modelName": "AG:DeepSeek-V4.1-Flash",
+  "sessionId": "39454d6d-859d-4a16-92e2-5107d86c7e0f",
+  "reply": "（暂定完成：无客观依据，建议人工确认）\n已完成带自愈的数据处理：\n\n- 初版插件 `l2-fragile-etl` 对空数组触发 `ValueError`。\n- 已修复插件，空数组改为返回求和中性值 `0`。\n- 使用修复后的插件处理 `[1,2,3,4,5]`，结果为 `15`。\n- 已验证最终文件成功生成。\n\n产出文件：\n\n1. `E:\\Codes\\ABC\\work-duo\\eval-workspace\\eval-A-H6-6\\final_data.json`\n2. `E:\\Codes\\ABC\\work-duo\\eval-workspace\\eval-A-H6-6\\heal_report.md`\n3. `E:\\Codes\\ABC\\work-duo\\eval-workspace\\eval-A-H6-6\\.wd_mem\\runtime\\scripts\\l2_fragile_etl.py`",
+  "thinkingLen": 973,
+  "eventCount": 59,
+  "kbCalls": 0,
+  "artifactScore": 1
+}

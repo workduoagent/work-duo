@@ -1,0 +1,128 @@
+{
+  "caseId": "A-M1",
+  "slot": 0,
+  "scene": "A",
+  "kind": "M",
+  "title": "单源爬取+清洗+产物",
+  "model": "96af449e-dfc0-48ec-b077-aa9f02b43d64",
+  "workspace": "E:/Codes/ABC/work-duo/eval-workspace-final/eval-A-M1",
+  "startedAt": "2026-09-23T14:43:57.746Z",
+  "status": "done",
+  "runId": "run-1790174637893-7",
+  "durationMs": 99889,
+  "artifacts": [],
+  "artifactCheck": [
+    {
+      "artifact": "releases.csv",
+      "ok": true
+    },
+    {
+      "artifact": "releases_report.md",
+      "ok": true
+    }
+  ],
+  "traceCounts": {
+    "events": 45,
+    "reply_chars": 373,
+    "thinking_chars": 1383
+  },
+  "replyLen": 373,
+  "kbHits": 0,
+  "recoveries": 0,
+  "error": null,
+  "metrics": {
+    "ha": {
+      "terminal": true,
+      "status": "done"
+    },
+    "perf": {
+      "durationMs": 99889
+    },
+    "heal": {
+      "replyLen": 373
+    }
+  },
+  "files": [
+    {
+      "rel": ".wd_mem/.gitignore",
+      "size": 310,
+      "mtime": 1790174637895.823
+    },
+    {
+      "rel": ".wd_mem/graph/edges.jsonl",
+      "size": 1147,
+      "mtime": 1790174733216.08
+    },
+    {
+      "rel": ".wd_mem/graph/nodes.jsonl",
+      "size": 11688,
+      "mtime": 1790174733216.08
+    },
+    {
+      "rel": ".wd_mem/graph/sessions/a0a01d7a-5ae1-4db7-a974-81c700935531.json",
+      "size": 7387,
+      "mtime": 1790174733217.843
+    },
+    {
+      "rel": ".wd_mem/graph/_index.json",
+      "size": 1922,
+      "mtime": 1790174733216.08
+    },
+    {
+      "rel": ".wd_mem/knowledge/MEMORY.md",
+      "size": 133,
+      "mtime": 1790174637894.8086
+    },
+    {
+      "rel": ".wd_mem/README.md",
+      "size": 1378,
+      "mtime": 1790174637895.823
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/injected_generate_releases_report.py",
+      "size": 3706,
+      "mtime": 1790174726157.4766
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/injected_validate_releases_json.py",
+      "size": 320,
+      "mtime": 1790174682278.7134
+    },
+    {
+      "rel": ".wd_mem/scripts/generate_releases_report.py",
+      "size": 3638,
+      "mtime": 1790174723586.8733
+    },
+    {
+      "rel": ".wd_mem/scripts/validate_releases_json.py",
+      "size": 252,
+      "mtime": 1790174679337.4207
+    },
+    {
+      "rel": "releases.csv",
+      "size": 1063,
+      "mtime": 1790174726332.6694
+    },
+    {
+      "rel": "releases_raw.json",
+      "size": 305287,
+      "mtime": 1790174665122.608
+    },
+    {
+      "rel": "releases_report.md",
+      "size": 1668,
+      "mtime": 1790174726333.4082
+    }
+  ],
+  "agentId": "4ce65867-1bff-467c-a0ae-2cb8e2fe6656",
+  "agentIdentifier": "l2-a-m1-mue7rav2-nkr4aw",
+  "modelName": "AG:DeepSeek-V4.1-Flash",
+  "seedTier": null,
+  "seedId": null,
+  "sessionId": "a0a01d7a-5ae1-4db7-a974-81c700935531",
+  "reply": "已生成/更新 releases_raw.json\n已成功获取 GitHub 最新 20 条 Release，原始响应为合法 JSON（共 20 条）。\n\n产出文件：`E:/Codes/ABC/work-duo/eval-workspace-final/eval-A-M1/releases_raw.json`\n\n已生成/更新 releases.csv、releases_report.md\n已完成并验证产物：CSV 含 20 条记录，报告共 32 行。\n\n- `E:/Codes/ABC/work-duo/eval-workspace-final/eval-A-M1/releases.csv`\n- `E:/Codes/ABC/work-duo/eval-workspace-final/eval-A-M1/releases_report.md`",
+  "thinkingLen": 1383,
+  "eventCount": 45,
+  "kbCalls": 0,
+  "artifactScore": 1
+}

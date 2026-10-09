@@ -1,0 +1,74 @@
+{
+  "caseId": "H-M1",
+  "slot": 0,
+  "scene": "H",
+  "kind": "M",
+  "title": "意图分流：SIMPLE_CHAT 快路径",
+  "model": "96af449e-dfc0-48ec-b077-aa9f02b43d64",
+  "workspace": "E:/Codes/ABC/work-duo/eval-workspace-full/eval-H-M1",
+  "startedAt": "2026-09-24T06:08:19.994Z",
+  "status": "done",
+  "runId": "run-1790230100121-2",
+  "durationMs": 3244,
+  "artifacts": [],
+  "artifactCheck": [],
+  "traceCounts": {
+    "completion_tokens": 31,
+    "events": 3,
+    "prompt_tokens": 1935,
+    "reply_chars": 39,
+    "thinking_chars": 0
+  },
+  "replyLen": 39,
+  "kbHits": 0,
+  "recoveries": 0,
+  "error": null,
+  "metrics": {
+    "ha": {
+      "terminal": true,
+      "status": "done"
+    },
+    "perf": {
+      "durationMs": 3244
+    },
+    "heal": {
+      "replyLen": 39
+    }
+  },
+  "files": [
+    {
+      "rel": ".wd_mem/.gitignore",
+      "size": 310,
+      "mtime": 1790230100125.21
+    },
+    {
+      "rel": ".wd_mem/knowledge/MEMORY.md",
+      "size": 133,
+      "mtime": 1790230100124.2068
+    },
+    {
+      "rel": ".wd_mem/README.md",
+      "size": 1378,
+      "mtime": 1790230100125.21
+    }
+  ],
+  "agentId": "d30c13db-ddc7-4be3-b5e0-ca1be9cfcc67",
+  "agentIdentifier": "l2-h-m1-muf4s1ti-9gtnla",
+  "modelName": "AG:DeepSeek-V4.1-Flash",
+  "seedTier": null,
+  "seedId": null,
+  "sessionId": "771bc161-21b1-400f-ac63-7e13eb30818d",
+  "reply": "你好，我是一个严谨高效的智能助手，能够协助你处理信息、分析问题并完成各类任务。",
+  "thinkingLen": 0,
+  "eventCount": 3,
+  "kbCalls": 0,
+  "signals": {
+    "hasPlanGenerated": false,
+    "planSteps": 0,
+    "toolCalls": [],
+    "writeCount": 0,
+    "sensitiveCount": 0,
+    "errorCount": 0
+  },
+  "artifactScore": 1
+}

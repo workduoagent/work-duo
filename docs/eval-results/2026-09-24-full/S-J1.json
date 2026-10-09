@@ -1,0 +1,430 @@
+{
+  "caseId": "S-J1",
+  "slot": 0,
+  "scene": "S",
+  "kind": "M",
+  "title": "真实CVE修复：tarfile路径穿越",
+  "model": "96af449e-dfc0-48ec-b077-aa9f02b43d64",
+  "workspace": "E:/Codes/ABC/work-duo/eval-workspace-full/eval-S-J1",
+  "startedAt": "2026-09-24T02:33:06.084Z",
+  "status": "done",
+  "runId": "run-1790217187159-0",
+  "durationMs": 912988,
+  "artifacts": [],
+  "artifactCheck": [
+    {
+      "artifact": "tarfix-proj/SELFTEST.md",
+      "ok": true
+    }
+  ],
+  "traceCounts": {
+    "completion_tokens": 27749,
+    "events": 186,
+    "prompt_tokens": 710625,
+    "reply_chars": 282,
+    "thinking_chars": 4707
+  },
+  "replyLen": 282,
+  "kbHits": 0,
+  "recoveries": 0,
+  "error": null,
+  "metrics": {
+    "ha": {
+      "terminal": true,
+      "status": "done"
+    },
+    "perf": {
+      "durationMs": 912988
+    },
+    "heal": {
+      "replyLen": 282
+    }
+  },
+  "files": [
+    {
+      "rel": ".pytest_cache/.gitignore",
+      "size": 37,
+      "mtime": 1790215030538.7566
+    },
+    {
+      "rel": ".pytest_cache/CACHEDIR.TAG",
+      "size": 191,
+      "mtime": 1790215030539.756
+    },
+    {
+      "rel": ".pytest_cache/README.md",
+      "size": 302,
+      "mtime": 1790215030537.753
+    },
+    {
+      "rel": ".pytest_cache/v/cache/lastfailed",
+      "size": 2,
+      "mtime": 1790218062736.747
+    },
+    {
+      "rel": ".pytest_cache/v/cache/nodeids",
+      "size": 141,
+      "mtime": 1790218062736.747
+    },
+    {
+      "rel": ".wd_mem/.gitignore",
+      "size": 310,
+      "mtime": 1790214857958.1912
+    },
+    {
+      "rel": ".wd_mem/graph/edges.jsonl",
+      "size": 4312,
+      "mtime": 1790218095607.0732
+    },
+    {
+      "rel": ".wd_mem/graph/nodes.jsonl",
+      "size": 49298,
+      "mtime": 1790218095606.0642
+    },
+    {
+      "rel": ".wd_mem/graph/sessions/97b5a5a9-2e44-46e9-a412-058bc4dd64e0.json",
+      "size": 6286,
+      "mtime": 1790218095609.0957
+    },
+    {
+      "rel": ".wd_mem/graph/sessions/ec610553-511b-4fd1-8b5f-0eecc900f42a.json",
+      "size": 8280,
+      "mtime": 1790215314935.9983
+    },
+    {
+      "rel": ".wd_mem/graph/_index.json",
+      "size": 3902,
+      "mtime": 1790218095606.0642
+    },
+    {
+      "rel": ".wd_mem/knowledge/MEMORY.md",
+      "size": 133,
+      "mtime": 1790214857958.1912
+    },
+    {
+      "rel": ".wd_mem/pytest-tmp/deep/escape2.txt",
+      "size": 8,
+      "mtime": 1790217312838.624
+    },
+    {
+      "rel": ".wd_mem/pytest-tmp/pytest-of-Administrator/pytest-0/deep/escape2.txt",
+      "size": 8,
+      "mtime": 1790215030485.432
+    },
+    {
+      "rel": ".wd_mem/pytest-tmp/pytest-of-Administrator/pytest-0/test_benign_tar_extracts0/benign.tar",
+      "size": 10240,
+      "mtime": 1790215030476.3645
+    },
+    {
+      "rel": ".wd_mem/pytest-tmp/pytest-of-Administrator/pytest-0/test_benign_tar_extracts0/dest/b.txt",
+      "size": 4,
+      "mtime": 1790215030480.4016
+    },
+    {
+      "rel": ".wd_mem/pytest-tmp/pytest-of-Administrator/pytest-0/test_benign_tar_extracts0/dest/sub/a.txt",
+      "size": 5,
+      "mtime": 1790215030480.4016
+    },
+    {
+      "rel": ".wd_mem/pytest-tmp/pytest-of-Administrator/pytest-0/test_benign_tar_extractscurrent/benign.tar",
+      "size": 10240,
+      "mtime": 1790215030476.3645
+    },
+    {
+      "rel": ".wd_mem/pytest-tmp/pytest-of-Administrator/pytest-0/test_benign_tar_extractscurrent/dest/b.txt",
+      "size": 4,
+      "mtime": 1790215030480.4016
+    },
+    {
+      "rel": ".wd_mem/pytest-tmp/pytest-of-Administrator/pytest-0/test_benign_tar_extractscurrent/dest/sub/a.txt",
+      "size": 5,
+      "mtime": 1790215030480.4016
+    },
+    {
+      "rel": ".wd_mem/pytest-tmp/pytest-of-Administrator/pytest-0/test_malicious_tar_cannot_esca0/dest/ok.txt",
+      "size": 4,
+      "mtime": 1790215030484.4258
+    },
+    {
+      "rel": ".wd_mem/pytest-tmp/pytest-of-Administrator/pytest-0/test_malicious_tar_cannot_esca0/escaped.txt",
+      "size": 7,
+      "mtime": 1790215030485.432
+    },
+    {
+      "rel": ".wd_mem/pytest-tmp/pytest-of-Administrator/pytest-0/test_malicious_tar_cannot_esca0/evil.tar",
+      "size": 10240,
+      "mtime": 1790215030483.4194
+    },
+    {
+      "rel": ".wd_mem/pytest-tmp/pytest-of-Administrator/pytest-0/test_malicious_tar_cannot_escacurrent/dest/ok.txt",
+      "size": 4,
+      "mtime": 1790215030484.4258
+    },
+    {
+      "rel": ".wd_mem/pytest-tmp/pytest-of-Administrator/pytest-0/test_malicious_tar_cannot_escacurrent/escaped.txt",
+      "size": 7,
+      "mtime": 1790215030485.432
+    },
+    {
+      "rel": ".wd_mem/pytest-tmp/pytest-of-Administrator/pytest-0/test_malicious_tar_cannot_escacurrent/evil.tar",
+      "size": 10240,
+      "mtime": 1790215030483.4194
+    },
+    {
+      "rel": ".wd_mem/pytest-tmp/pytest-of-Administrator/pytest-1/deep/escape2.txt",
+      "size": 8,
+      "mtime": 1790217312776.2007
+    },
+    {
+      "rel": ".wd_mem/pytest-tmp/pytest-of-Administrator/pytest-1/test_benign_tar_extracts0/benign.tar",
+      "size": 10240,
+      "mtime": 1790217312766.7195
+    },
+    {
+      "rel": ".wd_mem/pytest-tmp/pytest-of-Administrator/pytest-1/test_benign_tar_extracts0/dest/b.txt",
+      "size": 4,
+      "mtime": 1790217312771.1177
+    },
+    {
+      "rel": ".wd_mem/pytest-tmp/pytest-of-Administrator/pytest-1/test_benign_tar_extracts0/dest/sub/a.txt",
+      "size": 5,
+      "mtime": 1790217312770.1145
+    },
+    {
+      "rel": ".wd_mem/pytest-tmp/pytest-of-Administrator/pytest-1/test_benign_tar_extractscurrent/benign.tar",
+      "size": 10240,
+      "mtime": 1790217312766.7195
+    },
+    {
+      "rel": ".wd_mem/pytest-tmp/pytest-of-Administrator/pytest-1/test_benign_tar_extractscurrent/dest/b.txt",
+      "size": 4,
+      "mtime": 1790217312771.1177
+    },
+    {
+      "rel": ".wd_mem/pytest-tmp/pytest-of-Administrator/pytest-1/test_benign_tar_extractscurrent/dest/sub/a.txt",
+      "size": 5,
+      "mtime": 1790217312770.1145
+    },
+    {
+      "rel": ".wd_mem/pytest-tmp/pytest-of-Administrator/pytest-1/test_malicious_tar_cannot_esca0/dest/ok.txt",
+      "size": 4,
+      "mtime": 1790217312775.1965
+    },
+    {
+      "rel": ".wd_mem/pytest-tmp/pytest-of-Administrator/pytest-1/test_malicious_tar_cannot_esca0/escaped.txt",
+      "size": 7,
+      "mtime": 1790217312775.1965
+    },
+    {
+      "rel": ".wd_mem/pytest-tmp/pytest-of-Administrator/pytest-1/test_malicious_tar_cannot_esca0/evil.tar",
+      "size": 10240,
+      "mtime": 1790217312774.1924
+    },
+    {
+      "rel": ".wd_mem/pytest-tmp/pytest-of-Administrator/pytest-1/test_malicious_tar_cannot_escacurrent/dest/ok.txt",
+      "size": 4,
+      "mtime": 1790217312775.1965
+    },
+    {
+      "rel": ".wd_mem/pytest-tmp/pytest-of-Administrator/pytest-1/test_malicious_tar_cannot_escacurrent/escaped.txt",
+      "size": 7,
+      "mtime": 1790217312775.1965
+    },
+    {
+      "rel": ".wd_mem/pytest-tmp/pytest-of-Administrator/pytest-1/test_malicious_tar_cannot_escacurrent/evil.tar",
+      "size": 10240,
+      "mtime": 1790217312774.1924
+    },
+    {
+      "rel": ".wd_mem/pytest-tmp/pytest-of-Administrator/pytest-2/test_benign_tar_extracts0/benign.tar",
+      "size": 10240,
+      "mtime": 1790217522366.3247
+    },
+    {
+      "rel": ".wd_mem/pytest-tmp/pytest-of-Administrator/pytest-2/test_benign_tar_extracts0/dest/b.txt",
+      "size": 4,
+      "mtime": 1790217522369.4187
+    },
+    {
+      "rel": ".wd_mem/pytest-tmp/pytest-of-Administrator/pytest-2/test_benign_tar_extracts0/dest/sub/a.txt",
+      "size": 5,
+      "mtime": 1790217522369.4187
+    },
+    {
+      "rel": ".wd_mem/pytest-tmp/pytest-of-Administrator/pytest-2/test_benign_tar_extractscurrent/benign.tar",
+      "size": 10240,
+      "mtime": 1790217522366.3247
+    },
+    {
+      "rel": ".wd_mem/pytest-tmp/pytest-of-Administrator/pytest-2/test_benign_tar_extractscurrent/dest/b.txt",
+      "size": 4,
+      "mtime": 1790217522369.4187
+    },
+    {
+      "rel": ".wd_mem/pytest-tmp/pytest-of-Administrator/pytest-2/test_benign_tar_extractscurrent/dest/sub/a.txt",
+      "size": 5,
+      "mtime": 1790217522369.4187
+    },
+    {
+      "rel": ".wd_mem/pytest-tmp/pytest-of-Administrator/pytest-2/test_malicious_tar_cannot_esca0/evil.tar",
+      "size": 10240,
+      "mtime": 1790217522373.543
+    },
+    {
+      "rel": ".wd_mem/pytest-tmp/pytest-of-Administrator/pytest-2/test_malicious_tar_cannot_escacurrent/evil.tar",
+      "size": 10240,
+      "mtime": 1790217522373.543
+    },
+    {
+      "rel": ".wd_mem/pytest-tmp/pytest-of-Administrator/pytest-current/test_benign_tar_extracts0/benign.tar",
+      "size": 10240,
+      "mtime": 1790217522366.3247
+    },
+    {
+      "rel": ".wd_mem/pytest-tmp/pytest-of-Administrator/pytest-current/test_benign_tar_extracts0/dest/b.txt",
+      "size": 4,
+      "mtime": 1790217522369.4187
+    },
+    {
+      "rel": ".wd_mem/pytest-tmp/pytest-of-Administrator/pytest-current/test_benign_tar_extracts0/dest/sub/a.txt",
+      "size": 5,
+      "mtime": 1790217522369.4187
+    },
+    {
+      "rel": ".wd_mem/pytest-tmp/pytest-of-Administrator/pytest-current/test_benign_tar_extractscurrent/benign.tar",
+      "size": 10240,
+      "mtime": 1790217522366.3247
+    },
+    {
+      "rel": ".wd_mem/pytest-tmp/pytest-of-Administrator/pytest-current/test_benign_tar_extractscurrent/dest/b.txt",
+      "size": 4,
+      "mtime": 1790217522369.4187
+    },
+    {
+      "rel": ".wd_mem/pytest-tmp/pytest-of-Administrator/pytest-current/test_benign_tar_extractscurrent/dest/sub/a.txt",
+      "size": 5,
+      "mtime": 1790217522369.4187
+    },
+    {
+      "rel": ".wd_mem/pytest-tmp/pytest-of-Administrator/pytest-current/test_malicious_tar_cannot_esca0/evil.tar",
+      "size": 10240,
+      "mtime": 1790217522373.543
+    },
+    {
+      "rel": ".wd_mem/pytest-tmp/pytest-of-Administrator/pytest-current/test_malicious_tar_cannot_escacurrent/evil.tar",
+      "size": 10240,
+      "mtime": 1790217522373.543
+    },
+    {
+      "rel": ".wd_mem/README.md",
+      "size": 1378,
+      "mtime": 1790214857958.1912
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/auto_run_1790215269791.py",
+      "size": 378,
+      "mtime": 1790215269792.0132
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/auto_run_1790217325705.py",
+      "size": 441,
+      "mtime": 1790217325705.7205
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/auto_run_1790217930334.py",
+      "size": 2065,
+      "mtime": 1790217930334.1287
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/auto_run_1790217961883.py",
+      "size": 255,
+      "mtime": 1790217961883.472
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/injected_injected_run_tarfix_pytest.py",
+      "size": 500,
+      "mtime": 1790218062264.9697
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/injected_injected_tarfix_recon_run.py",
+      "size": 2148,
+      "mtime": 1790217521921.8623
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/injected_run_tarfix_pytest.py",
+      "size": 433,
+      "mtime": 1790217783496.3005
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/injected_tarfix_recon_run.py",
+      "size": 2081,
+      "mtime": 1790215029694.4668
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/run_tarfix_pytest_final.py",
+      "size": 231,
+      "mtime": 1790217468873.867
+    },
+    {
+      "rel": ".wd_mem/scripts/run_tarfix_pytest.py",
+      "size": 366,
+      "mtime": 1790217778979.2866
+    },
+    {
+      "rel": ".wd_mem/tarfix-recon.md",
+      "size": 1629,
+      "mtime": 1790215066414.8943
+    },
+    {
+      "rel": ".wd_mem/tarfix_recon_run.py",
+      "size": 2014,
+      "mtime": 1790215014962.9753
+    },
+    {
+      "rel": "tarfix-proj/legacy_extract.py",
+      "size": 2801,
+      "mtime": 1790218056759.382
+    },
+    {
+      "rel": "tarfix-proj/SELFTEST.md",
+      "size": 2653,
+      "mtime": 1790218081924.056
+    },
+    {
+      "rel": "tarfix-proj/test_safe_extract.py",
+      "size": 2038,
+      "mtime": 1790214557852.1619
+    },
+    {
+      "rel": "tarfix-proj/__pycache__/legacy_extract.cpython-311.pyc",
+      "size": 3813,
+      "mtime": 1790218062716.9265
+    },
+    {
+      "rel": "tarfix-proj/__pycache__/test_safe_extract.cpython-311-pytest-9.1.1.pyc",
+      "size": 9653,
+      "mtime": 1790217303147.5415
+    }
+  ],
+  "agentId": "fdb90b76-8661-4c77-8d9a-cc88bae3bdcc",
+  "agentIdentifier": "l2-s-j1-muex3a41-y2dxbe",
+  "modelName": "AG:DeepSeek-V4.1-Flash",
+  "seedTier": "security",
+  "seedId": "py-security-tarfile-traversal",
+  "sessionId": "97b5a5a9-2e44-46e9-a412-058bc4dd64e0",
+  "reply": "已生成/更新 SELFTEST.md\n已完成修复前基线侦察，并记录缺陷分析、修复方案及 pytest 结果：**1 failed, 1 passed**。未修改测试或实现文件。\n\n产物已确认生成：`E:/Codes/ABC/work-duo/eval-workspace-full/eval-S-J1/tarfix-proj/SELFTEST.md`\n\n已生成/更新 legacy_extract.py、SELFTEST.md\n「修复并验证安全解包」已生成/更新 legacy_extract.py、SELFTEST.md（执行轮次达预算上限，产物经客观校验无误）",
+  "thinkingLen": 4707,
+  "eventCount": 186,
+  "kbCalls": 0,
+  "artifactScore": 1,
+  "judge": {
+    "cmd": "python -m pytest test_safe_extract.py -v",
+    "passed": 2,
+    "failed": 0,
+    "errors": 0,
+    "resolved": true,
+    "execBy": "outer-bash"
+  },
+  "resolved": true
+}

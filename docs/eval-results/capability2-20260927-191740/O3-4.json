@@ -1,0 +1,38 @@
+{
+  "caseId": "O3-4",
+  "dim": "O办公",
+  "title": "流水账周报结构化（三节格式）",
+  "status": "done",
+  "autoPass": true,
+  "autoScore": 1,
+  "durationMs": 39284,
+  "asserts": [
+    {
+      "name": "status_done",
+      "ok": true,
+      "detail": "done"
+    },
+    {
+      "name": "weekly_md_exists",
+      "ok": true,
+      "detail": "周报.md 缺失"
+    },
+    {
+      "name": "three_sections",
+      "ok": true,
+      "detail": "三节标题都应在"
+    },
+    {
+      "name": "numbers_kept",
+      "ok": true,
+      "detail": "量化数字应保留"
+    }
+  ],
+  "counts": {
+    "prompt": 13480,
+    "completion": 655
+  },
+  "runId": "run-1790509762695-49",
+  "notes": "",
+  "at": "2026-09-27T11:50:01.962Z"
+}

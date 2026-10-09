@@ -1,0 +1,33 @@
+{
+  "caseId": "B6-4",
+  "dim": "B知识库",
+  "title": "答案溯源（引用来源文件名）",
+  "status": "done",
+  "autoPass": true,
+  "autoScore": 1,
+  "durationMs": 42197,
+  "asserts": [
+    {
+      "name": "status_done",
+      "ok": true,
+      "detail": "done"
+    },
+    {
+      "name": "answer_3days",
+      "ok": true,
+      "detail": "代码冻结期为**版本发布前 3 天**。  \n来源文件：**研发管理制度.md** [1]"
+    },
+    {
+      "name": "cites_source",
+      "ok": true,
+      "detail": "回复应引用来源文件名"
+    }
+  ],
+  "counts": {
+    "prompt": 3096,
+    "completion": 79
+  },
+  "runId": "run-1790510633402-64",
+  "notes": "",
+  "at": "2026-09-27T12:04:35.583Z"
+}

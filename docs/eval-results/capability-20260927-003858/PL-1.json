@@ -1,0 +1,30 @@
+{
+  "caseId": "PL-1",
+  "dim": "Plugin",
+  "title": "Python 插件",
+  "status": "done",
+  "autoPass": true,
+  "autoScore": 1,
+  "durationMs": 226,
+  "asserts": [
+    {
+      "name": "upsert_ok",
+      "ok": true,
+      "detail": "{\"createdAt\":\"2026-09-26T17:03:15.897Z\",\"dependencies\":[],\"description\":\"cap sui"
+    },
+    {
+      "name": "test_ok",
+      "ok": true,
+      "detail": "{\"callId\":\"call_1790442195910\",\"depsInstalled\":[],\"durationMs\":201,\"errorMessage\":null,\"errorType\":null,\"exitCode\":0,\"mi"
+    },
+    {
+      "name": "echo_match",
+      "ok": true,
+      "detail": "{\"count\":9,\"echo\":\"hello-cap\",\"ok\":true,\"received\":{\"echo\":\"hello-cap\"}}"
+    }
+  ],
+  "counts": {},
+  "runId": null,
+  "notes": "",
+  "at": "2026-09-26T17:03:16.119Z"
+}

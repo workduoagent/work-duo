@@ -1,0 +1,38 @@
+{
+  "caseId": "C1-2",
+  "dim": "C对话",
+  "title": "长文本附件摘要（token 纪律）",
+  "status": "done",
+  "autoPass": true,
+  "autoScore": 1,
+  "durationMs": 36131,
+  "asserts": [
+    {
+      "name": "status_done",
+      "ok": true,
+      "detail": "done"
+    },
+    {
+      "name": "reply_len_100_700",
+      "ok": true,
+      "detail": "len=252"
+    },
+    {
+      "name": "planted_facts_ge2",
+      "ok": true,
+      "detail": "命中种植事实 3/5"
+    },
+    {
+      "name": "prompt_token_bounded",
+      "ok": true,
+      "detail": "prompt_tokens=8425"
+    }
+  ],
+  "counts": {
+    "prompt": 8425,
+    "completion": 567
+  },
+  "runId": "run-1790517029658-0",
+  "notes": "",
+  "at": "2026-09-27T13:51:05.770Z"
+}

@@ -1,0 +1,137 @@
+{
+  "caseId": "D-H2",
+  "slot": 7,
+  "scene": "D",
+  "kind": "H",
+  "title": "原生工具深链路（抓取→清洗→图表）",
+  "model": "96af449e-dfc0-48ec-b077-aa9f02b43d64",
+  "workspace": "E:/Codes/ABC/work-duo/eval-workspace-full/eval-D-H2-7",
+  "startedAt": "2026-09-23T17:44:00.080Z",
+  "status": "done",
+  "runId": "run-1790185440288-15",
+  "durationMs": 277791,
+  "artifacts": [],
+  "artifactCheck": [
+    {
+      "artifact": "pipeline/raw.json",
+      "ok": true
+    },
+    {
+      "artifact": "pipeline/clean.csv",
+      "ok": true
+    },
+    {
+      "artifact": "pipeline/chart.png",
+      "ok": true
+    }
+  ],
+  "traceCounts": {
+    "events": 105,
+    "reply_chars": 433,
+    "thinking_chars": 2515
+  },
+  "replyLen": 433,
+  "kbHits": 0,
+  "recoveries": 0,
+  "error": null,
+  "metrics": {
+    "ha": {
+      "terminal": true,
+      "status": "done"
+    },
+    "perf": {
+      "durationMs": 277791
+    },
+    "heal": {
+      "replyLen": 433
+    }
+  },
+  "files": [
+    {
+      "rel": ".wd_mem/.gitignore",
+      "size": 310,
+      "mtime": 1790185440292.3987
+    },
+    {
+      "rel": ".wd_mem/graph/edges.jsonl",
+      "size": 1911,
+      "mtime": 1790185713814.7031
+    },
+    {
+      "rel": ".wd_mem/graph/nodes.jsonl",
+      "size": 17260,
+      "mtime": 1790185713812.3176
+    },
+    {
+      "rel": ".wd_mem/graph/sessions/74acdd3e-ff63-4251-9874-9a4904364f55.json",
+      "size": 9972,
+      "mtime": 1790185713817.7405
+    },
+    {
+      "rel": ".wd_mem/graph/_index.json",
+      "size": 2601,
+      "mtime": 1790185713813.5557
+    },
+    {
+      "rel": ".wd_mem/knowledge/MEMORY.md",
+      "size": 133,
+      "mtime": 1790185440291.1328
+    },
+    {
+      "rel": ".wd_mem/README.md",
+      "size": 1378,
+      "mtime": 1790185440292.3987
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/chart_pipeline.py",
+      "size": 1244,
+      "mtime": 1790185684067.3413
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/clean_pipeline.py",
+      "size": 2026,
+      "mtime": 1790185621877.0386
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/injected_chart_pipeline.py",
+      "size": 1313,
+      "mtime": 1790185686868.4727
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/injected_clean_pipeline.py",
+      "size": 2095,
+      "mtime": 1790185627623.9
+    },
+    {
+      "rel": "pipeline/chart.png",
+      "size": 66986,
+      "mtime": 1790185687543.523
+    },
+    {
+      "rel": "pipeline/clean.csv",
+      "size": 510,
+      "mtime": 1790185628388.6606
+    },
+    {
+      "rel": "pipeline/raw.json",
+      "size": 27520,
+      "mtime": 1790185510119.2393
+    },
+    {
+      "rel": "pipeline/tool_log.md",
+      "size": 1139,
+      "mtime": 1790185640642.135
+    }
+  ],
+  "agentId": "4089dae5-a4d5-4a7f-b31e-1022dab45d1f",
+  "agentIdentifier": "l2-d-h2-muee6u1m-8xjk8w",
+  "modelName": "AG:DeepSeek-V4.1-Flash",
+  "seedTier": null,
+  "seedId": null,
+  "sessionId": "74acdd3e-ff63-4251-9874-9a4904364f55",
+  "reply": "已生成/更新 raw.json、tool_log.md\n步骤 1/3 已完成。公开 JSON 接口返回 **HTTP 200**，响应已保存；抓取工具和状态已记录在日志中。\n\n- `E:\\Codes\\ABC\\work-duo\\eval-workspace-full\\eval-D-H2-7\\pipeline\\raw.json`\n- `E:\\Codes\\ABC\\work-duo\\eval-workspace-full\\eval-D-H2-7\\pipeline\\tool_log.md`\n\n已生成/更新 clean.csv、tool_log.md\n「清洗并导出 CSV」已生成/更新 clean_pipeline.py、tool_log.md（执行轮次达预算上限，产物经客观校验无误）\n\n已生成/更新 chart.png、tool_log.md\n「生成 stars 前十柱状图」已生成/更新 chart_pipeline.py（执行轮次达预算上限，产物经客观校验无误）",
+  "thinkingLen": 2515,
+  "eventCount": 105,
+  "kbCalls": 0,
+  "artifactScore": 1
+}

@@ -1,0 +1,12 @@
+============================= test session starts =============================
+platform win32 -- Python 3.13.14, pytest-9.1.1, pluggy-1.6.0 -- C:\Users\Administrator\.workbuddy\binaries\python\envs\default\Scripts\python.exe
+cachedir: .pytest_cache
+rootdir: E:\Codes\ABC\work-duo\eval-workspace-full\eval-S-J5-4\redos-proj
+collecting ... collected 4 items
+
+test_auth_compat.py::test_normal_parse PASSED                            [ 25%]
+test_auth_compat.py::test_case_insensitive_and_spaces PASSED             [ 50%]
+test_auth_compat.py::test_no_realm_returns_none PASSED                   [ 75%]
+test_auth_compat.py::test_no_catastrophic_backtracking PASSED            [100%]
+
+============================== 4 passed in 5.64s ==============================

@@ -1,0 +1,16 @@
+{
+  "faultId": "F-11",
+  "startedAt": "2026-09-23T15:52:50.297Z",
+  "observations": [
+    {
+      "ok": true,
+      "msg": "rebuild+add+list 并发 fulfilled=3/3"
+    },
+    {
+      "ok": true,
+      "msg": "资产数=6（期望≥6）"
+    }
+  ],
+  "ok": true,
+  "finishedAt": "2026-09-23T15:52:53.764Z"
+}

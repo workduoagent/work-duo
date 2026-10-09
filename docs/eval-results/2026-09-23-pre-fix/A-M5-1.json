@@ -1,0 +1,152 @@
+{
+  "caseId": "A-M5",
+  "slot": 1,
+  "scene": "A",
+  "kind": "M",
+  "title": "KB导入+RAG综述",
+  "model": "96af449e-dfc0-48ec-b077-aa9f02b43d64",
+  "workspace": "E:/Codes/ABC/work-duo/eval-workspace/eval-A-M5-1",
+  "startedAt": "2026-09-23T02:27:26.220Z",
+  "status": "done",
+  "runId": "run-1790130446295-9",
+  "durationMs": 415815,
+  "artifacts": [],
+  "artifactCheck": [
+    {
+      "artifact": "research_note.md",
+      "ok": true
+    }
+  ],
+  "traceCounts": {
+    "events": 158,
+    "reply_chars": 1582,
+    "thinking_chars": 3094
+  },
+  "replyLen": 1582,
+  "kbHits": 0,
+  "recoveries": 0,
+  "error": null,
+  "metrics": {
+    "ha": {
+      "terminal": true,
+      "status": "done"
+    },
+    "perf": {
+      "durationMs": 415815
+    },
+    "heal": {
+      "replyLen": 1582
+    }
+  },
+  "files": [
+    {
+      "rel": ".wd_mem/.gitignore",
+      "size": 310,
+      "mtime": 1790130446299.8337
+    },
+    {
+      "rel": ".wd_mem/graph/edges.jsonl",
+      "size": 5549,
+      "mtime": 1790130857385.66
+    },
+    {
+      "rel": ".wd_mem/graph/nodes.jsonl",
+      "size": 35555,
+      "mtime": 1790130857382.5117
+    },
+    {
+      "rel": ".wd_mem/graph/sessions/18b051f6-b1ca-4ad1-b3ef-1574fa66e29b.json",
+      "size": 19048,
+      "mtime": 1790130857389.6394
+    },
+    {
+      "rel": ".wd_mem/graph/_index.json",
+      "size": 4104,
+      "mtime": 1790130857382.5117
+    },
+    {
+      "rel": ".wd_mem/knowledge/MEMORY.md",
+      "size": 133,
+      "mtime": 1790130446298.8372
+    },
+    {
+      "rel": ".wd_mem/README.md",
+      "size": 1378,
+      "mtime": 1790130446299.8337
+    },
+    {
+      "rel": ".wd_mem/rebuild_index.py",
+      "size": 3113,
+      "mtime": 1790130728479.367
+    },
+    {
+      "rel": ".wd_mem/recon.md",
+      "size": 437,
+      "mtime": 1790130595527.863
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/auto_run_1790130605457.mjs",
+      "size": 404,
+      "mtime": 1790130605462.3027
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/injected_rebuild_index.py",
+      "size": 3177,
+      "mtime": 1790130731341.8887
+    },
+    {
+      "rel": "file_manifest.txt",
+      "size": 563,
+      "mtime": 1790130841041.4885
+    },
+    {
+      "rel": "knowledge_base/circuit_breaker.md",
+      "size": 835,
+      "mtime": 1790130663055.1458
+    },
+    {
+      "rel": "knowledge_base/graceful_degradation.md",
+      "size": 897,
+      "mtime": 1790130663065.7368
+    },
+    {
+      "rel": "knowledge_base/http_retry.md",
+      "size": 749,
+      "mtime": 1790130570598.4548
+    },
+    {
+      "rel": "knowledge_base/idempotency.md",
+      "size": 819,
+      "mtime": 1790130588932.8992
+    },
+    {
+      "rel": "knowledge_base/index.json",
+      "size": 4515,
+      "mtime": 1790130731651.6965
+    },
+    {
+      "rel": "knowledge_base/rate_limiting.md",
+      "size": 825,
+      "mtime": 1790130663050.0442
+    },
+    {
+      "rel": "knowledge_base/timeout.md",
+      "size": 807,
+      "mtime": 1790130580373.2537
+    },
+    {
+      "rel": "research_note.md",
+      "size": 6460,
+      "mtime": 1790130841040.16
+    }
+  ],
+  "agentId": "09c55428-3989-45d5-979e-f9080a789820",
+  "agentIdentifier": "l2-a-m5-mudhg4gf",
+  "modelName": "AG:DeepSeek-V4.1-Flash",
+  "sessionId": "18b051f6-b1ca-4ad1-b3ef-1574fa66e29b",
+  "reply": "已生成/更新 knowledge_base、recon.md、http_retry.md、timeout.md、idempotency.md\n当前步骤已完成，产物已确认生成：\n\n- `E:\\Codes\\ABC\\work-duo\\eval-workspace\\eval-A-M5-1\\knowledge_base\\`\n- `E:\\Codes\\ABC\\work-duo\\eval-workspace\\eval-A-M5-1\\.wd_mem\\recon.md`\n- `E:\\Codes\\ABC\\work-duo\\eval-workspace\\eval-A-M5-1\\knowledge_base\\http_retry.md`（18 行）\n- `E:\\Codes\\ABC\\work-duo\\eval-workspace\\eval-A-M5-1\\knowledge_base\\timeout.md`（18 行）\n- `E:\\Codes\\ABC\\work-duo\\eval-workspace\\eval-A-M5-1\\knowledge_base\\idempotency.md`（18 行）\n\n已在 `recon.md` 中记录知识库检查结论及后续步骤约束。\n\n已生成/更新 rate_limiting.md、circuit_breaker.md、graceful_degradation.md\n已完成限流、熔断、降级三篇知识库短文，均已确认生成且满足不少于 8 行的要求：\n\n- `E:\\Codes\\ABC\\work-duo\\eval-workspace\\eval-A-M5-1\\knowledge_base\\rate_limiting.md`\n- `E:\\Codes\\ABC\\work-duo\\eval-workspace\\eval-A-M5-1\\knowledge_base\\circuit_breaker.md`\n- `E:\\Codes\\ABC\\work-duo\\eval-workspace\\eval-A-M5-1\\knowledge_base\\graceful_degradation.md`\n\n知识库现已包含至少 6 篇主题短文。\n\n已生成/更新 index.json\n知识库索引已重建并完成校验。\n\n产出文件：\n\n`E:\\Codes\\ABC\\work-duo\\eval-workspace\\eval-A-M5-1\\knowledge_base\\index.json`\n\n校验结果：\n- 合法 JSON：是\n- `document_count`：`6`\n- `status`：`\"completed\"`\n- 已包含 6 篇文档的路径、`source_id`、标题、关键词和内容摘要。\n\n已生成/更新 research_note.md、file_manifest.txt\n已完成当前步骤，产物已生成并确认内容完整：\n\n- 综述文件：`E:\\Codes\\ABC\\work-duo\\eval-workspace\\eval-A-M5-1\\research_note.md`\n  - 超过 25 行\n  - 包含正文引用 `[1]` 至 `[6]`\n  - 包含“参考文献”章节\n  - 按六个主题分别列出对应文件和 `source_id`\n  - 围绕重试、超时、幂等、限流、熔断、降级进行了综合比较与组合设计分析\n\n- 文件清单：`E:\\Codes\\ABC\\work-duo\\eval-workspace\\eval-A-M5-1\\file_manifest.txt`\n  - 超过 10 行\n  - 已列出六篇主题文档、索引、侦察结论、综述和清单文件\n  - 包含 `research_note.md` 和 `knowledge_base/index.json`】【。",
+  "thinkingLen": 3094,
+  "eventCount": 158,
+  "kbCalls": 0,
+  "artifactScore": 1
+}

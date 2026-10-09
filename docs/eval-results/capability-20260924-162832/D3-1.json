@@ -1,0 +1,30 @@
+{
+  "caseId": "D3-1",
+  "dim": "D3",
+  "title": "单步闭环",
+  "status": "done",
+  "autoPass": false,
+  "autoScore": 0,
+  "durationMs": 6151,
+  "asserts": [
+    {
+      "name": "status_done",
+      "ok": true,
+      "detail": "done"
+    },
+    {
+      "name": "app_v1",
+      "ok": false,
+      "detail": "missing app.txt"
+    },
+    {
+      "name": "reply_or_summary",
+      "ok": true,
+      "detail": ""
+    }
+  ],
+  "counts": {},
+  "runId": null,
+  "notes": "",
+  "at": "2026-09-24T08:32:28.657Z"
+}

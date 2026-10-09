@@ -1,0 +1,25 @@
+{
+  "caseId": "SK-3",
+  "dim": "Skill",
+  "title": "技能文件读写",
+  "status": "done",
+  "autoPass": true,
+  "autoScore": 1,
+  "durationMs": 26,
+  "asserts": [
+    {
+      "name": "write_ok",
+      "ok": true,
+      "detail": "notes/README.md"
+    },
+    {
+      "name": "roundtrip",
+      "ok": true,
+      "detail": "cap-roundtrip-1790507740379\n"
+    }
+  ],
+  "counts": {},
+  "runId": null,
+  "notes": "",
+  "at": "2026-09-27T11:15:40.404Z"
+}

@@ -1,0 +1,30 @@
+{
+  "caseId": "D6-2",
+  "dim": "D6",
+  "title": "计划门禁",
+  "status": "done",
+  "autoPass": false,
+  "autoScore": 0,
+  "durationMs": 65919,
+  "asserts": [
+    {
+      "name": "saw_plan_gate",
+      "ok": false,
+      "detail": "{\"agentId\":\"cf2db508-1cd7-433f-bee9-daccd8cead97\",\"runId\":\"run-1790239429140-18\""
+    },
+    {
+      "name": "reject_ack",
+      "ok": false,
+      "detail": ""
+    },
+    {
+      "name": "terminal_after_reject",
+      "ok": false,
+      "detail": "running"
+    }
+  ],
+  "counts": {},
+  "runId": null,
+  "notes": "",
+  "at": "2026-09-24T08:44:55.035Z"
+}

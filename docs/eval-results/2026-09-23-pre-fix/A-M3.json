@@ -1,0 +1,171 @@
+{
+  "caseId": "A-M3",
+  "slot": 0,
+  "scene": "A",
+  "kind": "M",
+  "title": "批量URL并发爬取+记忆中间态",
+  "model": "96af449e-dfc0-48ec-b077-aa9f02b43d64",
+  "workspace": "E:/Codes/ABC/work-duo/eval-workspace/eval-A-M3",
+  "startedAt": "2026-09-23T04:45:59.411Z",
+  "status": "done",
+  "runId": "run-1790138759441-47",
+  "durationMs": 391927,
+  "artifacts": [],
+  "artifactCheck": [
+    {
+      "artifact": "doc_index.json",
+      "ok": true
+    },
+    {
+      "artifact": "doc_summary.md",
+      "ok": true
+    }
+  ],
+  "traceCounts": {
+    "events": 92,
+    "reply_chars": 413,
+    "thinking_chars": 2962
+  },
+  "replyLen": 413,
+  "kbHits": 0,
+  "recoveries": 0,
+  "error": null,
+  "metrics": {
+    "ha": {
+      "terminal": true,
+      "status": "done"
+    },
+    "perf": {
+      "durationMs": 391927
+    },
+    "heal": {
+      "replyLen": 413
+    }
+  },
+  "files": [
+    {
+      "rel": ".wd_mem/.gitignore",
+      "size": 310,
+      "mtime": 1790138759444.0957
+    },
+    {
+      "rel": ".wd_mem/data/mdn_01.html",
+      "size": 228458,
+      "mtime": 1790138840680.3994
+    },
+    {
+      "rel": ".wd_mem/data/mdn_02.html",
+      "size": 213537,
+      "mtime": 1790138840871.121
+    },
+    {
+      "rel": ".wd_mem/data/mdn_03.html",
+      "size": 234367,
+      "mtime": 1790138841057.989
+    },
+    {
+      "rel": ".wd_mem/data/mdn_04.html",
+      "size": 153352,
+      "mtime": 1790138841211.9172
+    },
+    {
+      "rel": ".wd_mem/data/mdn_05.html",
+      "size": 181499,
+      "mtime": 1790138841428.4412
+    },
+    {
+      "rel": ".wd_mem/data/mdn_06.html",
+      "size": 201396,
+      "mtime": 1790138841644.5164
+    },
+    {
+      "rel": ".wd_mem/data/mdn_07.html",
+      "size": 166862,
+      "mtime": 1790138841860.797
+    },
+    {
+      "rel": ".wd_mem/data/mdn_08.html",
+      "size": 371059,
+      "mtime": 1790138842408.8606
+    },
+    {
+      "rel": ".wd_mem/data/mdn_09.html",
+      "size": 354406,
+      "mtime": 1790138843117.862
+    },
+    {
+      "rel": ".wd_mem/data/mdn_10.html",
+      "size": 195712,
+      "mtime": 1790138843394.1426
+    },
+    {
+      "rel": ".wd_mem/graph/edges.jsonl",
+      "size": 1018,
+      "mtime": 1790139145847.2678
+    },
+    {
+      "rel": ".wd_mem/graph/nodes.jsonl",
+      "size": 17405,
+      "mtime": 1790139145847.2678
+    },
+    {
+      "rel": ".wd_mem/graph/sessions/e7cf74a2-443b-40d3-84f8-41264ba02808.json",
+      "size": 8171,
+      "mtime": 1790139145848.2947
+    },
+    {
+      "rel": ".wd_mem/graph/_index.json",
+      "size": 1861,
+      "mtime": 1790139145847.2678
+    },
+    {
+      "rel": ".wd_mem/knowledge/MEMORY.md",
+      "size": 133,
+      "mtime": 1790138759444.0957
+    },
+    {
+      "rel": ".wd_mem/README.md",
+      "size": 1378,
+      "mtime": 1790138759444.0957
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/build_mdn_index.mjs",
+      "size": 2605,
+      "mtime": 1790138963699.7017
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/injected_validate_doc_outputs.py",
+      "size": 3952,
+      "mtime": 1790139128785.15
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/verify_mdn_outputs.mjs",
+      "size": 1091,
+      "mtime": 1790138993704.786
+    },
+    {
+      "rel": ".wd_mem/validate_doc_outputs.py",
+      "size": 3890,
+      "mtime": 1790139125444.0967
+    },
+    {
+      "rel": "doc_index.json",
+      "size": 1674,
+      "mtime": 1790138963737.8457
+    },
+    {
+      "rel": "doc_summary.md",
+      "size": 1318,
+      "mtime": 1790138963739.2803
+    }
+  ],
+  "agentId": "6b89f3f3-f9cc-45b2-9fa5-179478d3b817",
+  "agentIdentifier": "l2-a-m3-mudmeaye-f2lgom",
+  "modelName": "AG:DeepSeek-V4.1-Flash",
+  "sessionId": "e7cf74a2-443b-40d3-84f8-41264ba02808",
+  "reply": "已生成/更新 doc_index.json、doc_summary.md\n已完成当前步骤，10 个 MDN 文档页已并发抓取并解析成功。\n\n产出文件：\n\n- `E:/Codes/ABC/work-duo/eval-workspace/eval-A-M3/doc_index.json`\n  - 合法 JSON\n  - 包含按输入顺序排列的 10 条 `url`、`title`、`h1` 记录\n- `E:/Codes/ABC/work-duo/eval-workspace/eval-A-M3/doc_summary.md`\n  - 已生成 Markdown 表格\n  - 共 15 行，包含 `URL`、`title`、`h1`\n\n已完成长期记忆沉淀：`l2-a-m3-doc-topics`。\n\n「校验索引与汇总完整性」已生成/更新 validate_doc_outputs.py（执行轮次达预算上限，产物经客观校验无误）",
+  "thinkingLen": 2962,
+  "eventCount": 92,
+  "kbCalls": 0,
+  "artifactScore": 1
+}

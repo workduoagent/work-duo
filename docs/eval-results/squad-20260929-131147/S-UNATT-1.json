@@ -1,0 +1,39 @@
+{
+  "caseId": "S-UNATT-1",
+  "dim": "squad",
+  "title": "无人值守：schedule/api 三路插话全拒（配置已还原）",
+  "status": "failed",
+  "autoPass": false,
+  "autoScore": 0,
+  "asserts": [
+    {
+      "name": "api 模式 run 触发",
+      "ok": true,
+      "detail": "{\"ok\":true,\"sessionId\":\"sqs_1790658707215794700_1\",\"waited\":false}"
+    },
+    {
+      "name": "live inject 拒绝（无人值守）",
+      "ok": true,
+      "detail": "squad_inject_to_task 工具错误: {\"error\":\"无人值守会话（schedule/api）不支持插话\"}"
+    },
+    {
+      "name": "pre_talk 拒绝（无人值守）",
+      "ok": true,
+      "detail": "squad_talk_to_task 工具错误: {\"error\":\"无人值守会话（schedule/api）不支持插话\"}"
+    },
+    {
+      "name": "broadcast 拒绝（无人值守）",
+      "ok": false,
+      "detail": ""
+    },
+    {
+      "name": "run_strategy 已还原",
+      "ok": true,
+      "detail": ""
+    }
+  ],
+  "sessionId": "sqs_1790658707215794700_1",
+  "durationMs": 5056,
+  "notes": "",
+  "at": "2026-09-29T05:11:52.253Z"
+}

@@ -1,0 +1,33 @@
+{
+  "caseId": "B6-2",
+  "dim": "B知识库",
+  "title": "多库归属（产品 A/B 规格不混淆）",
+  "status": "done",
+  "autoPass": true,
+  "autoScore": 1,
+  "durationMs": 6045,
+  "asserts": [
+    {
+      "name": "status_done",
+      "ok": true,
+      "detail": "done"
+    },
+    {
+      "name": "answers_5500",
+      "ok": true,
+      "detail": "5500mAh"
+    },
+    {
+      "name": "not_confused_with_A",
+      "ok": true,
+      "detail": "不应把产品 A 的 4000mAh 混入"
+    }
+  ],
+  "counts": {
+    "prompt": 3252,
+    "completion": 37
+  },
+  "runId": "run-1790510599609-62",
+  "notes": "",
+  "at": "2026-09-27T12:03:25.637Z"
+}

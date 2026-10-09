@@ -1,0 +1,20 @@
+{
+  "caseId": "PL-3",
+  "dim": "Plugin",
+  "title": "reject node",
+  "status": "done",
+  "autoPass": false,
+  "autoScore": 0,
+  "durationMs": 9,
+  "asserts": [
+    {
+      "name": "reject_node",
+      "ok": false,
+      "detail": "unexpected ok: {\"data\":{\"createdAt\":\"2026-09-24T06:11:59.161Z\",\"dependencies\":[],\"description\":"
+    }
+  ],
+  "counts": {},
+  "runId": null,
+  "notes": "",
+  "at": "2026-09-24T06:11:59.168Z"
+}

@@ -1,0 +1,43 @@
+{
+  "caseId": "K2-3",
+  "dim": "K编码",
+  "title": "跨文件功能：库存对账报告（py-cross-file-inventory）",
+  "status": "failed",
+  "autoPass": false,
+  "autoScore": 0,
+  "durationMs": 482017,
+  "asserts": [
+    {
+      "name": "status_done",
+      "ok": false,
+      "detail": "timeout"
+    },
+    {
+      "name": "reply_nonempty",
+      "ok": false,
+      "detail": ""
+    },
+    {
+      "name": "artifact:SELFTEST.md",
+      "ok": true,
+      "detail": "工作空间应存在 inv-project/SELFTEST.md"
+    },
+    {
+      "name": "artifact:README.md",
+      "ok": true,
+      "detail": "工作空间应存在 inv-project/README.md"
+    },
+    {
+      "name": "test_cmd_evidence",
+      "ok": true,
+      "detail": "轨迹或回复应有测试通过证据"
+    }
+  ],
+  "counts": {
+    "prompt": 0,
+    "completion": 0
+  },
+  "runId": "run-1790508662335-42",
+  "notes": "",
+  "at": "2026-09-27T11:39:04.335Z"
+}

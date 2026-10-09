@@ -1,0 +1,48 @@
+{
+  "caseId": "T4-1",
+  "dim": "T数据",
+  "title": "CSV 区域汇总（runner 独立重算）",
+  "status": "done",
+  "autoPass": true,
+  "autoScore": 1,
+  "durationMs": 45316,
+  "asserts": [
+    {
+      "name": "status_done",
+      "ok": true,
+      "detail": "done"
+    },
+    {
+      "name": "summary_md",
+      "ok": true,
+      "detail": "summary.md 缺失"
+    },
+    {
+      "name": "sum:华东",
+      "ok": true,
+      "detail": "期望 12605：含 12605"
+    },
+    {
+      "name": "sum:华南",
+      "ok": true,
+      "detail": "期望 10475：含 10475"
+    },
+    {
+      "name": "sum:华北",
+      "ok": true,
+      "detail": "期望 9145：含 9145"
+    },
+    {
+      "name": "total",
+      "ok": true,
+      "detail": "期望 32225：含 32225"
+    }
+  ],
+  "counts": {
+    "prompt": 40620,
+    "completion": 572
+  },
+  "runId": "run-1790515961241-4",
+  "notes": "",
+  "at": "2026-09-27T13:33:26.540Z"
+}

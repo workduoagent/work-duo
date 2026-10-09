@@ -1,0 +1,183 @@
+{
+  "caseId": "C-M2",
+  "slot": 1,
+  "scene": "C",
+  "kind": "M",
+  "title": "逻辑缺陷修复（购物车合计与满减）",
+  "model": "96af449e-dfc0-48ec-b077-aa9f02b43d64",
+  "workspace": "E:/Codes/ABC/work-duo/eval-workspace/eval-C-M2-1",
+  "startedAt": "2026-09-23T12:12:28.818Z",
+  "status": "done",
+  "runId": "run-1790165548945-3",
+  "durationMs": 491369,
+  "artifacts": [],
+  "artifactCheck": [
+    {
+      "artifact": "cart-proj/SELFTEST.md",
+      "ok": true
+    }
+  ],
+  "traceCounts": {
+    "events": 145,
+    "reply_chars": 667,
+    "thinking_chars": 4224
+  },
+  "replyLen": 667,
+  "kbHits": 0,
+  "recoveries": 0,
+  "error": null,
+  "metrics": {
+    "ha": {
+      "terminal": true,
+      "status": "done"
+    },
+    "perf": {
+      "durationMs": 491369
+    },
+    "heal": {
+      "replyLen": 667
+    }
+  },
+  "files": [
+    {
+      "rel": ".wd_mem/.gitignore",
+      "size": 310,
+      "mtime": 1790165548949.1226
+    },
+    {
+      "rel": ".wd_mem/graph/edges.jsonl",
+      "size": 3039,
+      "mtime": 1790166036767.2087
+    },
+    {
+      "rel": ".wd_mem/graph/nodes.jsonl",
+      "size": 23991,
+      "mtime": 1790166036766.1729
+    },
+    {
+      "rel": ".wd_mem/graph/sessions/07ffe567-a745-46df-ada4-69dd0a84c046.json",
+      "size": 12129,
+      "mtime": 1790166036769.2246
+    },
+    {
+      "rel": ".wd_mem/graph/_index.json",
+      "size": 2764,
+      "mtime": 1790166036766.1729
+    },
+    {
+      "rel": ".wd_mem/knowledge/MEMORY.md",
+      "size": 133,
+      "mtime": 1790165548947.83
+    },
+    {
+      "rel": ".wd_mem/pytest_final.txt",
+      "size": 225,
+      "mtime": 1790166032898.5342
+    },
+    {
+      "rel": ".wd_mem/README.md",
+      "size": 1378,
+      "mtime": 1790165548949.1226
+    },
+    {
+      "rel": ".wd_mem/recon.md",
+      "size": 2277,
+      "mtime": 1790165695065.752
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/injected_finalize_selftest.py",
+      "size": 3093,
+      "mtime": 1790166032509.0916
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/injected_recon_probe.py",
+      "size": 2074,
+      "mtime": 1790165694631.9893
+    },
+    {
+      "rel": ".wd_mem/scripts/finalize_selftest.py",
+      "size": 3029,
+      "mtime": 1790166029441.152
+    },
+    {
+      "rel": ".wd_mem/scripts/recon_probe.py",
+      "size": 2010,
+      "mtime": 1790165691879.372
+    },
+    {
+      "rel": "cart-proj/.pytest_cache/.gitignore",
+      "size": 37,
+      "mtime": 1790165695051.4062
+    },
+    {
+      "rel": "cart-proj/.pytest_cache/CACHEDIR.TAG",
+      "size": 191,
+      "mtime": 1790165695052.4658
+    },
+    {
+      "rel": "cart-proj/.pytest_cache/README.md",
+      "size": 302,
+      "mtime": 1790165695051.4062
+    },
+    {
+      "rel": "cart-proj/.pytest_cache/v/cache/lastfailed",
+      "size": 2,
+      "mtime": 1790166032888.229
+    },
+    {
+      "rel": "cart-proj/.pytest_cache/v/cache/nodeids",
+      "size": 134,
+      "mtime": 1790166032888.229
+    },
+    {
+      "rel": "cart-proj/cart.py",
+      "size": 410,
+      "mtime": 1790165938954.071
+    },
+    {
+      "rel": "cart-proj/requirements.txt",
+      "size": 7,
+      "mtime": 1790165340675.6223
+    },
+    {
+      "rel": "cart-proj/SELFTEST.md",
+      "size": 1742,
+      "mtime": 1790166032898.5342
+    },
+    {
+      "rel": "cart-proj/test_cart.py",
+      "size": 289,
+      "mtime": 1790165340678.812
+    },
+    {
+      "rel": "cart-proj/__pycache__/cart.cpython-311.pyc",
+      "size": 915,
+      "mtime": 1790166032883.5522
+    },
+    {
+      "rel": "cart-proj/__pycache__/test_cart.cpython-311-pytest-9.1.1.pyc",
+      "size": 4012,
+      "mtime": 1790165695012.318
+    }
+  ],
+  "agentId": "7cefbff9-e253-4f9b-956f-d49aff2b92d4",
+  "agentIdentifier": "l2-c-m2-mue2chtf-y99k1k",
+  "modelName": "AG:DeepSeek-V4.1-Flash",
+  "seedTier": "logic",
+  "seedId": "py-logic-cart",
+  "sessionId": "07ffe567-a745-46df-ada4-69dd0a84c046",
+  "reply": "已生成/更新 recon.md\n已完成步骤 1：运行测试并定位逻辑问题。\n\n- pytest 基线：2 failed, 1 passed\n- 已定位：\n  - 合计计算漏乘商品单价\n  - 满减条件错误，应包含 10000 分边界\n- 已记录 `cart.py` 与 `test_cart.py` 的 SHA-256 基线哈希\n- 未修改源码、测试文件或 `SELFTEST.md`\n- 产出文件已确认生成：\n\n`E:\\Codes\\ABC\\work-duo\\eval-workspace\\eval-C-M2-1\\.wd_mem\\recon.md`\n\n已生成/更新 SELFTEST.md\n当前步骤已完成。\n\n已读取 `.wd_mem/recon.md`，并在修复前建立文档骨架，包含以下章节：\n\n- 问题清单\n- 修复说明\n- 最终 pytest 摘要\n\n产出文件完整路径：\n\n`E:\\Codes\\ABC\\work-duo\\eval-workspace\\eval-C-M2-1\\cart-proj\\SELFTEST.md`\n\n本步骤未修改 `cart.py` 或任何测试文件。\n\n已生成/更新 cart.py、pytest_final.txt\n「仅修复 cart.py 并跑全量测试」已生成/更新 cart.py（执行轮次达预算上限，产物经客观校验无误）\n\n已生成/更新 SELFTEST.md、cart.py\n「回填文档并完成交付核验」已生成/更新 finalize_selftest.py（执行轮次达预算上限，产物经客观校验无误）",
+  "thinkingLen": 4224,
+  "eventCount": 145,
+  "kbCalls": 0,
+  "artifactScore": 1,
+  "judge": {
+    "cmd": "python -m pytest test_cart.py -v",
+    "passed": 3,
+    "failed": 0,
+    "errors": 0,
+    "resolved": true,
+    "execBy": "outer-bash"
+  },
+  "resolved": true
+}

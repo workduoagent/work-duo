@@ -1,0 +1,30 @@
+{
+  "caseId": "SK-2",
+  "dim": "Skill",
+  "title": "技能创建",
+  "status": "done",
+  "autoPass": true,
+  "autoScore": 1,
+  "durationMs": 99,
+  "asserts": [
+    {
+      "name": "upsert_ok",
+      "ok": true,
+      "detail": "{\"createdAt\":\"2026-09-24T07:40:18.931Z\",\"description\":\"cap suite\",\"id\":\"18515b27"
+    },
+    {
+      "name": "get_markdown",
+      "ok": true,
+      "detail": "{\"identifier\":\"cap-test-skill-muf82c75\",\"tree\":{\"children\":[{\"children\":[],\"isDir\":true,\"name\":\"asse"
+    },
+    {
+      "name": "has_scripts",
+      "ok": true,
+      "detail": "{\"identifier\":\"cap-test-skill-muf82c75\",\"tree\":{\"children\":[{\"children\":[],\"isDir\":true,\"name\":\"assets\",\"relPath\":\"assets\"},{\"children\":[],\"isDir\":tru"
+    }
+  ],
+  "counts": {},
+  "runId": null,
+  "notes": "",
+  "at": "2026-09-24T07:40:18.980Z"
+}

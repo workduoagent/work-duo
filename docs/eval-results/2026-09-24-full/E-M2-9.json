@@ -1,0 +1,138 @@
+{
+  "caseId": "E-M2",
+  "slot": 9,
+  "scene": "E",
+  "kind": "M",
+  "title": "长上下文压缩后信息保留",
+  "model": "96af449e-dfc0-48ec-b077-aa9f02b43d64",
+  "workspace": "E:/Codes/ABC/work-duo/eval-workspace-full/eval-E-M2-9",
+  "startedAt": "2026-09-23T17:44:00.080Z",
+  "status": "done",
+  "runId": "run-1790185594809-33",
+  "durationMs": 196877,
+  "artifacts": [],
+  "artifactCheck": [
+    {
+      "artifact": "ctx/seed_facts.md",
+      "ok": true
+    },
+    {
+      "artifact": "ctx/recall.md",
+      "ok": true
+    }
+  ],
+  "traceCounts": {
+    "events": 22,
+    "reply_chars": 202,
+    "thinking_chars": 493
+  },
+  "replyLen": 202,
+  "kbHits": 0,
+  "recoveries": 0,
+  "error": null,
+  "metrics": {
+    "ha": {
+      "terminal": true,
+      "status": "done"
+    },
+    "perf": {
+      "durationMs": 196877
+    },
+    "heal": {
+      "replyLen": 202
+    }
+  },
+  "files": [
+    {
+      "rel": ".wd_mem/.gitignore",
+      "size": 310,
+      "mtime": 1790185440342.3428
+    },
+    {
+      "rel": ".wd_mem/graph/edges.jsonl",
+      "size": 1277,
+      "mtime": 1790185631912.8267
+    },
+    {
+      "rel": ".wd_mem/graph/nodes.jsonl",
+      "size": 22585,
+      "mtime": 1790185631912.8267
+    },
+    {
+      "rel": ".wd_mem/graph/sessions/ed3f263d-85f2-4782-860f-c22fad427689.json",
+      "size": 8758,
+      "mtime": 1790185631915.2065
+    },
+    {
+      "rel": ".wd_mem/graph/_index.json",
+      "size": 2602,
+      "mtime": 1790185631912.8267
+    },
+    {
+      "rel": ".wd_mem/knowledge/MEMORY.md",
+      "size": 133,
+      "mtime": 1790185440341.3257
+    },
+    {
+      "rel": ".wd_mem/README.md",
+      "size": 1378,
+      "mtime": 1790185440342.3428
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/injected_count_essay.py",
+      "size": 534,
+      "mtime": 1790185588864.9988
+    },
+    {
+      "rel": ".wd_mem/scripts/count_essay.py",
+      "size": 465,
+      "mtime": 1790185586334.9338
+    },
+    {
+      "rel": "ctx/essay.md",
+      "size": 12198,
+      "mtime": 1790185569041.9824
+    },
+    {
+      "rel": "ctx/recall.md",
+      "size": 154,
+      "mtime": 1790185621062.2522
+    },
+    {
+      "rel": "ctx/seed_facts.md",
+      "size": 592,
+      "mtime": 1790185462973.4631
+    }
+  ],
+  "agentId": "bb94b325-e585-4ee5-b551-256c9439929a",
+  "agentIdentifier": "l2-e-m2-muee6u1o-oevwzi",
+  "modelName": "AG:DeepSeek-V4.1-Flash",
+  "seedTier": null,
+  "seedId": null,
+  "sessionId": "ed3f263d-85f2-4782-860f-c22fad427689",
+  "rounds": [
+    {
+      "round": 1,
+      "sessionId": "ed3f263d-85f2-4782-860f-c22fad427689",
+      "runId": "run-1790185440339-18",
+      "status": "done"
+    },
+    {
+      "round": 2,
+      "sessionId": "ed3f263d-85f2-4782-860f-c22fad427689",
+      "runId": "run-1790185474079-28",
+      "status": "done"
+    },
+    {
+      "round": 3,
+      "sessionId": "ed3f263d-85f2-4782-860f-c22fad427689",
+      "runId": "run-1790185594809-33",
+      "status": "done"
+    }
+  ],
+  "reply": "已生成/更新 recall.md\n已将第 3 条和第 7 条事实原样抄写至：\n\n`E:\\Codes\\ABC\\work-duo\\eval-workspace-full\\eval-E-M2-9\\ctx\\recall.md`\n\n抄写内容：\n- 日本的首都是东京（Tokyo）。来源：seed_facts.md 第3条\n- 光在真空中的速度约为每秒 299,792 公里。来源：seed_facts.md 第7条",
+  "thinkingLen": 493,
+  "eventCount": 22,
+  "kbCalls": 0,
+  "artifactScore": 1
+}

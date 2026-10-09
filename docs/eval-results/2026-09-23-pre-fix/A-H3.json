@@ -1,0 +1,177 @@
+{
+  "caseId": "A-H3",
+  "slot": 0,
+  "scene": "A",
+  "kind": "H",
+  "title": "全链路Skill+KB+插件",
+  "model": "96af449e-dfc0-48ec-b077-aa9f02b43d64",
+  "workspace": "E:/Codes/ABC/work-duo/eval-workspace/eval-A-H3",
+  "startedAt": "2026-09-23T03:38:42.848Z",
+  "status": "error",
+  "runId": "run-1790134722898-25",
+  "durationMs": 602968,
+  "artifacts": [],
+  "artifactCheck": [
+    {
+      "artifact": "research_rust_async.md",
+      "ok": false
+    }
+  ],
+  "traceCounts": {
+    "events": 159,
+    "reply_chars": 0,
+    "thinking_chars": 4001
+  },
+  "replyLen": 0,
+  "kbHits": 0,
+  "recoveries": 0,
+  "error": null,
+  "metrics": {
+    "ha": {
+      "terminal": true,
+      "status": "error"
+    },
+    "perf": {
+      "durationMs": 602968
+    },
+    "heal": {
+      "replyLen": 0
+    }
+  },
+  "files": [
+    {
+      "rel": ".wd_mem/.gitignore",
+      "size": 310,
+      "mtime": 1790134722900.922
+    },
+    {
+      "rel": ".wd_mem/graph/edges.jsonl",
+      "size": 2430,
+      "mtime": 1790135140020.5227
+    },
+    {
+      "rel": ".wd_mem/graph/nodes.jsonl",
+      "size": 30940,
+      "mtime": 1790135226826.6985
+    },
+    {
+      "rel": ".wd_mem/graph/_index.json",
+      "size": 3342,
+      "mtime": 1790135226827.7446
+    },
+    {
+      "rel": ".wd_mem/knowledge/MEMORY.md",
+      "size": 133,
+      "mtime": 1790134722899.9192
+    },
+    {
+      "rel": ".wd_mem/README.md",
+      "size": 1378,
+      "mtime": 1790134722900.922
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/injected_validate_l2_web_research_skill.py",
+      "size": 1800,
+      "mtime": 1790134991406.985
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/injected_validate_rust_async_kb.py",
+      "size": 2140,
+      "mtime": 1790135131756.286
+    },
+    {
+      "rel": ".wd_mem/scripts/validate_l2_web_research_skill.py",
+      "size": 1738,
+      "mtime": 1790134979459.3198
+    },
+    {
+      "rel": ".wd_mem/scripts/validate_rust_async_kb.py",
+      "size": 2078,
+      "mtime": 1790135128350.48
+    },
+    {
+      "rel": "kb/rust_async/01_futures_and_async_await.md",
+      "size": 2265,
+      "mtime": 1790135040925.8513
+    },
+    {
+      "rel": "kb/rust_async/02_executor_and_reactor.md",
+      "size": 2596,
+      "mtime": 1790135057224.5742
+    },
+    {
+      "rel": "kb/rust_async/03_tokio_runtime.md",
+      "size": 2477,
+      "mtime": 1790135072881.3386
+    },
+    {
+      "rel": "kb/rust_async/04_cancellation_and_concurrency.md",
+      "size": 2880,
+      "mtime": 1790135090327.5637
+    },
+    {
+      "rel": "kb/rust_async/index.json",
+      "size": 3435,
+      "mtime": 1790135112606.9846
+    },
+    {
+      "rel": "research/raw/rust-async-book.html",
+      "size": 27730,
+      "mtime": 1790135214299.1917
+    },
+    {
+      "rel": "research/raw/rust-future.html",
+      "size": 23396,
+      "mtime": 1790135214849.3477
+    },
+    {
+      "rel": "research/raw/tokio-runtime.html",
+      "size": 84419,
+      "mtime": 1790135215731.7332
+    },
+    {
+      "rel": "research/raw/tokio-spawning.html",
+      "size": 69716,
+      "mtime": 1790135216652.6594
+    },
+    {
+      "rel": "research/raw_async_book.html",
+      "size": 27730,
+      "mtime": 1790135265585.6592
+    },
+    {
+      "rel": "research/raw_future.html",
+      "size": 23396,
+      "mtime": 1790135266623.9626
+    },
+    {
+      "rel": "research/raw_tokio_runtime.html",
+      "size": 60566,
+      "mtime": 1790135274419.5242
+    },
+    {
+      "rel": "research/raw_tokio_spawning.html",
+      "size": 69716,
+      "mtime": 1790135275185.1494
+    },
+    {
+      "rel": "skills/l2-web-research/skill.json",
+      "size": 3081,
+      "mtime": 1790134948800.9731
+    },
+    {
+      "rel": "skills/l2-web-research/SKILL.md",
+      "size": 2697,
+      "mtime": 1790134964792.807
+    }
+  ],
+  "agentId": "7e69ba21-f7d9-4611-9616-e74bfc5ae52a",
+  "agentIdentifier": "l2-a-h3-mudjzsbo",
+  "modelName": "AG:DeepSeek-V4.1-Flash",
+  "sessionId": "6bda6888-b0e7-4905-89a4-479bcbe53495",
+  "reply": "",
+  "thinkingLen": 4001,
+  "eventCount": 159,
+  "kbCalls": 0,
+  "artifactScore": 0
+}

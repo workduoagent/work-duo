@@ -1,0 +1,19 @@
+{
+  "caseId": "S-UNATT-1",
+  "dim": "squad",
+  "title": "S-UNATT-1",
+  "status": "failed",
+  "autoPass": false,
+  "autoScore": 0,
+  "asserts": [
+    {
+      "name": "执行异常",
+      "ok": false,
+      "detail": "Cannot read properties of undefined (reading 'slice')"
+    }
+  ],
+  "sessionId": null,
+  "durationMs": 5060,
+  "notes": "",
+  "at": "2026-09-29T05:11:27.391Z"
+}

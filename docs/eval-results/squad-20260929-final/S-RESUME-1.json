@@ -1,0 +1,34 @@
+{
+  "caseId": "S-RESUME-1",
+  "dim": "squad",
+  "title": "续跑幂等：done 跳过+pending 重跑",
+  "status": "done",
+  "autoPass": true,
+  "autoScore": 1,
+  "asserts": [
+    {
+      "name": "resume 重入受理",
+      "ok": true,
+      "detail": "{\"ok\":true,\"resumed\":\"reenter\",\"sessionId\":\"sqs_1790665613968309900_15\"}"
+    },
+    {
+      "name": "done 节点真跳过（t1 零新 handoff）",
+      "ok": true,
+      "detail": "before=1 after=1"
+    },
+    {
+      "name": "pending 节点重跑完成",
+      "ok": true,
+      "detail": "{\"t1\":{\"title\":\"续跑一\",\"assignee\":\"Python 后端\",\"status\":\"done\",\"handoff_id\":\"sqdh_1790665629336_00126\"},\"t2\":{\"title\":\"续跑二\",\"assignee\":\"React 前端\",\"status"
+    },
+    {
+      "name": "重入后终态 done",
+      "ok": true,
+      "detail": "status=done"
+    }
+  ],
+  "sessionId": "sqs_1790665613968309900_15",
+  "durationMs": 61471,
+  "notes": "",
+  "at": "2026-09-29T07:07:55.400Z"
+}

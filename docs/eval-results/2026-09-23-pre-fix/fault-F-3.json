@@ -1,0 +1,12 @@
+{
+  "faultId": "F-3",
+  "startedAt": "2026-09-23T04:35:56.784Z",
+  "observations": [
+    {
+      "ok": true,
+      "msg": "A-H5 降级容错 status=done artifacts=1"
+    }
+  ],
+  "ok": true,
+  "finishedAt": "2026-09-23T04:41:25.462Z"
+}

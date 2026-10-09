@@ -1,0 +1,38 @@
+{
+  "caseId": "K2-2",
+  "dim": "K编码",
+  "title": "真实缺陷修复：正则 ReDoS（py-security-auth-regex-redos）",
+  "status": "done",
+  "autoPass": true,
+  "autoScore": 1,
+  "durationMs": 222970,
+  "asserts": [
+    {
+      "name": "status_done",
+      "ok": true,
+      "detail": "done"
+    },
+    {
+      "name": "reply_nonempty",
+      "ok": true,
+      "detail": "（暂定完成：无客观依据，建议人工确认）\n「修复认证头解析的灾难性回溯」已生成/更新 auth_compat.py、run_auth_tests.py、inspe"
+    },
+    {
+      "name": "artifact:redos_fix.md",
+      "ok": true,
+      "detail": "工作空间应存在 redos-proj/redos_fix.md"
+    },
+    {
+      "name": "test_cmd_evidence",
+      "ok": true,
+      "detail": "轨迹或回复应有测试通过证据"
+    }
+  ],
+  "counts": {
+    "prompt": 160133,
+    "completion": 4261
+  },
+  "runId": "run-1790508439307-41",
+  "notes": "",
+  "at": "2026-09-27T11:31:02.261Z"
+}

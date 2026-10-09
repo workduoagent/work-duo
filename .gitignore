@@ -33,24 +33,22 @@ dist-verify2
 *.sw?
 
 pnpm-lock.yaml
-# L2 测评工作空间（运行时产物，不入库）
-eval-workspace*/
-
-eval-workspace-repeat/
-
-eval-workspace-final/
-
-eval-workspace-faults/
-
-eval-workspace-full/
-
-eval-workspace-p4proj/
 
 # 运行时产物（小分队工作区/交接箱/记忆），不进 git
 src-tauri/.wd_mem/
 
-# .workspace 运行时产物（测评/跑案例结果），不进 git
+# .workspace 运行时产物（跑案例的临时结果），不进 git
+# 注意：docs/eval-results/ 是**已入库的测评证据**（发布门禁基线 scorecard
+# 在squad-20260929-final/gate.json），与本条无关，不要一起忽略。
 .workspace/.eval-results/
+
+# L2 测评工作区（运行时产物，可由 harness 重建，不进 git）
+eval-workspace*/
+eval-workspace-repeat/
+eval-workspace-final/
+eval-workspace-faults/
+eval-workspace-full/
+eval-workspace-p4proj/
 
 # 客户端私有目录（随客户端/设备变动，不便携带）
 # 项目记忆已迁至 .workspace/.memory/ 并入库，见该目录 README.md

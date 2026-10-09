@@ -1,0 +1,74 @@
+{
+  "caseId": "H-M2",
+  "slot": 1,
+  "scene": "H",
+  "kind": "M",
+  "title": "意图分流：灰色地带弱信号不落盘",
+  "model": "96af449e-dfc0-48ec-b077-aa9f02b43d64",
+  "workspace": "E:/Codes/ABC/work-duo/eval-workspace-full/eval-H-M2-1",
+  "startedAt": "2026-09-24T06:08:19.996Z",
+  "status": "done",
+  "runId": "run-1790230100417-6",
+  "durationMs": 18259,
+  "artifacts": [],
+  "artifactCheck": [],
+  "traceCounts": {
+    "completion_tokens": 126,
+    "events": 3,
+    "prompt_tokens": 1953,
+    "reply_chars": 82,
+    "thinking_chars": 10
+  },
+  "replyLen": 82,
+  "kbHits": 0,
+  "recoveries": 0,
+  "error": null,
+  "metrics": {
+    "ha": {
+      "terminal": true,
+      "status": "done"
+    },
+    "perf": {
+      "durationMs": 18259
+    },
+    "heal": {
+      "replyLen": 82
+    }
+  },
+  "files": [
+    {
+      "rel": ".wd_mem/.gitignore",
+      "size": 310,
+      "mtime": 1790230100423.226
+    },
+    {
+      "rel": ".wd_mem/knowledge/MEMORY.md",
+      "size": 133,
+      "mtime": 1790230100422.227
+    },
+    {
+      "rel": ".wd_mem/README.md",
+      "size": 1378,
+      "mtime": 1790230100423.226
+    }
+  ],
+  "agentId": "4d7d879f-9659-45bd-9db1-ed0ffcf7a10e",
+  "agentIdentifier": "l2-h-m2-muf4s1tm-8r1lma",
+  "modelName": "AG:DeepSeek-V4.1-Flash",
+  "seedTier": null,
+  "seedId": null,
+  "sessionId": "e3b3fcd7-4a6d-4c86-b5ff-fe4052237abe",
+  "reply": "“今天天气真不错。”整体语气**轻松、愉快、积极**，是在表达对天气的满意，也可能是在开启轻松的闲聊。具体是单纯感叹还是借天气引出话题，还要看上下文和说话时的语调。",
+  "thinkingLen": 10,
+  "eventCount": 3,
+  "kbCalls": 0,
+  "signals": {
+    "hasPlanGenerated": false,
+    "planSteps": 0,
+    "toolCalls": [],
+    "writeCount": 0,
+    "sensitiveCount": 0,
+    "errorCount": 0
+  },
+  "artifactScore": 1
+}

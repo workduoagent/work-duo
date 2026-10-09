@@ -1,0 +1,38 @@
+{
+  "caseId": "K2-6",
+  "dim": "K编码",
+  "title": "代码评审：只出报告不改码",
+  "status": "done",
+  "autoPass": true,
+  "autoScore": 1,
+  "durationMs": 54363,
+  "asserts": [
+    {
+      "name": "status_done",
+      "ok": true,
+      "detail": "done"
+    },
+    {
+      "name": "review_md",
+      "ok": true,
+      "detail": "# legacy.py 代码评审\n\n## 问题 1：文件句柄未关闭\n- **问题：** `load()` 中通过 `open(path)` 打开文件后读取内容，但没有关闭文件；若读取或解析失败，也没有清理逻辑。`save()` 虽然在正常执"
+    },
+    {
+      "name": "covers_handle_or_import",
+      "ok": true,
+      "detail": "报告应覆盖句柄/导入类问题"
+    },
+    {
+      "name": "source_untouched",
+      "ok": true,
+      "detail": "legacy.py 必须逐字节原样（禁改码）"
+    }
+  ],
+  "counts": {
+    "prompt": 25076,
+    "completion": 1411
+  },
+  "runId": "run-1790509316395-45",
+  "notes": "",
+  "at": "2026-09-27T11:42:50.741Z"
+}

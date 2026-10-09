@@ -1,0 +1,30 @@
+{
+  "caseId": "D5-1",
+  "dim": "D5",
+  "title": "客观 criteria",
+  "status": "done",
+  "autoPass": true,
+  "autoScore": 1,
+  "durationMs": 57411,
+  "asserts": [
+    {
+      "name": "status_done",
+      "ok": true,
+      "detail": "done"
+    },
+    {
+      "name": "out_ok",
+      "ok": true,
+      "detail": "PIPELINE_OK\n"
+    },
+    {
+      "name": "evidence_or_reply",
+      "ok": true,
+      "detail": "已生成/更新 out.txt\n已创建并读取自检 `out.txt`，确认内容包含 `PIPELINE_OK`。\n\n完整路径：`E:/Codes/ABC/work"
+    }
+  ],
+  "counts": {},
+  "runId": null,
+  "notes": "",
+  "at": "2026-09-27T11:11:38.369Z"
+}

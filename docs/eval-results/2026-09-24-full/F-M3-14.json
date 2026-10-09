@@ -1,0 +1,198 @@
+{
+  "caseId": "F-M3",
+  "slot": 14,
+  "scene": "F",
+  "kind": "M",
+  "title": "runtime/data 复用（跨轮）",
+  "model": "96af449e-dfc0-48ec-b077-aa9f02b43d64",
+  "workspace": "E:/Codes/ABC/work-duo/eval-workspace-full/eval-F-M3-14",
+  "startedAt": "2026-09-23T17:44:00.081Z",
+  "status": "done",
+  "runId": "run-1790185491720-29",
+  "durationMs": 111930,
+  "artifacts": [],
+  "artifactCheck": [
+    {
+      "artifact": "datause/summary.md",
+      "ok": true
+    }
+  ],
+  "traceCounts": {
+    "events": 30,
+    "reply_chars": 243,
+    "thinking_chars": 709
+  },
+  "replyLen": 243,
+  "kbHits": 0,
+  "recoveries": 0,
+  "error": null,
+  "metrics": {
+    "ha": {
+      "terminal": true,
+      "status": "done"
+    },
+    "perf": {
+      "durationMs": 111930
+    },
+    "heal": {
+      "replyLen": 243
+    }
+  },
+  "files": [
+    {
+      "rel": ".wd_mem/.gitignore",
+      "size": 310,
+      "mtime": 1790185440274.472
+    },
+    {
+      "rel": ".wd_mem/graph/edges.jsonl",
+      "size": 756,
+      "mtime": 1790185550214.719
+    },
+    {
+      "rel": ".wd_mem/graph/nodes.jsonl",
+      "size": 8991,
+      "mtime": 1790185550214.719
+    },
+    {
+      "rel": ".wd_mem/graph/sessions/cf9e0a0e-f9f2-477d-8885-21ff03b50e1b.json",
+      "size": 2123,
+      "mtime": 1790185487031.5742
+    },
+    {
+      "rel": ".wd_mem/graph/sessions/f8bff453-009b-41fd-ace6-0cb37b3abd8a.json",
+      "size": 2795,
+      "mtime": 1790185550216.175
+    },
+    {
+      "rel": ".wd_mem/graph/_index.json",
+      "size": 1748,
+      "mtime": 1790185550214.719
+    },
+    {
+      "rel": ".wd_mem/knowledge/MEMORY.md",
+      "size": 133,
+      "mtime": 1790185440273.4763
+    },
+    {
+      "rel": ".wd_mem/README.md",
+      "size": 1378,
+      "mtime": 1790185440274.472
+    },
+    {
+      "rel": ".wd_mem/runtime/calc_sales.py",
+      "size": 476,
+      "mtime": 1790185543453.7922
+    },
+    {
+      "rel": ".wd_mem/runtime/data/sales.csv",
+      "size": 1351,
+      "mtime": 1790185479098.599
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/injected_calc_sales.py",
+      "size": 546,
+      "mtime": 1790185546212.475
+    },
+    {
+      "rel": "datause/summary.md",
+      "size": 508,
+      "mtime": 1790185527685.8997
+    }
+  ],
+  "agentId": "b62686da-ddbe-4d56-b7c1-382329096c2b",
+  "agentIdentifier": "l2-f-m3-muee6u1r-yle72x",
+  "modelName": "AG:DeepSeek-V4.1-Flash",
+  "seedTier": null,
+  "seedId": null,
+  "sessionId": "cf9e0a0e-f9f2-477d-8885-21ff03b50e1b",
+  "rounds": [
+    {
+      "round": 1,
+      "sessionId": "cf9e0a0e-f9f2-477d-8885-21ff03b50e1b",
+      "runId": "run-1790185440265-9",
+      "status": "done"
+    },
+    {
+      "round": 2,
+      "sessionId": "f8bff453-009b-41fd-ace6-0cb37b3abd8a",
+      "runId": "run-1790185491720-29",
+      "status": "done"
+    }
+  ],
+  "sessionIds": [
+    "cf9e0a0e-f9f2-477d-8885-21ff03b50e1b",
+    "f8bff453-009b-41fd-ace6-0cb37b3abd8a"
+  ],
+  "reply": "已生成/更新 summary.md\n已读取 `.wd_mem/runtime/data/sales.csv` 并按“销售额”字段核算：**总额 66,140.00，15 行**。Top3 为 SO-2025-0005（17,097.00）、SO-2025-0013（7,197.00）、SO-2025-0003（6,495.00）。\n\n汇总文件已生成并确认存在：`datause/summary.md`  \n读取文件路径：`.wd_mem/runtime/data/sales.csv`",
+  "thinkingLen": 709,
+  "eventCount": 30,
+  "kbCalls": 0,
+  "artifactScore": 1,
+  "wdMem": {
+    "structureOk": true,
+    "usedCount": 4,
+    "total": 7,
+    "items": [
+      {
+        "key": "memory",
+        "label": "长期记忆 MEMORY.md",
+        "present": true,
+        "used": true,
+        "path": ".wd_mem/knowledge/MEMORY.md",
+        "count": "0KB"
+      },
+      {
+        "key": "sessions",
+        "label": "会话摘要 sessions/",
+        "present": true,
+        "used": false,
+        "path": ".wd_mem/sessions",
+        "count": 0
+      },
+      {
+        "key": "graph",
+        "label": "实体图 graph/",
+        "present": true,
+        "used": true,
+        "path": ".wd_mem/graph",
+        "count": 4
+      },
+      {
+        "key": "artifacts",
+        "label": "设计沉淀 knowledge/artifacts/",
+        "present": true,
+        "used": false,
+        "path": ".wd_mem/knowledge/artifacts",
+        "count": 0
+      },
+      {
+        "key": "scripts",
+        "label": "可复用脚本 runtime/scripts/",
+        "present": true,
+        "used": true,
+        "path": ".wd_mem/runtime/scripts",
+        "count": 1
+      },
+      {
+        "key": "data",
+        "label": "中间数据 runtime/data/",
+        "present": true,
+        "used": true,
+        "path": ".wd_mem/runtime/data",
+        "count": 1
+      },
+      {
+        "key": "outputs",
+        "label": "产物归档 runtime/outputs/",
+        "present": true,
+        "used": false,
+        "path": ".wd_mem/runtime/outputs",
+        "count": 0
+      }
+    ],
+    "leaks": [
+      "datause/summary.md"
+    ]
+  }
+}

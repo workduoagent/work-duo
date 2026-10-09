@@ -1,0 +1,25 @@
+{
+  "caseId": "PL-4",
+  "dim": "Plugin",
+  "title": "reject 缺字段",
+  "status": "done",
+  "autoPass": false,
+  "autoScore": 0,
+  "durationMs": 8,
+  "asserts": [
+    {
+      "name": "reject_missing_id",
+      "ok": false,
+      "detail": "accepted"
+    },
+    {
+      "name": "reject_missing_script",
+      "ok": false,
+      "detail": "accepted"
+    }
+  ],
+  "counts": {},
+  "runId": null,
+  "notes": "",
+  "at": "2026-09-24T07:42:03.662Z"
+}

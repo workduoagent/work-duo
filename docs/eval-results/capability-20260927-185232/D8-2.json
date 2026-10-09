@@ -1,0 +1,35 @@
+{
+  "caseId": "D8-2",
+  "dim": "D8",
+  "title": "轨迹隔离",
+  "status": "done",
+  "autoPass": true,
+  "autoScore": 1,
+  "durationMs": 18447,
+  "asserts": [
+    {
+      "name": "both_terminal",
+      "ok": true,
+      "detail": "done/done"
+    },
+    {
+      "name": "a_has_marker",
+      "ok": true,
+      "detail": "ALPHA-mujq2g78"
+    },
+    {
+      "name": "b_has_marker",
+      "ok": true,
+      "detail": "BETA-mujq2g78"
+    },
+    {
+      "name": "no_cross",
+      "ok": true,
+      "detail": "isolation"
+    }
+  ],
+  "counts": {},
+  "runId": null,
+  "notes": "",
+  "at": "2026-09-27T11:15:40.269Z"
+}

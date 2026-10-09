@@ -1,0 +1,161 @@
+{
+  "caseId": "A-H2",
+  "slot": 1,
+  "scene": "A",
+  "kind": "H",
+  "title": "大批量ETL多格式产物",
+  "model": "96af449e-dfc0-48ec-b077-aa9f02b43d64",
+  "workspace": "E:/Codes/ABC/work-duo/eval-workspace-final/eval-A-H2-1",
+  "startedAt": "2026-09-23T15:06:03.430Z",
+  "status": "done",
+  "runId": "run-1790175963917-24",
+  "durationMs": 286248,
+  "artifacts": [],
+  "artifactCheck": [
+    {
+      "artifact": "etl_full.csv",
+      "ok": true
+    },
+    {
+      "artifact": "etl_stats.json",
+      "ok": true
+    },
+    {
+      "artifact": "etl_report.md",
+      "ok": true
+    },
+    {
+      "artifact": "etl_dist.png",
+      "ok": true
+    }
+  ],
+  "traceCounts": {
+    "events": 79,
+    "reply_chars": 187,
+    "thinking_chars": 2090
+  },
+  "replyLen": 187,
+  "kbHits": 0,
+  "recoveries": 0,
+  "error": null,
+  "metrics": {
+    "ha": {
+      "terminal": true,
+      "status": "done"
+    },
+    "perf": {
+      "durationMs": 286248
+    },
+    "heal": {
+      "replyLen": 187
+    }
+  },
+  "files": [
+    {
+      "rel": ".wd_mem/.gitignore",
+      "size": 310,
+      "mtime": 1790175963923.347
+    },
+    {
+      "rel": ".wd_mem/etl_process.py",
+      "size": 6818,
+      "mtime": 1790176223756.6895
+    },
+    {
+      "rel": ".wd_mem/graph/edges.jsonl",
+      "size": 1155,
+      "mtime": 1790176246872.8713
+    },
+    {
+      "rel": ".wd_mem/graph/nodes.jsonl",
+      "size": 14577,
+      "mtime": 1790176246871.8574
+    },
+    {
+      "rel": ".wd_mem/graph/sessions/1a5579d8-d8f5-4287-bcea-256b131f1651.json",
+      "size": 9667,
+      "mtime": 1790176246875.1404
+    },
+    {
+      "rel": ".wd_mem/graph/_index.json",
+      "size": 2151,
+      "mtime": 1790176246872.8713
+    },
+    {
+      "rel": ".wd_mem/knowledge/MEMORY.md",
+      "size": 133,
+      "mtime": 1790175963922.341
+    },
+    {
+      "rel": ".wd_mem/README.md",
+      "size": 1378,
+      "mtime": 1790175963922.341
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/auto_run_1790176110463.py",
+      "size": 735,
+      "mtime": 1790176110463.7808
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/injected_etl_process.py",
+      "size": 6888,
+      "mtime": 1790176237088.453
+    },
+    {
+      "rel": "etl_dist.png",
+      "size": 59495,
+      "mtime": 1790176237884.9526
+    },
+    {
+      "rel": "etl_full.csv",
+      "size": 29680,
+      "mtime": 1790176237268.6257
+    },
+    {
+      "rel": "etl_report.md",
+      "size": 709,
+      "mtime": 1790176237270.0923
+    },
+    {
+      "rel": "etl_stats.json",
+      "size": 3381,
+      "mtime": 1790176237268.6257
+    },
+    {
+      "rel": "page1.json",
+      "size": 555224,
+      "mtime": 1790176050265.116
+    },
+    {
+      "rel": "page2.json",
+      "size": 552794,
+      "mtime": 1790176060170.3716
+    },
+    {
+      "rel": "page3.json",
+      "size": 555861,
+      "mtime": 1790176070093.5127
+    },
+    {
+      "rel": "page4.json",
+      "size": 549960,
+      "mtime": 1790176080560.4614
+    },
+    {
+      "rel": "page5.json",
+      "size": 548584,
+      "mtime": 1790176096657.1235
+    }
+  ],
+  "agentId": "33f5cf43-55fc-4e92-a4d2-f3743ad33639",
+  "agentIdentifier": "l2-a-h2-mue8jprq-uce0g1",
+  "modelName": "AG:DeepSeek-V4.1-Flash",
+  "seedTier": null,
+  "seedId": null,
+  "sessionId": "1a5579d8-d8f5-4287-bcea-256b131f1651",
+  "reply": "已生成/更新 raw_repositories.jsonl\n「分页采集仓库数据」已通过客观校验完成（执行轮次达预算上限，产物经核验无误）\n\n已生成/更新 etl_full.csv、etl_stats.json、etl_report.md、etl_dist.png\n「清洗聚合并生成交付文件」已生成/更新 etl_process.py（执行轮次达预算上限，产物经客观校验无误）",
+  "thinkingLen": 2090,
+  "eventCount": 79,
+  "kbCalls": 0,
+  "artifactScore": 1
+}

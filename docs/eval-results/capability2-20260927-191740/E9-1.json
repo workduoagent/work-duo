@@ -1,0 +1,63 @@
+{
+  "caseId": "E9-1",
+  "dim": "E编排",
+  "title": "🏆 月度经营简报全链（KB+沙箱+xlsx+PNG+md+记忆）",
+  "status": "failed",
+  "autoPass": false,
+  "autoScore": 0,
+  "durationMs": 238076,
+  "asserts": [
+    {
+      "name": "status_done",
+      "ok": true,
+      "detail": "done"
+    },
+    {
+      "name": "md_exists",
+      "ok": true,
+      "detail": "九月经营简报.md 缺失"
+    },
+    {
+      "name": "xlsx_ok",
+      "ok": true,
+      "detail": "5590B"
+    },
+    {
+      "name": "png_ok",
+      "ok": true,
+      "detail": "5088B"
+    },
+    {
+      "name": "mom_percent_11_2",
+      "ok": true,
+      "detail": "含 11"
+    },
+    {
+      "name": "verdict_correct",
+      "ok": true,
+      "detail": "结论应为「目标达成」（11.2%≥10%）"
+    },
+    {
+      "name": "kb_search_fired",
+      "ok": true,
+      "detail": "应检索 KB"
+    },
+    {
+      "name": "plugin_calls_ge2",
+      "ok": true,
+      "detail": "custom__ 调用 5 次"
+    },
+    {
+      "name": "memory_anchored",
+      "ok": false,
+      "detail": "memory_list 2 行"
+    }
+  ],
+  "counts": {
+    "prompt": 189401,
+    "completion": 4316
+  },
+  "runId": "run-1790511656014-73",
+  "notes": "",
+  "at": "2026-09-27T12:24:54.071Z"
+}

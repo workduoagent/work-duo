@@ -1,0 +1,30 @@
+{
+  "caseId": "D1-3",
+  "dim": "D1",
+  "title": "灰色地带弱信号",
+  "status": "done",
+  "autoPass": false,
+  "autoScore": 0,
+  "durationMs": 15182,
+  "asserts": [
+    {
+      "name": "status_done",
+      "ok": true,
+      "detail": "done"
+    },
+    {
+      "name": "reply_nonempty",
+      "ok": true,
+      "detail": "“今天天气真不错。”整体语气是**轻松、愉快、带有赞叹和积极情绪**的。\n\n- **“真”**：加强语气，表示说话人对天气状况的真实赞赏。\n- **“不错”**"
+    },
+    {
+      "name": "no_workspace_write",
+      "ok": false,
+      "detail": "files=3 tools="
+    }
+  ],
+  "counts": {},
+  "runId": null,
+  "notes": "",
+  "at": "2026-09-24T06:19:58.093Z"
+}

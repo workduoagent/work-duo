@@ -1,0 +1,285 @@
+{
+  "caseId": "S-J2",
+  "slot": 1,
+  "scene": "S",
+  "kind": "M",
+  "title": "真实缺陷修复：fnmatch反转范围",
+  "model": "96af449e-dfc0-48ec-b077-aa9f02b43d64",
+  "workspace": "E:/Codes/ABC/work-duo/eval-workspace-full/eval-S-J2-1",
+  "startedAt": "2026-09-24T02:33:06.423Z",
+  "status": "done",
+  "runId": "run-1790217187406-5",
+  "durationMs": 479135,
+  "artifacts": [],
+  "artifactCheck": [
+    {
+      "artifact": "fnfix-proj/SELFTEST.md",
+      "ok": true
+    }
+  ],
+  "traceCounts": {
+    "completion_tokens": 8993,
+    "events": 143,
+    "prompt_tokens": 378750,
+    "reply_chars": 324,
+    "thinking_chars": 1198
+  },
+  "replyLen": 324,
+  "kbHits": 0,
+  "recoveries": 0,
+  "error": null,
+  "metrics": {
+    "ha": {
+      "terminal": true,
+      "status": "done"
+    },
+    "perf": {
+      "durationMs": 479135
+    },
+    "heal": {
+      "replyLen": 324
+    }
+  },
+  "files": [
+    {
+      "rel": ".wd_mem/.gitignore",
+      "size": 310,
+      "mtime": 1790214857963.4404
+    },
+    {
+      "rel": ".wd_mem/data/fnfix-pytest-output.txt",
+      "size": 15305,
+      "mtime": 1790217500068.165
+    },
+    {
+      "rel": ".wd_mem/graph/edges.jsonl",
+      "size": 1379,
+      "mtime": 1790217661370.8027
+    },
+    {
+      "rel": ".wd_mem/graph/nodes.jsonl",
+      "size": 100328,
+      "mtime": 1790217661370.8027
+    },
+    {
+      "rel": ".wd_mem/graph/sessions/523f7c2c-773d-4181-a615-0bd5fdb5ef6b.json",
+      "size": 5597,
+      "mtime": 1790217661371.8118
+    },
+    {
+      "rel": ".wd_mem/graph/sessions/c1676217-a95b-43a3-b224-dde50f42662f.json",
+      "size": 4990,
+      "mtime": 1790215994664.9158
+    },
+    {
+      "rel": ".wd_mem/graph/_index.json",
+      "size": 2911,
+      "mtime": 1790217661370.8027
+    },
+    {
+      "rel": ".wd_mem/knowledge/MEMORY.md",
+      "size": 133,
+      "mtime": 1790214857963.4404
+    },
+    {
+      "rel": ".wd_mem/README.md",
+      "size": 1378,
+      "mtime": 1790214857963.4404
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/auto_run_1790215467844.py",
+      "size": 187,
+      "mtime": 1790215467845.066
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/auto_run_1790215749939.py",
+      "size": 171,
+      "mtime": 1790215749939.1465
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/auto_run_1790215763661.py",
+      "size": 225,
+      "mtime": 1790215763660.8674
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/auto_run_1790215818530.py",
+      "size": 244,
+      "mtime": 1790215818530.382
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/auto_run_1790215873393.py",
+      "size": 331,
+      "mtime": 1790215873393.0913
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/auto_run_1790217434309.py",
+      "size": 207,
+      "mtime": 1790217434309.0398
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/auto_run_1790217511595.py",
+      "size": 290,
+      "mtime": 1790217511595.012
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/auto_run_1790217574325.py",
+      "size": 547,
+      "mtime": 1790217574325.2559
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/auto_run_1790217587746.py",
+      "size": 574,
+      "mtime": 1790217587745.9724
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/auto_run_1790217607801.py",
+      "size": 936,
+      "mtime": 1790217607803.1882
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/auto_run_1790217620000.py",
+      "size": 413,
+      "mtime": 1790217620001.265
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/auto_run_1790217654823.py",
+      "size": 464,
+      "mtime": 1790217654822.9211
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/check_pytest.py",
+      "size": 190,
+      "mtime": 1790215115953.993
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/injected_fnfix_diagnose.py",
+      "size": 543,
+      "mtime": 1790217422418.2964
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/injected_injected_run_fnfix_pytest.py",
+      "size": 395,
+      "mtime": 1790217403481.5293
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/injected_injected_run_fnfix_pytest_capture.py",
+      "size": 797,
+      "mtime": 1790217499443.246
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/injected_run_fnfix_pytest.py",
+      "size": 326,
+      "mtime": 1790215677841.2234
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/injected_run_fnfix_pytest_capture.py",
+      "size": 728,
+      "mtime": 1790215799518.3157
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/injected_run_fnfix_pytest_debug.py",
+      "size": 538,
+      "mtime": 1790215738796.337
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/show_fnmatch.py",
+      "size": 165,
+      "mtime": 1790215085782.2124
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/show_tests.py",
+      "size": 168,
+      "mtime": 1790215099391.6055
+    },
+    {
+      "rel": ".wd_mem/scripts/fnfix_diagnose.py",
+      "size": 474,
+      "mtime": 1790217418436.072
+    },
+    {
+      "rel": ".wd_mem/scripts/run_fnfix_pytest.py",
+      "size": 257,
+      "mtime": 1790215674060.298
+    },
+    {
+      "rel": ".wd_mem/scripts/run_fnfix_pytest_capture.py",
+      "size": 659,
+      "mtime": 1790215787106.5957
+    },
+    {
+      "rel": ".wd_mem/scripts/run_fnfix_pytest_debug.py",
+      "size": 469,
+      "mtime": 1790215726673.5334
+    },
+    {
+      "rel": "fnfix-proj/.pytest_cache/.gitignore",
+      "size": 37,
+      "mtime": 1790217404290.9182
+    },
+    {
+      "rel": "fnfix-proj/.pytest_cache/CACHEDIR.TAG",
+      "size": 191,
+      "mtime": 1790217404290.9182
+    },
+    {
+      "rel": "fnfix-proj/.pytest_cache/README.md",
+      "size": 302,
+      "mtime": 1790217404289.9182
+    },
+    {
+      "rel": "fnfix-proj/.pytest_cache/v/cache/lastfailed",
+      "size": 2,
+      "mtime": 1790217608251.2917
+    },
+    {
+      "rel": "fnfix-proj/.pytest_cache/v/cache/nodeids",
+      "size": 272,
+      "mtime": 1790217655273.3528
+    },
+    {
+      "rel": "fnfix-proj/fnmatch_compat.py",
+      "size": 2030,
+      "mtime": 1790217636277.889
+    },
+    {
+      "rel": "fnfix-proj/SELFTEST.md",
+      "size": 886,
+      "mtime": 1790217645608.73
+    },
+    {
+      "rel": "fnfix-proj/test_fnmatch_compat.py",
+      "size": 1584,
+      "mtime": 1790216142688.4014
+    },
+    {
+      "rel": "fnfix-proj/__pycache__/fnmatch_compat.cpython-311.pyc",
+      "size": 3477,
+      "mtime": 1790217655268.011
+    },
+    {
+      "rel": "fnfix-proj/__pycache__/test_fnmatch_compat.cpython-311-pytest-9.1.1.pyc",
+      "size": 10219,
+      "mtime": 1790217404012.5876
+    }
+  ],
+  "agentId": "1c964b24-6871-4c3c-9ff3-0c579c57e5e5",
+  "agentIdentifier": "l2-s-j2-muex3a40-mrvkkt",
+  "modelName": "AG:DeepSeek-V4.1-Flash",
+  "seedTier": "logic",
+  "seedId": "py-logic-fnmatch-revrange",
+  "sessionId": "523f7c2c-773d-4181-a615-0bd5fdb5ef6b",
+  "reply": "（暂定完成：无客观依据，建议人工确认）\n修复已完成：`fnmatch_compat.py` 对反向字符范围按空集处理，不再抛出 `re.error`；`[c-a]` 不匹配字符，`[!c-a]` 匹配任意单字符。未修改测试文件。\n\n完整 pytest 结果：**4 passed**（退出码 0）。\n\n产出文件：\n- `E:\\Codes\\ABC\\work-duo\\eval-workspace-full\\eval-S-J2-1\\fnfix-proj\\fnmatch_compat.py`\n- `E:\\Codes\\ABC\\work-duo\\eval-workspace-full\\eval-S-J2-1\\fnfix-proj\\SELFTEST.md`",
+  "thinkingLen": 1198,
+  "eventCount": 143,
+  "kbCalls": 0,
+  "artifactScore": 1,
+  "judge": {
+    "cmd": "python -m pytest test_fnmatch_compat.py -v",
+    "passed": 4,
+    "failed": 0,
+    "errors": 0,
+    "resolved": true,
+    "execBy": "outer-bash"
+  },
+  "resolved": true
+}

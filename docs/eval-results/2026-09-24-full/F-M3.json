@@ -1,0 +1,206 @@
+{
+  "caseId": "F-M3",
+  "slot": 0,
+  "scene": "F",
+  "kind": "M",
+  "title": "runtime/data 复用（跨轮）",
+  "model": "96af449e-dfc0-48ec-b077-aa9f02b43d64",
+  "workspace": "E:/Codes/ABC/work-duo/eval-workspace-full/eval-F-M3",
+  "startedAt": "2026-09-24T01:04:06.251Z",
+  "status": "done",
+  "runId": "run-1790211921768-6",
+  "durationMs": 180998,
+  "artifacts": [],
+  "artifactCheck": [
+    {
+      "artifact": "datause/summary.md",
+      "ok": true
+    }
+  ],
+  "traceCounts": {
+    "events": 31,
+    "reply_chars": 143,
+    "thinking_chars": 918
+  },
+  "replyLen": 143,
+  "kbHits": 0,
+  "recoveries": 0,
+  "error": null,
+  "metrics": {
+    "ha": {
+      "terminal": true,
+      "status": "done"
+    },
+    "perf": {
+      "durationMs": 180998
+    },
+    "heal": {
+      "replyLen": 143
+    }
+  },
+  "files": [
+    {
+      "rel": ".wd_mem/.gitignore",
+      "size": 310,
+      "mtime": 1790211846336.8167
+    },
+    {
+      "rel": ".wd_mem/graph/edges.jsonl",
+      "size": 1143,
+      "mtime": 1790212022765.0344
+    },
+    {
+      "rel": ".wd_mem/graph/nodes.jsonl",
+      "size": 11590,
+      "mtime": 1790212022764.0266
+    },
+    {
+      "rel": ".wd_mem/graph/sessions/6b610704-7bd0-4300-be60-81d8468722e0.json",
+      "size": 4341,
+      "mtime": 1790212022767.259
+    },
+    {
+      "rel": ".wd_mem/graph/sessions/f7c63c6e-bf80-4d47-a9b8-fc3911707ded.json",
+      "size": 3069,
+      "mtime": 1790211916457.2168
+    },
+    {
+      "rel": ".wd_mem/graph/_index.json",
+      "size": 2608,
+      "mtime": 1790212022765.0344
+    },
+    {
+      "rel": ".wd_mem/knowledge/MEMORY.md",
+      "size": 133,
+      "mtime": 1790211846335.6287
+    },
+    {
+      "rel": ".wd_mem/README.md",
+      "size": 1378,
+      "mtime": 1790211846335.6287
+    },
+    {
+      "rel": ".wd_mem/runtime/data/sales.csv",
+      "size": 1057,
+      "mtime": 1790211909536.9111
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/injected_generate_sales_csv.py",
+      "size": 2225,
+      "mtime": 1790211909159.1355
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/injected_summarize_sales.py",
+      "size": 1621,
+      "mtime": 1790212006150.8506
+    },
+    {
+      "rel": ".wd_mem/scripts/generate_sales_csv.py",
+      "size": 2158,
+      "mtime": 1790211906534.1277
+    },
+    {
+      "rel": ".wd_mem/scripts/summarize_sales.py",
+      "size": 1554,
+      "mtime": 1790212002780.9216
+    },
+    {
+      "rel": "datause/summary.md",
+      "size": 459,
+      "mtime": 1790212006381.431
+    }
+  ],
+  "agentId": "674eb787-2766-4d60-9ce6-8aaa0fd3e562",
+  "agentIdentifier": "l2-f-m3-muetwt54-ct6m7q",
+  "modelName": "AG:DeepSeek-V4.1-Flash",
+  "seedTier": null,
+  "seedId": null,
+  "sessionId": "f7c63c6e-bf80-4d47-a9b8-fc3911707ded",
+  "rounds": [
+    {
+      "round": 1,
+      "sessionId": "f7c63c6e-bf80-4d47-a9b8-fc3911707ded",
+      "runId": "run-1790211846333-5",
+      "status": "done"
+    },
+    {
+      "round": 2,
+      "sessionId": "6b610704-7bd0-4300-be60-81d8468722e0",
+      "runId": "run-1790211921768-6",
+      "status": "done"
+    }
+  ],
+  "sessionIds": [
+    "f7c63c6e-bf80-4d47-a9b8-fc3911707ded",
+    "6b610704-7bd0-4300-be60-81d8468722e0"
+  ],
+  "reply": "已生成/更新 summary.md\n已完成销售数据汇总。\n\n- 已读取文件：`.wd_mem/runtime/data/sales.csv`\n- 总额：17,940.66\n- 行数：20\n- Top3：S020、S001、S010\n- 产出文件：`datause/summary.md`",
+  "thinkingLen": 918,
+  "eventCount": 31,
+  "kbCalls": 0,
+  "artifactScore": 1,
+  "wdMem": {
+    "structureOk": true,
+    "usedCount": 4,
+    "total": 7,
+    "items": [
+      {
+        "key": "memory",
+        "label": "长期记忆 MEMORY.md",
+        "present": true,
+        "used": true,
+        "path": ".wd_mem/knowledge/MEMORY.md",
+        "count": "0KB"
+      },
+      {
+        "key": "sessions",
+        "label": "会话摘要 sessions/",
+        "present": true,
+        "used": false,
+        "path": ".wd_mem/sessions",
+        "count": 0
+      },
+      {
+        "key": "graph",
+        "label": "实体图 graph/",
+        "present": true,
+        "used": true,
+        "path": ".wd_mem/graph",
+        "count": 4
+      },
+      {
+        "key": "artifacts",
+        "label": "设计沉淀 knowledge/artifacts/",
+        "present": true,
+        "used": false,
+        "path": ".wd_mem/knowledge/artifacts",
+        "count": 0
+      },
+      {
+        "key": "scripts",
+        "label": "可复用脚本 runtime/scripts/",
+        "present": true,
+        "used": true,
+        "path": ".wd_mem/runtime/scripts",
+        "count": 2
+      },
+      {
+        "key": "data",
+        "label": "中间数据 runtime/data/",
+        "present": true,
+        "used": true,
+        "path": ".wd_mem/runtime/data",
+        "count": 1
+      },
+      {
+        "key": "outputs",
+        "label": "产物归档 runtime/outputs/",
+        "present": true,
+        "used": false,
+        "path": ".wd_mem/runtime/outputs",
+        "count": 0
+      }
+    ],
+    "leaks": []
+  }
+}

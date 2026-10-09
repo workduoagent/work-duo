@@ -1,0 +1,123 @@
+{
+  "caseId": "D-M3",
+  "slot": 1,
+  "scene": "D",
+  "kind": "M",
+  "title": "MCP 工具产出 Excel（能力面）",
+  "model": "96af449e-dfc0-48ec-b077-aa9f02b43d64",
+  "workspace": "E:/Codes/ABC/work-duo/eval-workspace-full/eval-D-M3-1",
+  "startedAt": "2026-09-23T18:06:25.987Z",
+  "status": "done",
+  "runId": "run-1790186786078-38",
+  "durationMs": 651101,
+  "artifacts": [],
+  "artifactCheck": [
+    {
+      "artifact": "plugin_probe.md",
+      "ok": true
+    },
+    {
+      "artifact": "report.xlsx",
+      "ok": true
+    }
+  ],
+  "traceCounts": {
+    "events": 162,
+    "reply_chars": 707,
+    "thinking_chars": 2788
+  },
+  "replyLen": 707,
+  "kbHits": 0,
+  "recoveries": 0,
+  "error": null,
+  "metrics": {
+    "ha": {
+      "terminal": true,
+      "status": "done"
+    },
+    "perf": {
+      "durationMs": 651101
+    },
+    "heal": {
+      "replyLen": 707
+    }
+  },
+  "files": [
+    {
+      "rel": ".wd_mem/.gitignore",
+      "size": 310,
+      "mtime": 1790186786081.3645
+    },
+    {
+      "rel": ".wd_mem/graph/edges.jsonl",
+      "size": 1644,
+      "mtime": 1790187431817.229
+    },
+    {
+      "rel": ".wd_mem/graph/nodes.jsonl",
+      "size": 20264,
+      "mtime": 1790187431817.229
+    },
+    {
+      "rel": ".wd_mem/graph/sessions/106f8c22-e457-4f38-a928-e0f2af1e775a.json",
+      "size": 8507,
+      "mtime": 1790187431823.2412
+    },
+    {
+      "rel": ".wd_mem/graph/_index.json",
+      "size": 2000,
+      "mtime": 1790187431817.229
+    },
+    {
+      "rel": ".wd_mem/knowledge/MEMORY.md",
+      "size": 133,
+      "mtime": 1790186786080.3494
+    },
+    {
+      "rel": ".wd_mem/README.md",
+      "size": 1378,
+      "mtime": 1790186786080.3494
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/auto_run_1790187349145.py",
+      "size": 478,
+      "mtime": 1790187349146.008
+    },
+    {
+      "rel": ".wd_mem/runtime/scripts/injected_create_report.py",
+      "size": 2865,
+      "mtime": 1790187396902.9795
+    },
+    {
+      "rel": ".wd_mem/scripts/create_report.py",
+      "size": 2796,
+      "mtime": 1790187393839.9236
+    },
+    {
+      "rel": "plugin_probe.md",
+      "size": 1838,
+      "mtime": 1790187421157.309
+    },
+    {
+      "rel": "report.xlsx",
+      "size": 10018,
+      "mtime": 1790187397281.9038
+    },
+    {
+      "rel": "research_data.json",
+      "size": 10251,
+      "mtime": 1790187337543.1545
+    }
+  ],
+  "agentId": "b61bfb7e-4773-4002-bac6-cdfbcfabbefa",
+  "agentIdentifier": "l2-d-m3-mueezoia-3dm3wj",
+  "modelName": "AG:DeepSeek-V4.1-Flash",
+  "seedTier": null,
+  "seedId": null,
+  "sessionId": "106f8c22-e457-4f38-a928-e0f2af1e775a",
+  "reply": "已生成/更新 research_data.json\n已完成并核验：`research_data.json` 是合法 JSON，共 206 行、14 条研究记录；Excel 中也包含 14 条记录。\n\n- [research_data.json](E:/Codes/ABC/work-duo/eval-workspace-full/eval-D-M3-1/research_data.json)\n- [plugin_probe.md](E:/Codes/ABC/work-duo/eval-workspace-full/eval-D-M3-1/plugin_probe.md)\n- [report.xlsx](E:/Codes/ABC/work-duo/eval-workspace-full/eval-D-M3-1/report.xlsx)\n\n研究内容基于搜索结果及官方来源链接整理，并在文件中注明了日期精度和检索局限。\n\n已生成/更新 report.xlsx、plugin_probe.md\n已完成并验证产物：\n\n- `report.xlsx`：`E:/Codes/ABC/work-duo/eval-workspace-full/eval-D-M3-1/report.xlsx`，含 `summary`、`detail` 两个工作表，detail 有 14 条记录。\n- `plugin_probe.md`：`E:/Codes/ABC/work-duo/eval-workspace-full/eval-D-M3-1/plugin_probe.md`，记录了实际调用的工具、数据来源、生成与验证方式及失败情况。",
+  "thinkingLen": 2788,
+  "eventCount": 162,
+  "kbCalls": 0,
+  "artifactScore": 1
+}
